@@ -1,0 +1,15 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = ""                               # 빌드 생략, run만
+  full_bin = "go run . serve"      # 변경 시 이 커맨드로 재실행
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  exclude_dir = ["tmp", "vendor", "pb_data", "Prod_Migrate", "Mail_Migrate", "S3"]
+
+  # 깔끔한 재시작을 위해 추가
+  send_interrupt = true
+  kill_delay = 500
+
+[log]
+  time = true

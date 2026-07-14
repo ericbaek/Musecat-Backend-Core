@@ -1,0 +1,4328 @@
+openapi: 3.1.0
+info:
+  title: Delta-DB API
+  version: 0.1.0
+  summary: OpenAPI source of truth for the frontend-facing Delta-DB endpoints.
+  description: |
+    This spec covers the first documentation batch used by the self-hosted Stoplight Elements
+    reference at `/docs/`.
+servers:
+  - url: http://localhost:8090
+    description: Local development server
+tags:
+  - name: Meta
+    description: Service metadata and helper endpoints.
+  - name: Geo
+    description: Country, timezone, and geocoding helper endpoints.
+  - name: Search
+    description: Public lookup endpoints for unified search.
+  - name: Arcades
+    description: Public arcade read endpoints.
+  - name: Moderator
+    description: Moderator-facing arcade and content review endpoints.
+  - name: Support
+    description: Supporter XP and request endpoints.
+  - name: Users
+    description: Public and authenticated user profile endpoints.
+  - name: Arcade Mutations
+    description: Authenticated arcade editing endpoints.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    LimitQuery:
+      name: limit
+      in: query
+      description: Positive integer limit. Endpoint-specific caps apply.
+      schema:
+        type: integer
+        minimum: 1
+    CountryQuery:
+      name: country
+      in: query
+      description: Country code stored in `arcade.country`.
+      schema:
+        type: string
+    UserIdQuery:
+      name: id
+      in: query
+      description: Target record id.
+      schema:
+        type: string
+    UsernameQuery:
+      name: username
+      in: query
+      description: Target username.
+      schema:
+        type: string
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+        code:
+          type: string
+    PocketBaseAuthError:
+      type: object
+      required: [data, message, status]
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+        message:
+          type: string
+        status:
+          type: integer
+          example: 401
+    Location:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat:
+          type: number
+          format: double
+        lon:
+          type: number
+          format: double
+    XpFeedback:
+      type: object
+      required:
+        - previous_exp
+        - new_exp
+        - diff_exp
+        - previous_percent_to_next_level
+        - new_percent_to_next_level
+        - previous_level
+        - new_level
+        - level_diff
+        - remaining_exp_to_next_level
+        - remaining_percent_to_next_level
+      properties:
+        previous_exp:
+          type: integer
+        new_exp:
+          type: integer
+        diff_exp:
+          type: integer
+        previous_percent_to_next_level:
+          type: integer
+          description: Progress percentage before the change. Use `100 - remaining_percent_to_next_level` semantics.
+        new_percent_to_next_level:
+          type: integer
+          description: Progress percentage after the change. Use `100 - remaining_percent_to_next_level` semantics.
+        previous_level:
+          type: integer
+        new_level:
+          type: integer
+        level_diff:
+          type: integer
+        remaining_exp_to_next_level:
+          type: integer
+        remaining_percent_to_next_level:
+          type: integer
+          description: Percent remaining to the next level. Use `100 - remaining_percent_to_next_level` for progress fill.
+    GeoLookupResponse:
+      type: object
+      required: [country, timezone]
+      properties:
+        country:
+          type: string
+        timezone:
+          type: string
+    GeocodeCandidate:
+      type: object
+      required: [address, lat, lon]
+      properties:
+        address:
+          type: string
+        road_address:
+          type: string
+        lat:
+          type: number
+          format: double
+        lon:
+          type: number
+          format: double
+        place_id:
+          type: string
+    GeocodeResponse:
+      type: object
+      required: [provider, query, results]
+      properties:
+        provider:
+          type: string
+          enum: [google, kakao, osm]
+        query:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/GeocodeCandidate'
+    ReverseGeocodeResponse:
+      type: object
+      required: [provider, lat, lon, address, display_name]
+      properties:
+        provider:
+          type: string
+          enum: [google, kakao, osm]
+        lat:
+          type: number
+          format: double
+        lon:
+          type: number
+          format: double
+        address:
+          type: string
+        road_address:
+          type: string
+        display_name:
+          type: string
+        place_id:
+          type: string
+    StatsResponse:
+      type: object
+      required: [arcade_count, changelog_count, flag_count]
+      properties:
+        arcade_count:
+          type: integer
+          format: int64
+        changelog_count:
+          type: integer
+          format: int64
+        flag_count:
+          type: integer
+          format: int64
+    SearchUserItem:
+      type: object
+      required: [username, nickname, avatar]
+      properties:
+        username:
+          type: string
+        nickname:
+          type: string
+        avatar:
+          type: string
+          description: Avatar filename only.
+    SearchArcadeItem:
+      type: object
+      required: [id, country, name, address, nickname, closed]
+      properties:
+        id:
+          type: string
+        country:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        nickname:
+          type: array
+          items:
+            type: string
+        closed:
+          type: boolean
+        distance_km:
+          type: number
+          format: double
+          description: Distance from the supplied user location in kilometers.
+    SearchResponse:
+      type: object
+      required: [users, arcades]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchUserItem'
+        arcades:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchArcadeItem'
+    ArcadeSummary:
+      type: object
+      required: [id, country, game_series]
+      properties:
+        id:
+          type: string
+        country:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        location:
+          $ref: '#/components/schemas/Location'
+        game_series:
+          type: array
+          items:
+            type: string
+    ArcadeAdminSummary:
+      type: object
+      required: [id, public, closed, country, timezone, createdBy, created, updated]
+      properties:
+        id:
+          type: string
+        public:
+          type: boolean
+        closed:
+          type: boolean
+        country:
+          type: string
+        timezone:
+          type: string
+        createdBy:
+          type: string
+        created:
+          type: string
+        updated:
+          type: string
+    ArcadeBasicExpanded:
+      type: object
+      required: [id, name, address, direction, nickname, subway_line, location]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        direction:
+          type: string
+        nickname:
+          type: array
+          items:
+            type: string
+        subway_line:
+          type: array
+          items:
+            type: string
+        location:
+          $ref: '#/components/schemas/Location'
+    DayHoursObject:
+      type: object
+      required: [start, end]
+      properties:
+        start:
+          type: integer
+          minimum: 0
+          maximum: 2359
+          description: HHMM integer.
+        end:
+          type: integer
+          minimum: 0
+          maximum: 2400
+          description: HHMM integer. `2400` is only valid for 24-hour operation.
+    DayHoursValue:
+      oneOf:
+        - $ref: '#/components/schemas/DayHoursObject'
+        - type: integer
+          const: 499
+          description: Closed marker.
+        - type: 'null'
+          description: Unknown or unset.
+      description: |
+        Weekly opening hours value. Use `499` for closed, `null` for unknown, or an object with
+        `start` and `end` HHMM values.
+    ArcadeHourExpanded:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        Monday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Tuesday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Wednesday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Thursday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Friday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Saturday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Sunday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Note:
+          type: string
+    ArcadeSnsItem:
+      type: object
+      required: [type, link]
+      properties:
+        type:
+          type: string
+        link:
+          type: string
+        name:
+          type: string
+    ArcadeSnsExpanded:
+      type: object
+      required: [id, items]
+      properties:
+        id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArcadeSnsItem'
+    ArcadeGtkItem:
+      type: object
+      required: [type, bool]
+      properties:
+        type:
+          type: string
+        bool:
+          type: boolean
+        note:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ParkingMeta'
+    ArcadeGtkExpanded:
+      type: object
+      required: [id, items]
+      properties:
+        id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArcadeGtkItem'
+    ParkingGeo:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat:
+          type: number
+        lon:
+          type: number
+    ParkingMeta:
+      type: object
+      additionalProperties: false
+      properties:
+        geo:
+          $ref: '#/components/schemas/ParkingGeo'
+        availability:
+          type: string
+          enum: [always_plenty, somewhat_plenty, somewhat_difficult, difficult]
+        options:
+          type: array
+          items:
+            type: string
+            enum: [free_parking_lot, paid_parking_lot, free_street_parking, paid_street_parking]
+        ev_charging:
+          type: boolean
+        gov_parking:
+          type: boolean
+    ArcadeFlagReaction:
+      type: object
+      required: [id, reaction, createdBy, created, updated]
+      properties:
+        id:
+          type: string
+        reaction:
+          type: string
+        createdBy:
+          type: string
+        created:
+          type: string
+        updated:
+          type: string
+    ArcadeFlagExpanded:
+      type: object
+      required: [id, arcade, disruption, solved, message, photos, createdBy, created, updated, reactions]
+      description: Open flag payload returned under game items or orphan flag lists.
+      properties:
+        id:
+          type: string
+        arcade:
+          type: string
+        disruption:
+          type: string
+        solved:
+          type: boolean
+        message:
+          type: string
+        photos:
+          type: array
+          items:
+            type: string
+        createdBy:
+          type: string
+        created:
+          type: string
+        updated:
+          type: string
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArcadeFlagReaction'
+    ArcadeGameArcade:
+      type: object
+      required: [id, country, name, address, location]
+      properties:
+        id:
+          type: string
+        country:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        location:
+          $ref: '#/components/schemas/Location'
+    ArcadeGameVersion:
+      type: object
+      required: [id, series, released_on, en, kr, jp, price_default]
+      properties:
+        id:
+          type: string
+        series:
+          oneOf:
+            - type: string
+            - type: 'null'
+        released_on:
+          oneOf:
+            - type: string
+            - type: 'null'
+        en:
+          type: string
+        kr:
+          type: string
+        jp:
+          type: string
+        price_default:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: string
+            - type: integer
+            - type: number
+            - type: 'null'
+    ArcadeGameItem:
+      type: object
+      additionalProperties: true
+      required: [id, updated]
+      properties:
+        arcade:
+          oneOf:
+            - $ref: '#/components/schemas/ArcadeGameArcade'
+            - type: 'null'
+        game:
+          type: string
+        version:
+          oneOf:
+            - $ref: '#/components/schemas/ArcadeGameVersion'
+            - type: 'null'
+        uncertain:
+          type: boolean
+        prev_game:
+          oneOf:
+            - $ref: '#/components/schemas/ArcadeGameVersion'
+            - type: 'null'
+        series:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+        location:
+          type: string
+        quantity:
+          type: integer
+        price:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: string
+            - type: integer
+            - type: number
+            - type: 'null'
+        tag:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        id:
+          type: string
+        updated:
+          type: string
+          description: Last time this specific game atom was confirmed or edited.
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArcadeFlagExpanded'
+    ArcadeGameInformationConfirmResponse:
+      type: object
+      required: [arcade, game, atom, updated]
+      properties:
+        arcade:
+          type: string
+        game:
+          type: string
+        atom:
+          type: string
+        updated:
+          type: string
+    ArcadeGameExpanded:
+      type: object
+      required: [id, items]
+      properties:
+        id:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArcadeGameItem'
+        orphanFlags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArcadeFlagExpanded'
+    ArcadePhotoExpanded:
+      type: object
+      additionalProperties: true
+      description: Expanded photo molecule payload.
+    ArcadeBasicValue:
+      oneOf:
+        - type: string
+        - type: 'null'
+        - $ref: '#/components/schemas/ArcadeBasicExpanded'
+    ArcadeHourValue:
+      oneOf:
+        - type: string
+        - type: 'null'
+        - $ref: '#/components/schemas/ArcadeHourExpanded'
+    ArcadeSnsValue:
+      oneOf:
+        - type: string
+        - type: 'null'
+        - $ref: '#/components/schemas/ArcadeSnsExpanded'
+    ArcadeGtkValue:
+      oneOf:
+        - type: string
+        - type: 'null'
+        - $ref: '#/components/schemas/ArcadeGtkExpanded'
+    ArcadeGameValue:
+      oneOf:
+        - type: string
+        - type: 'null'
+        - $ref: '#/components/schemas/ArcadeGameExpanded'
+    ArcadePhotoValue:
+      oneOf:
+        - type: string
+        - type: 'null'
+        - $ref: '#/components/schemas/ArcadePhotoExpanded'
+    ArcadeValueResponse:
+      type: object
+      required: [admin, basic, hour, sns, gtk, game, photo]
+      properties:
+        admin:
+          $ref: '#/components/schemas/ArcadeAdminSummary'
+        basic:
+          $ref: '#/components/schemas/ArcadeBasicValue'
+        hour:
+          $ref: '#/components/schemas/ArcadeHourValue'
+        sns:
+          $ref: '#/components/schemas/ArcadeSnsValue'
+        gtk:
+          $ref: '#/components/schemas/ArcadeGtkValue'
+        game:
+          $ref: '#/components/schemas/ArcadeGameValue'
+        photo:
+          $ref: '#/components/schemas/ArcadePhotoValue'
+    ArcadeUpdateChange:
+      type: object
+      required: [part, by, created]
+      properties:
+        part:
+          type: string
+        by:
+          type: string
+        created:
+          type: string
+    ArcadeUpdateSummary:
+      allOf:
+        - $ref: '#/components/schemas/ArcadeSummary'
+        - type: object
+          required: [updated, block_started_at, block_ended_at, changes, updated_parts]
+          properties:
+            updated:
+              type: string
+            block_started_at:
+              type: string
+            block_ended_at:
+              type: string
+            changes:
+              type: array
+              items:
+                $ref: '#/components/schemas/ArcadeUpdateChange'
+            updated_parts:
+              type: array
+              description: Ordered list of arcade parts changed in the grouped block.
+              items:
+                type: string
+                enum: [basic, hour, sns, gtk, game, bulk_game_version, photo, flag, flag_reaction]
+    ArcadesNearbyResponse:
+      type: object
+      required: [page, per_page, last_page, total, country_totals, items]
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        last_page:
+          type: integer
+        total:
+          type: integer
+        country_totals:
+          type: object
+          additionalProperties:
+            type: integer
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ArcadeSummary'
+              - type: object
+                required: [distance_km]
+                properties:
+                  distance_km:
+                    type: number
+                    format: double
+                  game:
+                    $ref: '#/components/schemas/ArcadeGameValue'
+    UserProfileSnsItem:
+      type: object
+      required: [type, link]
+      properties:
+        type:
+          type: string
+        link:
+          type: string
+        name:
+          type: string
+    UserProfileSns:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserProfileSnsItem'
+    UserProfileSeries:
+      type: object
+      required: [id, seriesNumber, en, kr, jp, en_short, kr_short, jp_short, manufacturer]
+      properties:
+        id:
+          type: string
+        seriesNumber:
+          oneOf:
+            - type: integer
+            - type: string
+            - type: 'null'
+        en:
+          type: string
+        kr:
+          type: string
+        jp:
+          type: string
+        en_short:
+          type: string
+        kr_short:
+          type: string
+        jp_short:
+          type: string
+        manufacturer:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+            - type: 'null'
+    UserProfile:
+      type: object
+      required:
+        - id
+        - created
+        - username
+        - nickname
+        - bio
+        - avatar
+        - background
+        - tag
+        - sns
+        - withdrawn
+        - series_public
+        - level
+      properties:
+        id:
+          type: string
+        created:
+          type: string
+        username:
+          type: string
+          maxLength: 15
+        nickname:
+          type: string
+        bio:
+          type: string
+        avatar:
+          type: string
+        background:
+          type: string
+        tag:
+          type: array
+          items:
+            type: string
+        sns:
+          $ref: '#/components/schemas/UserProfileSns'
+        withdrawn:
+          type: boolean
+        series_public:
+          type: boolean
+        warp:
+          type:
+            - boolean
+            - 'null'
+        level:
+          type: integer
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserProfileSeries'
+        visit_visibility:
+          type: string
+          enum: [private, summary, full]
+        visit_stats:
+          $ref: '#/components/schemas/VisitStats'
+        visits:
+          type: array
+          items:
+            $ref: '#/components/schemas/Visit'
+    Visit:
+      type: object
+      required: [id, arcade, visit_day, visited_at, distance_meters, accuracy_meters, gained_exp]
+      properties:
+        id: {type: string}
+        arcade: {type: string}
+        visit_day: {type: string, format: date}
+        visited_at: {type: string}
+        distance_meters: {type: number}
+        accuracy_meters: {type: number}
+        gained_exp: {type: integer}
+    VisitStats:
+      type: object
+      required: [total_visits, distinct_arcades, arcades]
+      properties:
+        total_visits: {type: integer}
+        distinct_arcades: {type: integer}
+        last_visited_at: {type: string}
+        arcades:
+          type: array
+          description: Per-arcade visit totals. Exposed in public summary and full profiles.
+          items:
+            type: object
+            required: [arcade, visit_count]
+            properties:
+              arcade: {type: string}
+              visit_count: {type: integer}
+    ArcadeVisitRequest:
+      type: object
+      required: [arcade, lat, lon, accuracy]
+      properties:
+        arcade: {type: string}
+        lat: {type: number}
+        lon: {type: number}
+        accuracy: {type: number, description: GPS accuracy in meters; must be at most 100.}
+    VisitVisibilityRequest:
+      type: object
+      required: [visit_visibility]
+      properties:
+        visit_visibility: {type: string, enum: [private, summary, full]}
+    UserActivityRange:
+      type: object
+      required: [start_date, end_date, tz, days]
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        tz:
+          type: string
+        days:
+          type: integer
+    UserActivityTotals:
+      type: object
+      required: [total_count, changelog_count, flag_count, legacy_ticket_count, attendance_count, max_daily_count]
+      properties:
+        total_count:
+          type: integer
+        changelog_count:
+          type: integer
+        flag_count:
+          type: integer
+        legacy_ticket_count:
+          type: integer
+        attendance_count:
+          type: integer
+        max_daily_count:
+          type: integer
+    UserActivityDay:
+      type: object
+      required: [date, total_count, level, changelog_count, flag_count, legacy_ticket_count, attendance_count]
+      properties:
+        date:
+          type: string
+          format: date
+        total_count:
+          type: integer
+        level:
+          type: integer
+          minimum: 0
+          maximum: 4
+        changelog_count:
+          type: integer
+        flag_count:
+          type: integer
+        legacy_ticket_count:
+          type: integer
+        attendance_count:
+          type: integer
+    UserActivityResponse:
+      type: object
+      required: [user, range, totals, days]
+      properties:
+        user:
+          $ref: '#/components/schemas/UserProfile'
+        range:
+          $ref: '#/components/schemas/UserActivityRange'
+        totals:
+          $ref: '#/components/schemas/UserActivityTotals'
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserActivityDay'
+    SupporterLedgerDetail:
+      type: object
+      additionalProperties: true
+    SupporterLedgerEntry:
+      type: object
+      required: [id, kind, source, action, exp, previous_exp, new_exp, created]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          description: Exact user_level_log.kind value.
+        source:
+          type: string
+          enum: [arcade, visit, flag, flag_reaction, attendance, other]
+        action:
+          type: string
+        exp:
+          type: integer
+        previous_exp:
+          type: integer
+        new_exp:
+          type: integer
+        created:
+          type: string
+        arcade_id:
+          type: string
+        arcade_name:
+          type: string
+        target_id:
+          type: string
+        target_name:
+          type: string
+        detail:
+          $ref: '#/components/schemas/SupporterLedgerDetail'
+    SupporterLatestRequest:
+      type: object
+      required: [id, status, exp_total, qualified, created]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        exp_total:
+          type: integer
+        qualified:
+          type: boolean
+        created:
+          type: string
+        decision_reason:
+          type: string
+    SupporterScoreResponse:
+      type: object
+      required: [total_exp, attendance_exp, qualified, threshold, can_request, entries]
+      properties:
+        total_exp:
+          type: integer
+        attendance_exp:
+          type: integer
+        qualified:
+          type: boolean
+        threshold:
+          type: integer
+        can_request:
+          type: boolean
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupporterLedgerEntry'
+        latest_request:
+          oneOf:
+            - $ref: '#/components/schemas/SupporterLatestRequest'
+            - type: 'null'
+    CreateSupporterRequestResponse:
+      type: object
+      required: [id, status, qualified, exp]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        qualified:
+          type: boolean
+        exp:
+          $ref: '#/components/schemas/SupporterScoreResponse'
+    UpdateArcadeHourRequest:
+      type: object
+      required: [arcade]
+      properties:
+        arcade:
+          type: string
+        Monday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Tuesday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Wednesday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Thursday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Friday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Saturday:
+          $ref: '#/components/schemas/DayHoursValue'
+        Sunday:
+          $ref: '#/components/schemas/DayHoursValue'
+        note:
+          type: string
+    UpdateArcadeHourResponse:
+      type: object
+      required: [arcade, hour, xp_feedback]
+      properties:
+        arcade:
+          type: string
+        hour:
+          $ref: '#/components/schemas/ArcadeHourExpanded'
+        xp_feedback:
+          $ref: '#/components/schemas/XpFeedback'
+    UploadSummary:
+      type: object
+      required: [total, success, failed]
+      properties:
+        total:
+          type: integer
+        success:
+          type: integer
+        failed:
+          type: integer
+    UploadedPhotoItem:
+      type: object
+      required: [index, atomId, filename]
+      properties:
+        index:
+          type: integer
+        atomId:
+          type: string
+        filename:
+          type: string
+    FailedPhotoItem:
+      type: object
+      required: [index, filename, reason]
+      properties:
+        index:
+          type: integer
+        filename:
+          type: string
+        reason:
+          type: string
+    ArcadePhotoUploadResponse:
+      type: object
+      required: [arcade, summary, uploaded, failed, xp_feedback]
+      properties:
+        arcade:
+          type: string
+        summary:
+          $ref: '#/components/schemas/UploadSummary'
+        uploaded:
+          type: array
+          items:
+            $ref: '#/components/schemas/UploadedPhotoItem'
+        failed:
+          type: array
+          items:
+            $ref: '#/components/schemas/FailedPhotoItem'
+        xp_feedback:
+          $ref: '#/components/schemas/XpFeedback'
+    UpdateArcadePhotoRequest:
+      type: object
+      required: [arcade, photos]
+      properties:
+        arcade:
+          type: string
+        photos:
+          type: array
+          minItems: 1
+          items:
+            type: string
+    UpdateArcadePhotoResponse:
+      type: object
+      required: [arcade, photo, count, xp_feedback]
+      properties:
+        arcade:
+          type: string
+        photo:
+          type: string
+        count:
+          type: integer
+        xp_feedback:
+          $ref: '#/components/schemas/XpFeedback'
+    GameSeriesVersion:
+      type: object
+      required: [id, series, released_on, en, kr, jp, price_default]
+      properties:
+        id:
+          type: string
+        series:
+          oneOf:
+            - type: string
+            - type: 'null'
+        released_on:
+          oneOf:
+            - type: string
+            - type: 'null'
+        en:
+          type: string
+        kr:
+          oneOf:
+            - type: string
+            - type: 'null'
+        jp:
+          oneOf:
+            - type: string
+            - type: 'null'
+        price_default:
+          $ref: '#/components/schemas/GameSeriesVersionPriceDefault'
+    GameSeriesVersionPriceDefaultMode:
+      type: object
+      required: [mode_key, represent]
+      properties:
+        mode_key:
+          type: string
+        label:
+          type: string
+        represent:
+          type: boolean
+    GameSeriesVersionPriceDefaultEntry:
+      type: object
+      required: [modes]
+      properties:
+        modes:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/GameSeriesVersionPriceDefaultMode'
+    GameSeriesVersionPriceDefault:
+      type: object
+      required: [global]
+      properties:
+        global:
+          $ref: '#/components/schemas/GameSeriesVersionPriceDefaultEntry'
+        countries:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/GameSeriesVersionPriceDefaultEntry'
+    GameSeriesVersionCreateRequest:
+      type: object
+      required: [series, released_on, en, kr, jp, price_default]
+      properties:
+        series:
+          type: string
+        released_on:
+          type: string
+        en:
+          type: string
+        kr:
+          type: string
+        jp:
+          type: string
+        price_default:
+          $ref: '#/components/schemas/GameSeriesVersionPriceDefault'
+    GameSeriesVersionUpdateRequest:
+      type: object
+      required: [id, series, released_on, en, kr, jp, price_default]
+      properties:
+        id:
+          type: string
+        series:
+          type: string
+        released_on:
+          type: string
+        en:
+          type: string
+        kr:
+          type: string
+        jp:
+          type: string
+        price_default:
+          $ref: '#/components/schemas/GameSeriesVersionPriceDefault'
+    GameSeriesBundle:
+      type: object
+      required: [version, series]
+      properties:
+        version:
+          $ref: '#/components/schemas/GameSeriesVersion'
+        series:
+          oneOf:
+            - $ref: '#/components/schemas/UserProfileSeries'
+            - type: 'null'
+    ListEnvelope:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        total:
+          type: integer
+    NewArcadeRequest:
+      type: object
+      required: [name, location, address]
+      properties:
+        name:
+          type: string
+        location:
+          $ref: '#/components/schemas/Location'
+        address:
+          type: string
+        direction:
+          type: string
+        nickname:
+          type: array
+          items:
+            type: string
+        subway_line:
+          type: array
+          items:
+            type: string
+    UpdateArcadeBasicRequest:
+      type: object
+      required: [arcade]
+      properties:
+        arcade:
+          type: string
+        name:
+          type: string
+        location:
+          $ref: '#/components/schemas/Location'
+        address:
+          type: string
+        direction:
+          type: string
+        nickname:
+          type: array
+          items:
+            type: string
+        subway_line:
+          type: array
+          items:
+            type: string
+    CreateArcadeNoticeRequest:
+      type: object
+      required: [arcade]
+      description: JSON body for notice metadata. To attach photos, use the multipart/form-data variant with `photos` files.
+      properties:
+        arcade:
+          type: string
+        type:
+          type: string
+          enum: [alert, close, issue, event]
+        message:
+          type: string
+          description: Markdown source stored and returned as-is.
+        link:
+          type: string
+        until:
+          type: string
+          format: date-time
+        priority:
+          type: number
+    CreateArcadeNoticeMultipartRequest:
+      type: object
+      required: [arcade]
+      description: Multipart body for notice metadata plus optional `photos` file uploads.
+      properties:
+        arcade:
+          type: string
+        type:
+          type: string
+          enum: [alert, close, issue, event]
+        message:
+          type: string
+          description: Markdown source stored and returned as-is.
+        link:
+          type: string
+        until:
+          type: string
+          format: date-time
+        priority:
+          type: number
+        photos:
+          type: array
+          maxItems: 99
+          items:
+            type: string
+            format: binary
+    UpdateArcadeNoticeRequest:
+      type: object
+      required: [id]
+      description: JSON body for notice metadata. To attach photos, use the multipart/form-data variant with `photos` files.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [alert, close, issue, event]
+        message:
+          type: string
+          description: Markdown source stored and returned as-is.
+        link:
+          type: string
+        until:
+          type: string
+          format: date-time
+        priority:
+          type: number
+    UpdateArcadeNoticeMultipartRequest:
+      type: object
+      description: Multipart body for notice metadata plus optional `photos` file uploads.
+      required: [id]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [alert, close, issue, event]
+        message:
+          type: string
+          description: Markdown source stored and returned as-is.
+        link:
+          type: string
+        until:
+          type: string
+          format: date-time
+        priority:
+          type: number
+        photos:
+          type: array
+          maxItems: 99
+          items:
+            type: string
+            format: binary
+    DeleteArcadeNoticeRequest:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+    ArcadeNotice:
+      type: object
+      required: [id, arcade, type, message, priority, created, updated]
+      properties:
+        id:
+          type: string
+        arcade:
+          type: string
+        type:
+          type: string
+          enum: [alert, close, issue, event]
+        message:
+          type: string
+          description: Markdown source stored in the editor field.
+        link:
+          type: string
+        delete:
+          type: boolean
+        until:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: string
+        priority:
+          type: number
+        photos:
+          type: array
+          items:
+            type: string
+        created:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: string
+        updated:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: string
+    ListArcadeNoticeResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArcadeNotice'
+        total:
+          type: integer
+    ArcadeOnlyRequest:
+      type: object
+      required: [arcade]
+      properties:
+        arcade:
+          type: string
+    GTKAtomInput:
+      type: object
+      required: [type, bool]
+      properties:
+        type:
+          type: string
+        bool:
+          type: boolean
+        note:
+          type: string
+        meta:
+          $ref: '#/components/schemas/ParkingMeta'
+    UpdateArcadeGTKRequest:
+      type: object
+      required: [arcade, gtk]
+      properties:
+        arcade:
+          type: string
+        gtk:
+          type: array
+          items:
+            $ref: '#/components/schemas/GTKAtomInput'
+    SNSAtomInput:
+      type: object
+      required: [type, link]
+      properties:
+        type:
+          type: string
+        link:
+          type: string
+        name:
+          type: string
+    UpdateArcadeSNSRequest:
+      type: object
+      required: [arcade, sns]
+      properties:
+        arcade:
+          type: string
+        sns:
+          type: array
+          items:
+            $ref: '#/components/schemas/SNSAtomInput'
+    PriceItem:
+      type: object
+      properties:
+        title:
+          type: string
+        value:
+          oneOf:
+            - type: number
+              format: float
+            - type: 'null'
+        mode_key:
+          type: string
+        represent:
+          type: boolean
+    Price:
+      type: object
+      required: [currency, type, list, accept]
+      properties:
+        currency:
+          type: string
+          enum: [KRW, JPY, USD]
+        type:
+          type: string
+          enum: [gamemode, credit, song, time, free, custom]
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/PriceItem'
+        accept:
+          type: array
+          items:
+            type: string
+            enum: ['Credit Card', 'Prepaid Card', Cash]
+    TagItem:
+      type: object
+      required: [category, note]
+      properties:
+        category:
+          type: string
+          enum: ['케비넷 타입', '로테이션 버전', '모니터', '스위치', '사운드', '녹화방송', '기타']
+        note:
+          type: string
+    GameAtomInput:
+      type: object
+      required: [game, location, quantity, price, tag]
+      properties:
+        game:
+          type: string
+        prev_id:
+          type: string
+        location:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        price:
+          $ref: '#/components/schemas/Price'
+        tag:
+          type: array
+          items:
+            $ref: '#/components/schemas/TagItem'
+        uncertain:
+          type: boolean
+        prev_game:
+          type: string
+    UpdateArcadeGameRequest:
+      type: object
+      required: [arcade, games]
+      properties:
+        arcade:
+          type: string
+        games:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameAtomInput'
+    ArcadeGameUncertainRequest:
+      type: object
+      required: [atom_ids]
+      properties:
+        atom_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+    ArcadeGameUncertainResponse:
+      type: object
+      required: [action, arcade, game, count, selected_count]
+      properties:
+        action:
+          type: string
+          enum: [rollback, confirm]
+        arcade:
+          type: string
+        game:
+          $ref: '#/components/schemas/ArcadeGameExpanded'
+        count:
+          type: integer
+        selected_count:
+          type: integer
+    BulkUpdateArcadeGameVersionRequest:
+      type: object
+      required: [atom_ids, current_game_version_series, new_game_version_series]
+      properties:
+        atom_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        current_game_version_series:
+          type: string
+        new_game_version_series:
+          type: string
+    BulkGameVersionChangelogItem:
+      type: object
+      required: [atom_id, arcade_id, arcade_name]
+      properties:
+        atom_id:
+          type: string
+        arcade_id:
+          type: string
+        arcade_name:
+          type: string
+    BulkGameVersionChangelogLog:
+      type: object
+      required: [type, version, before_game, after_game, items]
+      properties:
+        type:
+          type: string
+          description: Always `bulk_game_version_diff`.
+        version:
+          type: integer
+          description: Log schema version.
+          example: 1
+        before_game:
+          type: string
+          description: The shared game version before the bulk update.
+        after_game:
+          type: string
+          description: The shared game version after the bulk update.
+        items:
+          type: array
+          description: One item per updated atom.
+          items:
+            $ref: '#/components/schemas/BulkGameVersionChangelogItem'
+    FlagActionRequest:
+      type: object
+      required: [flag]
+      properties:
+        flag:
+          type: string
+    FlagReactionRequest:
+      type: object
+      required: [flag, reaction, action]
+      properties:
+        flag:
+          type: string
+        reaction:
+          type: string
+          enum: [fixed, issue_persist, wrong]
+        action:
+          type: string
+          enum: [add, delete]
+    RollbackArcadeRequest:
+      type: object
+      required: [arcade, part, value]
+      properties:
+        arcade:
+          type: string
+        part:
+          type: string
+          enum: [basic, hour, sns, gtk, game, photo]
+        value:
+          type: string
+        previous_value:
+          type: string
+        report:
+          type: boolean
+        report_message:
+          type: string
+    CreateSupportFeedbackRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+    CreateSupportFeedbackMultipartRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        photos:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            format: binary
+    CreateArcadeRequestAdminRequest:
+      type: object
+      required: [message]
+      properties:
+        arcade:
+          type: string
+        urgency:
+          type: string
+          enum: [high, medium, low]
+        message:
+          type: string
+    CreateUserReportRequest:
+      type: object
+      required: [user, reason]
+      properties:
+        user:
+          type: string
+        reason:
+          type: string
+    SignUpJsonRequest:
+      type: object
+      required: [username]
+      properties:
+        username:
+          type: string
+        nickname:
+          type: string
+        bio:
+          type: string
+    WithdrawRequest:
+      type: object
+      properties:
+        password:
+          type: string
+        reason:
+          type: string
+paths:
+  /search:
+    get:
+      tags: [Search]
+      summary: /search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Case-insensitive search keyword.
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: lat
+          in: query
+          schema:
+            type: number
+            format: double
+          description: User latitude. Provide together with `lon` to boost nearby arcade results.
+        - name: lon
+          in: query
+          schema:
+            type: number
+            format: double
+          description: User longitude. Provide together with `lat` to boost nearby arcade results.
+      responses:
+        '200':
+          description: Search results grouped by resource bucket.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+              example:
+                users:
+                  - username: searchhero
+                    nickname: Alpha Nick
+                    avatar: ""
+                arcades:
+                  - id: ubbeq9qzfck5s4w
+                    country: KR
+                    name: Search Palace
+                    address: 101 Exact Road
+                    nickname: [First Spot]
+                    closed: false
+                    distance_km: 0.4
+        '400':
+          description: Missing search query or invalid limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Upstream database lookup failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade:
+    get:
+      tags: [Arcades]
+      summary: /arcade
+      description: |
+        Returns relation ids by default.
+        When `expand=game`, each `game.items[]` entry includes `version`, `series`, `uncertain`, `updated`, and, when `uncertain=true`, `prev_game`.
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+          description: Arcade id.
+        - name: arcade
+          in: query
+          schema:
+            type: string
+          description: Alias for `id`.
+        - name: expand
+          in: query
+          schema:
+            type: string
+          description: |
+            `none` or empty returns relation ids only. `all` expands every section.
+            Comma-separated values such as `basic,hour` expand only the requested sections.
+      responses:
+        '200':
+          description: Arcade metadata with relation ids or expanded relation payloads.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeValueResponse'
+              examples:
+                idsOnly:
+                  value:
+                    admin:
+                      id: arcade_123
+                      public: true
+                      closed: false
+                      country: AU
+                      timezone: Australia/Sydney
+                      createdBy: user_123
+                      created: "2026-04-01 12:00:00.000Z"
+                      updated: "2026-04-10 09:00:00.000Z"
+                    basic: basic_rel
+                    hour: hour_rel
+                    sns: sns_rel
+                    gtk: gtk_rel
+                    game: game_rel
+                    photo: photo_rel
+                expanded:
+                  value:
+                    admin:
+                      id: arcade_123
+                      public: true
+                      closed: false
+                      country: AU
+                      timezone: Australia/Sydney
+                      createdBy: user_123
+                      created: "2026-04-01 12:00:00.000Z"
+                      updated: "2026-04-10 09:00:00.000Z"
+                    basic:
+                      id: basic_rel
+                      name: Sydney Arcade
+                      address: 123 George St, Sydney NSW
+                      direction: Level 2
+                      nickname: [Town Hall]
+                      subway_line: [T1]
+                      location:
+                        lat: -33.8708
+                        lon: 151.2062
+                    hour:
+                      id: hour_rel
+                      Monday:
+                        start: 1000
+                        end: 2300
+                      Thursday:
+                        start: 0
+                        end: 0
+                      Sunday: 499
+                      Note: Late night on Thursdays
+                    sns:
+                      id: sns_rel
+                      items:
+                        - type: instagram
+                          link: https://instagram.com/example
+                          name: Official account
+                    gtk:
+                      id: gtk_rel
+                      items:
+                        - type: smoking
+                          bool: false
+                    game:
+                      id: game_rel
+                      items:
+                        - id: atom_123
+                          updated: "2026-04-10 09:00:00.000Z"
+                          version:
+                            id: version_123
+                            series: series_123
+                            released_on: "2025-01-01"
+                            en: Version A
+                            kr: Version A
+                            jp: Version A
+                            price_default: null
+                          series:
+                            id: series_123
+                            seriesNumber: 1
+                            en: Series A
+                            kr: Series A
+                            jp: Series A
+                            en_short: A
+                            kr_short: A
+                            jp_short: A
+                            manufacturer: null
+                          uncertain: true
+                          prev_game:
+                            id: version_122
+                            series: series_123
+                            released_on: "2024-01-01"
+                            en: Version Old
+                            kr: Version Old
+                            jp: Version Old
+                            price_default: null
+                          location: 2F
+                          quantity: 1
+                          price:
+                            currency: KRW
+                            type: custom
+                            list:
+                              - value: 500
+                            accept: [Cash]
+                          tag: []
+                    photo:
+                      id: photo_rel
+        '400':
+          description: Missing target arcade id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcades:
+    get:
+      tags: [Arcades]
+      summary: /arcades
+      parameters:
+        - name: public
+          in: query
+          schema:
+            type: boolean
+        - name: closed
+          in: query
+          schema:
+            type: boolean
+        - $ref: '#/components/parameters/CountryQuery'
+      responses:
+        '200':
+          description: List of arcade summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ArcadeSummary'
+              example:
+                - id: arcade_123
+                  country: AU
+                  name: Sydney Arcade
+                  address: 123 George St, Sydney NSW
+                  location:
+                    lat: -33.8708
+                    lon: 151.2062
+                  game_series: [series_1, series_2]
+        '400':
+          description: Invalid boolean filter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Database lookup failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcades/updates:
+    get:
+      tags: [Arcades]
+      summary: /arcades/updates
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CountryQuery'
+      responses:
+        '200':
+          description: Latest update block per arcade, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ArcadeUpdateSummary'
+              example:
+                - id: arcade_123
+                  country: AU
+                  name: Sydney Arcade
+                  address: 123 George St, Sydney NSW
+                  location:
+                    lat: -33.8708
+                    lon: 151.2062
+                  game_series: [series_1]
+                  updated: "2026-04-10 09:00:00.000Z"
+                  block_started_at: "2026-04-10 09:00:00.000Z"
+                  block_ended_at: "2026-04-10 08:58:00.000Z"
+                  updated_parts: [basic, hour, flag, flag_reaction]
+                  changes:
+                    - part: hour
+                      by: user_123
+                      created: "2026-04-10 09:00:00.000Z"
+                    - part: flag
+                      by: user_123
+                      created: "2026-04-10 08:59:30.000Z"
+                    - part: flag_reaction
+                      by: user_123
+                      created: "2026-04-10 08:59:00.000Z"
+                    - part: basic
+                      by: user_123
+                      created: "2026-04-10 08:58:00.000Z"
+        '400':
+          description: Invalid limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to build update list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcades/nearby:
+    get:
+      tags: [Arcades]
+      summary: /arcades/nearby
+      parameters:
+        - name: game_series
+          in: query
+          description: Repeat the query param or pass comma-separated ids.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+        - name: lon
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+        - name: address
+          in: query
+          schema:
+            type: string
+          description: Normalized address keyword filter.
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: distance_limit
+          in: query
+          description: Optional maximum distance in kilometers from the supplied location.
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: expand
+          in: query
+          description: When true, expands each item's `game` payload with arcade game details.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Distance-sorted paginated nearby results.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadesNearbyResponse'
+              example:
+                page: 1
+                per_page: 15
+                last_page: 1
+                total: 1
+                country_totals:
+                  AU: 1
+                items:
+                  - id: arcade_123
+                    country: AU
+                    name: Sydney Arcade
+                    address: 123 George St, Sydney NSW
+                    location:
+                      lat: -33.8708
+                      lon: 151.2062
+                    game_series: [series_1]
+                    game:
+                      id: game_123
+                      items:
+                        - id: atom_1
+                          version:
+                            id: version_1
+                            series: series_1
+                            released_on: 2025-01-01
+                            en: Sydney Version
+                            kr: Sydney Version
+                            jp: Sydney Version
+                            price_default: null
+                          series:
+                            id: series_1
+                            seriesNumber: 1
+                            en: Sydney Series
+                            kr: Sydney Series
+                            jp: Sydney Series
+                            en_short: Sydney
+                            kr_short: Sydney
+                            jp_short: Sydney
+                            manufacturer: null
+                          uncertain: false
+                          location: 1F
+                          quantity: 1
+                          price: {}
+                          tag: []
+                          flags: []
+                    distance_km: 0.4
+        '400':
+          description: Invalid or missing location or page value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to load arcades.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /user:
+    get:
+      tags: [Users]
+      summary: /user
+      parameters:
+        - $ref: '#/components/parameters/UserIdQuery'
+        - $ref: '#/components/parameters/UsernameQuery'
+      responses:
+        '200':
+          description: Normalized public profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                id: toq3to4ncbf5ubd
+                created: "2026-03-30 10:15:00.000Z"
+                username: public_user_toq3to4ncbf5ubd
+                nickname: public_nick
+                bio: public bio
+                avatar: ""
+                background: ""
+                tag: []
+                sns:
+                  items: []
+                withdrawn: false
+                series_public: false
+        '400':
+          description: Missing id and username.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to build profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /user/me:
+    get:
+      tags: [Users]
+      summary: /user/me
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Full profile for the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                id: me_123
+                created: "2026-03-30 10:15:00.000Z"
+                username: me_user
+                nickname: me_nick
+                bio: public bio
+                avatar: ""
+                background: ""
+                tag: []
+                sns:
+                  items: []
+                withdrawn: false
+                series_public: false
+                warp: false
+                series: []
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PocketBaseAuthError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User record not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to build profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /user/activity:
+    get:
+      tags: [Users]
+      summary: /user/activity
+      parameters:
+        - $ref: '#/components/parameters/UserIdQuery'
+        - $ref: '#/components/parameters/UsernameQuery'
+        - name: tz
+          in: query
+          description: IANA timezone. Defaults to `UTC`.
+          schema:
+            type: string
+        - name: days
+          in: query
+          description: Integer between 1 and 365. Defaults to 365.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+      responses:
+        '200':
+          description: User profile plus activity counts and heatmap buckets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserActivityResponse'
+              example:
+                user:
+                  id: toq3to4ncbf5ubd
+                  created: "2026-03-30 10:15:00.000Z"
+                  username: public_user_toq3to4ncbf5ubd
+                  nickname: public_nick
+                  bio: public bio
+                  avatar: ""
+                  background: ""
+                  tag: []
+                  sns:
+                    items: []
+                  withdrawn: false
+                  series_public: false
+                  level: 0
+                range:
+                  start_date: "2025-03-30"
+                  end_date: "2026-03-29"
+                  tz: Asia/Seoul
+                  days: 365
+                totals:
+                  total_count: 18
+                  changelog_count: 9
+                  flag_count: 5
+                  legacy_ticket_count: 4
+                  attendance_count: 0
+                  max_daily_count: 3
+                days:
+                  - date: "2026-03-29"
+                    total_count: 2
+                    level: 3
+                    changelog_count: 1
+                    flag_count: 1
+                    legacy_ticket_count: 0
+                    attendance_count: 0
+        '400':
+          description: Invalid id/username combination, timezone, or day count.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to build activity response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /supporter/score:
+    get:
+      tags: [Support]
+      summary: /supporter/score
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current supporter XP ledger timeline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupporterScoreResponse'
+              example:
+                total_exp: 341
+                attendance_exp: 2
+                qualified: true
+                threshold: 300
+                can_request: true
+                entries:
+                  - id: log_124
+                    kind: xp:attendance:service:2026-04-30
+                    source: attendance
+                    action: check_in
+                    exp: 2
+                    previous_exp: 10
+                    new_exp: 12
+                    created: "2026-04-30 10:05:00.000Z"
+                    detail:
+                      day: "2026-04-30"
+                  - id: log_123
+                    kind: xp:arcade-public:arcade_123
+                    source: arcade
+                    action: public
+                    exp: 10
+                    previous_exp: 0
+                    new_exp: 10
+                    created: "2026-04-30 10:00:00.000Z"
+                    arcade_id: arcade_123
+                    arcade_name: Sample Arcade
+                    target_id: arcade_123
+                latest_request:
+                  id: req_123
+                  status: rejected
+                  exp_total: 341
+                  qualified: true
+                  created: "2026-04-30 10:30:00.000Z"
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Failed to build supporter XP.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /supporter/request:
+    post:
+      tags: [Support]
+      summary: /supporter/request
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Supporter request created and notifications sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSupporterRequestResponse'
+        '400':
+          description: XP threshold not met.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '409':
+          description: Existing pending or approved supporter request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to create supporter request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/hour:
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/hour
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadeHourRequest'
+            examples:
+              standard:
+                value:
+                  arcade: arcade_123
+                  Monday:
+                    start: 1000
+                    end: 2300
+                  Sunday: 499
+                  note: Weekdays only
+              fullDay:
+                value:
+                  arcade: arcade_123
+                  Thursday:
+                    start: 0
+                    end: 0
+                  note: 24 hours on Thursday
+      responses:
+        '200':
+          description: Hour relation updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateArcadeHourResponse'
+              example:
+                arcade: arcade_123
+                hour:
+                  id: hour_rel
+                  Monday:
+                    start: 1000
+                    end: 2300
+                  Tuesday: null
+                  Wednesday: null
+                  Thursday: null
+                  Friday: null
+                  Saturday: null
+                  Sunday: 499
+                  Note: Weekdays only
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/photo/upload:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/photo/upload
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [arcade, photos]
+              properties:
+                arcade:
+                  type: string
+                photos:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: string
+                    format: binary
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: All files uploaded successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadePhotoUploadResponse'
+              example:
+                arcade: arcade_123
+                summary:
+                  total: 2
+                  success: 2
+                  failed: 0
+                uploaded:
+                  - index: 0
+                    atomId: atom_1
+                    filename: ok.png
+                  - index: 1
+                    atomId: atom_2
+                    filename: ok2.jpg
+                failed: []
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 5
+                  diff_exp: 5
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 25
+                  previous_level: 0
+                  new_level: 1
+                  level_diff: 1
+                  remaining_exp_to_next_level: 3
+                  remaining_percent_to_next_level: 75
+        '207':
+          description: Partial success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadePhotoUploadResponse'
+              example:
+                arcade: arcade_123
+                summary:
+                  total: 2
+                  success: 1
+                  failed: 1
+                uploaded:
+                  - index: 0
+                    atomId: atom_1
+                    filename: ok.png
+                failed:
+                  - index: 1
+                    filename: bad.gif
+                    reason: unsupported mime type - image/gif
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 5
+                  diff_exp: 5
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 25
+                  previous_level: 0
+                  new_level: 1
+                  level_diff: 1
+                  remaining_exp_to_next_level: 3
+                  remaining_percent_to_next_level: 75
+        '400':
+          description: Invalid multipart body or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: All files failed validation or persistence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadePhotoUploadResponse'
+              example:
+                arcade: arcade_123
+                summary:
+                  total: 2
+                  success: 0
+                  failed: 2
+                uploaded: []
+                failed:
+                  - index: 0
+                    filename: bad1.gif
+                    reason: unsupported mime type - image/gif
+                  - index: 1
+                    filename: bad2.gif
+                    reason: unsupported mime type - image/gif
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 0
+                  diff_exp: 0
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 0
+                  previous_level: 0
+                  new_level: 0
+                  level_diff: 0
+                  remaining_exp_to_next_level: 4
+                  remaining_percent_to_next_level: 100
+  /arcade/photo:
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/photo
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadePhotoRequest'
+            example:
+              arcade: arcade_123
+              photos: [atom_1, atom_2]
+      responses:
+        '200':
+          description: Photo relation updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateArcadePhotoResponse'
+              example:
+                arcade: arcade_123
+                photo: photo_molecule_123
+                count: 2
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 3
+                  diff_exp: 3
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 75
+                  previous_level: 0
+                  new_level: 0
+                  level_diff: 0
+                  remaining_exp_to_next_level: 1
+                  remaining_percent_to_next_level: 25
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /hello:
+    get:
+      tags: [Meta]
+      summary: /hello
+      responses:
+        '200':
+          description: Plaintext greeting.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: hello world!
+  /stats:
+    get:
+      tags: [Meta]
+      summary: /stats
+      responses:
+        '200':
+          description: Current counts for arcade, changelog, and flag data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsResponse'
+  /geo:
+    get:
+      tags: [Geo]
+      summary: /geo
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+        - name: lon
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+      responses:
+        '200':
+          description: Country and timezone for the coordinate.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeoLookupResponse'
+        '400':
+          description: Invalid or missing coordinates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Upstream lookup failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /geocode:
+    get:
+      tags: [Geo]
+      summary: /geocode
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: region
+          in: query
+          schema:
+            type: string
+          description: "`kr` prefers Kakao."
+        - name: mode
+          in: query
+          schema:
+            type: string
+          description: "`free` uses OSM where applicable."
+      responses:
+        '200':
+          description: Normalized geocoding candidates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeocodeResponse'
+        '400':
+          description: Missing query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Upstream geocoding failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /reverse_geocode:
+    get:
+      tags: [Geo]
+      summary: /reverse_geocode
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+        - name: lon
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+        - name: region
+          in: query
+          schema:
+            type: string
+        - name: mode
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Normalized reverse geocoding result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReverseGeocodeResponse'
+        '400':
+          description: Invalid or missing coordinates.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Upstream reverse geocoding failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/games:
+    get:
+      tags: [Moderator]
+      summary: /arcade/games
+      description: &moderatorAccessDescription |
+        Requires an authenticated user whose `tag` or `tags` includes `developer`, `moderator`, `supporter`, or `founding_supporter`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CountryQuery'
+        - name: game_series
+          in: query
+          description: Repeat the query param or pass comma-separated series ids.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: game_series_version
+          in: query
+          description: Repeat the query param or pass comma-separated version ids.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+      responses:
+        '200':
+          description: Matching machine rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ArcadeGameItem'
+              example:
+                - id: atom_123
+                  arcade:
+                    id: arcade_123
+                    country: KR
+                    name: Seoul Arcade
+                    address: 123 Seoul Road
+                    location:
+                      lat: 37.5665
+                      lon: 126.978
+                  game: game_123
+                  location: 2F
+                  quantity: 1
+                  price:
+                    currency: KRW
+                    type: custom
+                    list:
+                      - value: 1000
+                    accept: []
+                  tag:
+                    - category: 기타
+                      quantity: 1
+                      note: ok
+                  version:
+                    id: version_123
+                    series: series_123
+                    released_on: "2025-06-01"
+                    en: Filter Version
+                    kr: Filter Version
+                    jp: Filter Version
+                    price_default: {}
+                  series:
+                    id: series_123
+                    seriesNumber: 7
+                    en: Filter Series
+                    kr: Filter Series
+                    jp: Filter Series
+                    en_short: Filter Series
+                    kr_short: Filter Series
+                    jp_short: Filter Series
+                    manufacturer: manufacturer_123
+        '502':
+          description: Failed to load matching machines.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /game_series_version:
+    get:
+      tags: [Arcades]
+      summary: /game_series_version
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Version plus related series data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameSeriesBundle'
+        '400':
+          description: Missing id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Version not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Moderator]
+      summary: /game_series_version
+      description: *moderatorAccessDescription
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameSeriesVersionCreateRequest'
+      responses:
+        '200':
+          description: Created version bundle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameSeriesBundle'
+        '400':
+          description: Invalid JSON body or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Moderator access required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to create or load the version bundle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags: [Moderator]
+      summary: /game_series_version
+      description: *moderatorAccessDescription
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameSeriesVersionUpdateRequest'
+      responses:
+        '200':
+          description: Updated version bundle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameSeriesBundle'
+        '400':
+          description: Invalid JSON body or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Moderator access required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Version not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to update or load the version bundle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /support_feedback:
+    get:
+      tags: [Support]
+      summary: /support_feedback
+      parameters:
+        - name: createdBy
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Matching support feedback entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEnvelope'
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Support]
+      summary: /support_feedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSupportFeedbackRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateSupportFeedbackMultipartRequest'
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: Created support feedback record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, message, status, createdBy, photos]
+                properties:
+                  id:
+                    type: string
+                  message:
+                    type: string
+                  status:
+                    type: string
+                  createdBy:
+                    type: string
+                  photos:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/new:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/new
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewArcadeRequest'
+      responses:
+        '200':
+          description: Newly created arcade summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Geolocation or persistence failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/request_admin:
+    get:
+      tags: [Support]
+      summary: /arcade/request_admin
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: arcade
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Matching admin requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEnvelope'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Support]
+      summary: /arcade/request_admin
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateArcadeRequestAdminRequest'
+      responses:
+        '200':
+          description: Created admin request.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/notice:
+    get:
+      tags: [Arcades]
+      summary: /arcade/notice
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Matching notices ordered by priority with 0 treated as the lowest priority, then latest first within the same priority. Soft-deleted notices are excluded. Notices whose `until` is reached are soft-deleted before the response is returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListArcadeNoticeResponse'
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/notice
+      description: |
+        Requires an authenticated user whose `tag` or `tags` includes `arcade_owner`, `moderator`, or `developer`.
+        Users with only `arcade_owner` may create notices only for arcades listed in `owns`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateArcadeNoticeRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateArcadeNoticeMultipartRequest'
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: Created notice.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeNotice'
+        '400':
+          description: Invalid JSON or missing arcade id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Notice access required or arcade ownership missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/notice
+      description: |
+        Requires an authenticated user whose `tag` or `tags` includes `arcade_owner`, `moderator`, or `developer`.
+        Users with only `arcade_owner` may update notices only for arcades listed in `owns`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadeNoticeRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadeNoticeMultipartRequest'
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: Updated notice.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeNotice'
+        '400':
+          description: Invalid JSON or missing notice id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Notice access required or arcade ownership missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Notice not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Update failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [Arcade Mutations]
+      summary: /arcade/notice
+      description: |
+        Requires an authenticated user whose `tag` or `tags` includes `arcade_owner`, `moderator`, or `developer`.
+        Users with only `arcade_owner` may delete notices only for arcades listed in `owns`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteArcadeNoticeRequest'
+      responses:
+        '200':
+          description: Soft-deleted notice.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, delete]
+                properties:
+                  id:
+                    type: string
+                  delete:
+                    type: boolean
+        '400':
+          description: Invalid JSON or missing notice id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Notice access required or arcade ownership missing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Notice not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Delete failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/rollback:
+    post:
+      tags: [Support]
+      summary: /arcade/rollback
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackArcadeRequest'
+      responses:
+        '200':
+          description: Rollback applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Validation or rollback rule failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Rollback transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/game/bulk_version:
+    post:
+      tags: [Moderator]
+      summary: /arcade/game/bulk_version
+      description: |
+        Requires an authenticated user whose `tag` or `tags` includes `developer`, `moderator`, `supporter`, or `founding_supporter`.
+        The selected atoms may span multiple arcades.
+
+        Changelog rules:
+        - Create exactly one `arcade_changelog` row per request.
+        - Set `changed` to `bulk_game_version`.
+        - Set `from` to the shared current game version id.
+        - Set `to` to the shared new game version id.
+        - Store the detailed snapshot in `log` using `BulkGameVersionChangelogLog`.
+        - `log.items[]` must contain one object per updated atom with `atom_id`, `arcade_id`, and `arcade_name`.
+        - `log.before_game` and `log.after_game` are the same ids used in `from` and `to`.
+        - If any atom id is missing, if any atom does not currently point at `current_game_version_series`, or if validation fails, update nothing and create no changelog row.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUpdateArcadeGameVersionRequest'
+      responses:
+        '200':
+          description: Bulk update applied and changelog created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, count, changelog]
+                properties:
+                  from:
+                    type: string
+                  to:
+                    type: string
+                  count:
+                    type: integer
+                  changelog:
+                    type: string
+                    description: Always `bulk_game_version`.
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Moderator access required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Transaction or notification failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/basic:
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/basic
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadeBasicRequest'
+      responses:
+        '200':
+          description: Updated arcade basic relation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, basic, changed, xp_feedback]
+                properties:
+                  arcade:
+                    type: string
+                  basic:
+                    type: string
+                  changed:
+                    type: array
+                    items:
+                      type: string
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Invalid JSON, validation failure, or no changed fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Load or persistence failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/public:
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/public
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArcadeOnlyRequest'
+      responses:
+        '200':
+          description: Arcade is now public.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, public, xp_feedback]
+                properties:
+                  arcade:
+                    type: string
+                  public:
+                    type: boolean
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Creator restriction or account restriction.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Validation or update failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/gtk:
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/gtk
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadeGTKRequest'
+      responses:
+        '200':
+          description: GTK relation updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, gtk, xp_feedback]
+                properties:
+                  arcade:
+                    type: string
+                  gtk:
+                    $ref: '#/components/schemas/ArcadeGtkExpanded'
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/sns:
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/sns
+      description: |
+        Creates a new `arcade_sns` molecule and writes the atoms under it.
+        The success response returns the same expanded SNS shape used by `GET /arcade?expand=sns`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadeSNSRequest'
+      responses:
+        '200':
+          description: SNS relation updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, sns, xp_feedback]
+                properties:
+                  arcade:
+                    type: string
+                  sns:
+                    $ref: '#/components/schemas/ArcadeSnsExpanded'
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/game:
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/game
+      description: |
+        Creates a new `arcade_game` molecule and atom set, then updates `arcade.game`.
+        When an input atom carries `uncertain` or `prev_game`, the values are preserved on the new atom and tracked in changelog diffs.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadeGameRequest'
+      responses:
+        '200':
+          description: Game relation updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, game, count, xp_feedback]
+                properties:
+                  arcade:
+                    type: string
+                  game:
+                    $ref: '#/components/schemas/ArcadeGameExpanded'
+                  count:
+                    type: integer
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/game/rollback:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/game/rollback
+      description: |
+        Accepts `atom_ids[]` for a single arcade only.
+        The selected atoms must be part of the current `arcade.game` molecule and must have `uncertain=true` with a non-empty `prev_game`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArcadeGameUncertainRequest'
+      responses:
+        '200':
+          description: Rollback applied by creating a new game molecule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeGameUncertainResponse'
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/game/confirm:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/game/confirm
+      description: |
+        Accepts `atom_ids[]` for a single arcade only.
+        The selected atoms must be part of the current `arcade.game` molecule and must have `uncertain=true`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArcadeGameUncertainRequest'
+      responses:
+        '200':
+          description: Confirmation applied by creating a new game molecule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeGameUncertainResponse'
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/game/information/confirm:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/game/information/confirm
+      description: |
+        Accepts a single `id` query parameter for one `arcade_game_atoms` record.
+        The selected atom must belong to a game, and the server records the new confirmation time in `updated`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Game atom record id.
+      responses:
+        '200':
+          description: Game atom confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeGameInformationConfirmResponse'
+              example:
+                arcade: arcade_123
+                game: game_123
+                atom: atom_123
+                updated: "2026-04-10 09:00:00.000Z"
+        '400':
+          description: Missing id or invalid record id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/flag:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/flag
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateArcadeFlagRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              required: [arcade, game_atom_id, disruption, message]
+              properties:
+                arcade:
+                  type: string
+                game_atom_id:
+                  type: string
+                disruption:
+                  type: string
+                  enum: [unplayable, major, bearable, minor]
+                message:
+                  type: string
+                photos:
+                  type: array
+                  maxItems: 3
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '200':
+          description: Flag created and linked to the atom.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, atom, flag, game, xp_feedback]
+                properties:
+                  arcade:
+                    type: string
+                  atom:
+                    type: string
+                  flag:
+                    type: string
+                  game:
+                    $ref: '#/components/schemas/ArcadeGameExpanded'
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Invalid body or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/flag/delete:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/flag/delete
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlagActionRequest'
+      responses:
+        '200':
+          description: Flag deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flag, deleted, game, xp_feedback]
+                properties:
+                  flag:
+                    type: string
+                  deleted:
+                    type: boolean
+                  game:
+                    $ref: '#/components/schemas/ArcadeGameExpanded'
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Invalid body or delete rule failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+  /arcade/flag/reaction:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/flag/reaction
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlagReactionRequest'
+      responses:
+        '200':
+          description: Reaction state updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flag, reaction, action, reaction_id, solved, game, xp_feedback]
+                properties:
+                  flag:
+                    type: string
+                  reaction:
+                    type: string
+                  action:
+                    type: string
+                  reaction_id:
+                    type: string
+                  solved:
+                    type: boolean
+                  game:
+                    $ref: '#/components/schemas/ArcadeGameExpanded'
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Invalid body or reaction rule failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Auto-solve follow-up failed after a successful reaction write.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /user/signup:
+    post:
+      tags: [Users]
+      summary: /user/signup
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignUpJsonRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username:
+                  type: string
+                  maxLength: 15
+                nickname:
+                  type: string
+                bio:
+                  type: string
+                avatar:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Signup initialized.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, profile]
+                properties:
+                  success:
+                    type: boolean
+                  profile:
+                    $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: Invalid body or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PocketBaseAuthError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Withdrawn account cannot sign up.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Username or user_info already initialized, or username already taken.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Signup transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /user/check-in:
+    post:
+      tags: [Users]
+      summary: /user/check-in
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Check-in state and XP feedback.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checked_in, already_checked_in, gained_exp, exp, level, day, xp_feedback]
+                properties:
+                  checked_in:
+                    type: boolean
+                  already_checked_in:
+                    type: boolean
+                  gained_exp:
+                    type: integer
+                  exp:
+                    type: integer
+                  level:
+                    type: integer
+                  day:
+                    type: string
+                    description: KST date in `YYYY-MM-DD` format.
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PocketBaseAuthError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Check-in transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/visits:
+    get:
+      tags: [Arcades]
+      summary: /arcade/visits
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Public aggregate visit counts for a public arcade.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, total_visits, distinct_visitors]
+                properties:
+                  arcade: {type: string}
+                  total_visits: {type: integer}
+                  distinct_visitors: {type: integer}
+  /arcade/visit:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/visit
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ArcadeVisitRequest'}
+      responses:
+        '200':
+          description: GPS visit verification result and XP feedback.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  visited: {type: boolean}
+                  already_visited: {type: boolean}
+                  visit: {$ref: '#/components/schemas/Visit'}
+                  gained_exp: {type: integer}
+                  exp: {type: integer}
+                  level: {type: integer}
+                  xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
+        '400': {description: Invalid coordinates or GPS accuracy.}
+        '403': {description: Inactive user, ineligible arcade, or outside the 100m radius.}
+        '409': {description: Missing arcade coordinates or timezone.}
+  /user/visits:
+    get:
+      tags: [Users]
+      summary: /user/visits
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Authenticated user's visit history and aggregate statistics.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [visits, stats]
+                properties:
+                  visits: {type: array, items: {$ref: '#/components/schemas/Visit'}}
+                  stats: {$ref: '#/components/schemas/VisitStats'}
+  /user/visit-visibility:
+    put:
+      tags: [Users]
+      summary: /user/visit-visibility
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VisitVisibilityRequest'}
+      responses:
+        '200':
+          description: Updated public visit visibility.
+  /user/withdraw:
+    post:
+      tags: [Users]
+      summary: /user/withdraw
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawRequest'
+      responses:
+        '200':
+          description: Account withdrawn successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, withdrawnAt]
+                properties:
+                  success:
+                    type: boolean
+                  withdrawnAt:
+                    type: string
+        '400':
+          description: Invalid JSON or password missing for password accounts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing auth or invalid password.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PocketBaseAuthError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Account already withdrawn.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Withdraw transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /user/report:
+    get:
+      tags: [Support]
+      summary: /user/report
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: user
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Matching user reports.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEnvelope'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Support]
+      summary: /user/report
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserReportRequest'
+      responses:
+        '200':
+          description: User report created.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
