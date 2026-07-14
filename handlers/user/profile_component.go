@@ -39,6 +39,7 @@ type Profile struct {
 	Avatar          string          `json:"avatar"`
 	Background      string          `json:"background"`
 	Tag             []string        `json:"tag"`
+	Owns            *[]string       `json:"owns,omitempty"`
 	SNS             ProfileSNS      `json:"sns"`
 	Withdrawn       bool            `json:"withdrawn"`
 	SeriesPublic    bool            `json:"series_public"`
@@ -139,6 +140,10 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	out.Avatar = avatar
 	out.Background = background
 	out.Tag = tag
+	if includePrivateSeries {
+		owns := userRec.GetStringSlice("owns")
+		out.Owns = &owns
+	}
 	if userInfoRec != nil && (userInfoRec.GetBool("series_public") || includePrivateSeries) {
 		out.Series = loadProfileSeries(app, userInfoRec)
 	}

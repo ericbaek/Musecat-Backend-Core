@@ -790,6 +790,11 @@ components:
           type: array
           items:
             type: string
+        owns:
+          type: array
+          description: Authenticated user's managed arcade IDs. Included only by GET /user/me.
+          items:
+            type: string
         sns:
           $ref: '#/components/schemas/UserProfileSns'
         withdrawn:

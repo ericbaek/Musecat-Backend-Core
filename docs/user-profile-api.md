@@ -164,6 +164,7 @@ Authenticated self profile lookup.
 - Status: `200 OK`
 - Body: Profile DTO
 - `series` is always included for the authenticated user when stored in `user_info.series`, even if `series_public = false`
+- `owns` is included only for the authenticated user and lists arcade IDs they may manage.
 
 ### Error Responses
 - `401 Unauthorized` when token is missing/invalid (PocketBase auth middleware shape):
