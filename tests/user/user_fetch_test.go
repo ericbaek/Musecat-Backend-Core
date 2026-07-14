@@ -228,16 +228,20 @@ func TestGetMe_Success(t *testing.T) {
 	var userID string
 	var username string
 	var createdAt string
+	var ownedArcadeID string
 
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
 		tb.Helper()
 		ensureWithdrawFields(tb, app)
 
 		token, userRec := createAuthUser(tb, app, true)
+		ownedArcadeID = seedVisitArcade(tb, app, "Asia/Seoul").Id
 		userID = userRec.Id
 		username = "me_user_" + userRec.Id
 		createdAt = userRec.GetString("created")
 		userRec.Set("username", username)
+		userRec.Set("tags", []string{"arcade_owner"})
+		userRec.Set("owns", []string{ownedArcadeID})
 		if err := app.Save(userRec); err != nil {
 			tb.Fatalf("failed to set username: %v", err)
 		}
@@ -305,9 +309,30 @@ func TestGetMe_Success(t *testing.T) {
 		if got := payload["warp"]; got != true {
 			tb.Fatalf("expected warp true, got %v", got)
 		}
+		if got := payload["tag"]; !containsString(got, "arcade_owner") {
+			tb.Fatalf("expected arcade_owner tag, got %#v", got)
+		}
+		if got := payload["owns"]; !containsString(got, ownedArcadeID) {
+			tb.Fatalf("expected owned arcade, got %#v", got)
+		}
 	}
 
 	scenario.Test(t)
+}
+
+func containsString(value any, expected string) bool {
+	values, ok := value.([]any)
+	if !ok {
+		return false
+	}
+
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+
+	return false
 }
 
 func TestGetMe_IncludesPrivateSeries(t *testing.T) {
