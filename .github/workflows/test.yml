@@ -14,3 +14,41 @@ jobs:
         with:
           go-version: "1.25.0"
       - run: go test ./...
+
+  update-full:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ericbaek/Musecat-Backend-Full
+          ref: dev
+          path: backend-full
+          token: ${{ secrets.FULL_REPO_DISPATCH_TOKEN }}
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.0"
+
+      - name: Update backend-core dependency
+        env:
+          CORE_SHA: ${{ github.sha }}
+        run: |
+          cd backend-full
+          go get github.com/ericbaek/musecat-backend-core@$CORE_SHA
+          go mod tidy
+          go test ./...
+
+      - name: Create dependency update pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          path: backend-full
+          token: ${{ secrets.FULL_REPO_DISPATCH_TOKEN }}
+          base: dev
+          branch: chore/update-backend-core
+          delete-branch: true
+          commit-message: "chore: update backend-core dependency"
+          title: "chore: update backend-core dependency"
+          body: "Automated update from backend-core commit `${{ github.sha }}`."

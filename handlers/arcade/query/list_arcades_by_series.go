@@ -43,7 +43,15 @@ type arcadeDistance struct {
 	payload      map[string]any
 }
 
-// ListArcadesBySeriesAndLocation 는 GET /arcades/nearby?game_series=...&lat=...&lon=...&address=...&page=... 요청을 처리한다.
+type countryTotal struct {
+	Total         int `json:"total"`
+	NearestArcade struct {
+		ID         string  `json:"id"`
+		DistanceKm float64 `json:"distance_km"`
+	} `json:"nearest_arcade"`
+}
+
+// ListArcadesBySeriesAndLocation 는 GET /arcades/nearby?game_series=...&lat=...&lon=...&address=...&country=...&page=... 요청을 처리한다.
 // 여러 game_series 를 모두 포함하는 공개·영업 중 오락실을 거리순으로 최대 15개씩 페이지네이션해 반환한다.
 func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 	q := re.Request.URL.Query()
@@ -51,6 +59,7 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 	// 1. 쿼리 파라미터에서 게임 시리즈 ID 들을 읽어온다. 쉼표 또는 다중 쿼리 파라미터를 모두 허용한다.
 	seriesIDs := parseSeriesIDs(q["game_series"])
 	addressFilter := normalizeAddressKeyword(q.Get("address"))
+	countryFilter := strings.ToUpper(strings.TrimSpace(q.Get("country")))
 	expandGame, err := strconv.ParseBool(strings.TrimSpace(q.Get("expand")))
 	if strings.TrimSpace(q.Get("expand")) != "" && err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{
@@ -101,7 +110,7 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 			"per_page":       nearbyPageSize,
 			"last_page":      0,
 			"total":          0,
-			"country_totals": map[string]int{},
+			"country_totals": map[string]countryTotal{},
 			"items":          []any{},
 		}
 		return re.JSON(http.StatusOK, response)
@@ -118,6 +127,11 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 			continue
 		}
 		item := candidate.Summary(true, true)
+		country, _ := item["country"].(string)
+		country = strings.TrimSpace(country)
+		if countryFilter != "" && !strings.EqualFold(country, countryFilter) {
+			continue
+		}
 		// 시리즈 필터: 요청된 모든 시리즈를 포함하지 않으면 스킵
 		if len(seriesIDs) > 0 && !containsAllSeries(candidate.GameSeries, seriesIDs) {
 			continue
@@ -162,7 +176,7 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 			"per_page":       nearbyPageSize,
 			"last_page":      0,
 			"total":          0,
-			"country_totals": map[string]int{},
+			"country_totals": map[string]countryTotal{},
 			"items":          []any{},
 		}
 		return re.JSON(http.StatusOK, response)
@@ -213,8 +227,8 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 	return re.JSON(http.StatusOK, response)
 }
 
-func summarizeCountryTotals(results []arcadeDistance) map[string]int {
-	totals := map[string]int{}
+func summarizeCountryTotals(results []arcadeDistance) map[string]countryTotal {
+	totals := map[string]countryTotal{}
 	for _, result := range results {
 		item := result.payload
 		country, ok := item["country"].(string)
@@ -225,7 +239,13 @@ func summarizeCountryTotals(results []arcadeDistance) map[string]int {
 		if country == "" {
 			continue
 		}
-		totals[country]++
+		total, ok := totals[country]
+		if !ok || result.distance < total.NearestArcade.DistanceKm {
+			total.NearestArcade.ID, _ = item["id"].(string)
+			total.NearestArcade.DistanceKm = result.distance
+		}
+		total.Total++
+		totals[country] = total
 	}
 	return totals
 }

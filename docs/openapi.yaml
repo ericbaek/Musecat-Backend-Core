@@ -681,7 +681,20 @@ components:
         country_totals:
           type: object
           additionalProperties:
-            type: integer
+            type: object
+            required: [total, nearest_arcade]
+            properties:
+              total:
+                type: integer
+              nearest_arcade:
+                type: object
+                required: [id, distance_km]
+                properties:
+                  id:
+                    type: string
+                  distance_km:
+                    type: number
+                    format: double
         items:
           type: array
           items:
@@ -2008,6 +2021,11 @@ paths:
           schema:
             type: string
           description: Normalized address keyword filter.
+        - name: country
+          in: query
+          schema:
+            type: string
+          description: Optional ISO country-code filter.
         - name: page
           in: query
           schema:
@@ -2038,7 +2056,11 @@ paths:
                 last_page: 1
                 total: 1
                 country_totals:
-                  AU: 1
+                  AU:
+                    total: 1
+                    nearest_arcade:
+                      id: arcade_123
+                      distance_km: 0.4
                 items:
                   - id: arcade_123
                     country: AU

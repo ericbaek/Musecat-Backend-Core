@@ -66,6 +66,34 @@ func TestDocumentationRoutes(t *testing.T) {
 		scenario.Test(t)
 	})
 
+	t.Run("GET /openapi.yaml uses configured spec path", func(t *testing.T) {
+		specPath := t.TempDir() + "/openapi.yaml"
+		if err := os.WriteFile(specPath, []byte("openapi: 3.1.0\ninfo:\n  title: Local spec\n"), 0o600); err != nil {
+			t.Fatalf("failed to write OpenAPI fixture: %v", err)
+		}
+		setTestEnv(t, "MUSECAT_OPENAPI_SPEC_PATH", specPath)
+
+		scenario := tests.ApiScenario{
+			Name:           "GET /openapi.yaml returns configured OpenAPI document",
+			Method:         http.MethodGet,
+			URL:            "/openapi.yaml",
+			ExpectedStatus: http.StatusOK,
+			ExpectedContent: []string{
+				"title: Local spec",
+			},
+			TestAppFactory: func(tb testing.TB) *tests.TestApp {
+				app := testutil.NewTestApp(tb)
+				app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+					registerDocumentationRoutes(se)
+					return se.Next()
+				})
+				return app
+			},
+		}
+
+		scenario.Test(t)
+	})
+
 	t.Run("GET /docs redirects to trailing slash", func(t *testing.T) {
 		scenario := tests.ApiScenario{
 			Name:           "GET /docs redirects",

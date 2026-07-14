@@ -92,6 +92,68 @@ func TestNearby_SortsByDistanceFromCachedCandidates(t *testing.T) {
 	}
 }
 
+func TestNearby_CountryFilterAndCountryTotalsIncludeNearestArcade(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+
+	nearJPID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Near Japan Arcade", Address: "Near Road", Country: "JP",
+		Location: location{Lat: 35.6812, Lon: 139.7671},
+	})
+	setArcadeVisibility(t, app, nearJPID, true, false)
+
+	farJPID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Far Japan Arcade", Address: "Far Road", Country: "JP",
+		Location: location{Lat: 35.6895, Lon: 139.6917},
+	})
+	setArcadeVisibility(t, app, farJPID, true, false)
+
+	krID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Korea Arcade", Address: "Korea Road", Country: "KR",
+		Location: location{Lat: 37.5665, Lon: 126.9780},
+	})
+	setArcadeVisibility(t, app, krID, true, false)
+
+	res := executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?lat=35.6810&lon=139.7670&country=jp", "", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+	defer res.Body.Close()
+
+	var payload struct {
+		Total         int              `json:"total"`
+		Items         []map[string]any `json:"items"`
+		CountryTotals map[string]struct {
+			Total         int `json:"total"`
+			NearestArcade struct {
+				ID         string  `json:"id"`
+				DistanceKm float64 `json:"distance_km"`
+			} `json:"nearest_arcade"`
+		} `json:"country_totals"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode nearby payload: %v", err)
+	}
+	if payload.Total != 2 || len(payload.Items) != 2 {
+		t.Fatalf("expected only two JP arcades, got total=%d items=%d", payload.Total, len(payload.Items))
+	}
+	for _, item := range payload.Items {
+		if item["country"] != "JP" {
+			t.Fatalf("expected only JP items, got %#v", item)
+		}
+	}
+	jpTotal, ok := payload.CountryTotals["JP"]
+	if !ok || len(payload.CountryTotals) != 1 {
+		t.Fatalf("expected only JP country total, got %#v", payload.CountryTotals)
+	}
+	if jpTotal.Total != 2 || jpTotal.NearestArcade.ID != nearJPID {
+		t.Fatalf("expected JP total to use nearest arcade %q, got %#v", nearJPID, jpTotal)
+	}
+	if jpTotal.NearestArcade.DistanceKm <= 0 {
+		t.Fatalf("expected nearest distance to be positive, got %f", jpTotal.NearestArcade.DistanceKm)
+	}
+}
+
 func TestNearby_ExpandsQuerySeriesAndAppliesDistanceLimit(t *testing.T) {
 	app := newArcadeTestApp(t)
 	_, user := createAuthUser(t, app)

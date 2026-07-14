@@ -30,8 +30,9 @@ import (
 )
 
 const (
-	documentationSpecPath = "docs/openapi.yaml"
-	documentationSiteDir  = "docs-site"
+	documentationSpecPath    = "docs/openapi.yaml"
+	documentationSpecPathEnv = "MUSECAT_OPENAPI_SPEC_PATH"
+	documentationSiteDir     = "docs-site"
 )
 
 func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
@@ -146,7 +147,7 @@ func RegisterDocumentationRoutes(se *core.ServeEvent) {
 			return err
 		}
 
-		spec, err := os.ReadFile(documentationSpecPath)
+		spec, err := os.ReadFile(resolveDocumentationSpecPath())
 		if err != nil {
 			return re.JSON(http.StatusInternalServerError, map[string]any{
 				"error":   "failed to load OpenAPI spec",
@@ -172,6 +173,14 @@ func RegisterDocumentationRoutes(se *core.ServeEvent) {
 
 		return apis.Static(os.DirFS(documentationSiteDir), true)(re)
 	})
+}
+
+func resolveDocumentationSpecPath() string {
+	if path := strings.TrimSpace(os.Getenv(documentationSpecPathEnv)); path != "" {
+		return path
+	}
+
+	return documentationSpecPath
 }
 
 type docsBasicAuthConfig struct {
