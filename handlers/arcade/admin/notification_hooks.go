@@ -1,17 +1,12 @@
 package admin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
@@ -436,111 +431,10 @@ func notifyTelegram(ctx context.Context, message string) error {
 	return nil
 }
 
-func sendTelegramText(ctx context.Context, message string) error {
-	botToken := strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
-	chatID := strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID"))
-	if botToken == "" || chatID == "" {
-		return fmt.Errorf("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured")
-	}
-
-	payload := map[string]any{
-		"chat_id":                  chatID,
-		"text":                     message,
-		"disable_web_page_preview": true,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-
-	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
-	req, err := http.NewRequestWithContext(cctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("telegram http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-
-	var data struct {
-		OK          bool   `json:"ok"`
-		Description string `json:"description"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return err
-	}
-	if !data.OK {
-		if strings.TrimSpace(data.Description) == "" {
-			return fmt.Errorf("telegram request failed")
-		}
-		return fmt.Errorf("telegram request failed: %s", data.Description)
-	}
+func sendTelegramText(context.Context, string) error {
 	return nil
 }
 
-func sendDiscordText(ctx context.Context, message string) error {
-	webhookURL := strings.TrimSpace(os.Getenv("DISCORD_WEBHOOK_URL"))
-	if webhookURL == "" {
-		return nil
-	}
-
-	content := strings.TrimSpace(message)
-	if content == "" {
-		return nil
-	}
-	const maxDiscordContentLen = 2000
-	if len(content) > maxDiscordContentLen {
-		content = content[:maxDiscordContentLen-3] + "..."
-	}
-
-	payload := map[string]any{
-		"content": content,
-		"allowed_mentions": map[string]any{
-			"parse": []string{},
-		},
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(cctx, http.MethodPost, webhookURL, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return fmt.Errorf("discord http %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
-	}
-
+func sendDiscordText(context.Context, string) error {
 	return nil
 }

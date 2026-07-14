@@ -232,26 +232,6 @@ func BulkUpdateArcadeGameVersion(re *core.RequestEvent) error {
 	})
 }
 
-func buildBulkGameVersionTelegramMessage(fromGame, toGame string, atomIDs []string, arcades map[string]string) string {
-	var b strings.Builder
-	b.WriteString("[")
-	b.WriteString(bulkGameVersionChanged)
-	b.WriteString("]\n")
-	appendTelegramField(&b, "from", fromGame)
-	appendTelegramField(&b, "to", toGame)
-	appendTelegramField(&b, "count", fmt.Sprintf("%d", len(atomIDs)))
-	appendTelegramField(&b, "arcade_count", fmt.Sprintf("%d", len(arcades)))
-	if len(atomIDs) > 0 {
-		b.WriteString("atom_ids:\n")
-		for _, atomID := range atomIDs {
-			b.WriteString("- ")
-			b.WriteString(strings.TrimSpace(atomID))
-			b.WriteString("\n")
-		}
-	}
-	return b.String()
-}
-
 func loadArcadeName(app core.App, arcadeID string) (string, error) {
 	arcadeRec, err := app.FindRecordById(arcadeinternal.CollectionArcade, arcadeID)
 	if err != nil {

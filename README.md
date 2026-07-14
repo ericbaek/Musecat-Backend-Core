@@ -25,6 +25,6 @@ The health endpoint is available at `/hello`. The API contract is maintained in 
 
 ## Contribution model
 
-Submit reusable API, schema, documentation, and test changes here. Production-only integrations belong in a separate private operations repository. Keep secrets, user data, venue-source exports, caches, and notification destinations out of issues, pull requests, commits, and test fixtures.
+Submit reusable API, schema, documentation, and test changes here. Production-only integrations belong in a separate private operations repository. The core can format lifecycle events, but it ships with no Telegram/Discord transport or notification credentials. Keep secrets, user data, venue-source exports, caches, and notification destinations out of issues, pull requests, commits, and test fixtures.
 
 See `CONTRIBUTING.md` for the pull-request requirements and `SECURITY.md` for private vulnerability reporting.
