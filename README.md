@@ -6,6 +6,26 @@ Musecat Backend Core is a PocketBase-based API server for arcade, user, and cont
 
 This repository is prepared for public release. The included license is source-available, not an OSI-approved open-source license: commercial use is not permitted and redistributed modifications must be published under the same terms.
 
+## About Musecat
+
+[Musecat](https://musecat.app) is a community service for finding nearby arcades and keeping their information current. It helps players browse arcade locations and game lineups, then contribute corrections, arcade edits, and fault reports. Arcade pages can include practical information such as machine counts and condition, pricing, opening hours, facilities, location notes, and update history.
+
+The reusable backend code is published here; Musecat's production database, ingestion workflow, operational configuration, credentials, and provider-source exports are not included.
+
+## Project Goal
+
+Musecat exists to make the world of arcades more connected and accessible.
+
+Our 2026 founding goal is to build a unified platform where arcade information can be discovered, understood, and shared beyond the boundaries of language, location, region, and country. From game availability and machine conditions to pricing, venue facilities, and community updates, Musecat brings together the details that help every visit feel more informed.
+
+We aim to support rhythm-game players throughout their journey: discovering new places to play, planning a trip with confidence, sharing first-hand knowledge, and helping the community keep arcade information alive and current.
+
+## Musecat Data
+
+The service data is not licensed under this repository's source-code license. In particular, do not use the public service or API to bulk extract, reconstruct, redistribute, or commercially reuse Musecat's database without permission.
+
+See [DATA_LICENSE.md](DATA_LICENSE.md) for the permitted uses, contribution licence, automated-access restrictions, and commercial or research permission process.
+
 ## Run locally
 
 1. Copy `.env.example` to `.env` and fill only the provider keys you intend to use.
