@@ -27,7 +27,6 @@ import (
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
-	_ "github.com/ericbaek/musecat-backend-core/migrations"
 )
 
 const (

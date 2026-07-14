@@ -11,6 +11,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	"github.com/ericbaek/musecat-backend-core/coreapp"
+	_ "github.com/ericbaek/musecat-backend-core/migrations"
 )
 
 func main() {
