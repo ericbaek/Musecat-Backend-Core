@@ -10,7 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-var arcadeUpdatePartOrder = []string{"basic", "hour", "sns", "gtk", "game", "bulk_game_version", "photo", "flag", "flag_reaction"}
+var arcadeUpdatePartOrder = []string{"basic", "hour", "sns", "gtk", "game", "bulk_game_version", "photo", "flag", "flag_reaction", "visit"}
 
 type arcadeUpdateBlockRow struct {
 	ArcadeID       string
@@ -86,6 +86,17 @@ WITH filtered AS (
 	INNER JOIN arcade_flag f ON f.id = r.flag
 	INNER JOIN arcade a ON a.id = f.arcade
 	WHERE %s
+	UNION ALL
+	SELECT
+		v.arcade,
+		'visit' AS changed,
+		v.user AS changed_by,
+		v.visited_at AS created,
+		v.id
+	FROM arcade_visit v
+	INNER JOIN arcade a ON a.id = v.arcade
+	INNER JOIN user_info ui ON ui.id = v.user
+	WHERE %s
 ),
 ordered AS (
 	SELECT
@@ -154,7 +165,7 @@ SELECT
 FROM blocks b
 INNER JOIN selected_blocks s ON s.block_id = b.block_id
 ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
-`, strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "))
+	`, strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND ")+" AND ui.visit_visibility IN ('summary', 'full')")
 
 	rows, err := re.App.DB().NewQuery(sql).Bind(params).Rows()
 	if err != nil {

@@ -260,6 +260,89 @@ func TestListArcadeUpdates_InvalidLimit(t *testing.T) {
 	}
 }
 
+func TestListArcadeUpdates_IncludesOnlyPublicVisits(t *testing.T) {
+	app := newArcadeTestApp(t)
+
+	_, summaryUser := createAuthUser(t, app)
+	_, fullUser := createAuthUser(t, app)
+	_, privateUser := createAuthUser(t, app)
+	base := time.Date(2030, 3, 26, 9, 0, 0, 0, time.UTC)
+
+	summaryArcade, _ := seedArcade(t, app, summaryUser.Id, arcadeSeed{Name: "Summary visit", Address: "A", Location: location{Lat: 37.1, Lon: 127.1}, Country: "KR"})
+	fullArcade, _ := seedArcade(t, app, fullUser.Id, arcadeSeed{Name: "Full visit", Address: "B", Location: location{Lat: 37.2, Lon: 127.2}, Country: "KR"})
+	privateArcade, _ := seedArcade(t, app, privateUser.Id, arcadeSeed{Name: "Private visit", Address: "C", Location: location{Lat: 37.3, Lon: 127.3}, Country: "KR"})
+
+	setArcadeVisibilityAndUpdated(t, app, summaryArcade, true, false, base)
+	setArcadeVisibilityAndUpdated(t, app, fullArcade, true, false, base)
+	setArcadeVisibilityAndUpdated(t, app, privateArcade, true, false, base)
+	setVisitVisibility(t, app, summaryUser.Id, "summary")
+	setVisitVisibility(t, app, fullUser.Id, "full")
+	setVisitVisibility(t, app, privateUser.Id, "private")
+	seedArcadeVisit(t, app, summaryUser.Id, summaryArcade, base)
+	seedArcadeVisit(t, app, fullUser.Id, fullArcade, base.Add(-time.Minute))
+	seedArcadeVisit(t, app, privateUser.Id, privateArcade, base.Add(-2*time.Minute))
+
+	res := executeJSONRequest(t, app, http.MethodGet, "/arcades/updates", "", nil)
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+
+	var payload []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(payload) != 2 {
+		t.Fatalf("expected 2 public visit entries, got %d: %#v", len(payload), payload)
+	}
+	expectedUsers := map[string]string{
+		"Summary visit": summaryUser.Id,
+		"Full visit":    fullUser.Id,
+	}
+	for _, entry := range payload {
+		name, _ := entry["name"].(string)
+		expectedUser, ok := expectedUsers[name]
+		if !ok {
+			t.Fatalf("unexpected visit entry: %#v", entry)
+		}
+		parts := stringSliceFromAny(t, entry["updated_parts"])
+		assertStringSlicesEqual(t, parts, []string{"visit"})
+		changes := mapSliceFromAny(t, entry["changes"])
+		if len(changes) != 1 {
+			t.Fatalf("expected one visit change, got %#v", changes)
+		}
+		assertChangeRow(t, changes[0], "visit", expectedUser)
+	}
+}
+
+func setVisitVisibility(tb testing.TB, app *tests.TestApp, userID, visibility string) {
+	tb.Helper()
+	rec, err := app.FindRecordById("user_info", userID)
+	if err != nil {
+		tb.Fatalf("failed to load user_info: %v", err)
+	}
+	rec.Set("visit_visibility", visibility)
+	if err := app.Save(rec); err != nil {
+		tb.Fatalf("failed to set visit visibility: %v", err)
+	}
+}
+
+func seedArcadeVisit(tb testing.TB, app *tests.TestApp, userID, arcadeID string, ts time.Time) {
+	tb.Helper()
+	coll, err := app.FindCollectionByNameOrId("arcade_visit")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_visit collection: %v", err)
+	}
+	rec := core.NewRecord(coll)
+	rec.Set("user", userID)
+	rec.Set("arcade", arcadeID)
+	rec.Set("visit_day", ts.Format("2006-01-02"))
+	rec.Set("visited_at", ts.Format(time.RFC3339))
+	if err := app.Save(rec); err != nil {
+		tb.Fatalf("failed to save arcade visit: %v", err)
+	}
+}
+
 func seedArcadeChangelog(tb testing.TB, app *tests.TestApp, arcadeID, changed, by string, ts time.Time) string {
 	tb.Helper()
 
