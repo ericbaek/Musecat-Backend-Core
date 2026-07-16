@@ -24,6 +24,7 @@ import (
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
 	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
+	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
@@ -57,6 +58,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		se.Router.GET("/reverse_geocode", handlers.ReverseGeocodeHandler)
 		se.Router.GET("/search", searchhandler.Search)
 		se.Router.GET("/stats", statshandler.GetStats)
+		se.Router.GET("/rankings", rankinghandler.List)
 		// Public read endpoint: returns current relation ids for the arcade
 		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
 		// Public read endpoint: list all arcades with basic info + gameSeries ids

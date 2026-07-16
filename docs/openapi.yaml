@@ -199,6 +199,34 @@ components:
         flag_count:
           type: integer
           format: int64
+    RankingProfile:
+      type: object
+      required: [id, nickname, username, avatar, level, tags]
+      properties:
+        id: {type: string}
+        nickname: {type: string}
+        username: {type: string}
+        avatar: {type: string}
+        level: {type: integer}
+        tags:
+          type: array
+          items: {type: string}
+    RankingEntry:
+      type: object
+      required: [rank, score, profile]
+      properties:
+        rank: {type: integer}
+        score: {type: integer, format: int64}
+        profile: {$ref: '#/components/schemas/RankingProfile'}
+    RankingResponse:
+      type: object
+      required: [metric, period, entries]
+      properties:
+        metric: {type: string, enum: [explorer, visits, xp, level, photographer]}
+        period: {type: string, enum: [week, month, half_year, year, all]}
+        entries:
+          type: array
+          items: {$ref: '#/components/schemas/RankingEntry'}
     SearchUserItem:
       type: object
       required: [username, nickname, avatar]
@@ -2668,6 +2696,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StatsResponse'
+  /rankings:
+    get:
+      tags: [Users]
+      summary: /rankings
+      parameters:
+        - name: metric
+          in: query
+          required: true
+          schema: {type: string, enum: [explorer, visits, xp, level, photographer]}
+        - name: period
+          in: query
+          required: true
+          schema: {type: string, enum: [week, month, half_year, year, all]}
+      responses:
+        '200':
+          description: Public user rankings. Level rankings accept only the all period.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RankingResponse'
+        '400':
+          description: Invalid metric or period.
   /geo:
     get:
       tags: [Geo]

@@ -29,6 +29,7 @@ import (
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
 	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
+	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
 	"github.com/ericbaek/musecat-backend-core/handlers/user"
@@ -131,6 +132,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		se.Router.GET("/search", searchhandler.Search)
 		se.Router.GET("/stats", statshandler.GetStats)
+		se.Router.GET("/rankings", rankinghandler.List)
 		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
 		se.Router.GET("/arcades", arcadequery.ListArcades)
 		se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)
