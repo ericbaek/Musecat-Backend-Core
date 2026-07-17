@@ -1375,7 +1375,7 @@ func TestGetArcadeValues_ExpandGame_PreservesLegacyPriceShape(t *testing.T) {
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Legacy Price Arcade",
 			Address:  "Legacy Road",
 			Nickname: []string{"Legacy"},
@@ -1449,7 +1449,7 @@ func TestGetArcadeValues_ExpandGame_PreservesValidCurrency(t *testing.T) {
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Valid Currency Arcade",
 			Address:  "Valid Road",
 			Nickname: []string{"Valid"},
@@ -1523,7 +1523,7 @@ func TestGetArcadeValues_ExpandGame_PreservesNumericPriceTitle(t *testing.T) {
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Numeric Title Arcade",
 			Address:  "Type Street",
 			Nickname: []string{"Typed"},
@@ -1605,7 +1605,7 @@ func TestGetArcadeValues_ExpandGame_SortsBySeriesNumberAndLatestRelease(t *testi
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Sorted Arcade",
 			Address:  "Sort Street",
 			Nickname: []string{"Sorted"},
@@ -1697,7 +1697,7 @@ func TestGetArcadeValues_ExpandGame_IncludesFlagsAndReactions(t *testing.T) {
 		if err := app.Save(userInfo); err != nil {
 			tb.Fatalf("failed to update user_info: %v", err)
 		}
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Flagged Arcade",
 			Address:  "Flag Street",
 			Nickname: []string{"Flagged"},
@@ -1874,7 +1874,7 @@ func TestGetArcadeValues_ExpandGame_IncludesOrphanFlags(t *testing.T) {
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Orphan Flag Arcade",
 			Address:  "Orphan Street",
 			Nickname: []string{"Orphan"},
@@ -2036,7 +2036,7 @@ func TestGetArcadeValues_ExpandGame_ExcludesSolvedFlags(t *testing.T) {
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Solved Filter Arcade",
 			Address:  "Solved Street",
 			Nickname: []string{"SolvedFilter"},

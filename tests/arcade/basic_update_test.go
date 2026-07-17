@@ -32,6 +32,7 @@ func TestUpdateArcadeBasic_PrivateWritesStructuredChangelog(t *testing.T) {
 
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
 		tb.Helper()
+		stubGeoLookup(tb)
 
 		token, user := createAuthUser(tb, app)
 		headers["Authorization"] = "Bearer " + token
@@ -338,7 +339,7 @@ func TestUpdateArcadeBasic_PrivateLocationChangeUpdatesTimezoneWithinSameCountry
 
 		stubGeoLookupByLocation(tb, func(lat, lon float64) (string, string) {
 			if floatAlmostEq(lat, 35.1796) && floatAlmostEq(lon, 129.0756) {
-				return "KR", "Asia/Busan"
+				return "KR", "Asia/Tokyo"
 			}
 			return "KR", "Asia/Seoul"
 		})
@@ -370,8 +371,8 @@ func TestUpdateArcadeBasic_PrivateLocationChangeUpdatesTimezoneWithinSameCountry
 		if got := arcadeRec.GetString("country"); got != "KR" {
 			tb.Fatalf("expected country KR, got %q", got)
 		}
-		if got := arcadeRec.GetString("timezone"); got != "Asia/Busan" {
-			tb.Fatalf("expected timezone Asia/Busan, got %q", got)
+		if got := arcadeRec.GetString("timezone"); got != "Asia/Tokyo" {
+			tb.Fatalf("expected timezone Asia/Tokyo, got %q", got)
 		}
 	}
 

@@ -85,6 +85,7 @@ func CreateArcadeRequestAdmin(re *core.RequestEvent) error {
 	rec.Set("arcade", body.Arcade)
 	rec.Set("urgency", body.Urgency)
 	rec.Set("message", body.Message)
+	rec.Set("kind", "general")
 	rec.Set("status", adminRequestWaitingStatus)
 	rec.Set("createdBy", re.Auth.Id)
 
@@ -97,6 +98,7 @@ func CreateArcadeRequestAdmin(re *core.RequestEvent) error {
 
 	return re.JSON(http.StatusOK, map[string]any{
 		"id":        rec.Id,
+		"kind":      rec.GetString("kind"),
 		"arcade":    strings.TrimSpace(rec.GetString("arcade")),
 		"urgency":   rec.GetString("urgency"),
 		"message":   rec.GetString("message"),
@@ -133,6 +135,7 @@ func ListArcadeRequestAdmin(re *core.RequestEvent) error {
 	for _, rec := range recs {
 		items = append(items, map[string]any{
 			"id":        rec.Id,
+			"kind":      rec.GetString("kind"),
 			"arcade":    strings.TrimSpace(rec.GetString("arcade")),
 			"urgency":   rec.GetString("urgency"),
 			"message":   rec.GetString("message"),

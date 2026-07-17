@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 
-	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
@@ -19,6 +19,7 @@ var (
 	ErrArcadeBasicEmpty           = errors.New("arcade.basic is empty")
 	ErrArcadeBasicLocationMissing = errors.New("missing arcade basic location")
 	ErrFacilityPhotoRegistration  = errors.New("at least one facility photo must be registered before making arcade public")
+	ErrArcadeGeoUnavailable       = errors.New("arcade country and timezone must be valid before making arcade public")
 )
 
 type RequestPublicArcadeBody struct {
@@ -212,22 +213,19 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 			return ErrArcadeBasicEmpty
 		}
 
-		basicRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeBasic, basicID)
-		if err != nil {
+		if _, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeBasic, basicID); err != nil {
 			return fmt.Errorf("failed to load arcade basic: %w", err)
 		}
-
-		lat, lon, ok := arcadeinternal.ReadLocation(basicRec.Get("location"))
-		if !ok {
-			return ErrArcadeBasicLocationMissing
+		country := strings.ToUpper(strings.TrimSpace(txArcade.GetString("country")))
+		timezone := strings.TrimSpace(txArcade.GetString("timezone"))
+		if len(country) != 2 || timezone == "" {
+			return ErrArcadeGeoUnavailable
+		}
+		if _, err := time.LoadLocation(timezone); err != nil {
+			return ErrArcadeGeoUnavailable
 		}
 
-		geoRes, err := geo.LookupCountryAndTimezone(re.Request.Context(), lat, lon)
-		if err != nil {
-			return fmt.Errorf("geo lookup failed: %w", err)
-		}
-
-		if requiresFacilityPhoto(geoRes.Country) {
+		if requiresFacilityPhoto(country) {
 			hasPhoto, err := hasPhotoRegistration(txApp, txArcade.GetString("photo"))
 			if err != nil {
 				return fmt.Errorf("failed to validate photo registration: %w", err)
@@ -237,9 +235,6 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 			}
 		}
 
-		if _, err := arcadeinternal.SyncArcadeCountryByGeoResult(txApp, body.Arcade, geoRes); err != nil {
-			return err
-		}
 		if err := arcadeinternal.UpdateArcadeFieldsTx(txApp, body.Arcade, map[string]any{
 			"public": true,
 		}, re.Auth.Id); err != nil {
@@ -268,6 +263,12 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 			return re.JSON(http.StatusBadRequest, map[string]any{
 				"error":   "validation failed",
 				"details": ErrFacilityPhotoRegistration.Error(),
+			})
+		}
+		if errors.Is(err, ErrArcadeGeoUnavailable) {
+			return re.JSON(http.StatusBadRequest, map[string]any{
+				"error":   "validation failed",
+				"details": ErrArcadeGeoUnavailable.Error(),
 			})
 		}
 		if errors.Is(err, ErrArcadeBasicEmpty) || errors.Is(err, ErrArcadeBasicLocationMissing) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pocketbase/pocketbase/core"
 
@@ -27,6 +28,7 @@ type RollbackArcadeBody struct {
 	Value         string `json:"value"`
 	PreviousValue string `json:"previous_value"`
 	Report        bool   `json:"report"`
+	Changelog     string `json:"changelog"`
 	ReportMessage string `json:"report_message"`
 }
 
@@ -75,6 +77,8 @@ func parseRollbackArcadeBody(re *core.RequestEvent) (RollbackArcadeBody, error) 
 	body.Part = strings.ToLower(strings.TrimSpace(body.Part))
 	body.Value = strings.TrimSpace(body.Value)
 	body.PreviousValue = strings.TrimSpace(body.PreviousValue)
+	body.Changelog = strings.TrimSpace(body.Changelog)
+	body.ReportMessage = strings.TrimSpace(body.ReportMessage)
 	if body.Value == "" {
 		body.Value = body.PreviousValue
 	}
@@ -97,8 +101,16 @@ func validateRollbackArcadeBody(body RollbackArcadeBody) error {
 	if len(body.Value) != 15 {
 		return fmt.Errorf("value must be a valid relation id")
 	}
-	if body.Report && strings.TrimSpace(body.ReportMessage) == "" {
-		return fmt.Errorf("report_message is required when report is true")
+	if body.Report {
+		if len(body.Changelog) != 15 {
+			return fmt.Errorf("changelog is required and must be a valid changelog id when report is true")
+		}
+		if body.ReportMessage == "" {
+			return fmt.Errorf("report_message is required when report is true")
+		}
+		if utf8.RuneCountInString(body.ReportMessage) > maxEditReportMessage {
+			return fmt.Errorf("report_message must be at most %d characters", maxEditReportMessage)
+		}
 	}
 	return nil
 }
@@ -160,10 +172,16 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 		}
 
 		if body.Report {
-			requestAdminID, err = createArcadeRequestAdminForRollback(txApp, body.Arcade, body.ReportMessage, re.Auth.Id)
-			if err != nil {
-				return err
+			report, reportErr := createArcadeEditReportTx(txApp, CreateArcadeEditReportBody{
+				Arcade:    body.Arcade,
+				Changelog: body.Changelog,
+				Urgency:   "high",
+				Message:   body.ReportMessage,
+			}, re.Auth, rollbackReportKind)
+			if reportErr != nil {
+				return reportErr
 			}
+			requestAdminID = report.Id
 		}
 
 		return nil
@@ -174,6 +192,12 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 			return re.JSON(http.StatusBadRequest, map[string]any{
 				"error":   "validation failed",
 				"details": validationErr.Error(),
+			})
+		}
+		var reportErr *editReportError
+		if errors.As(err, &reportErr) {
+			return re.JSON(reportErr.status, map[string]any{
+				"error": reportErr.message,
 			})
 		}
 		return re.JSON(http.StatusBadGateway, map[string]any{
@@ -192,23 +216,4 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 		"request_admin_id":   requestAdminID,
 		"request_admin_sent": requestAdminID != "",
 	})
-}
-
-func createArcadeRequestAdminForRollback(app core.App, arcadeID, message, createdBy string) (string, error) {
-	coll, err := app.FindCollectionByNameOrId(arcadeinternal.CollectionArcadeRequestAdmin)
-	if err != nil {
-		return "", fmt.Errorf("failed to find arcade_request_admin collection: %w", err)
-	}
-
-	rec := core.NewRecord(coll)
-	rec.Set("arcade", arcadeID)
-	rec.Set("urgency", "high")
-	rec.Set("message", message)
-	rec.Set("status", adminRequestWaitingStatus)
-	rec.Set("createdBy", createdBy)
-
-	if err := app.Save(rec); err != nil {
-		return "", fmt.Errorf("failed to create arcade_request_admin: %w", err)
-	}
-	return rec.Id, nil
 }

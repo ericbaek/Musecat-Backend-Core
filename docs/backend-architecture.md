@@ -3,7 +3,8 @@
 This document is the high-level map for the backend data model and handler layout.
 It is intentionally narrower than the OpenAPI spec:
 
-- `docs/openapi.yaml` describes API contracts.
+- `docs/openapi.yaml` describes API wire contracts.
+- `docs/architecture-contract.md` defines authorization, ownership, state-transition, and migration policy.
 - This file describes why the backend is split the way it is.
 
 The main goal is to keep future collection growth understandable.
@@ -69,7 +70,7 @@ other arcade handlers own mutation flows for their respective parts.
 | `arcade_flag_reaction` | Flag reaction records | reaction update flow |
 | `arcade_notice` | Public notices attached to arcades | notice read/write flows |
 | `arcade_request_admin` | Admin request queue for arcades | admin request creation and review |
-| `arcade_changelog` | Audit trail for arcade mutations. See [`docs/arcade-changelog.md`](/Users/ericbaek/Github/Musecat/Delta-DB/docs/arcade-changelog.md). | supporter score, audit views, changelog UI |
+| `arcade_changelog` | Audit trail for arcade mutations. See [`arcade-changelog.md`](arcade-changelog.md). | supporter score, audit views, changelog UI |
 
 ### Game Metadata
 

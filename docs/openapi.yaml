@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
-  title: Delta-DB API
-  version: 0.1.0
-  summary: OpenAPI source of truth for the frontend-facing Delta-DB endpoints.
+  title: Musecat Backend API
+  version: 2.0.0
+  summary: API v2 wire contract for frontend-facing Musecat endpoints.
   description: |
-    This spec covers the first documentation batch used by the self-hosted Stoplight Elements
-    reference at `/docs/`.
+    API v2 is a breaking cutover: frontend integrations use documented custom endpoints,
+    not PocketBase collection REST. See `docs/architecture-contract.md` for authorization,
+    state-transition, and migration rules.
 servers:
   - url: http://localhost:8090
     description: Local development server
@@ -1665,8 +1666,13 @@ components:
           type: string
         report:
           type: boolean
+          description: When true, `changelog` and `report_message` are required and the rollback plus report are atomic.
+        changelog:
+          type: string
+          description: Cited prior changelog id. Required when `report=true`; it must belong to `arcade`.
         report_message:
           type: string
+          maxLength: 1200
     CreateSupportFeedbackRequest:
       type: object
       required: [message]
@@ -1721,6 +1727,114 @@ components:
           type: string
         reason:
           type: string
+    ArcadeSummaryPage:
+      type: object
+      required: [page, per_page, last_page, total, items]
+      properties:
+        page: {type: integer}
+        per_page: {type: integer}
+        last_page: {type: integer}
+        total: {type: integer}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ArcadeSummary'}
+    ArcadeDraftListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ArcadeSummary'
+              - type: object
+                properties:
+                  public: {type: boolean, const: false}
+                  created: {type: string}
+                  updated: {type: string}
+        total: {type: integer}
+    ArcadeChangelogItem:
+      type: object
+      required: [id, arcade, changed, by, created, updated]
+      properties:
+        id: {type: string}
+        arcade: {type: string}
+        changed: {type: string}
+        from: {}
+        to: {}
+        by: {type: string}
+        log: {}
+        created: {type: string}
+        updated: {type: string}
+    ArcadeChangelogPage:
+      type: object
+      required: [page, per_page, last_page, total, items]
+      properties:
+        page: {type: integer}
+        per_page: {type: integer}
+        last_page: {type: integer}
+        total: {type: integer, format: int64}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ArcadeChangelogItem'}
+    ArcadePhotoAtom:
+      type: object
+      required: [id, arcade, photo, file_url, public, createdBy, created, updated]
+      properties:
+        id: {type: string}
+        arcade: {type: string}
+        photo: {type: string}
+        file_url:
+          type: string
+          format: uri-reference
+          description: Custom API URL for this file. Clients must not construct PocketBase `/api/files` URLs.
+        public: {type: boolean}
+        createdBy: {type: string}
+        created: {type: string}
+        updated: {type: string}
+    ArcadePhotoAtomListResponse:
+      type: object
+      required: [arcade, items, total]
+      properties:
+        arcade: {type: string}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ArcadePhotoAtom'}
+        total: {type: integer}
+    CreateArcadeEditReportRequest:
+      type: object
+      required: [arcade, changelog, message]
+      properties:
+        arcade: {type: string}
+        changelog: {type: string}
+        urgency: {type: string, enum: [high, medium, low], default: medium}
+        message: {type: string, maxLength: 1200}
+    ReviewArcadeEditReportRequest:
+      type: object
+      required: [id, outcome]
+      properties:
+        id: {type: string}
+        outcome: {type: string, enum: [upheld, dismissed, actioned]}
+        note: {type: string, maxLength: 1200}
+    ArcadeEditReport:
+      type: object
+      required: [id, kind, arcade, changelog, reported_editor, urgency, message, status, createdBy]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [edit_report, rollback_report]}
+        arcade: {type: string}
+        changelog: {type: string}
+        reported_editor: {type: string}
+        urgency: {type: string, enum: [high, medium, low]}
+        message: {type: string}
+        status: {type: string, enum: [waiting, processing, done]}
+        createdBy: {type: string}
+        reviewed_by: {type: string}
+        reviewed_at: {type: string}
+        review_outcome: {type: string, enum: [upheld, dismissed, actioned]}
+        review_note: {type: string}
+        created: {type: string}
+        updated: {type: string}
 paths:
   /search:
     get:
@@ -1783,7 +1897,8 @@ paths:
       tags: [Arcades]
       summary: /arcade
       description: |
-        Returns relation ids by default.
+        Returns only a public arcade (open or closed) and relation ids by default.
+        Private arcades always return `404`; use authenticated `GET /arcade/draft` for a creator or developer/moderator draft read.
         When `expand=game`, each `game.items[]` entry includes `version`, `series`, `uncertain`, `updated`, and, when `uncertain=true`, `prev_game`.
       parameters:
         - name: id
@@ -1925,38 +2040,197 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /arcade/draft:
+    get:
+      tags: [Arcades]
+      summary: /arcade/draft
+      description: Reads a private draft only for its creator or a `developer|moderator`. Public records are intentionally rejected; clients use `/arcade` for public reads.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Arcade metadata with the same shape as `GET /arcade`.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeValueResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '404':
+          description: Arcade does not exist or is not accessible as a draft.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    delete:
+      tags: [Arcade Mutations]
+      summary: /arcade/draft
+      description: Deletes only the authenticated creator's private draft. Published arcade history is never deleted by this endpoint.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Draft deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted]
+                properties:
+                  id: {type: string}
+                  deleted: {type: boolean}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Caller is not the draft creator.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Draft not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Published arcades cannot be deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /arcade/drafts:
+    get:
+      tags: [Arcade Mutations]
+      summary: /arcade/drafts
+      description: Lists the authenticated user's private drafts only.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Own draft summaries.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeDraftListResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+  /arcade/changelog:
+    get:
+      tags: [Arcades]
+      summary: /arcade/changelog
+      description: Public changelog timeline for public open/closed arcades. Private history is available only to the creator or a developer/moderator with a valid token.
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: Immutable changelog page.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeChangelogPage'}
+        '400':
+          description: Invalid pagination or missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist or private history is inaccessible.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /arcade/photo/file:
+    get:
+      tags: [Arcades]
+      summary: /arcade/photo/file
+      description: Streams one photo through the custom API. A published photo of a public arcade is anonymous-readable. Pending or draft photos require a bearer token with atom-list access. Clients must use the returned `file_url`, not PocketBase `/api/files` URLs.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Photo bytes.
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+            image/jpeg:
+              schema: {type: string, format: binary}
+        '400':
+          description: Missing photo atom id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Photo atom does not exist or is inaccessible.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /arcades:
     get:
       tags: [Arcades]
       summary: /arcades
+      description: Returns operating public arcades only. Public closed arcades are deliberately excluded and remain available through detail/search.
       parameters:
         - name: public
           in: query
           schema:
             type: boolean
+          description: "`false` is rejected; this parameter exists only for explicit v2 compatibility diagnostics."
         - name: closed
           in: query
           schema:
             type: boolean
+          description: "`true` is rejected; `/arcades` is an operating-discovery endpoint."
         - $ref: '#/components/parameters/CountryQuery'
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
       responses:
         '200':
-          description: List of arcade summaries.
+          description: Page of operating public arcade summaries.
           content:
             application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ArcadeSummary'
+              schema: {$ref: '#/components/schemas/ArcadeSummaryPage'}
               example:
-                - id: arcade_123
-                  country: AU
-                  name: Sydney Arcade
-                  address: 123 George St, Sydney NSW
-                  location:
-                    lat: -33.8708
-                    lon: 151.2062
-                  game_series: [series_1, series_2]
+                page: 1
+                per_page: 50
+                last_page: 1
+                total: 1
+                items:
+                  - id: arcade_123
+                    country: AU
+                    name: Sydney Arcade
+                    address: 123 George St, Sydney NSW
+                    location:
+                      lat: -33.8708
+                      lon: 151.2062
+                    game_series: [series_1, series_2]
         '400':
           description: Invalid boolean filter.
           content:
@@ -2479,6 +2753,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /arcade/photo/atoms:
+    get:
+      tags: [Arcade Mutations]
+      summary: /arcade/photo/atoms
+      description: Lists photo atoms through the custom API. Use each `file_url` for file delivery. Public arcades are available to active contributors; private drafts require creator or developer/moderator access.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Photo atom list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadePhotoAtomListResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '404':
+          description: Arcade does not exist or private draft is inaccessible.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /arcade/photo/atom:
+    delete:
+      tags: [Arcade Mutations]
+      summary: /arcade/photo/atom
+      description: Deletes a pending photo atom only for its uploader or developer/moderator. Published atoms are immutable and return `409`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Pending atom deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted]
+                properties:
+                  id: {type: string}
+                  deleted: {type: boolean}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Atom is not owned by the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Published atoms cannot be deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /arcade/photo/upload:
     post:
       tags: [Arcade Mutations]
@@ -3156,7 +3496,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '502':
-          description: Geolocation or persistence failure.
+          description: Persistence failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Required geo lookup failed; no arcade is persisted.
           content:
             application/json:
               schema:
@@ -3228,6 +3574,121 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /arcade/edit_report:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/edit_report
+      description: Creates an independent abuse report linked to one immutable changelog row. The server derives the reported editor; unresolved duplicates for the same arcade/changelog return `409`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateArcadeEditReportRequest'}
+      responses:
+        '200':
+          description: Edit report queued for manual review. This endpoint does not roll back or ban automatically.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeEditReport'}
+        '400':
+          description: Invalid parent id, message, or urgency.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '404':
+          description: Arcade/changelog mismatch or inaccessible private arcade.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: An unresolved report already exists for this changelog.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /moderation/arcade/edit-reports:
+    get:
+      tags: [Moderator]
+      summary: /moderation/arcade/edit-reports
+      description: Strict manual review queue. Requires `developer` or `moderator`; supporter tags are insufficient.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [waiting, processing, done]}
+      responses:
+        '200':
+          description: Review queue records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ArcadeEditReport'}
+                  total: {type: integer}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Developer or moderator access required.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /moderation/arcade/edit-report:
+    put:
+      tags: [Moderator]
+      summary: /moderation/arcade/edit-report
+      description: Records a manual decision only. It never performs an automatic ban or rollback.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewArcadeEditReportRequest'}
+      responses:
+        '200':
+          description: Report resolved with reviewer metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeEditReport'}
+        '400':
+          description: Invalid resolution payload.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Developer or moderator access required.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Edit report not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Report is already resolved.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /arcade/notice:
     get:
       tags: [Arcades]
@@ -3247,6 +3708,12 @@ paths:
                 $ref: '#/components/schemas/ListArcadeNoticeResponse'
         '400':
           description: Missing arcade id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Arcade does not exist or is private.
           content:
             application/json:
               schema:
@@ -3434,6 +3901,7 @@ paths:
     post:
       tags: [Support]
       summary: /arcade/rollback
+      description: Applies an immediate rollback. With `report=true`, it atomically creates a `rollback_report` linked to the cited changelog; it never auto-bans the cited editor.
       security:
         - bearerAuth: []
       requestBody:
@@ -3452,6 +3920,12 @@ paths:
                 additionalProperties: true
         '400':
           description: Validation or rollback rule failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: An unresolved report already exists for the cited changelog.
           content:
             application/json:
               schema:
@@ -3586,6 +4060,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '502':
           description: Load or persistence failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Required geo lookup failed; no location change is persisted.
           content:
             application/json:
               schema:

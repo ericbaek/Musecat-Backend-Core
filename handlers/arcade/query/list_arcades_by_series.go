@@ -94,9 +94,8 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 		page = val
 	}
 
-	// 3. 매 요청마다 공개 오락실 후보를 불러온 뒤, 메모리에서 시리즈/주소/거리 필터를 적용한다.
-	// /arcades/nearby는 검색 후보 스냅샷 캐시를 공유하지 않는다.
-	arcadeCandidates, err := BuildArcadeCandidates(re.App)
+	// 3. 공개 후보 스냅샷을 공유한 뒤, 메모리에서 시리즈/주소/거리 필터를 적용한다.
+	arcadeCandidates, err := GetArcadeCandidates(re.App)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to load arcade candidates",

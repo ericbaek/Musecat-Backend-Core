@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func TestDocumentationRoutes(t *testing.T) {
 			ExpectedStatus: http.StatusOK,
 			ExpectedContent: []string{
 				`openapi: 3.1.0`,
-				`title: Delta-DB API`,
+				`title: Musecat Backend API`,
 				`/search:`,
 			},
 			TestAppFactory: func(tb testing.TB) *tests.TestApp {
@@ -127,7 +128,7 @@ func TestDocumentationRoutes(t *testing.T) {
 			URL:            "/docs/",
 			ExpectedStatus: http.StatusOK,
 			ExpectedContent: []string{
-				`Delta-DB API Reference`,
+				`Musecat Backend API Reference`,
 				`elements-api`,
 				`/openapi.yaml`,
 			},
@@ -222,6 +223,48 @@ func setTestEnv(tb testing.TB, key, value string) {
 		}
 		if err != nil {
 			tb.Fatalf("failed to restore env %s: %v", key, err)
+		}
+	})
+}
+
+func TestLoadEnvFilePreservesInjectedEnvironment(t *testing.T) {
+	const injectedKey = "MUSECAT_TEST_ENV_INJECTED"
+	const emptyInjectedKey = "MUSECAT_TEST_ENV_EMPTY_INJECTED"
+	const localKey = "MUSECAT_TEST_ENV_FROM_FILE"
+
+	setTestEnv(t, injectedKey, "runtime-value")
+	setTestEnv(t, emptyInjectedKey, "")
+	unsetEnvForLoadEnvTest(t, localKey)
+
+	path := filepath.Join(t.TempDir(), ".env")
+	content := injectedKey + "=file-value\n" + emptyInjectedKey + "=file-value\n" + localKey + "='local value'\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write env fixture: %v", err)
+	}
+
+	loadEnvFile(path)
+	if got := os.Getenv(injectedKey); got != "runtime-value" {
+		t.Fatalf("injected value was overwritten: got %q", got)
+	}
+	if got, exists := os.LookupEnv(emptyInjectedKey); !exists || got != "" {
+		t.Fatalf("intentionally empty injected value was overwritten: exists=%v value=%q", exists, got)
+	}
+	if got := os.Getenv(localKey); got != "local value" {
+		t.Fatalf("expected missing key to load from file, got %q", got)
+	}
+}
+
+func unsetEnvForLoadEnvTest(tb testing.TB, key string) {
+	tb.Helper()
+	previous, existed := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		tb.Fatalf("failed to unset %s: %v", key, err)
+	}
+	tb.Cleanup(func() {
+		if existed {
+			_ = os.Setenv(key, previous)
+		} else {
+			_ = os.Unsetenv(key)
 		}
 	})
 }

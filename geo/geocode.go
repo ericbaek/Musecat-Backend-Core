@@ -188,7 +188,7 @@ func geocodeWithGoogle(ctx context.Context, query string) ([]GeocodeCandidate, e
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +257,7 @@ func reverseGeocodeWithGoogle(ctx context.Context, lat, lon float64) (ReverseGeo
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return ReverseGeocodeResponse{}, err
 	}
@@ -324,7 +324,7 @@ func geocodeWithKakao(ctx context.Context, query string) ([]GeocodeCandidate, er
 	req.Header.Set("Authorization", "KakaoAK "+key)
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +399,7 @@ func geocodeWithOSM(ctx context.Context, query string) ([]GeocodeCandidate, erro
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +470,7 @@ func reverseGeocodeWithKakao(ctx context.Context, lat, lon float64) (ReverseGeoc
 	req.Header.Set("Authorization", "KakaoAK "+key)
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return ReverseGeocodeResponse{}, err
 	}
@@ -539,7 +539,7 @@ func reverseGeocodeWithOSM(ctx context.Context, lat, lon float64) (ReverseGeocod
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return ReverseGeocodeResponse{}, err
 	}

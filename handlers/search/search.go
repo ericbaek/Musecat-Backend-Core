@@ -7,7 +7,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -84,7 +83,7 @@ func Search(re *core.RequestEvent) error {
 	}
 	userIDsCompletedAt := time.Now()
 
-	arcadeCandidates, err := arcadequery.BuildArcadeCandidates(re.App)
+	arcadeCandidates, err := arcadequery.GetArcadeCandidates(re.App)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to load arcade candidates",
@@ -286,7 +285,7 @@ type arcadeSearchResult struct {
 }
 
 func buildArcadeResults(arcadeCandidates []arcadequery.ArcadeCandidate, query string, limit int, userLat, userLon float64, hasLocation bool) ([]map[string]any, error) {
-	results := make([]arcadeSearchResult, 0, len(arcadeCandidates))
+	results := make([]arcadeSearchResult, 0, limit)
 	for idx, candidate := range arcadeCandidates {
 		rank, ok := arcadeTextRank(query, candidate)
 		if !ok {
@@ -312,22 +311,24 @@ func buildArcadeResults(arcadeCandidates []arcadequery.ArcadeCandidate, query st
 			score += distance
 		}
 
-		results = append(results, arcadeSearchResult{
+		result := arcadeSearchResult{
 			score:   score,
 			order:   idx,
 			payload: item,
-		})
-	}
-
-	sort.SliceStable(results, func(i, j int) bool {
-		if results[i].score == results[j].score {
-			return results[i].order < results[j].order
 		}
-		return results[i].score < results[j].score
-	})
-
-	if limit > 0 && len(results) > limit {
-		results = results[:limit]
+		if len(results) == limit && !searchResultBefore(result, results[len(results)-1]) {
+			continue
+		}
+		insertAt := len(results)
+		for insertAt > 0 && searchResultBefore(result, results[insertAt-1]) {
+			insertAt--
+		}
+		results = append(results, arcadeSearchResult{})
+		copy(results[insertAt+1:], results[insertAt:])
+		results[insertAt] = result
+		if len(results) > limit {
+			results = results[:limit]
+		}
 	}
 
 	out := make([]map[string]any, 0, len(results))
@@ -335,6 +336,13 @@ func buildArcadeResults(arcadeCandidates []arcadequery.ArcadeCandidate, query st
 		out = append(out, result.payload)
 	}
 	return out, nil
+}
+
+func searchResultBefore(left, right arcadeSearchResult) bool {
+	if left.score == right.score {
+		return left.order < right.order
+	}
+	return left.score < right.score
 }
 
 func arcadeTextRank(query string, candidate arcadequery.ArcadeCandidate) (int, bool) {

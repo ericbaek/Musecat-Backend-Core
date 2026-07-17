@@ -57,7 +57,11 @@ func loadEnvFile(path string) {
 			key := strings.TrimSpace(line[:index])
 			value := strings.Trim(strings.TrimSpace(line[index+1:]), `"'`)
 			if key != "" {
-				os.Setenv(key, value)
+				// Deployment-injected values, including an intentionally empty value,
+				// take precedence over local development defaults.
+				if _, exists := os.LookupEnv(key); !exists {
+					_ = os.Setenv(key, value)
+				}
 			}
 		}
 	}

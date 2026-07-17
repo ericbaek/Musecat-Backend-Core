@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
@@ -129,6 +130,7 @@ func TestRollbackArcadePart_WithReport_CreatesArcadeRequestAdmin(t *testing.T) {
 	var userID string
 	var arcadeID string
 	var targetBasicID string
+	var sourceChangelogID string
 
 	restoreTelegram := arcadeadmin.SetTelegramSenderForTest(func(_ context.Context, _ string) error {
 		return nil
@@ -179,14 +181,16 @@ func TestRollbackArcadePart_WithReport_CreatesArcadeRequestAdmin(t *testing.T) {
 		if err := app.Save(arcadeRec); err != nil {
 			tb.Fatalf("failed to set arcade.basic: %v", err)
 		}
+		sourceChangelogID = seedArcadeChangelog(tb, app, arcadeID, "basic", userID, time.Now())
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
 			"part":"basic",
 			"value":"%s",
 			"report":true,
+			"changelog":"%s",
 			"report_message":%q
-		}`, arcadeID, targetBasicID, reportMessage))
+		}`, arcadeID, targetBasicID, sourceChangelogID, reportMessage))
 	}
 
 	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
@@ -210,6 +214,15 @@ func TestRollbackArcadePart_WithReport_CreatesArcadeRequestAdmin(t *testing.T) {
 		if got := reqRec.GetString("arcade"); got != arcadeID {
 			tb.Fatalf("expected arcade=%q, got %q", arcadeID, got)
 		}
+		if got := reqRec.GetString("kind"); got != "rollback_report" {
+			tb.Fatalf("expected rollback_report kind, got %q", got)
+		}
+		if got := reqRec.GetString("changelog"); got != sourceChangelogID {
+			tb.Fatalf("expected changelog=%q, got %q", sourceChangelogID, got)
+		}
+		if got := reqRec.GetString("reported_editor"); got != userID {
+			tb.Fatalf("expected reported_editor=%q, got %q", userID, got)
+		}
 		if got := reqRec.GetString("urgency"); got != "high" {
 			tb.Fatalf("expected urgency=high, got %q", got)
 		}
@@ -219,8 +232,8 @@ func TestRollbackArcadePart_WithReport_CreatesArcadeRequestAdmin(t *testing.T) {
 		if got := reqRec.GetString("createdBy"); got != userID {
 			tb.Fatalf("expected createdBy=%q, got %q", userID, got)
 		}
-		if got := reqRec.GetString("message"); got != reportMessage {
-			tb.Fatalf("expected exact report message %q, got %q", reportMessage, got)
+		if got := reqRec.GetString("message"); got != strings.TrimSpace(reportMessage) {
+			tb.Fatalf("expected normalized report message %q, got %q", strings.TrimSpace(reportMessage), got)
 		}
 	}
 

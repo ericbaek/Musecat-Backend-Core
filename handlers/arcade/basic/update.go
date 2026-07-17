@@ -217,7 +217,7 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 	if body.Location != nil {
 		res, err := geo.LookupCountryAndTimezone(re.Request.Context(), merged.Lat, merged.Lon)
 		if err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{
+			return re.JSON(http.StatusServiceUnavailable, map[string]any{
 				"error":   "geo lookup failed",
 				"details": err.Error(),
 			})

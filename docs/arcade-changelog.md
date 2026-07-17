@@ -7,6 +7,8 @@ The important rule is simple:
 - only the mutation endpoints listed below create `arcade_changelog` rows
 - if an endpoint is not listed, it does not currently write an arcade changelog row
 
+Rows are immutable. API v2 serves timeline data through `GET /arcade/changelog`; clients must not use PocketBase collection REST to read or mutate it. A report cites an existing changelog id and derives the reported editor from the row's server-written `by` value.
+
 Each row uses these common columns:
 - `arcade`: the target arcade id
 - `changed`: the arcade part that was modified
@@ -29,6 +31,8 @@ Each row uses these common columns:
 | `POST /arcade/game/bulk_version` | `bulk_game_version` | one row per request | `bulk_game_version_diff` | Bulk version swap for many atoms at once. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, or `photo`. |
+
+When rollback includes `report=true`, its cited prior changelog and the `rollback_report` record are created/validated in the same transaction as the rollback. `POST /arcade/edit_report` is the report-only path and does not change the arcade.
 
 ## Log Shape Reference
 

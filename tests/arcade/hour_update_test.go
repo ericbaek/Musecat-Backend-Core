@@ -622,7 +622,7 @@ func TestUpdateArcadeHour_LogsNullToClosedAsUpdated(t *testing.T) {
 		}
 	}
 
-		scenario.Test(t)
+	scenario.Test(t)
 }
 
 func TestGetArcadeValues_ExpandsHourWithSameShapeAsUpdateResponse(t *testing.T) {
@@ -632,7 +632,7 @@ func TestGetArcadeValues_ExpandsHourWithSameShapeAsUpdateResponse(t *testing.T) 
 	token, user := createAuthUser(t, app)
 	headers["Authorization"] = "Bearer " + token
 
-	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+	arcadeID, _ := seedPublicArcade(t, app, user.Id, arcadeSeed{
 		Name:     "Expand Hour Arcade",
 		Address:  "Expand Street",
 		Nickname: []string{"Expand"},

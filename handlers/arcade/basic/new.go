@@ -129,7 +129,7 @@ func NewArcade(re *core.RequestEvent) error {
 	// 3. 위치 정보 조회
 	res, err := geo.LookupCountryAndTimezone(re.Request.Context(), body.Location.Lat, body.Location.Lon)
 	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
+		return re.JSON(http.StatusServiceUnavailable, map[string]any{
 			"error":   "geo lookup failed",
 			"details": err.Error(),
 		})

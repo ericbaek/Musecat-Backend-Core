@@ -35,7 +35,7 @@ func TestGetStats_Default(t *testing.T) {
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
 		tb.Helper()
 
-		baseArcadeCount, baseChangelogCount, baseFlagCount = loadRawStatsCounts(tb, app)
+		baseArcadeCount, baseChangelogCount, baseFlagCount = loadPublicStatsCounts(tb, app)
 
 		_, user := createAuthUser(tb, app)
 		arcade1, _ := seedArcade(tb, app, user.Id, arcadeSeed{
@@ -48,6 +48,7 @@ func TestGetStats_Default(t *testing.T) {
 			Address:  "2 Stats Street",
 			Location: location{Lat: 35.1796, Lon: 129.0756},
 		})
+		setArcadeVisibility(tb, app, arcade1, true, false)
 
 		now := time.Now().UTC()
 		insertStatsRecord(tb, app, "arcade_changelog", map[string]any{
@@ -113,24 +114,35 @@ func TestGetStats_Default(t *testing.T) {
 			tb.Fatalf("failed to decode response: %v", err)
 		}
 
-		assertInt64(tb, payload["arcade_count"], baseArcadeCount+2)
-		assertInt64(tb, payload["changelog_count"], baseChangelogCount+3)
-		assertInt64(tb, payload["flag_count"], baseFlagCount+5)
+		assertInt64(tb, payload["arcade_count"], baseArcadeCount+1)
+		assertInt64(tb, payload["changelog_count"], baseChangelogCount+2)
+		assertInt64(tb, payload["flag_count"], baseFlagCount+3)
 	}
 
 	scenario.Test(t)
 }
 
-func loadRawStatsCounts(tb testing.TB, app *tests.TestApp) (int64, int64, int64) {
+func loadPublicStatsCounts(tb testing.TB, app *tests.TestApp) (int64, int64, int64) {
 	tb.Helper()
 
 	rows, err := app.DB().NewQuery(`
 SELECT
-	(SELECT COUNT(*) FROM arcade) AS arcade_count,
-	(SELECT COUNT(*) FROM arcade_changelog) AS changelog_count,
+	(SELECT COUNT(*) FROM arcade WHERE public = 1) AS arcade_count,
 	(
-		(SELECT COUNT(*) FROM arcade_flag)
-		+ (SELECT COUNT(*) FROM arcade_flag_reaction)
+		SELECT COUNT(*)
+		FROM arcade_changelog c
+		INNER JOIN arcade a ON a.id = c.arcade
+		WHERE a.public = 1
+	) AS changelog_count,
+	(
+		(SELECT COUNT(*) FROM arcade_flag f INNER JOIN arcade a ON a.id = f.arcade WHERE a.public = 1)
+		+ (
+			SELECT COUNT(*)
+			FROM arcade_flag_reaction r
+			INNER JOIN arcade_flag f ON f.id = r.flag
+			INNER JOIN arcade a ON a.id = f.arcade
+			WHERE a.public = 1
+		)
 	) AS flag_count
 `).Rows()
 	if err != nil {

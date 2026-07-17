@@ -241,3 +241,77 @@ func TestLookupCountryAndTimezone_CountryProvidersAllFail(t *testing.T) {
 		t.Fatalf("expected nominatim failure in error, got %v", err)
 	}
 }
+
+func TestLookupCountryAndTimezone_CachesOnlySuccessfulValidatedResults(t *testing.T) {
+	requests := 0
+	stubLookupHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		requests++
+		switch req.URL.Host {
+		case "api.bigdatacloud.net":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"countryCode":"KR"}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Request:    req,
+			}, nil
+		case "timeapi.io":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"timeZone":"Asia/Seoul"}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Request:    req,
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected host: %s", req.URL.Host)
+		}
+	})
+
+	first, err := LookupCountryAndTimezone(context.Background(), 37.56651, 126.97801)
+	if err != nil {
+		t.Fatalf("first lookup failed: %v", err)
+	}
+	second, err := LookupCountryAndTimezone(context.Background(), 37.56654, 126.97804)
+	if err != nil {
+		t.Fatalf("cached lookup failed: %v", err)
+	}
+	if first != second || first.Country != "KR" || first.Timezone != "Asia/Seoul" {
+		t.Fatalf("unexpected cached result: first=%#v second=%#v", first, second)
+	}
+	if requests != 2 {
+		t.Fatalf("expected one successful provider pair, got %d requests", requests)
+	}
+}
+
+func TestLookupCountryAndTimezone_DoesNotCacheInvalidResult(t *testing.T) {
+	requests := 0
+	stubLookupHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		requests++
+		switch req.URL.Host {
+		case "api.bigdatacloud.net":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"countryCode":"KR"}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Request:    req,
+			}, nil
+		case "timeapi.io":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"timeZone":"Asia/Busan"}`)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Request:    req,
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected host: %s", req.URL.Host)
+		}
+	})
+
+	for i := 0; i < 2; i++ {
+		if _, err := LookupCountryAndTimezone(context.Background(), 35.1796, 129.0756); err == nil {
+			t.Fatalf("lookup %d unexpectedly accepted invalid timezone", i+1)
+		}
+	}
+	if requests != 4 {
+		t.Fatalf("expected failed result to make a fresh provider pair each time, got %d requests", requests)
+	}
+}

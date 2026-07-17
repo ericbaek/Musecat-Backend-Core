@@ -34,6 +34,8 @@ See [DATA_LICENSE.md](DATA_LICENSE.md) for the permitted uses, contribution lice
 
 PocketBase data is stored in `./pb_data` by default and is ignored by Git. A fresh instance starts with the versioned schema migrations in this repository. The committed `testdata/pb_data` fixture contains schema only and no production records.
 
+Deployment-injected environment variables take precedence over `.env`, including intentionally empty values. Docker build context excludes `.env`, `pb_data`, caches, and `.git` via `.dockerignore`.
+
 ## Docker
 
 ```sh
@@ -41,7 +43,7 @@ docker build -t musecat-backend-core .
 docker run --rm -p 8090:8090 -v "$(pwd)/pb_data:/pb_data" musecat-backend-core
 ```
 
-The health endpoint is available at `/hello`. The API contract is maintained in `docs/openapi.yaml` and served at `/openapi.yaml`.
+The health endpoint is available at `/hello`. API v2 uses documented custom routes only; direct PocketBase arcade collection REST is intentionally unsupported. The wire contract is maintained in `docs/openapi.yaml` and served at `/openapi.yaml`; authorization and architecture policy live in `docs/architecture-contract.md`.
 
 ## Contribution model
 

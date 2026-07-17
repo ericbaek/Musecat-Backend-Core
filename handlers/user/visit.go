@@ -182,7 +182,7 @@ func GetArcadeVisitStats(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
 	}
-	if !a.GetBool("public") {
+	if !a.GetBool("public") || a.GetBool("closed") {
 		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
 	}
 	stats, err := LoadArcadeVisitStats(re.App, id)

@@ -61,6 +61,9 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		se.Router.GET("/rankings", rankinghandler.List)
 		// Public read endpoint: returns current relation ids for the arcade
 		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
+		// Public changelog rows are exposed only through this custom API.
+		se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
+		se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
 		// Public read endpoint: list all arcades with basic info + gameSeries ids
 		se.Router.GET("/arcades", arcadequery.ListArcades)
 		se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
@@ -93,8 +96,12 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 			userhandler.RequireActiveUser(),
 		)
 		authArcade.POST("/new", arcadebasic.NewArcade)
+		authArcade.GET("/draft", arcadequery.GetArcadeDraft)
+		authArcade.GET("/drafts", arcadequery.ListMyArcadeDrafts)
+		authArcade.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
 		authArcade.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin)
 		authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
+		authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
 		authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart)
 		authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireModeratorAccess())
 		authArcade.POST("/game/rollback", arcadeadmin.RollbackArcadeGameUncertain)
@@ -107,6 +114,8 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authArcade.PUT("/hour", arcadehour.UpdateArcadeHour)
 		authArcade.PUT("/game", arcadegame.UpdateArcadeGame)
 		authArcade.PUT("/photo", arcadephoto.UpdateArcadePhoto)
+		authArcade.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)
+		authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
 		// Allow up to 10 * 20MB photo files (+multipart overhead) in a single request.
 		authArcade.POST("/photo/upload", arcadephoto.UploadArcadePhotos).Bind(apis.BodyLimit(220 << 20))
 		authArcade.POST("/flag", arcadeflag.CreateArcadeFlag)
@@ -128,6 +137,14 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authUser.POST("/withdraw", userhandler.Withdraw)
 		authUser.GET("/report", arcadeadmin.ListUserReport).Bind(userhandler.RequireActiveUser())
 		authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(userhandler.RequireActiveUser())
+
+		reviewQueue := se.Router.Group("/moderation/arcade").Bind(
+			apis.RequireAuth("user"),
+			userhandler.RequireActiveUser(),
+			arcadequery.RequireStrictReviewerAccess(),
+		)
+		reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
+		reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
 
 		authSupporter := se.Router.Group("/supporter").Bind(
 			apis.RequireAuth("user"),

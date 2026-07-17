@@ -5,11 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Result represents the lookup result for a coordinate.
@@ -19,9 +23,25 @@ type Result struct {
 }
 
 var (
-	httpClientMu sync.Mutex
+	httpClientMu sync.RWMutex
 	httpClient   = &http.Client{Timeout: 6 * time.Second}
+
+	lookupCache = struct {
+		sync.Mutex
+		entries map[string]lookupCacheEntry
+	}{entries: map[string]lookupCacheEntry{}}
+	lookupGroup singleflight.Group
 )
+
+const (
+	lookupCacheTTL     = 24 * time.Hour
+	lookupCacheMaxSize = 4096
+)
+
+type lookupCacheEntry struct {
+	result    Result
+	expiresAt time.Time
+}
 
 // SetHTTPClient overrides the package HTTP client and returns a restore function.
 func SetHTTPClient(client *http.Client) func() {
@@ -32,12 +52,27 @@ func SetHTTPClient(client *http.Client) func() {
 	}
 	httpClient = client
 	httpClientMu.Unlock()
+	clearLookupCache()
 
 	return func() {
 		httpClientMu.Lock()
 		httpClient = prev
 		httpClientMu.Unlock()
+		clearLookupCache()
 	}
+}
+
+func currentHTTPClient() *http.Client {
+	httpClientMu.RLock()
+	client := httpClient
+	httpClientMu.RUnlock()
+	return client
+}
+
+func clearLookupCache() {
+	lookupCache.Lock()
+	lookupCache.entries = map[string]lookupCacheEntry{}
+	lookupCache.Unlock()
 }
 
 // LookupCountryAndTimezone returns the ISO 3166-1 alpha-2 country code and IANA timezone name for the given coordinates.
@@ -49,6 +84,30 @@ func LookupCountryAndTimezone(ctx context.Context, lat, lon float64) (Result, er
 	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
 		return Result{}, errors.New("invalid coordinates")
 	}
+	key := lookupCacheKey(lat, lon)
+	if result, ok := loadLookupCache(key); ok {
+		return result, nil
+	}
+
+	result, err, _ := lookupGroup.Do(key, func() (any, error) {
+		if cached, ok := loadLookupCache(key); ok {
+			return cached, nil
+		}
+
+		result, err := lookupCountryAndTimezoneUncached(ctx, lat, lon)
+		if err != nil {
+			return Result{}, err
+		}
+		storeLookupCache(key, result)
+		return result, nil
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	return result.(Result), nil
+}
+
+func lookupCountryAndTimezoneUncached(ctx context.Context, lat, lon float64) (Result, error) {
 
 	// Create a child context with timeout to bound the overall operation.
 	if ctx == nil {
@@ -68,8 +127,62 @@ func LookupCountryAndTimezone(ctx context.Context, lat, lon float64) (Result, er
 	}
 
 	iso = overrideCountryForSpecialTimezone(iso, tz)
+	if len(iso) != 2 {
+		return Result{}, errors.New("invalid country result")
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return Result{}, fmt.Errorf("invalid timezone result: %w", err)
+	}
 
 	return Result{Country: iso, Timezone: tz}, nil
+}
+
+func lookupCacheKey(lat, lon float64) string {
+	// Four decimal places is about 11m latitude precision. It keeps cache growth
+	// bounded while not sharing values across materially different facilities.
+	lat = math.Round(lat*1e4) / 1e4
+	lon = math.Round(lon*1e4) / 1e4
+	return strconv.FormatFloat(lat, 'f', 4, 64) + "," + strconv.FormatFloat(lon, 'f', 4, 64)
+}
+
+func loadLookupCache(key string) (Result, bool) {
+	now := time.Now().UTC()
+	lookupCache.Lock()
+	entry, ok := lookupCache.entries[key]
+	if ok && now.Before(entry.expiresAt) {
+		lookupCache.Unlock()
+		return entry.result, true
+	}
+	if ok {
+		delete(lookupCache.entries, key)
+	}
+	lookupCache.Unlock()
+	return Result{}, false
+}
+
+func storeLookupCache(key string, result Result) {
+	now := time.Now().UTC()
+	lookupCache.Lock()
+	for cacheKey, entry := range lookupCache.entries {
+		if !now.Before(entry.expiresAt) {
+			delete(lookupCache.entries, cacheKey)
+		}
+	}
+	if len(lookupCache.entries) >= lookupCacheMaxSize {
+		var oldestKey string
+		var oldestExpiry time.Time
+		for cacheKey, entry := range lookupCache.entries {
+			if oldestKey == "" || entry.expiresAt.Before(oldestExpiry) {
+				oldestKey = cacheKey
+				oldestExpiry = entry.expiresAt
+			}
+		}
+		if oldestKey != "" {
+			delete(lookupCache.entries, oldestKey)
+		}
+	}
+	lookupCache.entries[key] = lookupCacheEntry{result: result, expiresAt: now.Add(lookupCacheTTL)}
+	lookupCache.Unlock()
 }
 
 // LookupTimezone returns the IANA timezone name for the given coordinates.
@@ -122,7 +235,7 @@ func lookupCountryISOFromBigDataCloud(ctx context.Context, lat, lon float64) (st
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -161,7 +274,7 @@ func lookupCountryISOFromNominatim(ctx context.Context, lat, lon float64) (strin
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -230,7 +343,7 @@ func lookupTimezoneFromTimeAPI(ctx context.Context, lat, lon float64) (string, e
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -268,7 +381,7 @@ func lookupTimezoneFromOpenMeteo(ctx context.Context, lat, lon float64) (string,
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	req.Header.Set("User-Agent", "myapp-geo/1.0")
 
-	resp, err := httpClient.Do(req)
+	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
 		return "", err
 	}

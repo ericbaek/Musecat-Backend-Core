@@ -3,6 +3,7 @@ package query
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -20,6 +21,17 @@ import (
 // - Default: returns relation ids basic/hour/sns/gtk/game/photo
 // - With expand=all: returns full objects for each relation in a frontend-friendly shape.
 func GetArcadeValues(re *core.RequestEvent) error {
+	return getArcadeValues(re, false)
+}
+
+// GetArcadeDraft handles an authenticated private-draft read. Only the creator
+// and strict reviewers may read non-public records; public records remain
+// available through GET /arcade.
+func GetArcadeDraft(re *core.RequestEvent) error {
+	return getArcadeValues(re, true)
+}
+
+func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 	q := re.Request.URL.Query()
 	id := q.Get("id")
 
@@ -35,8 +47,23 @@ func GetArcadeValues(re *core.RequestEvent) error {
 	rec, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, id)
 	if err != nil {
 		return re.JSON(http.StatusNotFound, map[string]any{
-			"error":   "arcade not found",
-			"details": err.Error(),
+			"error": "arcade not found",
+		})
+	}
+	isCreator := re.Auth != nil && rec.GetString("createdBy") == re.Auth.Id
+	isReviewer := HasStrictReviewerAccess(re.Auth)
+	if allowDraft {
+		// Draft reads are deliberately a separate capability. Public records are
+		// served only by GET /arcade so this route cannot become an alternate
+		// authenticated directory of every arcade.
+		if rec.GetBool("public") || (!isCreator && !isReviewer) {
+			return re.JSON(http.StatusNotFound, map[string]any{
+				"error": "arcade not found",
+			})
+		}
+	} else if !rec.GetBool("public") {
+		return re.JSON(http.StatusNotFound, map[string]any{
+			"error": "arcade not found",
 		})
 	}
 
@@ -265,6 +292,9 @@ func GetArcadeValues(re *core.RequestEvent) error {
 				}
 				atom, err := re.App.FindRecordById(arcadeinternal.CollectionArcadePhotoAtoms, atomID)
 				if err != nil {
+					if rec.GetBool("public") {
+						continue
+					}
 					items = append(items, map[string]any{
 						"id":        atomID,
 						"photo":     "",
@@ -274,10 +304,14 @@ func GetArcadeValues(re *core.RequestEvent) error {
 					})
 					continue
 				}
+				if rec.GetBool("public") && !atom.GetBool("public") {
+					continue
+				}
 				createdByID := atom.GetString("createdBy")
 				items = append(items, map[string]any{
 					"id":        atom.Id,
 					"photo":     atom.GetString("photo"),
+					"file_url":  "/arcade/photo/file?id=" + url.QueryEscape(atom.Id),
 					"public":    atom.GetBool("public"),
 					"created":   atom.Get("created"),
 					"createdBy": buildPhotoCreatedBy(re.App, createdByID),

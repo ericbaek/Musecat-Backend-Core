@@ -524,12 +524,12 @@ func TestRequireActiveUser_BlocksBanned(t *testing.T) {
 
 func TestArcadeCrudRequest_BlocksBannedUser(t *testing.T) {
 	scenario := tests.ApiScenario{
-		Name:           "POST builtin arcade record create returns 403 for banned users",
+		Name:           "POST builtin arcade record create is locked for every client",
 		Method:         http.MethodPost,
 		URL:            "/api/collections/arcade/records",
 		ExpectedStatus: http.StatusForbidden,
 		ExpectedContent: []string{
-			`"code":"ACCOUNT_BANNED"`,
+			`"message":"Only superusers can perform this action."`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {
 			return newWithdrawTestApp(tb)
@@ -544,7 +544,6 @@ func TestArcadeCrudRequest_BlocksBannedUser(t *testing.T) {
 		tb.Helper()
 		ensureWithdrawFields(tb, app)
 		token, userRec := createAuthUser(tb, app)
-		seedUserBan(tb, app, userRec.Id, "", "manual_suspend", time.Now().UTC().Add(24*time.Hour))
 		headers["Authorization"] = "Bearer " + token
 		scenario.Headers = headers
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{"createdBy":"%s","public":false}`, userRec.Id))
@@ -635,7 +634,7 @@ func TestGetArcadeValues_WithdrawnDisplayName(t *testing.T) {
 			tb.Fatalf("failed to update user_info: %v", err)
 		}
 
-		arcadeID, _ := seedArcade(tb, app, userRec.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, userRec.Id, arcadeSeed{
 			Name:     "Withdrawn Photo Arcade",
 			Address:  "Display Street",
 			Nickname: []string{"Display"},
@@ -725,7 +724,7 @@ func TestGetArcadeValues_FlagDisplayNameForWithdrawnUser(t *testing.T) {
 			tb.Fatalf("failed to set withdrawn user: %v", err)
 		}
 
-		arcadeID, _ := seedArcade(tb, app, userRec.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, userRec.Id, arcadeSeed{
 			Name:     "Flag Display Arcade",
 			Address:  "Flag Street",
 			Nickname: []string{"FlagDisplay"},

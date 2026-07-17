@@ -50,7 +50,7 @@ func decodeJSONMap(tb testing.TB, res *http.Response) map[string]any {
 
 func TestArcadeNotice_OwnerCanCreateUpdateDelete(t *testing.T) {
 	app := newArcadeTestApp(t)
-	arcadeID, _ := seedArcade(t, app, "", arcadeSeed{
+	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
 		Name:     "Owned Arcade",
 		Address:  "1 Owner St",
 		Location: location{Lat: 37.5, Lon: 127.0},
@@ -104,7 +104,7 @@ func TestArcadeNotice_OwnerCanCreateUpdateDelete(t *testing.T) {
 
 func TestArcadeNotice_ArcadeOwnerRequiresOwnership(t *testing.T) {
 	app := newArcadeTestApp(t)
-	arcadeID, _ := seedArcade(t, app, "", arcadeSeed{
+	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
 		Name:     "Unowned Arcade",
 		Address:  "2 Owner St",
 		Location: location{Lat: 37.6, Lon: 127.1},
@@ -171,7 +171,7 @@ func TestArcadeNotice_ModeratorAndDeveloperBypassOwnership(t *testing.T) {
 
 func TestArcadeNotice_ListFiltersAndSorts(t *testing.T) {
 	app := newArcadeTestApp(t)
-	arcadeID, _ := seedArcade(t, app, "", arcadeSeed{
+	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
 		Name:     "Listed Arcade",
 		Address:  "4 Owner St",
 		Location: location{Lat: 37.8, Lon: 127.3},
@@ -239,7 +239,7 @@ func TestArcadeNotice_ListFiltersAndSorts(t *testing.T) {
 
 func TestArcadeNotice_ListExpiresPastNotices(t *testing.T) {
 	app := newArcadeTestApp(t)
-	arcadeID, _ := seedArcade(t, app, "", arcadeSeed{
+	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
 		Name:     "Expiry Arcade",
 		Address:  "5 Expiry St",
 		Location: location{Lat: 37.9, Lon: 127.4},

@@ -227,12 +227,13 @@ func TestRequestPublicArcade_DoesNotRequirePhotoOutsideKR(t *testing.T) {
 	scenario.Test(t)
 }
 
-func TestRequestPublicArcade_UpdatesCountryFromCurrentLocation(t *testing.T) {
+func TestRequestPublicArcade_UsesStoredGeoWithoutLookup(t *testing.T) {
 	headers := map[string]string{}
 	var arcadeID string
+	geoCalls := 0
 
 	scenario := tests.ApiScenario{
-		Name:           "PUT /arcade/public updates country from current location",
+		Name:           "PUT /arcade/public uses stored geo without lookup",
 		Method:         http.MethodPut,
 		URL:            "/arcade/public",
 		Headers:        headers,
@@ -249,11 +250,9 @@ func TestRequestPublicArcade_UpdatesCountryFromCurrentLocation(t *testing.T) {
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
 		tb.Helper()
 
-		stubGeoLookupByLocation(tb, func(lat, lon float64) (string, string) {
-			if floatAlmostEq(lat, 35.6895) && floatAlmostEq(lon, 139.6917) {
-				return "JP", "Asia/Tokyo"
-			}
-			return "KR", "Asia/Seoul"
+		stubGeoLookupWithResolver(tb, func(_ *http.Request) (string, string, error) {
+			geoCalls++
+			return "", "", fmt.Errorf("publication must not call geo lookup")
 		})
 
 		token, user := createAuthUser(tb, app)
@@ -295,11 +294,14 @@ func TestRequestPublicArcade_UpdatesCountryFromCurrentLocation(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		if got := arcadeRec.GetString("country"); got != "JP" {
-			tb.Fatalf("expected country JP after public request, got %q", got)
+		if geoCalls != 0 {
+			tb.Fatalf("expected no geo lookup during publication, got %d calls", geoCalls)
 		}
-		if got := arcadeRec.GetString("timezone"); got != "Asia/Tokyo" {
-			tb.Fatalf("expected timezone Asia/Tokyo after public request, got %q", got)
+		if got := arcadeRec.GetString("country"); got != "KR" {
+			tb.Fatalf("expected stored country KR after public request, got %q", got)
+		}
+		if got := arcadeRec.GetString("timezone"); got != "Asia/Seoul" {
+			tb.Fatalf("expected stored timezone Asia/Seoul after public request, got %q", got)
 		}
 		if !arcadeRec.GetBool("public") {
 			tb.Fatalf("expected arcade.public=true")

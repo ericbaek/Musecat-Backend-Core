@@ -9,6 +9,8 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/types"
+
+	_ "github.com/ericbaek/musecat-backend-core/migrations"
 )
 
 // NewTestApp clones the configured PocketBase data directory and returns a ready TestApp.

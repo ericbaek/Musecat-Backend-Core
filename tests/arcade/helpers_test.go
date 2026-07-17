@@ -134,6 +134,8 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		se.Router.GET("/stats", statshandler.GetStats)
 		se.Router.GET("/rankings", rankinghandler.List)
 		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
+		se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
+		se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
 		se.Router.GET("/arcades", arcadequery.ListArcades)
 		se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)
 		se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
@@ -158,8 +160,12 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 			user.RequireActiveUser(),
 		)
 		group.POST("/new", arcadebasic.NewArcade)
+		group.GET("/draft", arcadequery.GetArcadeDraft)
+		group.GET("/drafts", arcadequery.ListMyArcadeDrafts)
+		group.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
 		group.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin)
 		group.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
+		group.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
 		group.POST("/rollback", arcadeadmin.RollbackArcadePart)
 		group.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireModeratorAccess())
 		group.POST("/game/rollback", arcadeadmin.RollbackArcadeGameUncertain)
@@ -178,11 +184,20 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		group.PUT("/hour", arcadehour.UpdateArcadeHour)
 		group.PUT("/public", arcadepublic.RequestPublicArcade)
 		group.PUT("/photo", arcadephoto.UpdateArcadePhoto)
+		group.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)
+		group.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
 		group.POST("/photo/upload", arcadephoto.UploadArcadePhotos)
 
 		authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))
 		authUser.GET("/report", arcadeadmin.ListUserReport).Bind(user.RequireActiveUser())
 		authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(user.RequireActiveUser())
+		reviewQueue := se.Router.Group("/moderation/arcade").Bind(
+			apis.RequireAuth("user"),
+			user.RequireActiveUser(),
+			arcadequery.RequireStrictReviewerAccess(),
+		)
+		reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
+		reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
 		supporter := se.Router.Group("/supporter").Bind(apis.RequireAuth("user"), user.RequireActiveUser())
 		supporter.GET("/score", arcadeadmin.GetSupporterScore)
 		supporter.POST("/request", arcadeadmin.CreateSupporterRequest)
@@ -373,6 +388,24 @@ func seedArcade(tb testing.TB, app *tests.TestApp, createdBy string, seed arcade
 	}
 
 	return arcadeRec.Id, basicRec.Id
+}
+
+// seedPublicArcade keeps public-read tests explicit without changing the
+// private-draft default used by mutation and authorization tests.
+func seedPublicArcade(tb testing.TB, app *tests.TestApp, createdBy string, seed arcadeSeed) (arcadeID, basicID string) {
+	tb.Helper()
+
+	arcadeID, basicID = seedArcade(tb, app, createdBy, seed)
+	record, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		tb.Fatalf("failed to load arcade %s: %v", arcadeID, err)
+	}
+	record.Set("public", true)
+	record.Set("closed", false)
+	if err := app.Save(record); err != nil {
+		tb.Fatalf("failed to make arcade public: %v", err)
+	}
+	return arcadeID, basicID
 }
 
 func loadChangelogRecords(tb testing.TB, app *tests.TestApp, arcadeID, field string) []*core.Record {

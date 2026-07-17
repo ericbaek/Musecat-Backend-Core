@@ -295,6 +295,12 @@ func ListArcadeNotice(re *core.RequestEvent) error {
 			"error": "arcade is required",
 		})
 	}
+	arcade, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, arcadeID)
+	if err != nil || !arcade.GetBool("public") {
+		return re.JSON(http.StatusNotFound, map[string]any{
+			"error": "arcade not found",
+		})
+	}
 
 	recs, err := re.App.FindRecordsByFilter(
 		arcadeinternal.CollectionArcadeNotice,

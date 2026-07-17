@@ -27,7 +27,7 @@ func TestGetArcadeValues_ExpandGameOmitsMissingTagQuantity(t *testing.T) {
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Tagless Quantity Arcade",
 			Address:  "No Qty Street",
 			Nickname: []string{"Tagless"},
@@ -105,7 +105,7 @@ func TestGetArcadeValues_Default(t *testing.T) {
 
 		_, user := createAuthUser(tb, app)
 		createdBy = user.Id
-		id, basic := seedArcade(tb, app, user.Id, arcadeSeed{
+		id, basic := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Default Arcade",
 			Address:  "123 Seoul Road",
 			Nickname: []string{"Default"},
@@ -146,8 +146,8 @@ func TestGetArcadeValues_Default(t *testing.T) {
 		if got := admin["createdBy"]; got != createdBy {
 			tb.Fatalf("expected admin.createdBy %q, got %v", createdBy, got)
 		}
-		if got := admin["public"]; got != false {
-			tb.Fatalf("expected admin.public false, got %v", got)
+		if got := admin["public"]; got != true {
+			tb.Fatalf("expected admin.public true, got %v", got)
 		}
 		if got := admin["closed"]; got != false {
 			tb.Fatalf("expected admin.closed false, got %v", got)
@@ -186,7 +186,7 @@ func TestGetArcadeValues_ExpandBasic(t *testing.T) {
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:      "Expanded Arcade",
 			Address:   "456 Busan St",
 			Direction: "B1",
@@ -248,7 +248,7 @@ func TestGetArcadeValues_ExpandGTKParkingMeta(t *testing.T) {
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Parking Expanded Arcade",
 			Address:  "Parking Road",
 			Nickname: []string{"Park"},
@@ -340,7 +340,7 @@ func TestGetArcadeValues_ExpandGame_IncludesUncertainPrevGame(t *testing.T) {
 		tb.Helper()
 
 		_, user := createAuthUser(tb, app)
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Uncertain Arcade",
 			Address:  "789 Seoul Ave",
 			Nickname: []string{"Uncertain"},
@@ -469,7 +469,7 @@ func TestGetArcadeValues_ExpandPhoto(t *testing.T) {
 			tb.Fatalf("failed to update user_info nickname: %v", err)
 		}
 
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Photo Expanded Arcade",
 			Address:  "Photo Expanded Street",
 			Nickname: []string{"PhotoExpanded"},

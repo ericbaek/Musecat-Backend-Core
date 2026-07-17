@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+pb_data/
+.cache/
+cache/
+.git/
+.DS_Store
+tmp/
+coverage/
+*.log
+.idea/
+.vscode/
