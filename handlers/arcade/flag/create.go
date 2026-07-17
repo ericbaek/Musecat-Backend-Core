@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 
@@ -25,7 +26,7 @@ const maxFlagPhotosPerRequest = 3
 
 type CreateArcadeFlagBody struct {
 	Arcade     string `json:"arcade"`
-	GameAtomID string `json:"game_atom_id"`
+	GameID     string `json:"game_id"`
 	Disruption string `json:"disruption"`
 	Message    string `json:"message"`
 	Photos     []*filesystem.File
@@ -40,7 +41,7 @@ func parseCreateArcadeFlagBody(re *core.RequestEvent) (CreateArcadeFlagBody, err
 
 		body := CreateArcadeFlagBody{
 			Arcade:     re.Request.FormValue("arcade"),
-			GameAtomID: re.Request.FormValue("game_atom_id"),
+			GameID:     re.Request.FormValue("game_id"),
 			Disruption: re.Request.FormValue("disruption"),
 			Message:    re.Request.FormValue("message"),
 		}
@@ -64,15 +65,15 @@ func parseCreateArcadeFlagBody(re *core.RequestEvent) (CreateArcadeFlagBody, err
 
 func validateCreateArcadeFlagBody(body *CreateArcadeFlagBody) error {
 	body.Arcade = strings.TrimSpace(body.Arcade)
-	body.GameAtomID = strings.TrimSpace(body.GameAtomID)
+	body.GameID = strings.TrimSpace(body.GameID)
 	body.Disruption = strings.TrimSpace(body.Disruption)
 	body.Message = strings.TrimSpace(body.Message)
 
 	if body.Arcade == "" {
 		return fmt.Errorf("arcade is required")
 	}
-	if body.GameAtomID == "" {
-		return fmt.Errorf("game_atom_id is required")
+	if body.GameID == "" {
+		return fmt.Errorf("game_id is required")
 	}
 	if body.Disruption == "" {
 		return fmt.Errorf("disruption is required")
@@ -120,22 +121,17 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
 
-		atomRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeGameAtoms, body.GameAtomID)
+		entryRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeGameEntry, body.GameID)
 		if err != nil {
-			return fmt.Errorf("game atom not found: %w", err)
+			return fmt.Errorf("game entry not found: %w", err)
 		}
-
-		moleculeID := strings.TrimSpace(atomRec.GetString("molecule"))
-		if moleculeID == "" {
-			return fmt.Errorf("game atom has no molecule")
+		if entryRec.GetString("arcade") != body.Arcade {
+			return fmt.Errorf("game_id does not belong to arcade")
 		}
-
-		moleculeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeGame, moleculeID)
-		if err != nil {
-			return fmt.Errorf("game molecule not found: %w", err)
-		}
-		if moleculeRec.GetString("arcade") != body.Arcade {
-			return fmt.Errorf("game_atom_id does not belong to arcade")
+		stateID := arcadeRec.GetString("game_state")
+		active, err := txApp.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameRevision, "batch={:batch} && entry={:entry}", "", 1, 0, dbx.Params{"batch": stateID, "entry": body.GameID})
+		if err != nil || len(active) == 0 {
+			return fmt.Errorf("game_id is not active in the current game state")
 		}
 		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
@@ -150,6 +146,7 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 
 		flagRec := core.NewRecord(flagColl)
 		flagRec.Set("arcade", body.Arcade)
+		flagRec.Set("game_entry", body.GameID)
 		flagRec.Set("disruption", body.Disruption)
 		flagRec.Set("message", body.Message)
 		flagRec.Set("solved", false)
@@ -162,12 +159,6 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 		}
 		newFlagID = flagRec.Id
 
-		flags := atomRec.GetStringSlice("flags")
-		flags = append(flags, newFlagID)
-		atomRec.Set("flags", flags)
-		if err := txApp.Save(atomRec); err != nil {
-			return fmt.Errorf("failed to update game atom flags: %w", err)
-		}
 		if arcadeRec.GetBool("public") {
 			nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.FlagKind(newFlagID), 5, baseExp)
 			if err != nil {
@@ -176,11 +167,11 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 			currentExp = nextExp
 		}
 
-		if gameValue, ok := arcadeinternal.BuildExpandedGameValue(txApp, arcadeRec.GetString("game")); ok {
+		if gameValue, ok := arcadeinternal.BuildExpandedGameValue(txApp, arcadeRec.GetString("game_state")); ok {
 			expandedGameValue = gameValue
 		} else {
 			expandedGameValue = map[string]any{
-				"id":    arcadeRec.GetString("game"),
+				"id":    arcadeRec.GetString("game_state"),
 				"items": []map[string]any{},
 			}
 		}
@@ -196,7 +187,7 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 
 	return re.JSON(http.StatusOK, map[string]any{
 		"arcade":      body.Arcade,
-		"atom":        body.GameAtomID,
+		"game_id":     body.GameID,
 		"flag":        newFlagID,
 		"game":        expandedGameValue,
 		"xp_feedback": xpFeedback,

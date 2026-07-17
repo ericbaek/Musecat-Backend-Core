@@ -18,7 +18,7 @@ var rollbackPartCollections = map[string]string{
 	"hour":  arcadeinternal.CollectionArcadeHour,
 	"sns":   arcadeinternal.CollectionArcadeSNS,
 	"gtk":   arcadeinternal.CollectionArcadeGTK,
-	"game":  arcadeinternal.CollectionArcadeGame,
+	"game":  arcadeinternal.CollectionArcadeGameRevisionBatch,
 	"photo": arcadeinternal.CollectionArcadePhoto,
 }
 
@@ -140,7 +140,11 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 			return &rollbackValidationError{message: "arcade not found"}
 		}
 
-		fromValue = strings.TrimSpace(arcadeRec.GetString(body.Part))
+		field := body.Part
+		if body.Part == "game" {
+			field = "game_state"
+		}
+		fromValue = strings.TrimSpace(arcadeRec.GetString(field))
 		if fromValue == "" {
 			return &rollbackValidationError{message: fmt.Sprintf("arcade.%s is empty", body.Part)}
 		}
@@ -164,7 +168,7 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 		if err := arcadeinternal.UpdateArcadeFieldsTxWithLogs(
 			txApp,
 			body.Arcade,
-			map[string]any{body.Part: toValue},
+			map[string]any{field: toValue},
 			map[string]any{body.Part: rollbackLog},
 			re.Auth.Id,
 		); err != nil {

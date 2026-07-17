@@ -39,28 +39,28 @@ func validateRequestPublicArcadeBody(body RequestPublicArcadeBody) error {
 	return nil
 }
 
-func hasGameRegistration(app core.App, moleculeID string) (bool, error) {
-	moleculeID = strings.TrimSpace(moleculeID)
-	if moleculeID == "" {
+func hasGameRegistration(app core.App, stateID string) (bool, error) {
+	stateID = strings.TrimSpace(stateID)
+	if stateID == "" {
 		return false, nil
 	}
 
-	if _, err := app.FindRecordById(arcadeinternal.CollectionArcadeGame, moleculeID); err != nil {
+	if _, err := app.FindRecordById(arcadeinternal.CollectionArcadeGameRevisionBatch, stateID); err != nil {
 		return false, nil
 	}
 
-	atoms, err := app.FindRecordsByFilter(
-		arcadeinternal.CollectionArcadeGameAtoms,
-		"molecule={:id}",
+	revisions, err := app.FindRecordsByFilter(
+		arcadeinternal.CollectionArcadeGameRevision,
+		"batch={:id}",
 		"",
 		1,
 		0,
-		dbx.Params{"id": moleculeID},
+		dbx.Params{"id": stateID},
 	)
 	if err != nil {
 		return false, err
 	}
-	return len(atoms) > 0, nil
+	return len(revisions) > 0, nil
 }
 
 func hasSNSRegistration(app core.App, moleculeID string) (bool, error) {
@@ -160,7 +160,7 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		})
 	}
 
-	hasGame, err := hasGameRegistration(re.App, arcade.GetString("game"))
+	hasGame, err := hasGameRegistration(re.App, arcade.GetString("game_state"))
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to validate game registration",

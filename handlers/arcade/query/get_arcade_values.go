@@ -72,7 +72,7 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 	hourId, _ := arcadeinternal.AsString(rec.Get("hour"))
 	snsId, _ := arcadeinternal.AsString(rec.Get("sns"))
 	gtkId, _ := arcadeinternal.AsString(rec.Get("gtk"))
-	gameId, _ := arcadeinternal.AsString(rec.Get("game"))
+	gameId, _ := arcadeinternal.AsString(rec.Get("game_state"))
 	photoId, _ := arcadeinternal.AsString(rec.Get("photo"))
 	admin := map[string]any{
 		"id":        rec.Id,
@@ -176,108 +176,8 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 		}
 	}
 
-	if want["game"] {
-		gameExpanded := false
-		items := []map[string]any{}
-		linkedFlagIDs := map[string]struct{}{}
-
-		if gameId != "" {
-			if gameRec, err := re.App.FindRecordById(arcadeinternal.CollectionArcadeGame, gameId); err == nil {
-				atoms, _ := re.App.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameAtoms, "molecule={:id}", "", 0, 0, dbx.Params{"id": gameRec.Id})
-				items = make([]map[string]any, 0, len(atoms))
-
-				for _, a := range atoms {
-					// Return stored price JSON as-is to preserve original scalar types.
-					price := a.Get("price")
-					tags := arcadeinternal.DecodeGameTagPayload(a.Get("tag"))
-
-					gameId := a.GetString("game")
-					var versionObj any
-					var seriesObj any
-					if gameId != "" {
-						if bundle, err := BuildGameSeriesBundle(re.App, gameId); err == nil {
-							versionObj = bundle["version"]
-							seriesObj = bundle["series"]
-						}
-					}
-					uncertain := a.GetBool("uncertain")
-					var prevGameObj any
-					if uncertain {
-						prevGameID := a.GetString("prev_game")
-						if prevGameID != "" {
-							if bundle, err := BuildGameSeriesBundle(re.App, prevGameID); err == nil {
-								prevGameObj = bundle["version"]
-							}
-						}
-					}
-					item := map[string]any{
-						"version":   versionObj,
-						"series":    seriesObj,
-						"uncertain": uncertain,
-						"location":  a.GetString("location"),
-						"quantity":  a.GetInt("quantity"),
-						"price":     price,
-						"tag":       tags,
-						"id":        a.GetString("id"),
-						"updated":   arcadeinternal.GameAtomUpdatedValue(a),
-					}
-					if uncertain {
-						item["prev_game"] = prevGameObj
-					}
-
-					flagIDs := a.GetStringSlice("flags")
-					flags := make([]map[string]any, 0, len(flagIDs))
-					for _, flagID := range flagIDs {
-						if flagID == "" {
-							continue
-						}
-						flagObj, ok := expandFlag(re.App, flagID, nil)
-						if !ok {
-							continue
-						}
-						linkedFlagIDs[flagID] = struct{}{}
-						flags = append(flags, flagObj)
-					}
-					item["flags"] = flags
-					items = append(items, item)
-				}
-				sortExpandedGameItems(items)
-
-				gameExpanded = true
-			}
-		}
-
-		arcadeFlags, _ := re.App.FindRecordsByFilter(
-			arcadeinternal.CollectionArcadeFlag,
-			"arcade={:id} && solved=false",
-			"created",
-			0,
-			0,
-			dbx.Params{"id": rec.Id},
-		)
-		orphanFlags := make([]map[string]any, 0)
-		for _, flagRec := range arcadeFlags {
-			if flagRec.GetBool("solved") {
-				continue
-			}
-			if _, linked := linkedFlagIDs[flagRec.Id]; linked {
-				continue
-			}
-			flagObj, ok := expandFlag(re.App, flagRec.Id, flagRec)
-			if !ok {
-				continue
-			}
-			orphanFlags = append(orphanFlags, flagObj)
-		}
-
-		if gameExpanded || len(orphanFlags) > 0 {
-			gameObj := map[string]any{
-				"id":    gameId,
-				"items": items,
-			}
-			if len(orphanFlags) > 0 {
-				gameObj["orphanFlags"] = orphanFlags
-			}
+	if want["game"] && gameId != "" {
+		if gameObj, ok := arcadeinternal.BuildExpandedGameValue(re.App, gameId); ok {
 			out["game"] = gameObj
 		}
 	}

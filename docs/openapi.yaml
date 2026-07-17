@@ -1537,8 +1537,9 @@ components:
       properties:
         game:
           type: string
-        prev_id:
+        id:
           type: string
+          description: Stable `arcade_game_entry` id. Omit only to add a new installation.
         location:
           type: string
         quantity:
@@ -1556,14 +1557,31 @@ components:
           type: string
     UpdateArcadeGameRequest:
       type: object
-      required: [arcade, games]
+      required: [arcade, base_state_id, games]
       properties:
         arcade:
           type: string
+        base_state_id:
+          type: string
+          description: Current `arcade.game_state`; stale values return 409.
         games:
           type: array
           items:
             $ref: '#/components/schemas/GameAtomInput'
+    CreateArcadeFlagRequest:
+      type: object
+      required: [arcade, game_id, disruption, message]
+      properties:
+        arcade:
+          type: string
+        game_id:
+          type: string
+          description: Stable active `arcade_game_entry` id.
+        disruption:
+          type: string
+          enum: [unplayable, major, bearable, minor]
+        message:
+          type: string
     ArcadeGameUncertainRequest:
       type: object
       required: [atom_ids]
@@ -4219,8 +4237,8 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/game
       description: |
-        Creates a new `arcade_game` molecule and atom set, then updates `arcade.game`.
-        When an input atom carries `uncertain` or `prev_game`, the values are preserved on the new atom and tracked in changelog diffs.
+        Creates an immutable revision batch and updates only `arcade.game_state`.
+        Existing item ids are durable entries; the submitted version must remain in that entry's series.
       security:
         - bearerAuth: []
       requestBody:
@@ -4248,6 +4266,12 @@ paths:
                     $ref: '#/components/schemas/XpFeedback'
         '400':
           description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: `base_state_id` is stale or a game version conflicts with the current state.
           content:
             application/json:
               schema:
@@ -4405,11 +4429,11 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [arcade, game_atom_id, disruption, message]
+              required: [arcade, game_id, disruption, message]
               properties:
                 arcade:
                   type: string
-                game_atom_id:
+                game_id:
                   type: string
                 disruption:
                   type: string
@@ -4424,16 +4448,16 @@ paths:
                     format: binary
       responses:
         '200':
-          description: Flag created and linked to the atom.
+          description: Flag created and linked to the durable game entry.
           content:
             application/json:
               schema:
                 type: object
-                required: [arcade, atom, flag, game, xp_feedback]
+                required: [arcade, game_id, flag, game, xp_feedback]
                 properties:
                   arcade:
                     type: string
-                  atom:
+                  game_id:
                     type: string
                   flag:
                     type: string

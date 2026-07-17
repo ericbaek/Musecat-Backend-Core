@@ -76,42 +76,6 @@ func DeleteArcadeFlag(re *core.RequestEvent) error {
 			return fmt.Errorf("flag can only be deleted within 15 minutes of creation")
 		}
 
-		atomRecs, err := txApp.FindRecordsByFilter(
-			arcadeinternal.CollectionArcadeGameAtoms,
-			"",
-			"",
-			0,
-			0,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to load game atoms: %w", err)
-		}
-
-		for _, atom := range atomRecs {
-			flags := atom.GetStringSlice("flags")
-			if len(flags) == 0 {
-				continue
-			}
-
-			nextFlags := make([]string, 0, len(flags))
-			changed := false
-			for _, id := range flags {
-				if id == body.Flag {
-					changed = true
-					continue
-				}
-				nextFlags = append(nextFlags, id)
-			}
-			if !changed {
-				continue
-			}
-
-			atom.Set("flags", nextFlags)
-			if err := txApp.Save(atom); err != nil {
-				return fmt.Errorf("failed to unlink flag from atom: %w", err)
-			}
-		}
-
 		if err := txApp.Delete(flagRec); err != nil {
 			return fmt.Errorf("failed to delete flag: %w", err)
 		}
@@ -134,11 +98,11 @@ func DeleteArcadeFlag(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
-		if gameValue, ok := arcadeinternal.BuildExpandedGameValue(txApp, arcadeRec.GetString("game")); ok {
+		if gameValue, ok := arcadeinternal.BuildExpandedGameValue(txApp, arcadeRec.GetString("game_state")); ok {
 			expandedGameValue = gameValue
 		} else {
 			expandedGameValue = map[string]any{
-				"id":    arcadeRec.GetString("game"),
+				"id":    arcadeRec.GetString("game_state"),
 				"items": []map[string]any{},
 			}
 		}

@@ -25,7 +25,7 @@ Each row uses these common columns:
 | `PUT /arcade/hour` | `hour` | one row per request | `hour_diff` | Replaces the current `arcade_hour` relation. |
 | `PUT /arcade/sns` | `sns` | one row per request | `sns_diff` | Replaces the current `arcade_sns` relation. |
 | `PUT /arcade/gtk` | `gtk` | one row per request | `gtk_diff` | Replaces the current `arcade_gtk` relation. |
-| `PUT /arcade/game` | `game` | one row per request | `game_diff` | Creates a new `arcade_game` molecule and new atom rows. |
+| `PUT /arcade/game` | `game` | one row per request | `game_diff` | Validates `base_state_id`, creates an immutable revision batch, then moves `arcade.game_state` to it. Item IDs are persistent `arcade_game_entry` IDs. |
 | `POST /arcade/game/confirm` | `game` | one row per request | `game_diff` | Confirm flow for selected uncertain atoms. |
 | `POST /arcade/game/information/confirm` | `game` | one row per request | `game_information_confirm_diff` | Marks one atom as freshly confirmed and refreshes its `updated` timestamp. |
 | `POST /arcade/game/bulk_version` | `bulk_game_version` | one row per request | `bulk_game_version_diff` | Bulk version swap for many atoms at once. |

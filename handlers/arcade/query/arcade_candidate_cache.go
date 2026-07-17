@@ -20,8 +20,9 @@ const arcadeCandidateCacheKey = "arcade_candidate_snapshot"
 var arcadeCandidateCacheHookCollections = []string{
 	arcadeinternal.CollectionArcade,
 	arcadeinternal.CollectionArcadeBasic,
-	arcadeinternal.CollectionArcadeGame,
-	arcadeinternal.CollectionArcadeGameAtoms,
+	arcadeinternal.CollectionArcadeGameEntry,
+	arcadeinternal.CollectionArcadeGameRevisionBatch,
+	arcadeinternal.CollectionArcadeGameRevision,
 	arcadeinternal.CollectionGameSeriesVersion,
 }
 
@@ -158,11 +159,7 @@ func BuildArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
 	if err != nil {
 		return nil, err
 	}
-	games, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeGame, "", "", 0, 0)
-	if err != nil {
-		return nil, err
-	}
-	atoms, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameAtoms, "", "", 0, 0)
+	revisions, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameRevision, "", "", 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -190,44 +187,46 @@ func BuildArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
 		}
 	}
 
-	seriesSetByMoleculeID := map[string]map[string]struct{}{}
-	for _, atomRec := range atoms {
-		moleculeID := strings.TrimSpace(atomRec.GetString("molecule"))
-		versionID := strings.TrimSpace(atomRec.GetString("game"))
-		if moleculeID == "" || versionID == "" {
+	seriesSetByStateID := map[string]map[string]struct{}{}
+	for _, revision := range revisions {
+		stateID := strings.TrimSpace(revision.GetString("batch"))
+		versionID := strings.TrimSpace(revision.GetString("version"))
+		if stateID == "" || versionID == "" {
 			continue
 		}
 		seriesID := seriesByVersionID[versionID]
 		if seriesID == "" {
 			continue
 		}
-		seriesSet := seriesSetByMoleculeID[moleculeID]
+		seriesSet := seriesSetByStateID[stateID]
 		if seriesSet == nil {
 			seriesSet = map[string]struct{}{}
-			seriesSetByMoleculeID[moleculeID] = seriesSet
+			seriesSetByStateID[stateID] = seriesSet
 		}
 		seriesSet[seriesID] = struct{}{}
 	}
 
-	gameSeriesByMoleculeID := make(map[string][]string, len(games))
-	for _, gameRec := range games {
-		moleculeID := strings.TrimSpace(gameRec.Id)
-		seriesSet := seriesSetByMoleculeID[moleculeID]
-		if len(seriesSet) == 0 {
-			continue
-		}
+	gameSeriesByStateID := make(map[string][]string, len(seriesSetByStateID))
+	for stateID, seriesSet := range seriesSetByStateID {
 		series := make([]string, 0, len(seriesSet))
 		for sid := range seriesSet {
 			series = append(series, sid)
 		}
 		sort.Strings(series)
-		gameSeriesByMoleculeID[moleculeID] = series
+		gameSeriesByStateID[stateID] = series
 	}
 
 	candidates := make([]ArcadeCandidate, 0, len(arcades))
 	for _, arcadeRec := range arcades {
 		basicRec := basicByArcadeID[arcadeRec.Id]
-		gameSeries := gameSeriesByMoleculeID[strings.TrimSpace(arcadeRec.GetString("game"))]
+		stateID := strings.TrimSpace(arcadeRec.GetString("game_state"))
+		gameSeries := gameSeriesByStateID[stateID]
+		// Phase-A databases may still have archived legacy molecules while an
+		// operator resolves identity ambiguities. This read-only fallback never
+		// accepts legacy writes and disappears once game_state is set.
+		if stateID == "" {
+			gameSeries = loadLegacyArcadeGameSeries(app, arcadeRec.GetString("game"))
+		}
 		candidate, ok := buildArcadeCandidateFromRecords(arcadeRec, basicRec, gameSeries)
 		if !ok {
 			continue
@@ -253,7 +252,7 @@ func buildArcadeCandidate(app core.App, arcadeRec *core.Record) (ArcadeCandidate
 		return ArcadeCandidate{}, false
 	}
 
-	gameSeries := loadArcadeGameSeries(app, arcadeRec.GetString("game"))
+	gameSeries := loadArcadeGameSeries(app, arcadeRec.GetString("game_state"))
 	return buildArcadeCandidateFromRecords(arcadeRec, basicRec, gameSeries)
 }
 
@@ -266,7 +265,7 @@ func buildArcadeCandidateFromRecords(arcadeRec, basicRec *core.Record, gameSerie
 		ID:      arcadeRec.Id,
 		Country: strings.TrimSpace(arcadeRec.GetString("country")),
 		Closed:  arcadeRec.GetBool("closed"),
-		GameID:  strings.TrimSpace(arcadeRec.GetString("game")),
+		GameID:  strings.TrimSpace(arcadeRec.GetString("game_state")),
 	}
 
 	candidate.Name = strings.TrimSpace(basicRec.GetString("name"))
@@ -289,20 +288,20 @@ func buildArcadeCandidateFromRecords(arcadeRec, basicRec *core.Record, gameSerie
 	return candidate, true
 }
 
-func loadArcadeGameSeries(app core.App, gameID string) []string {
-	gameID = strings.TrimSpace(gameID)
-	if app == nil || gameID == "" {
+func loadArcadeGameSeries(app core.App, stateID string) []string {
+	stateID = strings.TrimSpace(stateID)
+	if app == nil || stateID == "" {
 		return nil
 	}
 
-	atoms, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameAtoms, "molecule={:id}", "", 0, 0, dbx.Params{"id": gameID})
+	revisions, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameRevision, "batch={:id}", "", 0, 0, dbx.Params{"id": stateID})
 	if err != nil {
 		return nil
 	}
 
 	seriesSet := map[string]struct{}{}
-	for _, atom := range atoms {
-		versionID := strings.TrimSpace(atom.GetString("game"))
+	for _, revision := range revisions {
+		versionID := strings.TrimSpace(revision.GetString("version"))
 		if versionID == "" {
 			continue
 		}
@@ -324,6 +323,30 @@ func loadArcadeGameSeries(app core.App, gameID string) []string {
 		series = append(series, id)
 	}
 	return series
+}
+
+func loadLegacyArcadeGameSeries(app core.App, moleculeID string) []string {
+	moleculeID = strings.TrimSpace(moleculeID)
+	if app == nil || moleculeID == "" {
+		return nil
+	}
+	atoms, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameAtoms, "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+	if err != nil {
+		return nil
+	}
+	set := map[string]struct{}{}
+	for _, atom := range atoms {
+		version, findErr := app.FindRecordById(arcadeinternal.CollectionGameSeriesVersion, atom.GetString("game"))
+		if findErr == nil && strings.TrimSpace(version.GetString("series")) != "" {
+			set[strings.TrimSpace(version.GetString("series"))] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func cloneArcadeCandidates(candidates []ArcadeCandidate) []ArcadeCandidate {

@@ -63,25 +63,32 @@ func BuildGameSeriesBundle(app core.App, versionID string) (map[string]any, erro
 	}, nil
 }
 
-func BuildExpandedGameValue(app core.App, moleculeID string) (map[string]any, bool) {
-	if strings.TrimSpace(moleculeID) == "" {
+// BuildExpandedGameValue expands an immutable game-state batch. Item ids are
+// durable arcade_game_entry ids; state data always comes from this batch.
+func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool) {
+	if strings.TrimSpace(stateID) == "" {
 		return nil, false
 	}
 
-	gameRec, err := app.FindRecordById(CollectionArcadeGame, moleculeID)
+	batch, err := app.FindRecordById(CollectionArcadeGameRevisionBatch, stateID)
 	if err != nil {
 		return nil, false
 	}
 
-	atoms, _ := app.FindRecordsByFilter(CollectionArcadeGameAtoms, "molecule={:id}", "", 0, 0, dbx.Params{"id": gameRec.Id})
-	items := make([]map[string]any, 0, len(atoms))
-	linkedFlagIDs := map[string]struct{}{}
+	revisions, _ := app.FindRecordsByFilter(CollectionArcadeGameRevision, "batch={:id}", "", 0, 0, dbx.Params{"id": batch.Id})
+	items := make([]map[string]any, 0, len(revisions))
+	activeEntries := map[string]struct{}{}
 
-	for _, a := range atoms {
-		price := a.Get("price")
-		tags := DecodeGameTagPayload(a.Get("tag"))
+	for _, revision := range revisions {
+		entryID := strings.TrimSpace(revision.GetString("entry"))
+		if entryID == "" {
+			continue
+		}
+		activeEntries[entryID] = struct{}{}
+		price := revision.Get("price")
+		tags := DecodeGameTagPayload(revision.Get("tag"))
 
-		gameID := a.GetString("game")
+		gameID := revision.GetString("version")
 		var versionObj any
 		var seriesObj any
 		if gameID != "" {
@@ -91,10 +98,10 @@ func BuildExpandedGameValue(app core.App, moleculeID string) (map[string]any, bo
 			}
 		}
 
-		uncertain := a.GetBool("uncertain")
+		uncertain := revision.GetBool("uncertain")
 		var prevGameObj any
 		if uncertain {
-			prevGameID := a.GetString("prev_game")
+			prevGameID := revision.GetString("previous_version")
 			if prevGameID != "" {
 				if bundle, err := BuildGameSeriesBundle(app, prevGameID); err == nil {
 					prevGameObj = bundle["version"]
@@ -103,31 +110,28 @@ func BuildExpandedGameValue(app core.App, moleculeID string) (map[string]any, bo
 		}
 
 		item := map[string]any{
-			"version":   versionObj,
-			"series":    seriesObj,
-			"uncertain": uncertain,
-			"location":  a.GetString("location"),
-			"quantity":  a.GetInt("quantity"),
-			"price":     price,
-			"tag":       tags,
-			"id":        a.GetString("id"),
-			"updated":   GameAtomUpdatedValue(a),
+			"version":    versionObj,
+			"series":     seriesObj,
+			"uncertain":  uncertain,
+			"location":   revision.GetString("location"),
+			"quantity":   revision.GetInt("quantity"),
+			"price":      price,
+			"tag":        tags,
+			"id":         entryID,
+			"updated":    revision.GetString("last_modified_at"),
+			"updated_by": revision.GetString("last_modified_by"),
 		}
 		if uncertain {
 			item["prev_game"] = prevGameObj
 		}
 
-		flagIDs := a.GetStringSlice("flags")
-		flags := make([]map[string]any, 0, len(flagIDs))
-		for _, flagID := range flagIDs {
-			if flagID == "" {
-				continue
-			}
-			flagObj, ok := expandFlag(app, flagID, nil)
+		flagRecs, _ := app.FindRecordsByFilter(CollectionArcadeFlag, "game_entry={:entry} && solved=false", "created", 0, 0, dbx.Params{"entry": entryID})
+		flags := make([]map[string]any, 0, len(flagRecs))
+		for _, flagRec := range flagRecs {
+			flagObj, ok := expandFlag(app, flagRec.Id, flagRec)
 			if !ok {
 				continue
 			}
-			linkedFlagIDs[flagID] = struct{}{}
 			flags = append(flags, flagObj)
 		}
 		item["flags"] = flags
@@ -137,8 +141,9 @@ func BuildExpandedGameValue(app core.App, moleculeID string) (map[string]any, bo
 	sortExpandedGameItems(items)
 
 	gameObj := map[string]any{
-		"id":    gameRec.Id,
-		"items": items,
+		"id":       batch.Id,
+		"state_id": batch.Id,
+		"items":    items,
 	}
 
 	arcadeFlags, _ := app.FindRecordsByFilter(
@@ -147,16 +152,21 @@ func BuildExpandedGameValue(app core.App, moleculeID string) (map[string]any, bo
 		"created",
 		0,
 		0,
-		dbx.Params{"id": gameRec.GetString("arcade")},
+		dbx.Params{"id": batch.GetString("arcade")},
 	)
 	orphanFlags := make([]map[string]any, 0)
 	for _, flagRec := range arcadeFlags {
 		if flagRec.GetBool("solved") {
 			continue
 		}
-		if _, linked := linkedFlagIDs[flagRec.Id]; linked {
-			continue
+		entryID := strings.TrimSpace(flagRec.GetString("game_entry"))
+		if entryID != "" {
+			if _, active := activeEntries[entryID]; active {
+				continue
+			}
 		}
+		// Unassigned legacy flags and flags attached to removed entries are
+		// intentionally surfaced as orphans; neither is auto-resolved.
 		flagObj, ok := expandFlag(app, flagRec.Id, flagRec)
 		if !ok {
 			continue
@@ -186,7 +196,7 @@ func GameAtomUpdatedValue(atom *core.Record) string {
 func ResolveGameMoleculeIDForFlag(app core.App, arcadeID, flagID string) string {
 	if arcadeID != "" {
 		if arcadeRec, err := app.FindRecordById(CollectionArcade, arcadeID); err == nil {
-			if gameID := strings.TrimSpace(arcadeRec.GetString("game")); gameID != "" {
+			if gameID := strings.TrimSpace(arcadeRec.GetString("game_state")); gameID != "" {
 				return gameID
 			}
 		}
