@@ -73,6 +73,9 @@ func UpdateArcadeFieldsTxWithLogs(app core.App, arcadeID string, updates, logs m
 		var log any
 		if logs != nil {
 			log = logs[k]
+			if k == "game_state" && log == nil {
+				log = logs["game"]
+			}
 		}
 		changed := k
 		if k == "game_state" {
