@@ -40,6 +40,7 @@ type GameAtomInput struct {
 	Tag       []TagItem `json:"tag"`
 	Uncertain bool      `json:"uncertain,omitempty"`
 	PrevGame  string    `json:"prev_game,omitempty"`
+	Confirm   bool      `json:"-"`
 	RawPrice  any       `json:"-"`
 	RawTag    any       `json:"-"`
 }
@@ -297,7 +298,10 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 			revision.Set("last_modified_at", now)
 			revision.Set("last_modified_by", createdBy)
 		}
-		if previous != nil {
+		if g.Confirm {
+			revision.Set("last_confirmed_at", now)
+			revision.Set("last_confirmed_by", createdBy)
+		} else if previous != nil {
 			revision.Set("last_confirmed_at", previous.Get("last_confirmed_at"))
 			revision.Set("last_confirmed_by", previous.GetString("last_confirmed_by"))
 		}
@@ -307,6 +311,8 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		kind := "updated"
 		if previous == nil {
 			kind = "added"
+		} else if g.Confirm {
+			kind = "confirmed"
 		} else if !revisionChanged(previous, g) {
 			kind = "unchanged"
 		}

@@ -1584,9 +1584,13 @@ components:
           type: string
     ArcadeGameUncertainRequest:
       type: object
-      required: [atom_ids]
+      required: [arcade, base_state_id, game_ids]
       properties:
-        atom_ids:
+        arcade:
+          type: string
+        base_state_id:
+          type: string
+        game_ids:
           type: array
           minItems: 1
           items:
@@ -1608,9 +1612,9 @@ components:
           type: integer
     BulkUpdateArcadeGameVersionRequest:
       type: object
-      required: [atom_ids, current_game_version_series, new_game_version_series]
+      required: [game_ids, current_game_version_series, new_game_version_series]
       properties:
-        atom_ids:
+        game_ids:
           type: array
           minItems: 1
           items:
@@ -3966,17 +3970,7 @@ paths:
       summary: /arcade/game/bulk_version
       description: |
         Requires an authenticated user whose `tag` or `tags` includes `developer`, `moderator`, `supporter`, or `founding_supporter`.
-        The selected atoms may span multiple arcades.
-
-        Changelog rules:
-        - Create exactly one `arcade_changelog` row per request.
-        - Set `changed` to `bulk_game_version`.
-        - Set `from` to the shared current game version id.
-        - Set `to` to the shared new game version id.
-        - Store the detailed snapshot in `log` using `BulkGameVersionChangelogLog`.
-        - `log.items[]` must contain one object per updated atom with `atom_id`, `arcade_id`, and `arcade_name`.
-        - `log.before_game` and `log.after_game` are the same ids used in `from` and `to`.
-        - If any atom id is missing, if any atom does not currently point at `current_game_version_series`, or if validation fails, update nothing and create no changelog row.
+        The selected stable game entries may span multiple arcades. Each affected arcade receives an immutable game-state batch and its own `changed=game` changelog row.
       security:
         - bearerAuth: []
       requestBody:
@@ -3987,12 +3981,12 @@ paths:
               $ref: '#/components/schemas/BulkUpdateArcadeGameVersionRequest'
       responses:
         '200':
-          description: Bulk update applied and changelog created.
+          description: Bulk update applied through immutable game-state batches.
           content:
             application/json:
               schema:
                 type: object
-                required: [from, to, count, changelog]
+                required: [from, to, count, changed]
                 properties:
                   from:
                     type: string
@@ -4000,9 +3994,9 @@ paths:
                     type: string
                   count:
                     type: integer
-                  changelog:
+                  changed:
                     type: string
-                    description: Always `bulk_game_version`.
+                    description: Always `game`.
         '400':
           description: Invalid JSON or validation failure.
           content:
@@ -4293,8 +4287,8 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/game/rollback
       description: |
-        Accepts `atom_ids[]` for a single arcade only.
-        The selected atoms must be part of the current `arcade.game` molecule and must have `uncertain=true` with a non-empty `prev_game`.
+        Accepts stable `game_ids[]` for one arcade and requires the current `base_state_id`.
+        Selected entries must be uncertain and have a previous version.
       security:
         - bearerAuth: []
       requestBody:
@@ -4305,7 +4299,7 @@ paths:
               $ref: '#/components/schemas/ArcadeGameUncertainRequest'
       responses:
         '200':
-          description: Rollback applied by creating a new game molecule.
+          description: Rollback applied by creating an immutable game-state batch.
           content:
             application/json:
               schema:
@@ -4333,8 +4327,8 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/game/confirm
       description: |
-        Accepts `atom_ids[]` for a single arcade only.
-        The selected atoms must be part of the current `arcade.game` molecule and must have `uncertain=true`.
+        Accepts stable `game_ids[]` for one arcade and requires the current `base_state_id`.
+        Selected entries must be uncertain.
       security:
         - bearerAuth: []
       requestBody:
@@ -4345,7 +4339,7 @@ paths:
               $ref: '#/components/schemas/ArcadeGameUncertainRequest'
       responses:
         '200':
-          description: Confirmation applied by creating a new game molecule.
+          description: Confirmation applied by creating an immutable game-state batch.
           content:
             application/json:
               schema:
@@ -4373,20 +4367,25 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/game/information/confirm
       description: |
-        Accepts a single `id` query parameter for one `arcade_game_atoms` record.
-        The selected atom must belong to a game, and the server records the new confirmation time in `updated`.
+        Accepts `arcade` and stable `game_id` query parameters. The server creates a new state batch and records the confirmation on the selected revision.
       security:
         - bearerAuth: []
       parameters:
-        - name: id
+        - name: arcade
           in: query
           required: true
           schema:
             type: string
-          description: Game atom record id.
+          description: Arcade id.
+        - name: game_id
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Stable arcade_game_entry id.
       responses:
         '200':
-          description: Game atom confirmed.
+          description: Game entry confirmed.
           content:
             application/json:
               schema:
