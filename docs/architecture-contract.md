@@ -61,6 +61,8 @@ Rollback is a normal, immediate wiki action. When `report=true`, `POST /arcade/r
 
 Game mutations require `base_state_id`; a stale value returns `409`. Existing `games[].id` values are stable entry IDs, while rows without one create a new entry. Same-series version changes retain the entry; a cross-series change is rejected. Removed entries remain durable for historical flags, which appear as `orphanFlags` while absent from the selected batch.
 
+Every game-state mutation writes one immutable `arcade_changelog` row with `changed="game"`. Its `from` and `to` values are revision-batch IDs; log version 2 contains `state_from`, `state_to`, and an entry-level `before`/`after` snapshot. The row's authenticated `by` and `created` are the canonical editor and timestamp for timeline UI. Legacy backfill does not create user-edit changelog rows.
+
 An unresolved report is unique per `(arcade, changelog)` across report kinds. Report text and review notes are limited to 1,200 Unicode characters. The reviewer records `reviewed_by`, `reviewed_at`, `review_outcome`, and `review_note`; resolution only records a decision and MUST NOT silently mutate the cited content.
 
 ## API and PocketBase boundary

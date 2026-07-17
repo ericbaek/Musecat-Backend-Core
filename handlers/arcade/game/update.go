@@ -162,6 +162,24 @@ func revisionChanged(previous *core.Record, g GameAtomInput) bool {
 	return !arcadeinternal.JSONValueEqual(previous.Get("price"), price) || !arcadeinternal.JSONValueEqual(arcadeinternal.NormalizeGameTagPayload(previous.Get("tag")), NormalizeTagForStorage(tag))
 }
 
+// gameRevisionSnapshot is intentionally self-contained: the timeline can show
+// a meaningful before/after diff even after catalog titles or later revisions
+// change. The changelog row's `by` and `created` identify the editor and time.
+func gameRevisionSnapshot(revision *core.Record) map[string]any {
+	if revision == nil {
+		return nil
+	}
+	return map[string]any{
+		"version":          revision.GetString("version"),
+		"location":         revision.GetString("location"),
+		"quantity":         revision.GetInt("quantity"),
+		"price":            revision.Get("price"),
+		"tag":              arcadeinternal.DecodeGameTagPayload(revision.Get("tag")),
+		"uncertain":        revision.GetBool("uncertain"),
+		"previous_version": revision.GetString("previous_version"),
+	}
+}
+
 func versionSeries(app core.App, versionID string) (string, error) {
 	rec, err := app.FindRecordById(arcadeinternal.CollectionGameSeriesVersion, versionID)
 	if err != nil {
@@ -289,8 +307,15 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		kind := "updated"
 		if previous == nil {
 			kind = "added"
+		} else if !revisionChanged(previous, g) {
+			kind = "unchanged"
 		}
-		logItems = append(logItems, map[string]any{"entry_id": entryID, "game": g.Game, "change_type": kind})
+		logItems = append(logItems, map[string]any{
+			"entry_id":    entryID,
+			"change_type": kind,
+			"before":      gameRevisionSnapshot(previous),
+			"after":       gameRevisionSnapshot(revision),
+		})
 	}
 	for entryID, previous := range previousByEntry {
 		found := false
@@ -301,10 +326,21 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 			}
 		}
 		if !found {
-			logItems = append(logItems, map[string]any{"entry_id": entryID, "game": previous.GetString("version"), "change_type": "deleted"})
+			logItems = append(logItems, map[string]any{
+				"entry_id":    entryID,
+				"change_type": "deleted",
+				"before":      gameRevisionSnapshot(previous),
+				"after":       nil,
+			})
 		}
 	}
-	log := arcadeinternal.BuildChangelogEnvelope("game", logItems)
+	log := map[string]any{
+		"type":       "game_diff",
+		"version":    2,
+		"state_from": currentState,
+		"state_to":   batch.Id,
+		"items":      logItems,
+	}
 	if err := arcadeinternal.UpdateArcadeFieldsTxWithLogs(txApp, arcadeRec.Id, map[string]any{"game_state": batch.Id}, map[string]any{"game": log}, createdBy); err != nil {
 		return "", err
 	}
