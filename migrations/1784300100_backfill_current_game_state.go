@@ -21,7 +21,7 @@ func init() {
 				return fmt.Errorf("load legacy arcades: %w", err)
 			}
 			for _, arcade := range arcades {
-				if err := backfillCurrentGameState(txApp, arcade); err != nil {
+				if err := backfillCurrentGameState(txApp, arcade, false); err != nil {
 					return err
 				}
 			}
@@ -30,7 +30,7 @@ func init() {
 	}, func(app core.App) error { return nil })
 }
 
-func backfillCurrentGameState(app core.App, arcade *core.Record) error {
+func backfillCurrentGameState(app core.App, arcade *core.Record, allowMissingCreator bool) error {
 	molecule, err := app.FindRecordById("arcade_game", arcade.GetString("game"))
 	if err != nil || molecule.GetString("arcade") != arcade.Id {
 		return nil
@@ -39,7 +39,7 @@ func backfillCurrentGameState(app core.App, arcade *core.Record) error {
 	if author == "" {
 		author = strings.TrimSpace(arcade.GetString("createdBy"))
 	}
-	if author == "" {
+	if author == "" && !allowMissingCreator {
 		return createCurrentGameBackfillIssue(app, arcade.Id, "current game molecule has no creator attribution")
 	}
 	atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:molecule}", "created", 0, 0, dbx.Params{"molecule": molecule.Id})
