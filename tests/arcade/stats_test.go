@@ -71,6 +71,13 @@ func TestGetStats_Default(t *testing.T) {
 			"from":    "",
 			"to":      "",
 		}, now.Add(-time.Hour))
+		insertStatsRecord(tb, app, "z_legacy_tickets", map[string]any{
+			"arcade":    arcade1,
+			"createdBy": user.Id,
+			"message":   "legacy update",
+			"status":    "approved",
+			"type":      "legacy",
+		}, now.Add(-30*time.Minute))
 
 		flag1 := insertStatsRecord(tb, app, "arcade_flag", map[string]any{
 			"arcade":     arcade1,
@@ -114,7 +121,7 @@ func TestGetStats_Default(t *testing.T) {
 		}
 
 		assertInt64(tb, payload["arcade_count"], baseArcadeCount+2)
-		assertInt64(tb, payload["changelog_count"], baseChangelogCount+3)
+		assertInt64(tb, payload["changelog_count"], baseChangelogCount+4)
 		assertInt64(tb, payload["flag_count"], baseFlagCount+5)
 	}
 
@@ -127,7 +134,10 @@ func loadRawStatsCounts(tb testing.TB, app *tests.TestApp) (int64, int64, int64)
 	rows, err := app.DB().NewQuery(`
 SELECT
 	(SELECT COUNT(*) FROM arcade) AS arcade_count,
-	(SELECT COUNT(*) FROM arcade_changelog) AS changelog_count,
+	(
+		(SELECT COUNT(*) FROM arcade_changelog)
+		+ (SELECT COUNT(*) FROM z_legacy_tickets)
+	) AS changelog_count,
 	(
 		(SELECT COUNT(*) FROM arcade_flag)
 		+ (SELECT COUNT(*) FROM arcade_flag_reaction)
@@ -188,6 +198,16 @@ VALUES ({:created}, {:createdBy}, {:flag}, {:reaction}, {:updated})
 		params["createdBy"] = stringField(fields, "createdBy")
 		params["flag"] = stringField(fields, "flag")
 		params["reaction"] = stringField(fields, "reaction")
+	case "z_legacy_tickets":
+		query = `
+INSERT INTO z_legacy_tickets (arcade, created, createdBy, data, message, status, type, updated)
+VALUES ({:arcade}, {:created}, {:createdBy}, NULL, {:message}, {:status}, {:type}, {:updated})
+`
+		params["arcade"] = stringField(fields, "arcade")
+		params["createdBy"] = stringField(fields, "createdBy")
+		params["message"] = stringField(fields, "message")
+		params["status"] = stringField(fields, "status")
+		params["type"] = stringField(fields, "type")
 	default:
 		tb.Fatalf("unsupported collection %q", collectionName)
 	}

@@ -12,7 +12,10 @@ func GetStats(re *core.RequestEvent) error {
 	rows, err := re.App.DB().NewQuery(`
 SELECT
 	(SELECT COUNT(*) FROM arcade) AS arcade_count,
-	(SELECT COUNT(*) FROM arcade_changelog) AS changelog_count,
+	(
+		(SELECT COUNT(*) FROM arcade_changelog)
+		+ (SELECT COUNT(*) FROM z_legacy_tickets)
+	) AS changelog_count,
 	(
 		(SELECT COUNT(*) FROM arcade_flag)
 		+ (SELECT COUNT(*) FROM arcade_flag_reaction)
