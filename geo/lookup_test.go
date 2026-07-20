@@ -108,24 +108,28 @@ func TestLookupCountryAndTimezone_FallsBackToNominatimForCountry(t *testing.T) {
 
 func TestLookupCountryAndTimezone_OverridesCountryByTimezone(t *testing.T) {
 	cases := []struct {
-		name     string
-		timezone string
-		want     string
+		name         string
+		timezone     string
+		wantCountry  string
+		wantTimezone string
 	}{
 		{
-			name:     "hong kong",
-			timezone: "Asia/Hong_Kong",
-			want:     "HK",
+			name:         "hong kong",
+			timezone:     "Asia/Hong_Kong",
+			wantCountry:  "HK",
+			wantTimezone: "Asia/Hong_Kong",
 		},
 		{
-			name:     "macau",
-			timezone: "Asia/Macau",
-			want:     "MO",
+			name:         "macau",
+			timezone:     "Asia/Macau",
+			wantCountry:  "MO",
+			wantTimezone: "Asia/Macau",
 		},
 		{
-			name:     "macao alias",
-			timezone: "Asia/Macao",
-			want:     "MO",
+			name:         "macao alias",
+			timezone:     "Asia/Macao",
+			wantCountry:  "MO",
+			wantTimezone: "Asia/Macau",
 		},
 	}
 
@@ -157,11 +161,48 @@ func TestLookupCountryAndTimezone_OverridesCountryByTimezone(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LookupCountryAndTimezone returned error: %v", err)
 			}
-			if res.Country != tc.want {
-				t.Fatalf("expected country %s, got %q", tc.want, res.Country)
+			if res.Country != tc.wantCountry {
+				t.Fatalf("expected country %s, got %q", tc.wantCountry, res.Country)
 			}
-			if res.Timezone != tc.timezone {
-				t.Fatalf("expected timezone %s, got %q", tc.timezone, res.Timezone)
+			if res.Timezone != tc.wantTimezone {
+				t.Fatalf("expected timezone %s, got %q", tc.wantTimezone, res.Timezone)
+			}
+		})
+	}
+}
+
+func TestLookupCountryAndTimezone_NormalizesSingleTimezoneCountries(t *testing.T) {
+	cases := []struct {
+		name         string
+		country      string
+		providerZone string
+		wantZone     string
+	}{
+		{name: "vietnam", country: "VN", providerZone: "Asia/Bangkok", wantZone: "Asia/Ho_Chi_Minh"},
+		{name: "thailand", country: "TH", providerZone: "Asia/Ho_Chi_Minh", wantZone: "Asia/Bangkok"},
+		{name: "japan", country: "JP", providerZone: "Asia/Seoul", wantZone: "Asia/Tokyo"},
+		{name: "korea", country: "KR", providerZone: "Asia/Busan", wantZone: "Asia/Seoul"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubLookupHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+				switch req.URL.Host {
+				case "api.bigdatacloud.net":
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"countryCode":"` + tc.country + `"}`)), Header: http.Header{"Content-Type": []string{"application/json"}}, Request: req}, nil
+				case "timeapi.io":
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"timeZone":"` + tc.providerZone + `"}`)), Header: http.Header{"Content-Type": []string{"application/json"}}, Request: req}, nil
+				default:
+					return nil, fmt.Errorf("unexpected host: %s", req.URL.Host)
+				}
+			})
+
+			res, err := LookupCountryAndTimezone(context.Background(), 0, 0)
+			if err != nil {
+				t.Fatalf("LookupCountryAndTimezone returned error: %v", err)
+			}
+			if res.Timezone != tc.wantZone {
+				t.Fatalf("expected timezone %s, got %q", tc.wantZone, res.Timezone)
 			}
 		})
 	}

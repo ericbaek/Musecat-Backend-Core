@@ -67,7 +67,7 @@ func LookupCountryAndTimezone(ctx context.Context, lat, lon float64) (Result, er
 		return Result{}, fmt.Errorf("timezone lookup failed: %w", err)
 	}
 
-	iso = overrideCountryForSpecialTimezone(iso, tz)
+	iso, tz = normalizeCountryAndTimezone(iso, tz)
 
 	return Result{Country: iso, Timezone: tz}, nil
 }
@@ -202,6 +202,44 @@ func lookupTimezone(ctx context.Context, lat, lon float64) (string, error) {
 	}
 
 	return "", fmt.Errorf("timeapi.io failed (%v); open-meteo failed (%v)", err, fallbackErr)
+}
+
+// normalizeCountryAndTimezone keeps timezone storage stable for countries with
+// a single canonical IANA timezone. Coordinate providers sometimes return a
+// neighboring timezone that currently has the same UTC offset.
+func normalizeCountryAndTimezone(country, timezone string) (string, string) {
+	country = overrideCountryForSpecialTimezone(country, timezone)
+	if canonical, ok := canonicalTimezoneByCountry[country]; ok {
+		return country, canonical
+	}
+	return country, canonicalTimezoneAlias(timezone)
+}
+
+var canonicalTimezoneByCountry = map[string]string{
+	"BN": "Asia/Brunei",
+	"HK": "Asia/Hong_Kong",
+	"JP": "Asia/Tokyo",
+	"KH": "Asia/Phnom_Penh",
+	"KR": "Asia/Seoul",
+	"LA": "Asia/Vientiane",
+	"MO": "Asia/Macau",
+	"MY": "Asia/Kuala_Lumpur",
+	"PH": "Asia/Manila",
+	"SG": "Asia/Singapore",
+	"TH": "Asia/Bangkok",
+	"TW": "Asia/Taipei",
+	"VN": "Asia/Ho_Chi_Minh",
+}
+
+func canonicalTimezoneAlias(timezone string) string {
+	switch strings.TrimSpace(timezone) {
+	case "Asia/Macao":
+		return "Asia/Macau"
+	case "Asia/Calcutta":
+		return "Asia/Kolkata"
+	default:
+		return strings.TrimSpace(timezone)
+	}
 }
 
 func overrideCountryForSpecialTimezone(country, timezone string) string {
