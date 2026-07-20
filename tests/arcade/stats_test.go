@@ -72,6 +72,13 @@ func TestGetStats_Default(t *testing.T) {
 			"from":    "",
 			"to":      "",
 		}, now.Add(-time.Hour))
+		insertStatsRecord(tb, app, "z_legacy_tickets", map[string]any{
+			"arcade":    arcade1,
+			"createdBy": user.Id,
+			"message":   "legacy update",
+			"status":    "approved",
+			"type":      "legacy",
+		}, now.Add(-30*time.Minute))
 
 		flag1 := insertStatsRecord(tb, app, "arcade_flag", map[string]any{
 			"arcade":     arcade1,
@@ -115,7 +122,7 @@ func TestGetStats_Default(t *testing.T) {
 		}
 
 		assertInt64(tb, payload["arcade_count"], baseArcadeCount+1)
-		assertInt64(tb, payload["changelog_count"], baseChangelogCount+2)
+		assertInt64(tb, payload["changelog_count"], baseChangelogCount+3)
 		assertInt64(tb, payload["flag_count"], baseFlagCount+3)
 	}
 
@@ -129,10 +136,18 @@ func loadPublicStatsCounts(tb testing.TB, app *tests.TestApp) (int64, int64, int
 SELECT
 	(SELECT COUNT(*) FROM arcade WHERE public = 1) AS arcade_count,
 	(
-		SELECT COUNT(*)
-		FROM arcade_changelog c
-		INNER JOIN arcade a ON a.id = c.arcade
-		WHERE a.public = 1
+		(
+			SELECT COUNT(*)
+			FROM arcade_changelog c
+			INNER JOIN arcade a ON a.id = c.arcade
+			WHERE a.public = 1
+		)
+		+ (
+			SELECT COUNT(*)
+			FROM z_legacy_tickets t
+			INNER JOIN arcade a ON a.id = t.arcade
+			WHERE a.public = 1
+		)
 	) AS changelog_count,
 	(
 		(SELECT COUNT(*) FROM arcade_flag f INNER JOIN arcade a ON a.id = f.arcade WHERE a.public = 1)
@@ -200,6 +215,16 @@ VALUES ({:created}, {:createdBy}, {:flag}, {:reaction}, {:updated})
 		params["createdBy"] = stringField(fields, "createdBy")
 		params["flag"] = stringField(fields, "flag")
 		params["reaction"] = stringField(fields, "reaction")
+	case "z_legacy_tickets":
+		query = `
+INSERT INTO z_legacy_tickets (arcade, created, createdBy, data, message, status, type, updated)
+VALUES ({:arcade}, {:created}, {:createdBy}, NULL, {:message}, {:status}, {:type}, {:updated})
+`
+		params["arcade"] = stringField(fields, "arcade")
+		params["createdBy"] = stringField(fields, "createdBy")
+		params["message"] = stringField(fields, "message")
+		params["status"] = stringField(fields, "status")
+		params["type"] = stringField(fields, "type")
 	default:
 		tb.Fatalf("unsupported collection %q", collectionName)
 	}

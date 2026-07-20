@@ -371,8 +371,8 @@ func TestUpdateArcadeBasic_PrivateLocationChangeUpdatesTimezoneWithinSameCountry
 		if got := arcadeRec.GetString("country"); got != "KR" {
 			tb.Fatalf("expected country KR, got %q", got)
 		}
-		if got := arcadeRec.GetString("timezone"); got != "Asia/Tokyo" {
-			tb.Fatalf("expected timezone Asia/Tokyo, got %q", got)
+		if got := arcadeRec.GetString("timezone"); got != "Asia/Seoul" {
+			tb.Fatalf("expected timezone Asia/Seoul, got %q", got)
 		}
 	}
 

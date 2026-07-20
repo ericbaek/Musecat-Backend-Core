@@ -13,10 +13,18 @@ func GetStats(re *core.RequestEvent) error {
 SELECT
 	(SELECT COUNT(*) FROM arcade WHERE public = 1) AS arcade_count,
 	(
-		SELECT COUNT(*)
-		FROM arcade_changelog c
-		INNER JOIN arcade a ON a.id = c.arcade
-		WHERE a.public = 1
+		(
+			SELECT COUNT(*)
+			FROM arcade_changelog c
+			INNER JOIN arcade a ON a.id = c.arcade
+			WHERE a.public = 1
+		)
+		+ (
+			SELECT COUNT(*)
+			FROM z_legacy_tickets t
+			INNER JOIN arcade a ON a.id = t.arcade
+			WHERE a.public = 1
+		)
 	) AS changelog_count,
 	(
 		(SELECT COUNT(*) FROM arcade_flag f INNER JOIN arcade a ON a.id = f.arcade WHERE a.public = 1)
