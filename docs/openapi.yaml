@@ -872,10 +872,11 @@ components:
           description: Per-arcade visit totals. Exposed in public summary and full profiles.
           items:
             type: object
-            required: [arcade, visit_count]
+            required: [arcade, visit_count, last_visited_at]
             properties:
               arcade: {type: string}
               visit_count: {type: integer}
+              last_visited_at: {type: string}
     ArcadeVisitRequest:
       type: object
       required: [arcade, lat, lon, accuracy]

@@ -110,6 +110,9 @@ func TestVisitVisibilityControlsPublicProfileStats(t *testing.T) {
 	app := newUserFetchTestApp(t)
 	token, userRec := createAuthUser(t, app, true)
 	arcade := seedVisitArcade(t, app, "Asia/Seoul")
+	visitedAt := time.Date(2026, 7, 21, 3, 4, 5, 0, time.UTC)
+	restore := userhandler.SetVisitNowForTest(func() time.Time { return visitedAt })
+	t.Cleanup(restore)
 	headers := map[string]string{"Authorization": "Bearer " + token}
 	res := doUserRequest(t, app, http.MethodPost, "/arcade/visit", headers, `{"arcade":"`+arcade.Id+`","lat":37.5665,"lon":126.9780,"accuracy":10}`)
 	if res.StatusCode != http.StatusOK {
@@ -123,7 +126,7 @@ func TestVisitVisibilityControlsPublicProfileStats(t *testing.T) {
 	}
 	stats := profile["visit_stats"].(map[string]any)
 	arcades := stats["arcades"].([]any)
-	if len(arcades) != 1 || arcades[0].(map[string]any)["arcade"] != arcade.Id || arcades[0].(map[string]any)["visit_count"] != float64(1) {
+	if len(arcades) != 1 || arcades[0].(map[string]any)["arcade"] != arcade.Id || arcades[0].(map[string]any)["visit_count"] != float64(1) || arcades[0].(map[string]any)["last_visited_at"] != "2026-07-21 03:04:05.000Z" {
 		t.Fatalf("summary should expose per-arcade visit count: %#v", stats)
 	}
 	res = doUserRequest(t, app, http.MethodPut, "/user/visit-visibility", headers, `{"visit_visibility":"private"}`)

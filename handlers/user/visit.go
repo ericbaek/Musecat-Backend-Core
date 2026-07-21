@@ -36,8 +36,9 @@ type VisitStats struct {
 	Arcades         []ArcadeVisitCount `json:"arcades"`
 }
 type ArcadeVisitCount struct {
-	Arcade     string `json:"arcade"`
-	VisitCount int    `json:"visit_count"`
+	Arcade        string `json:"arcade"`
+	VisitCount    int    `json:"visit_count"`
+	LastVisitedAt string `json:"last_visited_at"`
 }
 type VisitSummary struct {
 	ID             string  `json:"id"`
@@ -244,7 +245,7 @@ func LoadVisitStats(app core.App, userID string) (VisitStats, error) {
 		return s, err
 	}
 	rows, err := app.DB().NewQuery(`
-SELECT arcade, COUNT(*)
+SELECT arcade, COUNT(*), MAX(visited_at)
 FROM arcade_visit
 WHERE user = {:user}
 GROUP BY arcade
@@ -256,7 +257,7 @@ ORDER BY COUNT(*) DESC, arcade ASC
 	defer rows.Close()
 	for rows.Next() {
 		var item ArcadeVisitCount
-		if err := rows.Scan(&item.Arcade, &item.VisitCount); err != nil {
+		if err := rows.Scan(&item.Arcade, &item.VisitCount, &item.LastVisitedAt); err != nil {
 			return s, err
 		}
 		s.Arcades = append(s.Arcades, item)
