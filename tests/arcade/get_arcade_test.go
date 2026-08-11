@@ -37,7 +37,7 @@ func TestGetArcadeValues_ExpandGameOmitsMissingTagQuantity(t *testing.T) {
 		moleculeID := seedArcadeGameMolecule(tb, app, arcadeID)
 		atomID := seedArcadeGameAtom(tb, app, moleculeID, versionID, "1F")
 
-		atom, err := app.FindRecordById("arcade_game_atoms", atomID)
+		atom, err := app.FindFirstRecordByFilter("arcade_game_history", "batch={:batch} && entry={:entry}", map[string]any{"batch": moleculeID, "entry": atomID})
 		if err != nil {
 			tb.Fatalf("failed to load atom: %v", err)
 		}

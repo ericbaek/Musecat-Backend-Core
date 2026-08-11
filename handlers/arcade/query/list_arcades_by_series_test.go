@@ -1,6 +1,9 @@
 package query
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestAddressMatchesFilter(t *testing.T) {
 	t.Parallel()
@@ -53,5 +56,59 @@ func TestAddressMatchesFilter(t *testing.T) {
 				t.Fatalf("addressMatchesFilter(%q, %q) = %v, want %v", tc.address, tc.filter, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseOrderedIDs_DeduplicatesInFirstSeenOrder(t *testing.T) {
+	t.Parallel()
+
+	got := parseOrderedIDs([]string{" series_b, series_a ", "series_b", "series_c,series_a"})
+	want := []string{"series_b", "series_a", "series_c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseOrderedIDs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBuildNearbyGameFilters(t *testing.T) {
+	t.Parallel()
+
+	filters, err := buildNearbyGameFilters([]string{"series_a", "series_b"}, []string{"cabinet_a", "cabinet_b"})
+	if err != nil {
+		t.Fatalf("expected paired filters, got %v", err)
+	}
+	want := []nearbyGameFilter{
+		{SeriesID: "series_a", CabinetID: "cabinet_a"},
+		{SeriesID: "series_b", CabinetID: "cabinet_b"},
+	}
+	if !reflect.DeepEqual(filters, want) {
+		t.Fatalf("buildNearbyGameFilters() = %#v, want %#v", filters, want)
+	}
+
+	if _, err := buildNearbyGameFilters(nil, []string{"cabinet_a"}); err == nil {
+		t.Fatal("expected cabinet-only filters to fail")
+	}
+	if _, err := buildNearbyGameFilters([]string{"series_a", "series_b"}, []string{"cabinet_a"}); err == nil {
+		t.Fatal("expected mixed paired and series-only filters to fail")
+	}
+}
+
+func TestMatchesAllGameFilters_RequiresSameRevisionPairs(t *testing.T) {
+	t.Parallel()
+
+	installations := []ArcadeGameInstallation{
+		{SeriesID: "series_a", CabinetID: "silver"},
+		{SeriesID: "series_b", CabinetID: "gold"},
+	}
+	if matchesAllGameFilters(installations, []nearbyGameFilter{{SeriesID: "series_a", CabinetID: "gold"}}) {
+		t.Fatal("expected cross-series cabinet match to be rejected")
+	}
+	if !matchesAllGameFilters(installations, []nearbyGameFilter{
+		{SeriesID: "series_a", CabinetID: "silver"},
+		{SeriesID: "series_b", CabinetID: "gold"},
+	}) {
+		t.Fatal("expected every same-revision pair to match")
+	}
+	if !matchesAllGameFilters([]ArcadeGameInstallation{{SeriesID: "series_a"}}, []nearbyGameFilter{{SeriesID: "series_a"}}) {
+		t.Fatal("expected unknown cabinet to match a series-only filter")
 	}
 }

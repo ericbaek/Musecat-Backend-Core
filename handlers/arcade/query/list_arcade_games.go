@@ -103,12 +103,14 @@ func buildArcadeGameListQuery(countrySet, seriesSet, versionSet map[string]bool)
 SELECT
 	a.id AS arcade_id,
 	a.country AS arcade_country,
-	a.game_state AS game_id,
+	a.game_v2 AS game_id,
 	b.name AS arcade_name,
 	b.address AS arcade_address,
 	b.location AS arcade_location,
 	r.entry AS atom_id,
 	r.location AS machine_location,
+	r.cabinet AS cabinet_id,
+	r.last_modified_at AS updated,
 	r.quantity AS quantity,
 	r.price AS price,
 	r.tag AS tag,
@@ -130,7 +132,7 @@ SELECT
 	s.manufacturer AS series_manufacturer
 FROM arcade a
 INNER JOIN arcade_basic b ON b.id = a.basic
-INNER JOIN arcade_game_history r ON r.batch = a.game_state
+INNER JOIN arcade_game_history r ON r.batch = a.game_v2
 INNER JOIN game_series_version v ON v.id = r.version
 INNER JOIN game_series s ON s.id = v.series
 WHERE %s
@@ -168,6 +170,8 @@ func buildArcadeGameItem(raw dbx.NullStringMap) map[string]any {
 		},
 		"game":     nullStringMapValue(raw, "game_id"),
 		"location": nullStringMapValue(raw, "machine_location"),
+		"cabinet":  nullStringMapValue(raw, "cabinet_id"),
+		"updated":  nullStringMapValue(raw, "updated"),
 		"quantity": quantity,
 		"price":    decodeJSONValue(nullStringMapValue(raw, "price")),
 		"tag":      decodeJSONValue(nullStringMapValue(raw, "tag")),

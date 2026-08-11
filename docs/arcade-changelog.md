@@ -13,7 +13,7 @@ Deployment migrations are not user mutations. The guarded Full game-catalog
 cutover does not create a changelog row because it has no authenticated editor.
 It retains every old game batch and revision, records exact pre-change rows in
 the locked migration-origin collection, creates a complete shadow current
-batch, and moves `arcade.game_state` atomically. It must never attribute that
+batch, and moves `arcade.game_v2` atomically. It must never attribute that
 system normalization to an arbitrary user.
 
 Before that cutover, Full's legacy history import preserves each source
@@ -37,7 +37,7 @@ Each row uses these common columns:
 | `PUT /arcade/hour` | `hour` | one row per request | `hour_diff` | Replaces the current `arcade_hour` relation. |
 | `PUT /arcade/sns` | `sns` | one row per request | `sns_diff` | Replaces the current `arcade_sns` relation. |
 | `PUT /arcade/gtk` | `gtk` | one row per request | `gtk_diff` | Replaces the current `arcade_gtk` relation. |
-| `PUT /arcade/game` | `game` | one row per request | `game_diff` | Validates `base_state_id`, creates an immutable history batch, then moves `arcade.game_state` to it. Item IDs are persistent `arcade_game_id` IDs. |
+| `PUT /arcade/game` | `game` | one row per request | `game_diff` | Validates `base_state_id`, creates an immutable history batch, then moves `arcade.game_v2` to it. Item IDs are persistent `arcade_game_id` IDs. |
 | `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Developer/moderator-only administrative version swap. It uses the normal immutable game-state batch flow. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, or `photo`. |
@@ -145,8 +145,24 @@ Field-level diffs are usually:
 `items[]` contains one object per stable game entry. Each item includes:
 - `entry_id`
 - `change_type`: `added`, `updated`, `unchanged`, or `deleted`
-- `before`: the previous version/location/quantity/price/tag snapshot, or `null`
-- `after`: the resulting version/location/quantity/price/tag snapshot, or `null`
+- `before`: the previous revision snapshot, or `null`
+- `after`: the resulting revision snapshot, or `null`
+
+Each non-null revision snapshot contains:
+
+- `version`
+- `cabinet`: canonical `game_cabinet` id, or an empty value when unverified
+- `location`
+- `quantity`
+- `price`
+- `tag`
+- `uncertain`
+- `previous_version`
+
+A cabinet change is a normal game-state change and must appear in these
+before/after snapshots. State-cloning mutations must preserve the cabinet so a
+confirmation, rollback, or bulk version action cannot silently erase cabinet
+identity.
 
 The row-level `state_from` and `state_to` values identify the immutable
 history batches selected before and after the mutation. This keeps the log

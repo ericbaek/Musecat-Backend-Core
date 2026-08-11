@@ -18,9 +18,9 @@ func BuildUpdateBodyFromCurrentState(app core.App, arcadeID string) (UpdateArcad
 	if err != nil {
 		return UpdateArcadeGameBody{}, fmt.Errorf("arcade not found: %w", err)
 	}
-	stateID := strings.TrimSpace(arcade.GetString("game_state"))
+	stateID := strings.TrimSpace(arcade.GetString("game_v2"))
 	if stateID == "" {
-		return UpdateArcadeGameBody{}, fmt.Errorf("arcade.game_state is empty")
+		return UpdateArcadeGameBody{}, fmt.Errorf("arcade.game_v2 is empty")
 	}
 	revisions, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameRevision, "batch={:batch}", "created", 0, 0, dbx.Params{"batch": stateID})
 	if err != nil {
@@ -28,7 +28,7 @@ func BuildUpdateBodyFromCurrentState(app core.App, arcadeID string) (UpdateArcad
 	}
 	body := UpdateArcadeGameBody{Arcade: arcadeID, BaseStateID: stateID, Games: make([]GameAtomInput, 0, len(revisions))}
 	for _, revision := range revisions {
-		body.Games = append(body.Games, GameAtomInput{ID: revision.GetString("entry"), Game: revision.GetString("version"), Location: revision.GetString("location"), Quantity: revision.GetInt("quantity"), RawPrice: revision.Get("price"), RawTag: revision.Get("tag")})
+		body.Games = append(body.Games, GameAtomInput{ID: revision.GetString("entry"), Game: revision.GetString("version"), Cabinet: revision.GetString("cabinet"), Location: revision.GetString("location"), Quantity: revision.GetInt("quantity"), RawPrice: revision.Get("price"), RawTag: revision.Get("tag")})
 	}
 	return body, nil
 }

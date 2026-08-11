@@ -2,12 +2,12 @@ package query
 
 import (
 	"fmt"
-	"github.com/pocketbase/dbx"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
 
@@ -24,22 +24,31 @@ var arcadeCandidateCacheHookCollections = []string{
 	arcadeinternal.CollectionArcadeGameRevisionBatch,
 	arcadeinternal.CollectionArcadeGameRevision,
 	arcadeinternal.CollectionGameSeriesVersion,
+	arcadeinternal.CollectionGameCabinet,
+	arcadeinternal.CollectionGameSeriesVersionCabinet,
 }
 
 type ArcadeCandidate struct {
-	ID               string
-	Country          string
-	Closed           bool
-	Name             string
-	Address          string
-	GameID           string
-	Nicknames        []string
-	GameSeries       []string
-	Location         *arcadeinternal.Location
-	NameNorm         string
-	AddressNorm      string
-	AddressAliasNorm string
-	NicknameNorms    []string
+	ID                string
+	Country           string
+	Closed            bool
+	Name              string
+	Address           string
+	GameID            string
+	Nicknames         []string
+	GameSeries        []string
+	GameInstallations []ArcadeGameInstallation
+	Location          *arcadeinternal.Location
+	NameNorm          string
+	AddressNorm       string
+	AddressAliasNorm  string
+	NicknameNorms     []string
+}
+
+type ArcadeGameInstallation struct {
+	SeriesID  string
+	CabinetID string
+	Quantity  int
 }
 
 func (c ArcadeCandidate) Summary(includeLocation bool, includeGameSeries bool) map[string]any {
@@ -187,7 +196,7 @@ func BuildArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
 		}
 	}
 
-	seriesSetByStateID := map[string]map[string]struct{}{}
+	installationsByStateID := map[string][]ArcadeGameInstallation{}
 	for _, revision := range revisions {
 		stateID := strings.TrimSpace(revision.GetString("batch"))
 		versionID := strings.TrimSpace(revision.GetString("version"))
@@ -198,30 +207,22 @@ func BuildArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
 		if seriesID == "" {
 			continue
 		}
-		seriesSet := seriesSetByStateID[stateID]
-		if seriesSet == nil {
-			seriesSet = map[string]struct{}{}
-			seriesSetByStateID[stateID] = seriesSet
-		}
-		seriesSet[seriesID] = struct{}{}
+		installationsByStateID[stateID] = append(installationsByStateID[stateID], ArcadeGameInstallation{
+			SeriesID:  seriesID,
+			CabinetID: strings.TrimSpace(revision.GetString("cabinet")),
+			Quantity:  revision.GetInt("quantity"),
+		})
 	}
 
-	gameSeriesByStateID := make(map[string][]string, len(seriesSetByStateID))
-	for stateID, seriesSet := range seriesSetByStateID {
-		series := make([]string, 0, len(seriesSet))
-		for sid := range seriesSet {
-			series = append(series, sid)
-		}
-		sort.Strings(series)
-		gameSeriesByStateID[stateID] = series
+	for stateID := range installationsByStateID {
+		sortGameInstallations(installationsByStateID[stateID])
 	}
 
 	candidates := make([]ArcadeCandidate, 0, len(arcades))
 	for _, arcadeRec := range arcades {
 		basicRec := basicByArcadeID[arcadeRec.Id]
-		stateID := strings.TrimSpace(arcadeRec.GetString("game_state"))
-		gameSeries := gameSeriesByStateID[stateID]
-		candidate, ok := buildArcadeCandidateFromRecords(arcadeRec, basicRec, gameSeries)
+		stateID := strings.TrimSpace(arcadeRec.GetString("game_v2"))
+		candidate, ok := buildArcadeCandidateFromRecords(arcadeRec, basicRec, installationsByStateID[stateID])
 		if !ok {
 			continue
 		}
@@ -246,11 +247,11 @@ func buildArcadeCandidate(app core.App, arcadeRec *core.Record) (ArcadeCandidate
 		return ArcadeCandidate{}, false
 	}
 
-	gameSeries := loadArcadeGameSeries(app, arcadeRec.GetString("game_state"))
-	return buildArcadeCandidateFromRecords(arcadeRec, basicRec, gameSeries)
+	installations := loadArcadeGameInstallations(app, arcadeRec.GetString("game_v2"))
+	return buildArcadeCandidateFromRecords(arcadeRec, basicRec, installations)
 }
 
-func buildArcadeCandidateFromRecords(arcadeRec, basicRec *core.Record, gameSeries []string) (ArcadeCandidate, bool) {
+func buildArcadeCandidateFromRecords(arcadeRec, basicRec *core.Record, installations []ArcadeGameInstallation) (ArcadeCandidate, bool) {
 	if arcadeRec == nil || basicRec == nil {
 		return ArcadeCandidate{}, false
 	}
@@ -259,7 +260,7 @@ func buildArcadeCandidateFromRecords(arcadeRec, basicRec *core.Record, gameSerie
 		ID:      arcadeRec.Id,
 		Country: strings.TrimSpace(arcadeRec.GetString("country")),
 		Closed:  arcadeRec.GetBool("closed"),
-		GameID:  strings.TrimSpace(arcadeRec.GetString("game_state")),
+		GameID:  strings.TrimSpace(arcadeRec.GetString("game_v2")),
 	}
 
 	candidate.Name = strings.TrimSpace(basicRec.GetString("name"))
@@ -277,12 +278,13 @@ func buildArcadeCandidateFromRecords(arcadeRec, basicRec *core.Record, gameSerie
 		candidate.Location = &arcadeinternal.Location{Lat: lat, Lon: lon}
 	}
 
-	candidate.GameSeries = cloneStringSliceOrEmpty(gameSeries)
-	sort.Strings(candidate.GameSeries)
+	candidate.GameInstallations = cloneGameInstallations(installations)
+	sortGameInstallations(candidate.GameInstallations)
+	candidate.GameSeries = gameSeriesFromInstallations(candidate.GameInstallations)
 	return candidate, true
 }
 
-func loadArcadeGameSeries(app core.App, stateID string) []string {
+func loadArcadeGameInstallations(app core.App, stateID string) []ArcadeGameInstallation {
 	stateID = strings.TrimSpace(stateID)
 	if app == nil || stateID == "" {
 		return nil
@@ -293,7 +295,7 @@ func loadArcadeGameSeries(app core.App, stateID string) []string {
 		return nil
 	}
 
-	seriesSet := map[string]struct{}{}
+	installations := make([]ArcadeGameInstallation, 0, len(revisions))
 	for _, revision := range revisions {
 		versionID := strings.TrimSpace(revision.GetString("version"))
 		if versionID == "" {
@@ -304,19 +306,15 @@ func loadArcadeGameSeries(app core.App, stateID string) []string {
 			continue
 		}
 		if sid, ok := arcadeinternal.AsString(verRec.Get("series")); ok && strings.TrimSpace(sid) != "" {
-			seriesSet[strings.TrimSpace(sid)] = struct{}{}
+			installations = append(installations, ArcadeGameInstallation{
+				SeriesID:  strings.TrimSpace(sid),
+				CabinetID: strings.TrimSpace(revision.GetString("cabinet")),
+				Quantity:  revision.GetInt("quantity"),
+			})
 		}
 	}
-
-	if len(seriesSet) == 0 {
-		return nil
-	}
-
-	series := make([]string, 0, len(seriesSet))
-	for id := range seriesSet {
-		series = append(series, id)
-	}
-	return series
+	sortGameInstallations(installations)
+	return installations
 }
 
 func cloneArcadeCandidates(candidates []ArcadeCandidate) []ArcadeCandidate {
@@ -329,9 +327,41 @@ func cloneArcadeCandidates(candidates []ArcadeCandidate) []ArcadeCandidate {
 		}
 		out[i].Nicknames = cloneStringSliceOrEmpty(candidate.Nicknames)
 		out[i].GameSeries = cloneStringSliceOrEmpty(candidate.GameSeries)
+		out[i].GameInstallations = cloneGameInstallations(candidate.GameInstallations)
 		out[i].NicknameNorms = cloneStringSliceOrEmpty(candidate.NicknameNorms)
 	}
 	return out
+}
+
+func cloneGameInstallations(in []ArcadeGameInstallation) []ArcadeGameInstallation {
+	if len(in) == 0 {
+		return []ArcadeGameInstallation{}
+	}
+	return append([]ArcadeGameInstallation(nil), in...)
+}
+
+func sortGameInstallations(installations []ArcadeGameInstallation) {
+	sort.Slice(installations, func(i, j int) bool {
+		if installations[i].SeriesID != installations[j].SeriesID {
+			return installations[i].SeriesID < installations[j].SeriesID
+		}
+		return installations[i].CabinetID < installations[j].CabinetID
+	})
+}
+
+func gameSeriesFromInstallations(installations []ArcadeGameInstallation) []string {
+	set := make(map[string]struct{}, len(installations))
+	for _, installation := range installations {
+		if installation.SeriesID != "" {
+			set[installation.SeriesID] = struct{}{}
+		}
+	}
+	series := make([]string, 0, len(set))
+	for seriesID := range set {
+		series = append(series, seriesID)
+	}
+	sort.Strings(series)
+	return series
 }
 
 func cloneStringSliceOrEmpty(in []string) []string {

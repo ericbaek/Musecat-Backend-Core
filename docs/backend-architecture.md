@@ -62,8 +62,8 @@ other arcade handlers own mutation flows for their respective parts.
 | `arcade_hour` | Opening-hour data | hour updates and read expansion |
 | `arcade_sns` | SNS links | SNS updates and read expansion |
 | `arcade_gtk` | GTK-related arcade data, including structured parking meta on `Parking` atoms | GTK updates and read expansion |
-| `arcade_game_id` | Durable installed-game identity | flags and game mutations |
-| `arcade_game_history_batch` | Immutable complete game-state snapshot selected by `arcade.game_state` | game reads, rollback, and mutations |
+| `arcade_game_id` | Durable installed-game identity referenced by `arcade_flag.game_id` | flags and game mutations |
+| `arcade_game_history_batch` | Immutable complete game-state snapshot selected by `arcade.game_v2` | game reads, rollback, and mutations |
 | `arcade_game_history` | Per-entry version, cabinet, quantity, price, and tag within a batch | game reads and mutations |
 | `arcade_photo` | Photo molecule record that groups photo atoms | photo updates and read expansion |
 | `arcade_photo_atoms` | Uploaded photo atoms/files | upload and photo update flows |
@@ -79,6 +79,8 @@ other arcade handlers own mutation flows for their respective parts.
 | --- | --- | --- |
 | `game_series` | Series metadata | game expansion and arcade game display |
 | `game_series_version` | Version-level metadata tied to a series | game expansion, public read endpoints |
+| `game_cabinet` | Canonical cabinet identity and localized names | game expansion and cabinet-qualified nearby filtering |
+| `game_series_version_cabinet` | Reviewed version/cabinet compatibility and cabinet-specific default price | game validation and catalog reads |
 | `game_manufacturer` | Manufacturer metadata | game-series related reads |
 
 ### Support And Moderation
@@ -137,7 +139,9 @@ When adding a feature or new collection:
 
 1. Decide whether the new data is source-of-truth, derived read data, or audit history.
 2. Put the collection name in `handlers/arcade/internal/collections.go` if it is arcade-related.
-3. Add or update the relevant migration.
+3. Add or update the Core schema-only bootstrap coverage. If existing Full data
+   must be transformed, document and implement that guarded migration in
+   Backend Full rather than this repository.
 4. Update the relevant handler doc under `docs/`.
 5. If the new collection affects multiple domains, add a short note here explaining the boundary.
 

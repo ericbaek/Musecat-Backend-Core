@@ -466,12 +466,29 @@ func executeJSONRequest(tb testing.TB, app *tests.TestApp, method, url, body str
 func seedGameSeriesVersion(tb testing.TB, app *tests.TestApp) string {
 	tb.Helper()
 
+	seriesColl, err := app.FindCollectionByNameOrId("game_series")
+	if err != nil {
+		tb.Fatalf("failed to load game_series collection: %v", err)
+	}
+	series := core.NewRecord(seriesColl)
+	series.Set("seriesNumber", time.Now().UnixNano())
+	series.Set("en", "Test Series")
+	series.Set("kr", "Test Series")
+	series.Set("jp", "Test Series")
+	series.Set("en_short", "Test Series")
+	series.Set("kr_short", "Test Series")
+	series.Set("jp_short", "Test Series")
+	if err := app.Save(series); err != nil {
+		tb.Fatalf("failed to save game_series: %v", err)
+	}
+
 	coll, err := app.FindCollectionByNameOrId("game_series_version")
 	if err != nil {
 		tb.Fatalf("failed to load game_series_version collection: %v", err)
 	}
 
 	rec := core.NewRecord(coll)
+	rec.Set("series", series.Id)
 	rec.Set("en", "Test Version")
 	if err := app.Save(rec); err != nil {
 		tb.Fatalf("failed to save game_series_version: %v", err)

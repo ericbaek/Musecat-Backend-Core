@@ -28,7 +28,7 @@ func TestCreateArcadeFlag_Success(t *testing.T) {
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
 			`"arcade":"`,
-			`"atom":"`,
+			`"game_id":"`,
 			`"flag":"`,
 			`"game":{"id":"`,
 		},
@@ -54,7 +54,7 @@ func TestCreateArcadeFlag_Success(t *testing.T) {
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
-			"game_atom_id":"%s",
+			"game_id":"%s",
 			"disruption":"major",
 			"message":"coin acceptor jammed"
 		}`, arcadeID, atomID))
@@ -72,8 +72,8 @@ func TestCreateArcadeFlag_Success(t *testing.T) {
 		if got, _ := payload["arcade"].(string); got != arcadeID {
 			tb.Fatalf("expected arcade %q, got %v", arcadeID, payload["arcade"])
 		}
-		if got, _ := payload["atom"].(string); got != atomID {
-			tb.Fatalf("expected atom %q, got %v", atomID, payload["atom"])
+		if got, _ := payload["game_id"].(string); got != atomID {
+			tb.Fatalf("expected game_id %q, got %v", atomID, payload["game_id"])
 		}
 		flagID, _ := payload["flag"].(string)
 		if flagID == "" {
@@ -107,14 +107,8 @@ func TestCreateArcadeFlag_Success(t *testing.T) {
 		if got := flagRec.GetString("createdBy"); got != userID {
 			tb.Fatalf("expected createdBy %q, got %q", userID, got)
 		}
-
-		atomRec, err := app.FindRecordById("arcade_game_atoms", atomID)
-		if err != nil {
-			tb.Fatalf("failed to load arcade_game_atoms: %v", err)
-		}
-		flags := atomRec.GetStringSlice("flags")
-		if len(flags) != 1 || flags[0] != flagID {
-			tb.Fatalf("expected atom flags [%s], got %#v", flagID, flags)
+		if got := flagRec.GetString("game_id"); got != atomID {
+			tb.Fatalf("expected flag.game_id %q, got %q", atomID, got)
 		}
 	}
 
@@ -135,7 +129,7 @@ func TestCreateArcadeFlag_MultipartWithPhotos(t *testing.T) {
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
 			`"arcade":"`,
-			`"atom":"`,
+			`"game_id":"`,
 			`"flag":"`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {
@@ -178,8 +172,8 @@ func TestCreateArcadeFlag_MultipartWithPhotos(t *testing.T) {
 		if got, _ := payload["arcade"].(string); got != arcadeID {
 			tb.Fatalf("expected arcade %q, got %v", arcadeID, payload["arcade"])
 		}
-		if got, _ := payload["atom"].(string); got != atomID {
-			tb.Fatalf("expected atom %q, got %v", atomID, payload["atom"])
+		if got, _ := payload["game_id"].(string); got != atomID {
+			tb.Fatalf("expected game_id %q, got %v", atomID, payload["game_id"])
 		}
 		flagID, _ := payload["flag"].(string)
 		if flagID == "" {
@@ -263,8 +257,8 @@ func buildFlagMultipart(
 	if err := writer.WriteField("arcade", arcadeID); err != nil {
 		tb.Fatalf("failed to write arcade field: %v", err)
 	}
-	if err := writer.WriteField("game_atom_id", atomID); err != nil {
-		tb.Fatalf("failed to write game_atom_id field: %v", err)
+	if err := writer.WriteField("game_id", atomID); err != nil {
+		tb.Fatalf("failed to write game_id field: %v", err)
 	}
 	if err := writer.WriteField("disruption", disruption); err != nil {
 		tb.Fatalf("failed to write disruption field: %v", err)
@@ -300,27 +294,27 @@ func TestCreateArcadeFlag_Validation(t *testing.T) {
 	cases := []testCase{
 		{
 			name:   "missing arcade",
-			body:   `{"game_atom_id":"atom","disruption":"major","message":"broken"}`,
+			body:   `{"game_id":"atom","disruption":"major","message":"broken"}`,
 			detail: `"details":"arcade is required"`,
 		},
 		{
-			name:   "missing game_atom_id",
+			name:   "missing game_id",
 			body:   `{"arcade":"arc","disruption":"major","message":"broken"}`,
-			detail: `"details":"game_atom_id is required"`,
+			detail: `"details":"game_id is required"`,
 		},
 		{
 			name:   "missing disruption",
-			body:   `{"arcade":"arc","game_atom_id":"atom","message":"broken"}`,
+			body:   `{"arcade":"arc","game_id":"atom","message":"broken"}`,
 			detail: `"details":"disruption is required"`,
 		},
 		{
 			name:   "missing message",
-			body:   `{"arcade":"arc","game_atom_id":"atom","disruption":"major"}`,
+			body:   `{"arcade":"arc","game_id":"atom","disruption":"major"}`,
 			detail: `"details":"message is required"`,
 		},
 		{
 			name:   "invalid disruption",
-			body:   `{"arcade":"arc","game_atom_id":"atom","disruption":"critical","message":"broken"}`,
+			body:   `{"arcade":"arc","game_id":"atom","disruption":"critical","message":"broken"}`,
 			detail: `"details":"disruption must be one of unplayable, major, bearable, minor"`,
 		},
 	}
@@ -391,7 +385,7 @@ func TestCreateArcadeFlag_NotFoundOrCrossArcade(t *testing.T) {
 
 			scenario.Body = strings.NewReader(fmt.Sprintf(`{
 				"arcade":"nonexistent_arcade",
-				"game_atom_id":"%s",
+				"game_id":"%s",
 				"disruption":"minor",
 				"message":"broken"
 			}`, atomID))
@@ -400,19 +394,19 @@ func TestCreateArcadeFlag_NotFoundOrCrossArcade(t *testing.T) {
 		scenario.Test(t)
 	})
 
-	t.Run("game atom not found", func(t *testing.T) {
+	t.Run("game id not found", func(t *testing.T) {
 		headers := map[string]string{}
 		var arcadeID string
 
 		scenario := tests.ApiScenario{
-			Name:           "POST /arcade/flag game atom not found",
+			Name:           "POST /arcade/flag game id not found",
 			Method:         http.MethodPost,
 			URL:            "/arcade/flag",
 			Headers:        headers,
 			ExpectedStatus: http.StatusBadGateway,
 			ExpectedContent: []string{
 				`"error":"transaction failed"`,
-				`"details":"game atom not found:`,
+				`"details":"game entry not found:`,
 			},
 			TestAppFactory: func(tb testing.TB) *tests.TestApp {
 				return newArcadeTestApp(tb)
@@ -433,7 +427,7 @@ func TestCreateArcadeFlag_NotFoundOrCrossArcade(t *testing.T) {
 
 			scenario.Body = strings.NewReader(fmt.Sprintf(`{
 				"arcade":"%s",
-				"game_atom_id":"nonexistent_atom",
+				"game_id":"nonexistent_atom",
 				"disruption":"minor",
 				"message":"broken"
 			}`, arcadeID))
@@ -442,7 +436,7 @@ func TestCreateArcadeFlag_NotFoundOrCrossArcade(t *testing.T) {
 		scenario.Test(t)
 	})
 
-	t.Run("game atom belongs to another arcade", func(t *testing.T) {
+	t.Run("game id belongs to another arcade", func(t *testing.T) {
 		headers := map[string]string{}
 		var targetArcadeID string
 		var foreignAtomID string
@@ -455,7 +449,7 @@ func TestCreateArcadeFlag_NotFoundOrCrossArcade(t *testing.T) {
 			ExpectedStatus: http.StatusBadGateway,
 			ExpectedContent: []string{
 				`"error":"transaction failed"`,
-				`"details":"game_atom_id does not belong to arcade"`,
+				`"details":"game_id does not belong to arcade"`,
 			},
 			TestAppFactory: func(tb testing.TB) *tests.TestApp {
 				return newArcadeTestApp(tb)
@@ -483,7 +477,7 @@ func TestCreateArcadeFlag_NotFoundOrCrossArcade(t *testing.T) {
 
 			scenario.Body = strings.NewReader(fmt.Sprintf(`{
 				"arcade":"%s",
-				"game_atom_id":"%s",
+				"game_id":"%s",
 				"disruption":"minor",
 				"message":"broken"
 			}`, targetArcadeID, foreignAtomID))
@@ -501,7 +495,7 @@ func TestCreateArcadeFlag_BlocksWithdrawnUser(t *testing.T) {
 		Method:         http.MethodPost,
 		URL:            "/arcade/flag",
 		Headers:        headers,
-		Body:           strings.NewReader(`{"arcade":"x","game_atom_id":"y","disruption":"major","message":"broken"}`),
+		Body:           strings.NewReader(`{"arcade":"x","game_id":"y","disruption":"major","message":"broken"}`),
 		ExpectedStatus: http.StatusForbidden,
 		ExpectedContent: []string{
 			`"code":"ACCOUNT_WITHDRAWN"`,
@@ -535,45 +529,59 @@ func seedGameAtomForFlag(tb testing.TB, app *tests.TestApp, arcadeID string) str
 	tb.Helper()
 
 	versionID := seedGameSeriesVersion(tb, app)
-
-	gameColl, err := app.FindCollectionByNameOrId("arcade_game")
+	version, err := app.FindRecordById("game_series_version", versionID)
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game collection: %v", err)
+		tb.Fatalf("failed to load game_series_version: %v", err)
 	}
-	molecule := core.NewRecord(gameColl)
-	molecule.Set("arcade", arcadeID)
-	if err := app.Save(molecule); err != nil {
-		tb.Fatalf("failed to create arcade_game molecule: %v", err)
-	}
-
-	atomColl, err := app.FindCollectionByNameOrId("arcade_game_atoms")
+	entryColl, err := app.FindCollectionByNameOrId("arcade_game_id")
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game_atoms collection: %v", err)
+		tb.Fatalf("failed to load arcade_game_id: %v", err)
 	}
-	atom := core.NewRecord(atomColl)
-	atom.Set("molecule", molecule.Id)
-	atom.Set("game", versionID)
-	atom.Set("location", "1F")
-	atom.Set("quantity", 1)
-	atom.Set("price", map[string]any{
+	entry := core.NewRecord(entryColl)
+	entry.Set("arcade", arcadeID)
+	entry.Set("series", version.GetString("series"))
+	if err := app.Save(entry); err != nil {
+		tb.Fatalf("failed to create arcade_game_id: %v", err)
+	}
+	batchColl, err := app.FindCollectionByNameOrId("arcade_game_history_batch")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_history_batch: %v", err)
+	}
+	batch := core.NewRecord(batchColl)
+	batch.Set("arcade", arcadeID)
+	batch.Set("reason", "flag test")
+	if err := app.Save(batch); err != nil {
+		tb.Fatalf("failed to create arcade_game_history_batch: %v", err)
+	}
+	revisionColl, err := app.FindCollectionByNameOrId("arcade_game_history")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_history: %v", err)
+	}
+	revision := core.NewRecord(revisionColl)
+	revision.Set("batch", batch.Id)
+	revision.Set("entry", entry.Id)
+	revision.Set("version", versionID)
+	revision.Set("location", "1F")
+	revision.Set("quantity", 1)
+	revision.Set("price", map[string]any{
 		"currency": "KRW",
 		"type":     "credit",
 		"list":     []map[string]any{{"value": 500}},
 		"accept":   []string{},
 	})
-	atom.Set("tag", []map[string]any{{"category": "기타", "quantity": 1, "note": "ok"}})
-	if err := app.Save(atom); err != nil {
-		tb.Fatalf("failed to create arcade_game atom: %v", err)
+	revision.Set("tag", []map[string]any{{"category": "기타", "note": "ok"}})
+	if err := app.Save(revision); err != nil {
+		tb.Fatalf("failed to create arcade_game_history: %v", err)
 	}
 
 	arcadeRec, err := app.FindRecordById("arcade", arcadeID)
 	if err != nil {
 		tb.Fatalf("failed to load arcade: %v", err)
 	}
-	arcadeRec.Set("game", molecule.Id)
+	arcadeRec.Set("game_v2", batch.Id)
 	if err := app.Save(arcadeRec); err != nil {
-		tb.Fatalf("failed to link arcade.game: %v", err)
+		tb.Fatalf("failed to link arcade.game_v2: %v", err)
 	}
 
-	return atom.Id
+	return entry.Id
 }

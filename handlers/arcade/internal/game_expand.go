@@ -64,7 +64,7 @@ func BuildGameSeriesBundle(app core.App, versionID string) (map[string]any, erro
 }
 
 // BuildExpandedGameValue expands an immutable game-state batch. Item ids are
-// durable arcade_game_entry ids; state data always comes from this batch.
+// durable arcade_game_id ids; state data always comes from this batch.
 func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool) {
 	if strings.TrimSpace(stateID) == "" {
 		return nil, false
@@ -101,6 +101,7 @@ func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool)
 		item := map[string]any{
 			"version":    versionObj,
 			"series":     seriesObj,
+			"cabinet":    revision.GetString("cabinet"),
 			"location":   revision.GetString("location"),
 			"quantity":   revision.GetInt("quantity"),
 			"price":      price,
@@ -109,7 +110,7 @@ func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool)
 			"updated":    revision.GetString("last_modified_at"),
 			"updated_by": revision.GetString("last_modified_by"),
 		}
-		flagRecs, _ := app.FindRecordsByFilter(CollectionArcadeFlag, "game_entry={:entry} && solved=false", "created", 0, 0, dbx.Params{"entry": entryID})
+		flagRecs, _ := app.FindRecordsByFilter(CollectionArcadeFlag, "game_id={:entry} && solved=false", "created", 0, 0, dbx.Params{"entry": entryID})
 		flags := make([]map[string]any, 0, len(flagRecs))
 		for _, flagRec := range flagRecs {
 			flagObj, ok := expandFlag(app, flagRec.Id, flagRec)
@@ -143,7 +144,7 @@ func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool)
 		if flagRec.GetBool("solved") {
 			continue
 		}
-		entryID := strings.TrimSpace(flagRec.GetString("game_entry"))
+		entryID := strings.TrimSpace(flagRec.GetString("game_id"))
 		if entryID != "" {
 			if _, active := activeEntries[entryID]; active {
 				continue
@@ -180,7 +181,7 @@ func GameAtomUpdatedValue(atom *core.Record) string {
 func ResolveGameMoleculeIDForFlag(app core.App, arcadeID, flagID string) string {
 	if arcadeID != "" {
 		if arcadeRec, err := app.FindRecordById(CollectionArcade, arcadeID); err == nil {
-			if gameID := strings.TrimSpace(arcadeRec.GetString("game_state")); gameID != "" {
+			if gameID := strings.TrimSpace(arcadeRec.GetString("game_v2")); gameID != "" {
 				return gameID
 			}
 		}

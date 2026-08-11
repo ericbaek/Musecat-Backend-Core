@@ -73,7 +73,7 @@ func TestGameStateV2_PointerChangelogAndConflict(t *testing.T) {
 		t.Fatalf("historical revision was mutated: %q", got)
 	}
 	arcade, err := app.FindRecordById("arcade", arcadeID)
-	if err != nil || arcade.GetString("game_state") != state2 {
+	if err != nil || arcade.GetString("game_v2") != state2 {
 		t.Fatalf("arcade pointer was not moved: %v", err)
 	}
 	changes := loadChangelogRecords(t, app, arcadeID, "game")

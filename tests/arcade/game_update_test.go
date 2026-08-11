@@ -169,7 +169,7 @@ func TestUpdateArcadeGame_AllowsEmptyArray(t *testing.T) {
 			tb.Fatalf("expected empty game.items array, got %#v", items)
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load game atoms: %v", err)
 		}
@@ -253,16 +253,16 @@ func TestUpdateArcadeGame_StoresPriceAcceptAsEmptyArray(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade record: %v", err)
 		}
-		if got := arcadeRec.GetString("game"); got != moleculeID {
-			tb.Fatalf("expected arcade.game=%q, got %q", moleculeID, got)
+		if got := arcadeRec.GetString("game_v2"); got != moleculeID {
+			tb.Fatalf("expected arcade.game_v2=%q, got %q", moleculeID, got)
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
-			tb.Fatalf("failed to load game atoms: %v", err)
+			tb.Fatalf("failed to load game history: %v", err)
 		}
 		if len(atoms) != 1 {
-			tb.Fatalf("expected 1 game atom, got %d", len(atoms))
+			tb.Fatalf("expected 1 game revision, got %d", len(atoms))
 		}
 
 		var price map[string]any
@@ -379,7 +379,7 @@ func TestUpdateArcadeGame_IgnoresTagQuantityWhenStoring(t *testing.T) {
 			tb.Fatalf("expected response tag to omit quantity, got %#v", tag)
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load game atoms: %v", err)
 		}
@@ -472,7 +472,7 @@ func TestUpdateArcadeGame_AllowsNullPriceValue(t *testing.T) {
 			tb.Fatalf("expected game molecule id in response")
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load game atoms: %v", err)
 		}
@@ -569,7 +569,7 @@ func TestUpdateArcadeGame_AllowsMissingLocation(t *testing.T) {
 			tb.Fatalf("expected game molecule id in response")
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load game atoms: %v", err)
 		}
@@ -656,7 +656,7 @@ func TestUpdateArcadeGame_PreservesGamemodeMetadata(t *testing.T) {
 			tb.Fatalf("expected game molecule id in response")
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load game atoms: %v", err)
 		}
@@ -752,12 +752,12 @@ func TestUpdateArcadeGame_InheritsFlagsFromPrevAtom(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		prevMoleculeID := arcadeRec.GetString("game")
+		prevMoleculeID := arcadeRec.GetString("game_v2")
 		if prevMoleculeID == "" {
 			tb.Fatalf("expected previous game molecule id")
 		}
 
-		prevAtoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": prevMoleculeID})
+		prevAtoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": prevMoleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load previous game atoms: %v", err)
 		}
@@ -774,23 +774,20 @@ func TestUpdateArcadeGame_InheritsFlagsFromPrevAtom(t *testing.T) {
 		flagRec.Set("disruption", "major")
 		flagRec.Set("solved", false)
 		flagRec.Set("message", "inherit me")
+		flagRec.Set("game_id", prevAtoms[0].GetString("entry"))
 		flagRec.Set("createdBy", user.Id)
 		if err := app.Save(flagRec); err != nil {
 			tb.Fatalf("failed to save arcade_flag: %v", err)
 		}
 		inheritedFlagID = flagRec.Id
 
-		prevAtoms[0].Set("flags", []string{inheritedFlagID})
-		if err := app.Save(prevAtoms[0]); err != nil {
-			tb.Fatalf("failed to set flags on previous atom: %v", err)
-		}
-
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
+			"base_state_id":"%s",
 			"games":[
 				{
 					"game":"%s",
-					"prev_id":"%s",
+					"id":"%s",
 					"location":"2F",
 					"quantity":1,
 					"price":{
@@ -802,8 +799,8 @@ func TestUpdateArcadeGame_InheritsFlagsFromPrevAtom(t *testing.T) {
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
 			]
-		}`, arcadeID, versionID, prevAtoms[0].Id))
-		prevAtomID = prevAtoms[0].Id
+		}`, arcadeID, prevMoleculeID, versionID, prevAtoms[0].GetString("entry")))
+		prevAtomID = prevAtoms[0].GetString("entry")
 	}
 
 	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
@@ -824,7 +821,7 @@ func TestUpdateArcadeGame_InheritsFlagsFromPrevAtom(t *testing.T) {
 			tb.Fatalf("expected game molecule id in response")
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load game atoms: %v", err)
 		}
@@ -832,12 +829,17 @@ func TestUpdateArcadeGame_InheritsFlagsFromPrevAtom(t *testing.T) {
 			tb.Fatalf("expected 1 game atom, got %d", len(atoms))
 		}
 
-		flags := atoms[0].GetStringSlice("flags")
-		if len(flags) != 1 {
-			tb.Fatalf("expected inherited single flag, got %#v", flags)
+		items, ok := gameObj["items"].([]any)
+		if !ok || len(items) != 1 {
+			tb.Fatalf("expected one expanded item, got %#v", gameObj["items"])
 		}
-		if flags[0] != inheritedFlagID {
-			tb.Fatalf("expected inherited flag %q, got %q", inheritedFlagID, flags[0])
+		item, ok := items[0].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected expanded item, got %#v", items[0])
+		}
+		flags, ok := item["flags"].([]any)
+		if !ok || len(flags) != 1 || flags[0].(map[string]any)["id"] != inheritedFlagID {
+			tb.Fatalf("expected inherited flag %q, got %#v", inheritedFlagID, item["flags"])
 		}
 
 		changes, err := app.FindRecordsByFilter("arcade_changelog", "arcade={:id} && changed='game'", "-created", 0, 0, dbx.Params{"id": arcadeID})
@@ -869,36 +871,25 @@ func TestUpdateArcadeGame_InheritsFlagsFromPrevAtom(t *testing.T) {
 		if got, _ := logObj["type"].(string); got != "game_diff" {
 			tb.Fatalf("expected changelog.log.type=game_diff, got %v", logObj["type"])
 		}
-		if got, _ := logObj["version"].(float64); got != 1 {
-			tb.Fatalf("expected changelog.log.version=1, got %v", logObj["version"])
+		if got, _ := logObj["version"].(float64); got != 2 {
+			tb.Fatalf("expected changelog.log.version=2, got %v", logObj["version"])
 		}
 
-		items, ok := logObj["items"].([]any)
-		if !ok || len(items) != 1 {
+		logItems, ok := logObj["items"].([]any)
+		if !ok || len(logItems) != 1 {
 			tb.Fatalf("expected changelog.log.items size 1, got %T %#v", logObj["items"], logObj["items"])
 		}
-		itemObj, ok := items[0].(map[string]any)
+		itemObj, ok := logItems[0].(map[string]any)
 		if !ok {
-			tb.Fatalf("expected log.items[0] object, got %T", items[0])
+			tb.Fatalf("expected log.items[0] object, got %T", logItems[0])
 		}
-		if got, _ := itemObj["prev_id"].(string); got != prevAtomID {
-			tb.Fatalf("expected log.prev_id=%q, got %v", prevAtomID, itemObj["prev_id"])
+		if got, _ := itemObj["entry_id"].(string); got != prevAtomID {
+			tb.Fatalf("expected log.entry_id=%q, got %v", prevAtomID, itemObj["entry_id"])
 		}
 		if got, _ := itemObj["change_type"].(string); got != "updated" {
 			tb.Fatalf("expected log.change_type=updated, got %v", itemObj["change_type"])
 		}
 
-		bullets, ok := itemObj["bullets"].([]any)
-		if !ok || len(bullets) == 0 {
-			tb.Fatalf("expected non-empty log bullets, got %T %#v", itemObj["bullets"], itemObj["bullets"])
-		}
-		bulletSet := i18nBulletKeySet(bullets)
-		if !bulletSet["arcade.changelog.game.location.changed"] {
-			tb.Fatalf("expected location diff bullet, got %#v", bulletSet)
-		}
-		if !bulletSet["arcade.changelog.game.price.changed"] {
-			tb.Fatalf("expected price diff bullet, got %#v", bulletSet)
-		}
 	}
 
 	scenario.Test(t)
@@ -948,25 +939,26 @@ func TestUpdateArcadeGame_LogsUnchangedWhenNoDiff(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		prevMoleculeID := arcadeRec.GetString("game")
+		prevMoleculeID := arcadeRec.GetString("game_v2")
 		if prevMoleculeID == "" {
 			tb.Fatalf("expected previous game molecule id")
 		}
-		prevAtoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": prevMoleculeID})
+		prevAtoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": prevMoleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load previous game atoms: %v", err)
 		}
 		if len(prevAtoms) != 1 {
 			tb.Fatalf("expected 1 previous game atom, got %d", len(prevAtoms))
 		}
-		prevAtomID = prevAtoms[0].Id
+		prevAtomID = prevAtoms[0].GetString("entry")
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
+			"base_state_id":"%s",
 			"games":[
 				{
 					"game":"%s",
-					"prev_id":"%s",
+					"id":"%s",
 					"location":"1F",
 					"quantity":1,
 					"price":{
@@ -978,7 +970,7 @@ func TestUpdateArcadeGame_LogsUnchangedWhenNoDiff(t *testing.T) {
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
 			]
-		}`, arcadeID, versionID, prevAtomID))
+		}`, arcadeID, prevMoleculeID, versionID, prevAtomID))
 	}
 
 	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
@@ -1006,22 +998,11 @@ func TestUpdateArcadeGame_LogsUnchangedWhenNoDiff(t *testing.T) {
 		if !ok {
 			tb.Fatalf("expected log item object, got %T", items[0])
 		}
-		if got, _ := itemObj["prev_id"].(string); got != prevAtomID {
-			tb.Fatalf("expected log.prev_id=%q, got %v", prevAtomID, itemObj["prev_id"])
+		if got, _ := itemObj["entry_id"].(string); got != prevAtomID {
+			tb.Fatalf("expected log.entry_id=%q, got %v", prevAtomID, itemObj["entry_id"])
 		}
 		if got, _ := itemObj["change_type"].(string); got != "unchanged" {
 			tb.Fatalf("expected log.change_type=unchanged, got %v", itemObj["change_type"])
-		}
-		bullets, ok := itemObj["bullets"].([]any)
-		if !ok || len(bullets) == 0 {
-			tb.Fatalf("expected non-empty log bullets, got %T %#v", itemObj["bullets"], itemObj["bullets"])
-		}
-		keys := i18nBulletKeySet(bullets)
-		if !keys["arcade.changelog.game.no_changes"] {
-			tb.Fatalf("expected no_changes bullet key, got %#v", keys)
-		}
-		if _, exists := itemObj["diff"]; exists {
-			tb.Fatalf("expected unchanged item to omit diff field, got %v", itemObj["diff"])
 		}
 	}
 
@@ -1064,6 +1045,7 @@ func TestUpdateArcadeGame_LogsDeletedPrevGameAtom(t *testing.T) {
 		})
 
 		versionID := seedGameSeriesVersion(tb, app)
+		deletedVersionID := seedGameSeriesVersion(tb, app)
 		seedGameAtom(tb, app, arcadeID, versionID, map[string]any{
 			"currency": "KRW",
 			"type":     "custom",
@@ -1075,50 +1057,66 @@ func TestUpdateArcadeGame_LogsDeletedPrevGameAtom(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		prevMoleculeID := arcadeRec.GetString("game")
+		prevMoleculeID := arcadeRec.GetString("game_v2")
 		if prevMoleculeID == "" {
 			tb.Fatalf("expected linked game molecule id")
 		}
 
-		atomColl, err := app.FindCollectionByNameOrId("arcade_game_atoms")
+		version, err := app.FindRecordById("game_series_version", versionID)
 		if err != nil {
-			tb.Fatalf("failed to load arcade_game_atoms collection: %v", err)
+			tb.Fatalf("failed to load game_series_version: %v", err)
 		}
-		secondAtom := core.NewRecord(atomColl)
-		secondAtom.Set("molecule", prevMoleculeID)
-		secondAtom.Set("game", versionID)
-		secondAtom.Set("location", "B2")
-		secondAtom.Set("quantity", 2)
-		secondAtom.Set("price", map[string]any{
+		entryColl, err := app.FindCollectionByNameOrId("arcade_game_id")
+		if err != nil {
+			tb.Fatalf("failed to load arcade_game_id collection: %v", err)
+		}
+		entry := core.NewRecord(entryColl)
+		entry.Set("arcade", arcadeID)
+		entry.Set("series", version.GetString("series"))
+		if err := app.Save(entry); err != nil {
+			tb.Fatalf("failed to create second game entry: %v", err)
+		}
+		revisionColl, err := app.FindCollectionByNameOrId("arcade_game_history")
+		if err != nil {
+			tb.Fatalf("failed to load arcade_game_history collection: %v", err)
+		}
+		secondRevision := core.NewRecord(revisionColl)
+		secondRevision.Set("batch", prevMoleculeID)
+		secondRevision.Set("entry", entry.Id)
+		secondRevision.Set("version", deletedVersionID)
+		secondRevision.Set("location", "B2")
+		secondRevision.Set("quantity", 2)
+		secondRevision.Set("price", map[string]any{
 			"currency": "KRW",
 			"type":     "custom",
 			"list":     []map[string]any{{"value": 1000}},
 			"accept":   []string{"Cash"},
 		})
-		secondAtom.Set("tag", []map[string]any{{"category": "기타", "quantity": 1, "note": "old"}})
-		if err := app.Save(secondAtom); err != nil {
-			tb.Fatalf("failed to create second previous atom: %v", err)
+		secondRevision.Set("tag", []map[string]any{{"category": "기타", "note": "old"}})
+		if err := app.Save(secondRevision); err != nil {
+			tb.Fatalf("failed to create second previous revision: %v", err)
 		}
-		deletedPrevID = secondAtom.Id
+		deletedPrevID = entry.Id
 
-		prevAtoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "+created", 0, 0, dbx.Params{"id": prevMoleculeID})
+		prevAtoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "+created", 0, 0, dbx.Params{"id": prevMoleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load previous atoms: %v", err)
 		}
 		if len(prevAtoms) != 2 {
 			tb.Fatalf("expected 2 previous atoms, got %d", len(prevAtoms))
 		}
-		keptPrevID = prevAtoms[0].Id
+		keptPrevID = prevAtoms[0].GetString("entry")
 		if keptPrevID == deletedPrevID {
-			keptPrevID = prevAtoms[1].Id
+			keptPrevID = prevAtoms[1].GetString("entry")
 		}
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
+			"base_state_id":"%s",
 			"games":[
 				{
 					"game":"%s",
-					"prev_id":"%s",
+					"id":"%s",
 					"location":"2F",
 					"quantity":1,
 					"price":{
@@ -1130,7 +1128,7 @@ func TestUpdateArcadeGame_LogsDeletedPrevGameAtom(t *testing.T) {
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
 			]
-		}`, arcadeID, versionID, keptPrevID))
+		}`, arcadeID, prevMoleculeID, versionID, keptPrevID))
 	}
 
 	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
@@ -1185,16 +1183,8 @@ func TestUpdateArcadeGame_LogsDeletedPrevGameAtom(t *testing.T) {
 			if changeType != "deleted" {
 				continue
 			}
-			if got, _ := item["prev_id"].(string); got != deletedPrevID {
-				tb.Fatalf("expected deleted prev_id=%q, got %v", deletedPrevID, item["prev_id"])
-			}
-			bullets, ok := item["bullets"].([]any)
-			if !ok || len(bullets) == 0 {
-				tb.Fatalf("expected deleted item bullets, got %T %#v", item["bullets"], item["bullets"])
-			}
-			keys := i18nBulletKeySet(bullets)
-			if !keys["arcade.changelog.game.deleted"] {
-				tb.Fatalf("expected deleted bullet key, got %#v", keys)
+			if got, _ := item["entry_id"].(string); got != deletedPrevID {
+				tb.Fatalf("expected deleted entry_id=%q, got %v", deletedPrevID, item["entry_id"])
 			}
 			foundDeleted = true
 		}
@@ -1564,12 +1554,12 @@ func TestGetArcadeValues_ExpandGame_IncludesFlagsAndReactions(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		moleculeID := arcadeRec.GetString("game")
+		moleculeID := arcadeRec.GetString("game_v2")
 		if moleculeID == "" {
 			tb.Fatalf("expected linked game molecule id")
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load game atoms: %v", err)
 		}
@@ -1621,9 +1611,9 @@ func TestGetArcadeValues_ExpandGame_IncludesFlagsAndReactions(t *testing.T) {
 			tb.Fatalf("failed to save second reaction: %v", err)
 		}
 
-		atoms[0].Set("flags", []string{flagRec.Id})
-		if err := app.Save(atoms[0]); err != nil {
-			tb.Fatalf("failed to update game atom flags: %v", err)
+		flagRec.Set("game_id", atoms[0].GetString("entry"))
+		if err := app.Save(flagRec); err != nil {
+			tb.Fatalf("failed to link flag to game id: %v", err)
 		}
 
 		scenario.URL = fmt.Sprintf("/arcade?id=%s&expand=game", arcadeID)
@@ -1741,12 +1731,12 @@ func TestGetArcadeValues_ExpandGame_IncludesOrphanFlags(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		moleculeID := arcadeRec.GetString("game")
+		moleculeID := arcadeRec.GetString("game_v2")
 		if moleculeID == "" {
 			tb.Fatalf("expected linked game molecule id")
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load game atoms: %v", err)
 		}
@@ -1793,9 +1783,9 @@ func TestGetArcadeValues_ExpandGame_IncludesOrphanFlags(t *testing.T) {
 			tb.Fatalf("failed to save orphan reaction: %v", err)
 		}
 
-		atoms[0].Set("flags", []string{linkedFlagID})
-		if err := app.Save(atoms[0]); err != nil {
-			tb.Fatalf("failed to update game atom flags: %v", err)
+		linkedFlag.Set("game_id", atoms[0].GetString("entry"))
+		if err := app.Save(linkedFlag); err != nil {
+			tb.Fatalf("failed to link flag to game id: %v", err)
 		}
 
 		scenario.URL = fmt.Sprintf("/arcade?id=%s&expand=game", arcadeID)
@@ -1903,12 +1893,12 @@ func TestGetArcadeValues_ExpandGame_ExcludesSolvedFlags(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		moleculeID := arcadeRec.GetString("game")
+		moleculeID := arcadeRec.GetString("game_v2")
 		if moleculeID == "" {
 			tb.Fatalf("expected linked game molecule id")
 		}
 
-		atoms, err := app.FindRecordsByFilter("arcade_game_atoms", "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
+		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
 		if err != nil {
 			tb.Fatalf("failed to load game atoms: %v", err)
 		}
@@ -1963,9 +1953,13 @@ func TestGetArcadeValues_ExpandGame_ExcludesSolvedFlags(t *testing.T) {
 			tb.Fatalf("failed to save orphan solved flag: %v", err)
 		}
 
-		atoms[0].Set("flags", []string{linkedUnsolvedID, linkedSolved.Id})
-		if err := app.Save(atoms[0]); err != nil {
-			tb.Fatalf("failed to update game atom flags: %v", err)
+		linkedUnsolved.Set("game_id", atoms[0].GetString("entry"))
+		linkedSolved.Set("game_id", atoms[0].GetString("entry"))
+		if err := app.Save(linkedUnsolved); err != nil {
+			tb.Fatalf("failed to link unsolved flag to game id: %v", err)
+		}
+		if err := app.Save(linkedSolved); err != nil {
+			tb.Fatalf("failed to link solved flag to game id: %v", err)
 		}
 
 		scenario.URL = fmt.Sprintf("/arcade?id=%s&expand=game", arcadeID)
@@ -2041,38 +2035,53 @@ func i18nBulletKeySet(bullets []any) map[string]bool {
 func seedGameAtom(tb testing.TB, app *tests.TestApp, arcadeID, versionID string, price any) {
 	tb.Helper()
 
-	gameColl, err := app.FindCollectionByNameOrId("arcade_game")
+	version, err := app.FindRecordById("game_series_version", versionID)
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game collection: %v", err)
+		tb.Fatalf("failed to load game_series_version: %v", err)
 	}
-	molecule := core.NewRecord(gameColl)
-	molecule.Set("arcade", arcadeID)
-	if err := app.Save(molecule); err != nil {
-		tb.Fatalf("failed to create arcade_game molecule: %v", err)
-	}
-
-	atomColl, err := app.FindCollectionByNameOrId("arcade_game_atoms")
+	entryColl, err := app.FindCollectionByNameOrId("arcade_game_id")
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game_atoms collection: %v", err)
+		tb.Fatalf("failed to load arcade_game_id collection: %v", err)
 	}
-	atom := core.NewRecord(atomColl)
-	atom.Set("molecule", molecule.Id)
-	atom.Set("game", versionID)
-	atom.Set("location", "1F")
-	atom.Set("quantity", 1)
-	atom.Set("price", price)
-	atom.Set("tag", []map[string]any{{"category": "기타", "quantity": 1, "note": "ok"}})
-	if err := app.Save(atom); err != nil {
-		tb.Fatalf("failed to create arcade_game atom: %v", err)
+	entry := core.NewRecord(entryColl)
+	entry.Set("arcade", arcadeID)
+	entry.Set("series", version.GetString("series"))
+	if err := app.Save(entry); err != nil {
+		tb.Fatalf("failed to create arcade_game_id: %v", err)
+	}
+	batchColl, err := app.FindCollectionByNameOrId("arcade_game_history_batch")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_history_batch: %v", err)
+	}
+	batch := core.NewRecord(batchColl)
+	batch.Set("arcade", arcadeID)
+	batch.Set("reason", "test fixture")
+	if err := app.Save(batch); err != nil {
+		tb.Fatalf("failed to create arcade_game_history_batch: %v", err)
+	}
+	revisionColl, err := app.FindCollectionByNameOrId("arcade_game_history")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_history: %v", err)
+	}
+	revision := core.NewRecord(revisionColl)
+	revision.Set("batch", batch.Id)
+	revision.Set("entry", entry.Id)
+	revision.Set("version", versionID)
+	revision.Set("location", "1F")
+	revision.Set("quantity", 1)
+	revision.Set("price", price)
+	revision.Set("tag", []map[string]any{{"category": "기타", "note": "ok"}})
+	if err := app.Save(revision); err != nil {
+		tb.Fatalf("failed to create arcade_game_history: %v", err)
 	}
 
 	arcadeRec, err := app.FindRecordById("arcade", arcadeID)
 	if err != nil {
 		tb.Fatalf("failed to load arcade: %v", err)
 	}
-	arcadeRec.Set("game", molecule.Id)
+	arcadeRec.Set("game_v2", batch.Id)
 	if err := app.Save(arcadeRec); err != nil {
-		tb.Fatalf("failed to link arcade.game: %v", err)
+		tb.Fatalf("failed to link arcade.game_v2: %v", err)
 	}
 }
 
@@ -2123,52 +2132,71 @@ func seedGameSeriesVersionWithSeries(tb testing.TB, app *tests.TestApp, seriesID
 func seedArcadeGameMolecule(tb testing.TB, app *tests.TestApp, arcadeID string) string {
 	tb.Helper()
 
-	gameColl, err := app.FindCollectionByNameOrId("arcade_game")
+	batchColl, err := app.FindCollectionByNameOrId("arcade_game_history_batch")
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game collection: %v", err)
+		tb.Fatalf("failed to load arcade_game_history_batch: %v", err)
 	}
 
-	molecule := core.NewRecord(gameColl)
-	molecule.Set("arcade", arcadeID)
-	if err := app.Save(molecule); err != nil {
-		tb.Fatalf("failed to create arcade_game molecule: %v", err)
+	batch := core.NewRecord(batchColl)
+	batch.Set("arcade", arcadeID)
+	batch.Set("reason", "test fixture")
+	if err := app.Save(batch); err != nil {
+		tb.Fatalf("failed to create arcade_game_history_batch: %v", err)
 	}
 
 	arcadeRec, err := app.FindRecordById("arcade", arcadeID)
 	if err != nil {
 		tb.Fatalf("failed to load arcade: %v", err)
 	}
-	arcadeRec.Set("game", molecule.Id)
+	arcadeRec.Set("game_v2", batch.Id)
 	if err := app.Save(arcadeRec); err != nil {
-		tb.Fatalf("failed to link arcade.game: %v", err)
+		tb.Fatalf("failed to link arcade.game_v2: %v", err)
 	}
 
-	return molecule.Id
+	return batch.Id
 }
 
-func seedArcadeGameAtom(tb testing.TB, app *tests.TestApp, moleculeID, versionID, location string) string {
+func seedArcadeGameAtom(tb testing.TB, app *tests.TestApp, batchID, versionID, location string) string {
 	tb.Helper()
 
-	atomColl, err := app.FindCollectionByNameOrId("arcade_game_atoms")
+	batch, err := app.FindRecordById("arcade_game_history_batch", batchID)
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game_atoms collection: %v", err)
+		tb.Fatalf("failed to load arcade_game_history_batch: %v", err)
 	}
-
-	atom := core.NewRecord(atomColl)
-	atom.Set("molecule", moleculeID)
-	atom.Set("game", versionID)
-	atom.Set("location", location)
-	atom.Set("quantity", 1)
-	atom.Set("price", map[string]any{
+	version, err := app.FindRecordById("game_series_version", versionID)
+	if err != nil {
+		tb.Fatalf("failed to load game_series_version: %v", err)
+	}
+	entryColl, err := app.FindCollectionByNameOrId("arcade_game_id")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_id: %v", err)
+	}
+	entry := core.NewRecord(entryColl)
+	entry.Set("arcade", batch.GetString("arcade"))
+	entry.Set("series", version.GetString("series"))
+	if err := app.Save(entry); err != nil {
+		tb.Fatalf("failed to create arcade_game_id: %v", err)
+	}
+	revisionColl, err := app.FindCollectionByNameOrId("arcade_game_history")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_history: %v", err)
+	}
+	revision := core.NewRecord(revisionColl)
+	revision.Set("batch", batchID)
+	revision.Set("entry", entry.Id)
+	revision.Set("version", versionID)
+	revision.Set("location", location)
+	revision.Set("quantity", 1)
+	revision.Set("price", map[string]any{
 		"currency": "KRW",
 		"type":     "custom",
 		"list":     []map[string]any{{"value": 500}},
 		"accept":   []string{"Cash"},
 	})
-	atom.Set("tag", []map[string]any{{"category": "기타", "quantity": 1, "note": "ok"}})
-	if err := app.Save(atom); err != nil {
-		tb.Fatalf("failed to create arcade_game atom: %v", err)
+	revision.Set("tag", []map[string]any{{"category": "기타", "note": "ok"}})
+	if err := app.Save(revision); err != nil {
+		tb.Fatalf("failed to create arcade_game_history: %v", err)
 	}
 
-	return atom.Id
+	return entry.Id
 }

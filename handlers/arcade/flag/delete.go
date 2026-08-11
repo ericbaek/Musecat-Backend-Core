@@ -98,11 +98,11 @@ func DeleteArcadeFlag(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
-		if gameValue, ok := arcadeinternal.BuildExpandedGameValue(txApp, arcadeRec.GetString("game_state")); ok {
+		if gameValue, ok := arcadeinternal.BuildExpandedGameValue(txApp, arcadeRec.GetString("game_v2")); ok {
 			expandedGameValue = gameValue
 		} else {
 			expandedGameValue = map[string]any{
-				"id":    arcadeRec.GetString("game_state"),
+				"id":    arcadeRec.GetString("game_v2"),
 				"items": []map[string]any{},
 			}
 		}

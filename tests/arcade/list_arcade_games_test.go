@@ -279,13 +279,13 @@ func seedArcadeGameRevisionState(tb testing.TB, app *tests.TestApp, arcadeID, ve
 	}
 	entryCollection, err := app.FindCollectionByNameOrId("arcade_game_id")
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game_entry: %v", err)
+		tb.Fatalf("failed to load arcade_game_id: %v", err)
 	}
 	entry := core.NewRecord(entryCollection)
 	entry.Set("arcade", arcadeID)
 	entry.Set("series", version.GetString("series"))
 	if err := app.Save(entry); err != nil {
-		tb.Fatalf("failed to save arcade_game_entry: %v", err)
+		tb.Fatalf("failed to save arcade_game_id: %v", err)
 	}
 
 	batchCollection, err := app.FindCollectionByNameOrId("arcade_game_history_batch")
@@ -317,9 +317,9 @@ func seedArcadeGameRevisionState(tb testing.TB, app *tests.TestApp, arcadeID, ve
 	if err != nil {
 		tb.Fatalf("failed to load arcade: %v", err)
 	}
-	arcade.Set("game_state", batch.Id)
+	arcade.Set("game_v2", batch.Id)
 	if err := app.Save(arcade); err != nil {
-		tb.Fatalf("failed to link arcade.game_state: %v", err)
+		tb.Fatalf("failed to link arcade.game_v2: %v", err)
 	}
 	return entry.Id
 }

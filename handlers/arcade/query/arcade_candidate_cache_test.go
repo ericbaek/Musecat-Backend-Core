@@ -17,7 +17,9 @@ func TestGetArcadeCandidates_RebuildsAndInvalidates(t *testing.T) {
 
 	arcadeID, basicID := seedArcadeCandidateRecord(t, app, "Original Name", "Seoul Arcade")
 	versionID := seedArcadeCandidateVersion(t, app, "Initial Series")
-	seedArcadeCandidateGameState(t, app, arcadeID, versionID)
+	cabinetAID := seedArcadeCandidateCabinet(t, app, "Cabinet A")
+	cabinetBID := seedArcadeCandidateCabinet(t, app, "Cabinet B")
+	revisionID := seedArcadeCandidateGameState(t, app, arcadeID, versionID, cabinetAID)
 
 	candidates, err := GetArcadeCandidates(app)
 	if err != nil {
@@ -32,6 +34,33 @@ func TestGetArcadeCandidates_RebuildsAndInvalidates(t *testing.T) {
 	}
 	if len(candidate.GameSeries) != 1 {
 		t.Fatalf("expected one initial game series, got %#v", candidate.GameSeries)
+	}
+	if len(candidate.GameInstallations) != 1 || candidate.GameInstallations[0].CabinetID != cabinetAID {
+		t.Fatalf("expected cabinet projection %q, got %#v", cabinetAID, candidate.GameInstallations)
+	}
+	candidate.GameInstallations[0].CabinetID = "mutated clone"
+	candidates, err = GetArcadeCandidates(app)
+	if err != nil {
+		t.Fatalf("expected cached candidate clone to load: %v", err)
+	}
+	if got := findArcadeCandidate(candidates, arcadeID).GameInstallations[0].CabinetID; got != cabinetAID {
+		t.Fatalf("expected cached projection clone to remain %q, got %q", cabinetAID, got)
+	}
+
+	revision, err := app.FindRecordById("arcade_game_history", revisionID)
+	if err != nil {
+		t.Fatalf("failed to load game revision: %v", err)
+	}
+	revision.Set("cabinet", cabinetBID)
+	if err := app.Save(revision); err != nil {
+		t.Fatalf("failed to update game revision cabinet: %v", err)
+	}
+	candidates, err = GetArcadeCandidates(app)
+	if err != nil {
+		t.Fatalf("expected cache rebuild after cabinet update to succeed: %v", err)
+	}
+	if got := findArcadeCandidate(candidates, arcadeID).GameInstallations[0].CabinetID; got != cabinetBID {
+		t.Fatalf("expected updated cabinet projection %q, got %q", cabinetBID, got)
 	}
 
 	basicRec, err := app.FindRecordById("arcade_basic", basicID)
@@ -171,7 +200,23 @@ func seedArcadeCandidateVersion(tb testing.TB, app *tests.TestApp, seriesName st
 	return rec.Id
 }
 
-func seedArcadeCandidateGameState(tb testing.TB, app *tests.TestApp, arcadeID, versionID string) {
+func seedArcadeCandidateCabinet(tb testing.TB, app *tests.TestApp, name string) string {
+	tb.Helper()
+	coll, err := app.FindCollectionByNameOrId("game_cabinet")
+	if err != nil {
+		tb.Fatalf("failed to load game_cabinet: %v", err)
+	}
+	record := core.NewRecord(coll)
+	record.Set("en", name)
+	record.Set("kr", name)
+	record.Set("jp", name)
+	if err := app.Save(record); err != nil {
+		tb.Fatalf("failed to save game_cabinet: %v", err)
+	}
+	return record.Id
+}
+
+func seedArcadeCandidateGameState(tb testing.TB, app *tests.TestApp, arcadeID, versionID, cabinetID string) string {
 	tb.Helper()
 
 	version, err := app.FindRecordById("game_series_version", versionID)
@@ -180,13 +225,13 @@ func seedArcadeCandidateGameState(tb testing.TB, app *tests.TestApp, arcadeID, v
 	}
 	entryColl, err := app.FindCollectionByNameOrId("arcade_game_id")
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game_entry: %v", err)
+		tb.Fatalf("failed to load arcade_game_id: %v", err)
 	}
 	entry := core.NewRecord(entryColl)
 	entry.Set("arcade", arcadeID)
 	entry.Set("series", version.GetString("series"))
 	if err := app.Save(entry); err != nil {
-		tb.Fatalf("failed to save arcade_game_entry: %v", err)
+		tb.Fatalf("failed to save arcade_game_id: %v", err)
 	}
 
 	batchColl, err := app.FindCollectionByNameOrId("arcade_game_history_batch")
@@ -208,6 +253,7 @@ func seedArcadeCandidateGameState(tb testing.TB, app *tests.TestApp, arcadeID, v
 	revision.Set("batch", batch.Id)
 	revision.Set("entry", entry.Id)
 	revision.Set("version", versionID)
+	revision.Set("cabinet", cabinetID)
 	revision.Set("location", "1F")
 	revision.Set("quantity", 1)
 	revision.Set("price", map[string]any{
@@ -224,8 +270,9 @@ func seedArcadeCandidateGameState(tb testing.TB, app *tests.TestApp, arcadeID, v
 	if err != nil {
 		tb.Fatalf("failed to load arcade: %v", err)
 	}
-	arcade.Set("game_state", batch.Id)
+	arcade.Set("game_v2", batch.Id)
 	if err := app.Save(arcade); err != nil {
-		tb.Fatalf("failed to link arcade.game_state: %v", err)
+		tb.Fatalf("failed to link arcade.game_v2: %v", err)
 	}
+	return revision.Id
 }

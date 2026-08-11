@@ -37,10 +37,10 @@ func init() {
 		if _, err := ensureGameRevision(app, batches, entries, versions, users); err != nil {
 			return err
 		}
-		if err := ensureArcadeGameStateField(app, arcade, batches); err != nil {
+		if err := ensureArcadeGameV2Field(app, arcade, batches); err != nil {
 			return err
 		}
-		if err := ensureFlagGameEntryField(app, entries); err != nil {
+		if err := ensureFlagGameIDField(app, entries); err != nil {
 			return err
 		}
 		for _, name := range []string{
@@ -131,21 +131,21 @@ func ensureGameRevision(app core.App, batch, entry, version, users *core.Collect
 	return c, nil
 }
 
-func ensureArcadeGameStateField(app core.App, arcade, batch *core.Collection) error {
-	if arcade.Fields.GetByName("game_state") == nil {
-		arcade.Fields.Add(relation("game_state", batch.Id, false, false))
+func ensureArcadeGameV2Field(app core.App, arcade, batch *core.Collection) error {
+	if arcade.Fields.GetByName("game_v2") == nil {
+		arcade.Fields.Add(relation("game_v2", batch.Id, false, false))
 	}
 	return app.Save(arcade)
 }
 
-func ensureFlagGameEntryField(app core.App, entry *core.Collection) error {
+func ensureFlagGameIDField(app core.App, entry *core.Collection) error {
 	flag, err := app.FindCollectionByNameOrId("arcade_flag")
 	if err != nil {
 		return err
 	}
-	if flag.Fields.GetByName("game_entry") == nil {
-		flag.Fields.Add(relation("game_entry", entry.Id, false, false))
+	if flag.Fields.GetByName("game_id") == nil {
+		flag.Fields.Add(relation("game_id", entry.Id, false, false))
 	}
-	flag.AddIndex("idx_arcade_flag_game_entry_open", false, "game_entry, solved, created", "")
+	flag.AddIndex("idx_arcade_flag_game_id_open", false, "game_id, solved, created", "")
 	return app.Save(flag)
 }

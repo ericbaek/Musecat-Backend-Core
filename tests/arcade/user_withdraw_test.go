@@ -737,11 +737,11 @@ func TestGetArcadeValues_FlagDisplayNameForWithdrawnUser(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		gameID := arcadeRec.GetString("game")
+		gameID := arcadeRec.GetString("game_v2")
 		if gameID == "" {
-			tb.Fatalf("expected arcade.game relation to be set")
+			tb.Fatalf("expected arcade.game_v2 relation to be set")
 		}
-		atomRec, err := app.FindFirstRecordByFilter("arcade_game_atoms", "molecule={:id}", map[string]any{"id": gameID})
+		atomRec, err := app.FindFirstRecordByFilter("arcade_game_history", "batch={:id}", map[string]any{"id": gameID})
 		if err != nil {
 			tb.Fatalf("failed to load game atom: %v", err)
 		}
@@ -761,6 +761,7 @@ func TestGetArcadeValues_FlagDisplayNameForWithdrawnUser(t *testing.T) {
 		}
 		flagRec.Set("photos", []*filesystem.File{photo})
 		flagRec.Set("createdBy", userRec.Id)
+		flagRec.Set("game_id", atomRec.GetString("entry"))
 		if err := app.Save(flagRec); err != nil {
 			tb.Fatalf("failed to save flag: %v", err)
 		}
@@ -775,11 +776,6 @@ func TestGetArcadeValues_FlagDisplayNameForWithdrawnUser(t *testing.T) {
 		reactionRec.Set("createdBy", userRec.Id)
 		if err := app.Save(reactionRec); err != nil {
 			tb.Fatalf("failed to save reaction: %v", err)
-		}
-
-		atomRec.Set("flags", []string{flagRec.Id})
-		if err := app.Save(atomRec); err != nil {
-			tb.Fatalf("failed to link flag to atom: %v", err)
 		}
 
 		scenario.URL = fmt.Sprintf("/arcade?id=%s&expand=game", arcadeID)

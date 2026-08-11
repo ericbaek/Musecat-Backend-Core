@@ -51,13 +51,25 @@ type countryTotal struct {
 	} `json:"nearest_arcade"`
 }
 
+type nearbyGameFilter struct {
+	SeriesID  string
+	CabinetID string
+}
+
 // ListArcadesBySeriesAndLocation 는 GET /arcades/nearby?game_series=...&lat=...&lon=...&address=...&country=...&page=... 요청을 처리한다.
 // 여러 game_series 를 모두 포함하는 공개·영업 중 오락실을 거리순으로 최대 15개씩 페이지네이션해 반환한다.
 func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 	q := re.Request.URL.Query()
 
 	// 1. 쿼리 파라미터에서 게임 시리즈 ID 들을 읽어온다. 쉼표 또는 다중 쿼리 파라미터를 모두 허용한다.
-	seriesIDs := parseSeriesIDs(q["game_series"])
+	seriesIDs := parseOrderedIDs(q["game_series"])
+	cabinetIDs := parseOrderedIDs(q["game_cabinet"])
+	gameFilters, err := buildNearbyGameFilters(seriesIDs, cabinetIDs)
+	if err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error": err.Error(),
+		})
+	}
 	addressFilter := normalizeAddressKeyword(q.Get("address"))
 	countryFilter := strings.ToUpper(strings.TrimSpace(q.Get("country")))
 	expandGame, err := strconv.ParseBool(strings.TrimSpace(q.Get("expand")))
@@ -131,8 +143,7 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 		if countryFilter != "" && !strings.EqualFold(country, countryFilter) {
 			continue
 		}
-		// 시리즈 필터: 요청된 모든 시리즈를 포함하지 않으면 스킵
-		if len(seriesIDs) > 0 && !containsAllSeries(candidate.GameSeries, seriesIDs) {
+		if !matchesAllGameFilters(candidate.GameInstallations, gameFilters) {
 			continue
 		}
 		// 주소 필터: 행정구역 축약/정식 명칭(예: 대구/대구광역시)을 모두 매칭
@@ -152,8 +163,8 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 		sortDistance := distance
 		if expandGame && candidate.GameID != "" {
 			if expandedGame, ok := buildExpandedGameValue(re.App, candidate.GameID); ok {
-				if len(seriesIDs) > 0 {
-					expandedGame["items"] = filterExpandedGameItemsBySeries(expandedGame["items"], seriesIDs)
+				if len(gameFilters) > 0 {
+					expandedGame["items"] = filterExpandedGameItems(expandedGame["items"], gameFilters)
 				}
 				machineBonus := float64(sumExpandedGameQuantity(expandedGame["items"])) * 3
 				sortDistance = distance - machineBonus
@@ -249,20 +260,40 @@ func summarizeCountryTotals(results []arcadeDistance) map[string]countryTotal {
 	return totals
 }
 
-func parseSeriesIDs(params []string) []string {
-	set := map[string]struct{}{}
+func parseOrderedIDs(params []string) []string {
+	out := make([]string, 0, len(params))
+	seen := map[string]struct{}{}
 	for _, p := range params {
 		for _, part := range strings.Split(p, ",") {
 			if id := strings.TrimSpace(part); id != "" {
-				set[id] = struct{}{}
+				if _, exists := seen[id]; exists {
+					continue
+				}
+				seen[id] = struct{}{}
+				out = append(out, id)
 			}
 		}
 	}
-	out := make([]string, 0, len(set))
-	for id := range set {
-		out = append(out, id)
-	}
 	return out
+}
+
+func buildNearbyGameFilters(seriesIDs, cabinetIDs []string) ([]nearbyGameFilter, error) {
+	if len(cabinetIDs) > 0 && len(seriesIDs) == 0 {
+		return nil, errors.New("game_cabinet requires a paired game_series")
+	}
+	if len(cabinetIDs) > 0 && len(cabinetIDs) != len(seriesIDs) {
+		return nil, errors.New("game_series and game_cabinet must have the same number of paired ids")
+	}
+
+	filters := make([]nearbyGameFilter, 0, len(seriesIDs))
+	for i, seriesID := range seriesIDs {
+		filter := nearbyGameFilter{SeriesID: seriesID}
+		if len(cabinetIDs) > 0 {
+			filter.CabinetID = cabinetIDs[i]
+		}
+		filters = append(filters, filter)
+	}
+	return filters, nil
 }
 
 func parseDistanceLimit(raw string) (float64, bool, error) {
@@ -284,40 +315,36 @@ func buildExpandedGameValue(app core.App, moleculeID string) (map[string]any, bo
 	return arcadeinternal.BuildExpandedGameValue(app, moleculeID)
 }
 
-func filterExpandedGameItemsBySeries(items any, seriesIDs []string) []map[string]any {
+func filterExpandedGameItems(items any, filters []nearbyGameFilter) []map[string]any {
 	raw, ok := items.([]map[string]any)
-	if !ok || len(raw) == 0 || len(seriesIDs) == 0 {
+	if !ok || len(raw) == 0 || len(filters) == 0 {
 		if ok {
 			return raw
 		}
 		return []map[string]any{}
 	}
 
-	seriesSet := map[string]struct{}{}
-	for _, seriesID := range seriesIDs {
-		seriesID = strings.TrimSpace(seriesID)
-		if seriesID == "" {
-			continue
-		}
-		seriesSet[seriesID] = struct{}{}
-	}
-	if len(seriesSet) == 0 {
-		return []map[string]any{}
-	}
-
 	out := make([]map[string]any, 0, len(raw))
 	for _, item := range raw {
-		seriesObj, ok := item["series"].(map[string]any)
-		if !ok {
-			continue
+		seriesID := expandedGameItemSeriesID(item)
+		cabinetID, _ := item["cabinet"].(string)
+		for _, filter := range filters {
+			if seriesID == filter.SeriesID && (filter.CabinetID == "" || strings.TrimSpace(cabinetID) == filter.CabinetID) {
+				out = append(out, item)
+				break
+			}
 		}
-		seriesID, _ := seriesObj["id"].(string)
-		if _, exists := seriesSet[strings.TrimSpace(seriesID)]; !exists {
-			continue
-		}
-		out = append(out, item)
 	}
 	return out
+}
+
+func expandedGameItemSeriesID(item map[string]any) string {
+	seriesObj, ok := item["series"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	seriesID, _ := seriesObj["id"].(string)
+	return strings.TrimSpace(seriesID)
 }
 
 func sumExpandedGameQuantity(items any) int {
@@ -364,18 +391,20 @@ func expandedGameItemQuantity(item map[string]any) int {
 	return 0
 }
 
-// containsAllSeries 는 itemSeries(인터페이스로 전달됨)에 모든 targetSeries 가 포함되어 있는지 확인한다.
-func containsAllSeries(itemSeries any, targetSeries []string) bool {
-	raw, ok := itemSeries.([]string)
-	if !ok || len(raw) == 0 {
-		return false
-	}
-	seriesSet := map[string]struct{}{}
-	for _, s := range raw {
-		seriesSet[s] = struct{}{}
-	}
-	for _, target := range targetSeries {
-		if _, exists := seriesSet[target]; !exists {
+func matchesAllGameFilters(installations []ArcadeGameInstallation, filters []nearbyGameFilter) bool {
+	for _, filter := range filters {
+		matched := false
+		for _, installation := range installations {
+			if installation.SeriesID != filter.SeriesID {
+				continue
+			}
+			if filter.CabinetID != "" && installation.CabinetID != filter.CabinetID {
+				continue
+			}
+			matched = true
+			break
+		}
+		if !matched {
 			return false
 		}
 	}

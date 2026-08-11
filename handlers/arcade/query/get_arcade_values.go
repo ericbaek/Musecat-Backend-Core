@@ -72,7 +72,7 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 	hourId, _ := arcadeinternal.AsString(rec.Get("hour"))
 	snsId, _ := arcadeinternal.AsString(rec.Get("sns"))
 	gtkId, _ := arcadeinternal.AsString(rec.Get("gtk"))
-	gameId, _ := arcadeinternal.AsString(rec.Get("game_state"))
+	gameId, _ := arcadeinternal.AsString(rec.Get("game_v2"))
 	photoId, _ := arcadeinternal.AsString(rec.Get("photo"))
 	admin := map[string]any{
 		"id":        rec.Id,

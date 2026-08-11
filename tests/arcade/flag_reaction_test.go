@@ -341,26 +341,14 @@ func TestUpdateArcadeFlagReaction_AddReturnsGameWhenUnsolved(t *testing.T) {
 			Nickname: []string{"ReactionUnsolved"},
 			Location: location{Lat: 37.5665, Lon: 126.978},
 		})
-		atomID := seedGameAtomForFlag(tb, app, arcadeID)
-		atomRec, err := app.FindRecordById("arcade_game_atoms", atomID)
-		if err != nil {
-			tb.Fatalf("failed to load atom: %v", err)
-		}
-		expectedGameID = atomRec.GetString("molecule")
+		seedGameAtomForFlag(tb, app, arcadeID)
 		arcadeRec, err := app.FindRecordById("arcade", arcadeID)
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		arcadeRec.Set("game", "")
-		if err := app.Save(arcadeRec); err != nil {
-			tb.Fatalf("failed to clear arcade.game: %v", err)
-		}
+		expectedGameID = arcadeRec.GetString("game_v2")
 
 		flagID = createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC(), nil)
-		atomRec.Set("flags", []string{flagID})
-		if err := app.Save(atomRec); err != nil {
-			tb.Fatalf("failed to link flag to atom: %v", err)
-		}
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"flag":"%s",
 			"reaction":"issue_persist",

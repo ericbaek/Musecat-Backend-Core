@@ -27,13 +27,14 @@ type Price struct {
 	Accept   []string    `json:"accept"`
 }
 
-// ID is an arcade_game_entry id. It is intentionally stable across revisions.
+// ID is an arcade_game_id id. It is intentionally stable across revisions.
 // Game is a game_series_version id and may change only within the same series.
 type GameAtomInput struct {
 	ID string `json:"id,omitempty"`
 	// PrevID is legacy internal-only log input. API v2 does not decode it.
 	PrevID   string    `json:"-"`
 	Game     string    `json:"game"`
+	Cabinet  string    `json:"cabinet,omitempty"`
 	Location string    `json:"location"`
 	Quantity int       `json:"quantity"`
 	Price    Price     `json:"price"`
@@ -119,17 +120,18 @@ func validateUpdateGameBody(body *UpdateArcadeGameBody) error {
 	seenEntries, seenVersions := map[string]struct{}{}, map[string]struct{}{}
 	for i := range body.Games {
 		g := &body.Games[i]
-		g.ID, g.Game = strings.TrimSpace(g.ID), strings.TrimSpace(g.Game)
+		g.ID, g.Game, g.Cabinet = strings.TrimSpace(g.ID), strings.TrimSpace(g.Game), strings.TrimSpace(g.Cabinet)
 		if g.Game == "" {
 			return fmt.Errorf("games[%d].game is required", i)
 		}
 		if g.Quantity <= 0 {
 			return fmt.Errorf("games[%d].quantity must be > 0", i)
 		}
-		if _, ok := seenVersions[g.Game]; ok {
-			return fmt.Errorf("games[%d].game duplicates an active version", i)
+		versionKey := g.Game + "\x00" + g.Cabinet
+		if _, ok := seenVersions[versionKey]; ok {
+			return fmt.Errorf("games[%d].game and cabinet duplicate an active revision", i)
 		}
-		seenVersions[g.Game] = struct{}{}
+		seenVersions[versionKey] = struct{}{}
 		if g.ID != "" {
 			if _, ok := seenEntries[g.ID]; ok {
 				return fmt.Errorf("games[%d].id is duplicated", i)
@@ -147,7 +149,7 @@ func validateUpdateGameBody(body *UpdateArcadeGameBody) error {
 }
 
 func revisionChanged(previous *core.Record, g GameAtomInput) bool {
-	if previous == nil || previous.GetString("version") != g.Game || previous.GetString("location") != g.Location || previous.GetInt("quantity") != g.Quantity {
+	if previous == nil || previous.GetString("version") != g.Game || previous.GetString("cabinet") != g.Cabinet || previous.GetString("location") != g.Location || previous.GetInt("quantity") != g.Quantity {
 		return true
 	}
 	price, tag := any(g.RawPrice), any(g.RawTag)
@@ -169,6 +171,7 @@ func gameRevisionSnapshot(revision *core.Record) map[string]any {
 	}
 	return map[string]any{
 		"version":  revision.GetString("version"),
+		"cabinet":  revision.GetString("cabinet"),
 		"location": revision.GetString("location"),
 		"quantity": revision.GetInt("quantity"),
 		"price":    revision.Get("price"),
@@ -198,7 +201,7 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 	if err != nil {
 		return "", fmt.Errorf("arcade not found: %w", err)
 	}
-	currentState := strings.TrimSpace(arcadeRec.GetString("game_state"))
+	currentState := strings.TrimSpace(arcadeRec.GetString("game_v2"))
 	if strings.TrimSpace(body.BaseStateID) != currentState {
 		return "", fmt.Errorf("game state conflict")
 	}
@@ -239,6 +242,18 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		if seriesErr != nil || versionSeriesID == "" {
 			return "", fmt.Errorf("games[%d].game not found", i)
 		}
+		if g.Cabinet != "" {
+			if _, cabinetErr := txApp.FindRecordById(arcadeinternal.CollectionGameCabinet, g.Cabinet); cabinetErr != nil {
+				return "", fmt.Errorf("games[%d].cabinet not found", i)
+			}
+			if _, compatibilityErr := txApp.FindFirstRecordByFilter(
+				arcadeinternal.CollectionGameSeriesVersionCabinet,
+				"version={:version} && cabinet={:cabinet}",
+				dbx.Params{"version": g.Game, "cabinet": g.Cabinet},
+			); compatibilityErr != nil {
+				return "", fmt.Errorf("games[%d].cabinet is not supported by game version", i)
+			}
+		}
 		var entry *core.Record
 		if entryID == "" {
 			entry = core.NewRecord(entryColl)
@@ -266,6 +281,7 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		revision.Set("batch", batch.Id)
 		revision.Set("entry", entryID)
 		revision.Set("version", g.Game)
+		revision.Set("cabinet", g.Cabinet)
 		revision.Set("location", g.Location)
 		revision.Set("quantity", g.Quantity)
 		if g.RawPrice != nil {
@@ -325,7 +341,7 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		"state_to":   batch.Id,
 		"items":      logItems,
 	}
-	if err := arcadeinternal.UpdateArcadeFieldsTxWithLogs(txApp, arcadeRec.Id, map[string]any{"game_state": batch.Id}, map[string]any{"game": log}, createdBy); err != nil {
+	if err := arcadeinternal.UpdateArcadeFieldsTxWithLogs(txApp, arcadeRec.Id, map[string]any{"game_v2": batch.Id}, map[string]any{"game": log}, createdBy); err != nil {
 		return "", err
 	}
 	return batch.Id, nil

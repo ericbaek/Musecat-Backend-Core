@@ -12,10 +12,10 @@ var arcadeChangelogTracked = map[string]struct{}{
 	"sns":   {},
 	"gtk":   {},
 	"game":  {},
-	// game_state is the persistence pointer but game is the user-facing
+	// game_v2 is the persistence pointer but game is the user-facing
 	// aggregate section and changelog category.
-	"game_state": {},
-	"photo":      {},
+	"game_v2": {},
+	"photo":   {},
 }
 
 // writeArcadeChangelog creates a single changelog row.
@@ -73,12 +73,12 @@ func UpdateArcadeFieldsTxWithLogs(app core.App, arcadeID string, updates, logs m
 		var log any
 		if logs != nil {
 			log = logs[k]
-			if k == "game_state" && log == nil {
+			if k == "game_v2" && log == nil {
 				log = logs["game"]
 			}
 		}
 		changed := k
-		if k == "game_state" {
+		if k == "game_v2" {
 			changed = "game"
 		}
 		if err := writeArcadeChangelog(app, arcadeID, changed, oldV, newV, by, log); err != nil {

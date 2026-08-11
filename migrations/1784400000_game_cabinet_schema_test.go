@@ -29,8 +29,8 @@ func TestApplyGameCabinetSchemaFreshAndIdempotent(t *testing.T) {
 	if arcades.Fields.GetByName("game") != nil {
 		t.Fatal("fresh Core unexpectedly contains arcade.game")
 	}
-	if arcades.Fields.GetByName("game_state") == nil {
-		t.Fatal("fresh Core is missing arcade.game_state")
+	if arcades.Fields.GetByName("game_v2") == nil {
+		t.Fatal("fresh Core is missing arcade.game_v2")
 	}
 	revisions, err := app.FindCollectionByNameOrId("arcade_game_history")
 	if err != nil {
@@ -172,7 +172,7 @@ func TestApplyGameCabinetSchemaPreservesExistingGameState(t *testing.T) {
 	}
 
 	if got := cabinetMigrationRecordFingerprint(t, app, entries.Name, entryFields); got != beforeEntries {
-		t.Fatal("arcade_game_entry records changed during schema migration")
+		t.Fatal("arcade_game_id records changed during schema migration")
 	}
 	if got := cabinetMigrationRecordFingerprint(t, app, batches.Name, batchFields); got != beforeBatches {
 		t.Fatal("arcade_game_revision_batch records changed during schema migration")

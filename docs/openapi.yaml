@@ -553,6 +553,9 @@ components:
             - type: object
               additionalProperties: true
             - type: 'null'
+        cabinet:
+          type: string
+          description: Canonical `game_cabinet` id selected on this revision; empty when unverified.
         location:
           type: string
         quantity:
@@ -581,10 +584,13 @@ components:
             $ref: '#/components/schemas/ArcadeFlagExpanded'
     ArcadeGameExpanded:
       type: object
-      required: [id, items]
+      required: [id, state_id, items]
       properties:
         id:
           type: string
+        state_id:
+          type: string
+          description: Current immutable state batch id. This wire name is retained alongside `id`.
         items:
           type: array
           items:
@@ -1523,6 +1529,14 @@ components:
         id:
           type: string
           description: Stable `arcade_game_id` id. Omit only to add a new installation.
+        cabinet:
+          oneOf:
+            - type: string
+            - type: 'null'
+          description: |
+            Canonical `game_cabinet` id for this revision. The cabinet must be
+            supported by the submitted version through `game_series_version_cabinet`.
+            Use null only when the cabinet is genuinely unverified.
         location:
           type: string
         quantity:
@@ -1542,7 +1556,7 @@ components:
           type: string
         base_state_id:
           type: string
-          description: Current `arcade.game_state`; stale values return 409.
+          description: Current `arcade.game_v2`; stale values return 409. The wire name remains `base_state_id`.
         games:
           type: array
           items:
@@ -2236,7 +2250,27 @@ paths:
       parameters:
         - name: game_series
           in: query
-          description: Repeat the query param or pass comma-separated ids.
+          description: |
+            Repeat the query parameter or pass comma-separated `game_series` ids.
+            With no `game_cabinet`, every listed series is required and cabinet
+            identity is ignored, including unverified cabinet revisions. When
+            `game_cabinet` is present, order is significant: each series is paired
+            positionally with the cabinet at the same index and every pair is required.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: game_cabinet
+          in: query
+          description: |
+            Repeat the query parameter or pass comma-separated canonical
+            `game_cabinet` ids. Cabinet filtering requires `game_series`, the
+            two expanded lists must have equal lengths, and values are paired
+            positionally. Each `(game_series, game_cabinet)` pair must match the
+            same revision in the arcade's currently selected game state; all
+            requested pairs use AND semantics. A cabinet-only request is invalid.
           schema:
             oneOf:
               - type: string
@@ -2279,7 +2313,11 @@ paths:
             minimum: 0
         - name: expand
           in: query
-          description: When true, expands each item's `game` payload with arcade game details.
+          description: |
+            When true, expands each item's `game` payload with arcade game details,
+            including each revision's cabinet. When game filters are supplied,
+            expanded items contain only revisions matching the requested series or
+            positional series/cabinet pairs.
           schema:
             type: boolean
       responses:
@@ -2311,8 +2349,10 @@ paths:
                     game_series: [series_1]
                     game:
                       id: game_123
+                      state_id: game_123
                       items:
                         - id: atom_1
+                          updated: "2026-04-10 09:00:00.000Z"
                           version:
                             id: version_1
                             series: series_1
@@ -2331,6 +2371,7 @@ paths:
                             kr_short: Sydney
                             jp_short: Sydney
                             manufacturer: null
+                          cabinet: cabinet_gold
                           location: 1F
                           quantity: 1
                           price: {}
@@ -2338,7 +2379,10 @@ paths:
                           flags: []
                     distance_km: 0.4
         '400':
-          description: Invalid or missing location or page value.
+          description: |
+            Invalid or missing location/page value; a `game_cabinet` without
+            `game_series`; or unequal expanded
+            `game_series` and `game_cabinet` list lengths.
           content:
             application/json:
               schema:
@@ -3156,6 +3200,7 @@ paths:
                       lat: 37.5665
                       lon: 126.978
                   game: game_123
+                  cabinet: cabinet_gold
                   location: 2F
                   quantity: 1
                   price:
@@ -4140,8 +4185,11 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/game
       description: |
-        Creates an immutable revision batch and updates only `arcade.game_state`.
+        Creates an immutable revision batch and updates only `arcade.game_v2`.
         Existing item ids are durable entries; the submitted version must remain in that entry's series.
+        Cabinet ids are round-tripped on every revision and must be supported by
+        the submitted version. The wire fields remain `base_state_id`, `games[].id`,
+        and response `game.id`/`state_id` where present.
       security:
         - bearerAuth: []
       requestBody:
@@ -4174,7 +4222,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: `base_state_id` is stale or a game version conflicts with the current state.
+          description: "`base_state_id` is stale or a game version conflicts with the current state."
           content:
             application/json:
               schema:

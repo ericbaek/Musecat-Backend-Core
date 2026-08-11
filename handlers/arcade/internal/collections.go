@@ -10,7 +10,7 @@ const (
 	CollectionArcadeGTK      = "arcade_gtk"
 	CollectionArcadeGTKAtoms = "arcade_gtk_atoms"
 	// Game entry is the durable installation identity. Batches and revisions are
-	// immutable snapshots selected by arcade.game_state.
+	// immutable snapshots selected by arcade.game_v2.
 	CollectionArcadeGameEntry          = "arcade_game_id"
 	CollectionArcadeGameRevisionBatch  = "arcade_game_history_batch"
 	CollectionArcadeGameRevision       = "arcade_game_history"
@@ -26,4 +26,6 @@ const (
 	CollectionArcadeChangelog          = "arcade_changelog"
 	CollectionGameSeriesVersion        = "game_series_version"
 	CollectionGameSeries               = "game_series"
+	CollectionGameCabinet              = "game_cabinet"
+	CollectionGameSeriesVersionCabinet = "game_series_version_cabinet"
 )

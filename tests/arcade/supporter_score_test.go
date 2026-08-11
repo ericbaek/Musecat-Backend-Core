@@ -347,11 +347,11 @@ func seedSupporterLedgerEntry(tb testing.TB, app *tests.TestApp, userID, kind st
 	return rec.Id
 }
 
-func createFlagViaAPI(tb testing.TB, app *tests.TestApp, authHeader, arcadeID, atomID, disruption, message string) string {
+func createFlagViaAPI(tb testing.TB, app *tests.TestApp, authHeader, arcadeID, gameID, disruption, message string) string {
 	tb.Helper()
 
 	headers := map[string]string{"Authorization": authHeader}
-	body := fmt.Sprintf(`{"arcade":"%s","game_atom_id":"%s","disruption":"%s","message":"%s"}`, arcadeID, atomID, disruption, message)
+	body := fmt.Sprintf(`{"arcade":"%s","game_id":"%s","disruption":"%s","message":"%s"}`, arcadeID, gameID, disruption, message)
 	res := executeJSONRequest(tb, app, http.MethodPost, "/arcade/flag", body, headers)
 	defer res.Body.Close()
 

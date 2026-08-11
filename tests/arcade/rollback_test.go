@@ -243,8 +243,8 @@ func TestRollbackArcadeGame_RestoresHistoricalBatchAndWritesBatchChangelog(t *te
 	if err != nil {
 		t.Fatalf("failed to load arcade after game rollback: %v", err)
 	}
-	if got := arcade.GetString("game_state"); got != oldStateID {
-		t.Fatalf("expected arcade.game_state=%q after rollback, got %q", oldStateID, got)
+	if got := arcade.GetString("game_v2"); got != oldStateID {
+		t.Fatalf("expected arcade.game_v2=%q after rollback, got %q", oldStateID, got)
 	}
 
 	rolledBackRevisions, err := app.FindRecordsByFilter("arcade_game_history", "batch={:batch}", "", 0, 0, map[string]any{"batch": oldStateID})

@@ -160,7 +160,7 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		})
 	}
 
-	hasGame, err := hasGameRegistration(re.App, arcade.GetString("game_state"))
+	hasGame, err := hasGameRegistration(re.App, arcade.GetString("game_v2"))
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to validate game registration",

@@ -90,7 +90,7 @@ func TestBulkUpdateArcadeGameVersion_Success(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			stateID := arcade.GetString("game_state")
+			stateID := arcade.GetString("game_v2")
 			rows, err := app.FindRecordsByFilter("arcade_game_history", "batch={:batch} && entry={:entry}", "", 1, 0, dbx.Params{"batch": stateID, "entry": entryIDs[i]})
 			if err != nil || len(rows) != 1 {
 				t.Fatalf("expected updated revision for arcade %s, err=%v rows=%d", arcadeID, err, len(rows))
@@ -152,8 +152,8 @@ func TestBulkUpdateArcadeGameVersion_RejectsMismatchedCurrentGameAtomically(t *t
 			t.Fatalf("expected only initial changelog after failed bulk, err=%v rows=%d", err, len(changes))
 		}
 		arcade, err := app.FindRecordById("arcade", arcadeID)
-		if err != nil || arcade.GetString("game_state") != stateID {
-			t.Fatalf("bulk failure moved state pointer: err=%v state=%q", err, arcade.GetString("game_state"))
+		if err != nil || arcade.GetString("game_v2") != stateID {
+			t.Fatalf("bulk failure moved state pointer: err=%v state=%q", err, arcade.GetString("game_v2"))
 		}
 	}
 	scenario.Test(t)

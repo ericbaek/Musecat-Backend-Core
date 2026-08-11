@@ -142,7 +142,7 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 
 		field := body.Part
 		if body.Part == "game" {
-			field = "game_state"
+			field = "game_v2"
 		}
 		fromValue = strings.TrimSpace(arcadeRec.GetString(field))
 		if fromValue == "" {

@@ -15,7 +15,6 @@ import (
 func TestDeleteArcadeFlag_Success(t *testing.T) {
 	headers := map[string]string{}
 	var flagID string
-	var atomID string
 
 	scenario := tests.ApiScenario{
 		Name:           "POST /arcade/flag/delete success within 15m",
@@ -44,17 +43,8 @@ func TestDeleteArcadeFlag_Success(t *testing.T) {
 			Nickname: []string{"FlagDelete"},
 			Location: location{Lat: 37.5665, Lon: 126.978},
 		})
-		atomID = seedGameAtomForFlag(tb, app, arcadeID)
+		seedGameAtomForFlag(tb, app, arcadeID)
 		flagID = createFlagWithReactions(tb, app, arcadeID, user.Id, time.Now().UTC(), nil)
-
-		atomRec, err := app.FindRecordById("arcade_game_atoms", atomID)
-		if err != nil {
-			tb.Fatalf("failed to load atom: %v", err)
-		}
-		atomRec.Set("flags", []string{flagID})
-		if err := app.Save(atomRec); err != nil {
-			tb.Fatalf("failed to set atom flags: %v", err)
-		}
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{"flag":"%s"}`, flagID))
 	}
@@ -81,14 +71,6 @@ func TestDeleteArcadeFlag_Success(t *testing.T) {
 
 		if _, err := app.FindRecordById("arcade_flag", flagID); err == nil {
 			tb.Fatalf("expected flag %q to be deleted", flagID)
-		}
-
-		atomRec, err := app.FindRecordById("arcade_game_atoms", atomID)
-		if err != nil {
-			tb.Fatalf("failed to reload atom: %v", err)
-		}
-		if flags := atomRec.GetStringSlice("flags"); len(flags) != 0 {
-			tb.Fatalf("expected atom flags empty after delete, got %#v", flags)
 		}
 	}
 

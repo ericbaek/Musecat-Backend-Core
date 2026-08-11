@@ -154,6 +154,97 @@ func TestNearby_CountryFilterAndCountryTotalsIncludeNearestArcade(t *testing.T) 
 	}
 }
 
+func TestNearby_CabinetFilterMatchesSameSeriesRevision(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	chunithmID := seedNearbyGameSeries(t, app, "CHUNITHM")
+	otherSeriesID := seedNearbyGameSeries(t, app, "Other Series")
+	chunithmVersionID := seedNearbyGameSeriesVersion(t, app, chunithmID, "CHUNITHM Version")
+	otherVersionID := seedNearbyGameSeriesVersion(t, app, otherSeriesID, "Other Version")
+	goldID := seedNearbyGameCabinet(t, app, "Gold")
+	silverID := seedNearbyGameCabinet(t, app, "Silver")
+
+	goldArcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "CHUNITHM Gold", Address: "Gold Road", Location: location{Lat: 37.5665, Lon: 126.9790},
+	})
+	setArcadeVisibility(t, app, goldArcadeID, true, false)
+	goldBatchID := seedNearbyGameMolecule(t, app, goldArcadeID)
+	seedNearbyGameAtomWithCabinet(t, app, goldBatchID, chunithmVersionID, goldID)
+
+	crossMatchArcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Cross Match", Address: "Cross Road", Location: location{Lat: 37.5665, Lon: 126.9800},
+	})
+	setArcadeVisibility(t, app, crossMatchArcadeID, true, false)
+	crossBatchID := seedNearbyGameMolecule(t, app, crossMatchArcadeID)
+	seedNearbyGameAtomWithCabinet(t, app, crossBatchID, chunithmVersionID, silverID)
+	seedNearbyGameAtomWithCabinet(t, app, crossBatchID, otherVersionID, goldID)
+
+	unknownArcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Unknown Cabinet", Address: "Unknown Road", Location: location{Lat: 37.5665, Lon: 126.9810},
+	})
+	setArcadeVisibility(t, app, unknownArcadeID, true, false)
+	unknownBatchID := seedNearbyGameMolecule(t, app, unknownArcadeID)
+	seedNearbyGameAtom(t, app, unknownBatchID, chunithmVersionID)
+
+	seriesOnly := decodeNearbyItems(t, app, "/arcades/nearby?game_series="+chunithmID+"&lat=37.5665&lon=126.9780")
+	if len(seriesOnly) != 3 {
+		t.Fatalf("expected series-only filter to include all cabinets and unknown, got %#v", seriesOnly)
+	}
+
+	paired := decodeNearbyItems(t, app, "/arcades/nearby?game_series="+chunithmID+"&game_cabinet="+goldID+"&lat=37.5665&lon=126.9780")
+	if len(paired) != 1 || paired[0]["id"] != goldArcadeID {
+		t.Fatalf("expected only same-revision CHUNITHM Gold arcade %q, got %#v", goldArcadeID, paired)
+	}
+}
+
+func TestNearby_PairedCabinetFiltersAreOrderedAndAllRequired(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	seriesA := seedNearbyGameSeries(t, app, "Series A")
+	seriesB := seedNearbyGameSeries(t, app, "Series B")
+	versionA := seedNearbyGameSeriesVersion(t, app, seriesA, "Version A")
+	versionB := seedNearbyGameSeriesVersion(t, app, seriesB, "Version B")
+	cabinetA := seedNearbyGameCabinet(t, app, "Cabinet A")
+	cabinetB := seedNearbyGameCabinet(t, app, "Cabinet B")
+
+	completeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Complete", Address: "Complete Road", Location: location{Lat: 37.5665, Lon: 126.9790},
+	})
+	setArcadeVisibility(t, app, completeID, true, false)
+	completeBatch := seedNearbyGameMolecule(t, app, completeID)
+	seedNearbyGameAtomWithCabinet(t, app, completeBatch, versionA, cabinetA)
+	seedNearbyGameAtomWithCabinet(t, app, completeBatch, versionB, cabinetB)
+
+	partialID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Partial", Address: "Partial Road", Location: location{Lat: 37.5665, Lon: 126.9800},
+	})
+	setArcadeVisibility(t, app, partialID, true, false)
+	partialBatch := seedNearbyGameMolecule(t, app, partialID)
+	seedNearbyGameAtomWithCabinet(t, app, partialBatch, versionA, cabinetA)
+	seedNearbyGameAtomWithCabinet(t, app, partialBatch, versionB, cabinetA)
+
+	items := decodeNearbyItems(t, app, "/arcades/nearby?game_series="+seriesA+","+seriesB+"&game_cabinet="+cabinetA+","+cabinetB+"&lat=37.5665&lon=126.9780")
+	if len(items) != 1 || items[0]["id"] != completeID {
+		t.Fatalf("expected every ordered series/cabinet pair to match, got %#v", items)
+	}
+}
+
+func TestNearby_RejectsUnpairedCabinetFilters(t *testing.T) {
+	app := newArcadeTestApp(t)
+	tests := []string{
+		"/arcades/nearby?game_cabinet=cabinet_a&lat=37.5665&lon=126.9780",
+		"/arcades/nearby?game_series=series_a,series_b&game_cabinet=cabinet_a&lat=37.5665&lon=126.9780",
+	}
+	for _, url := range tests {
+		res := executeJSONRequest(t, app, http.MethodGet, url, "", nil)
+		if res.StatusCode != http.StatusBadRequest {
+			res.Body.Close()
+			t.Fatalf("expected 400 for unpaired filters %q, got %d", url, res.StatusCode)
+		}
+		res.Body.Close()
+	}
+}
+
 func TestNearby_ExpandsQuerySeriesAndAppliesDistanceLimit(t *testing.T) {
 	app := newArcadeTestApp(t)
 	_, user := createAuthUser(t, app)
@@ -346,16 +437,79 @@ func TestNearby_ExpandBoostsMachineCountRanking(t *testing.T) {
 	}
 }
 
+func TestNearby_ExpandFiltersAndBoostsOnlyPairedCabinetItems(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	seriesID := seedNearbyGameSeries(t, app, "Cabinet Ranking")
+	versionID := seedNearbyGameSeriesVersion(t, app, seriesID, "Cabinet Ranking Version")
+	goldID := seedNearbyGameCabinet(t, app, "Gold")
+	silverID := seedNearbyGameCabinet(t, app, "Silver")
+
+	nearID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Near", Address: "Near Road", Location: location{Lat: 37.5665, Lon: 127.1200},
+	})
+	setArcadeVisibility(t, app, nearID, true, false)
+	nearBatch := seedNearbyGameMolecule(t, app, nearID)
+	nearGold := seedNearbyGameAtomWithCabinet(t, app, nearBatch, versionID, goldID)
+	setNearbyAtomQuantity(t, app, nearGold, 1)
+	nearSilver := seedNearbyGameAtomWithCabinet(t, app, nearBatch, versionID, silverID)
+	setNearbyAtomQuantity(t, app, nearSilver, 100)
+
+	farID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Far", Address: "Far Road", Location: location{Lat: 37.5665, Lon: 127.1400},
+	})
+	setArcadeVisibility(t, app, farID, true, false)
+	farBatch := seedNearbyGameMolecule(t, app, farID)
+	farGold := seedNearbyGameAtomWithCabinet(t, app, farBatch, versionID, goldID)
+	setNearbyAtomQuantity(t, app, farGold, 2)
+
+	items := decodeNearbyItems(t, app, "/arcades/nearby?game_series="+seriesID+"&game_cabinet="+goldID+"&lat=37.5665&lon=126.9780&expand=true")
+	if len(items) != 2 || items[0]["id"] != farID || items[1]["id"] != nearID {
+		t.Fatalf("expected ranking to use only Gold quantities, got %#v", items)
+	}
+	for _, arcade := range items {
+		game, ok := arcade["game"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected expanded game object, got %#v", arcade["game"])
+		}
+		gameItems, ok := game["items"].([]any)
+		if !ok || len(gameItems) != 1 {
+			t.Fatalf("expected only one paired cabinet item, got %#v", game["items"])
+		}
+		gameItem, ok := gameItems[0].(map[string]any)
+		if !ok || gameItem["cabinet"] != goldID {
+			t.Fatalf("expected expanded Gold cabinet %q, got %#v", goldID, gameItems[0])
+		}
+	}
+}
+
+func decodeNearbyItems(tb testing.TB, app *tests.TestApp, url string) []map[string]any {
+	tb.Helper()
+	res := executeJSONRequest(tb, app, http.MethodGet, url, "", nil)
+	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
+		tb.Fatalf("expected 200 for %q, got %d", url, res.StatusCode)
+	}
+	defer res.Body.Close()
+	var payload struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		tb.Fatalf("failed to decode nearby payload: %v", err)
+	}
+	return payload.Items
+}
+
 func setNearbyAtomQuantity(tb testing.TB, app *tests.TestApp, atomID string, quantity int) {
 	tb.Helper()
 
-	rec, err := app.FindRecordById("arcade_game_atoms", atomID)
+	rec, err := app.FindRecordById("arcade_game_history", atomID)
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game_atoms record: %v", err)
+		tb.Fatalf("failed to load arcade_game_history record: %v", err)
 	}
 	rec.Set("quantity", quantity)
 	if err := app.Save(rec); err != nil {
-		tb.Fatalf("failed to update arcade_game_atoms quantity: %v", err)
+		tb.Fatalf("failed to update arcade_game_history quantity: %v", err)
 	}
 }
 
@@ -406,40 +560,66 @@ func seedNearbyGameSeriesVersion(tb testing.TB, app *tests.TestApp, seriesID, na
 func seedNearbyGameMolecule(tb testing.TB, app *tests.TestApp, arcadeID string) string {
 	tb.Helper()
 
-	coll, err := app.FindCollectionByNameOrId("arcade_game")
+	coll, err := app.FindCollectionByNameOrId("arcade_game_history_batch")
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game collection: %v", err)
+		tb.Fatalf("failed to load arcade_game_history_batch collection: %v", err)
 	}
 
 	rec := core.NewRecord(coll)
 	rec.Set("arcade", arcadeID)
+	rec.Set("reason", "nearby test")
 	if err := app.Save(rec); err != nil {
-		tb.Fatalf("failed to save arcade_game: %v", err)
+		tb.Fatalf("failed to save arcade_game_history_batch: %v", err)
 	}
 
 	arcadeRec, err := app.FindRecordById("arcade", arcadeID)
 	if err != nil {
 		tb.Fatalf("failed to load arcade: %v", err)
 	}
-	arcadeRec.Set("game", rec.Id)
+	arcadeRec.Set("game_v2", rec.Id)
 	if err := app.Save(arcadeRec); err != nil {
-		tb.Fatalf("failed to link arcade.game: %v", err)
+		tb.Fatalf("failed to link arcade.game_v2: %v", err)
 	}
 
 	return rec.Id
 }
 
 func seedNearbyGameAtom(tb testing.TB, app *tests.TestApp, moleculeID, versionID string) string {
+	return seedNearbyGameAtomWithCabinet(tb, app, moleculeID, versionID, "")
+}
+
+func seedNearbyGameAtomWithCabinet(tb testing.TB, app *tests.TestApp, batchID, versionID, cabinetID string) string {
 	tb.Helper()
 
-	coll, err := app.FindCollectionByNameOrId("arcade_game_atoms")
+	batch, err := app.FindRecordById("arcade_game_history_batch", batchID)
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game_atoms collection: %v", err)
+		tb.Fatalf("failed to load arcade_game_history_batch: %v", err)
+	}
+	version, err := app.FindRecordById("game_series_version", versionID)
+	if err != nil {
+		tb.Fatalf("failed to load game_series_version: %v", err)
+	}
+	entryColl, err := app.FindCollectionByNameOrId("arcade_game_id")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_id collection: %v", err)
+	}
+	entry := core.NewRecord(entryColl)
+	entry.Set("arcade", batch.GetString("arcade"))
+	entry.Set("series", version.GetString("series"))
+	if err := app.Save(entry); err != nil {
+		tb.Fatalf("failed to save arcade_game_id: %v", err)
+	}
+
+	coll, err := app.FindCollectionByNameOrId("arcade_game_history")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_history collection: %v", err)
 	}
 
 	rec := core.NewRecord(coll)
-	rec.Set("molecule", moleculeID)
-	rec.Set("game", versionID)
+	rec.Set("batch", batchID)
+	rec.Set("entry", entry.Id)
+	rec.Set("version", versionID)
+	rec.Set("cabinet", cabinetID)
 	rec.Set("location", "1F")
 	rec.Set("quantity", 1)
 	rec.Set("price", map[string]any{
@@ -449,8 +629,24 @@ func seedNearbyGameAtom(tb testing.TB, app *tests.TestApp, moleculeID, versionID
 		"accept":   []string{"Cash"},
 	})
 	if err := app.Save(rec); err != nil {
-		tb.Fatalf("failed to save arcade_game_atom: %v", err)
+		tb.Fatalf("failed to save arcade_game_history: %v", err)
 	}
 
+	return rec.Id
+}
+
+func seedNearbyGameCabinet(tb testing.TB, app *tests.TestApp, name string) string {
+	tb.Helper()
+	coll, err := app.FindCollectionByNameOrId("game_cabinet")
+	if err != nil {
+		tb.Fatalf("failed to load game_cabinet: %v", err)
+	}
+	rec := core.NewRecord(coll)
+	rec.Set("en", name)
+	rec.Set("kr", name)
+	rec.Set("jp", name)
+	if err := app.Save(rec); err != nil {
+		tb.Fatalf("failed to save game_cabinet: %v", err)
+	}
 	return rec.Id
 }

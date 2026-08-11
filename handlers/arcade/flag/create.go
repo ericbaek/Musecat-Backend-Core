@@ -128,7 +128,7 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 		if entryRec.GetString("arcade") != body.Arcade {
 			return fmt.Errorf("game_id does not belong to arcade")
 		}
-		stateID := arcadeRec.GetString("game_state")
+		stateID := arcadeRec.GetString("game_v2")
 		active, err := txApp.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameRevision, "batch={:batch} && entry={:entry}", "", 1, 0, dbx.Params{"batch": stateID, "entry": body.GameID})
 		if err != nil || len(active) == 0 {
 			return fmt.Errorf("game_id is not active in the current game state")
@@ -146,7 +146,7 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 
 		flagRec := core.NewRecord(flagColl)
 		flagRec.Set("arcade", body.Arcade)
-		flagRec.Set("game_entry", body.GameID)
+		flagRec.Set("game_id", body.GameID)
 		flagRec.Set("disruption", body.Disruption)
 		flagRec.Set("message", body.Message)
 		flagRec.Set("solved", false)
@@ -167,11 +167,11 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 			currentExp = nextExp
 		}
 
-		if gameValue, ok := arcadeinternal.BuildExpandedGameValue(txApp, arcadeRec.GetString("game_state")); ok {
+		if gameValue, ok := arcadeinternal.BuildExpandedGameValue(txApp, arcadeRec.GetString("game_v2")); ok {
 			expandedGameValue = gameValue
 		} else {
 			expandedGameValue = map[string]any{
-				"id":    arcadeRec.GetString("game_state"),
+				"id":    arcadeRec.GetString("game_v2"),
 				"items": []map[string]any{},
 			}
 		}
