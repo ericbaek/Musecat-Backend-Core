@@ -28,7 +28,7 @@ func BuildUpdateBodyFromCurrentState(app core.App, arcadeID string) (UpdateArcad
 	}
 	body := UpdateArcadeGameBody{Arcade: arcadeID, BaseStateID: stateID, Games: make([]GameAtomInput, 0, len(revisions))}
 	for _, revision := range revisions {
-		body.Games = append(body.Games, GameAtomInput{ID: revision.GetString("entry"), Game: revision.GetString("version"), Location: revision.GetString("location"), Quantity: revision.GetInt("quantity"), Uncertain: revision.GetBool("uncertain"), PrevGame: revision.GetString("previous_version"), RawPrice: revision.Get("price"), RawTag: revision.Get("tag")})
+		body.Games = append(body.Games, GameAtomInput{ID: revision.GetString("entry"), Game: revision.GetString("version"), Location: revision.GetString("location"), Quantity: revision.GetInt("quantity"), RawPrice: revision.Get("price"), RawTag: revision.Get("tag")})
 	}
 	return body, nil
 }

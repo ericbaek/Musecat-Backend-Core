@@ -73,9 +73,7 @@ func BulkUpdateArcadeGameVersion(re *core.RequestEvent) error {
 				if update.Games[i].Game != body.CurrentGameVersionSeries {
 					return fmt.Errorf("game_id %s does not match current_game_version_series", update.Games[i].ID)
 				}
-				update.Games[i].PrevGame = update.Games[i].Game
 				update.Games[i].Game = body.NewGameVersionSeries
-				update.Games[i].Uncertain = true
 				updated++
 			}
 			if _, err := arcadegame.UpdateArcadeGameTxFromExistingAtoms(tx, update, re.Auth.Id, "bulk_version"); err != nil {

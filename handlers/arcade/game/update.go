@@ -32,17 +32,14 @@ type Price struct {
 type GameAtomInput struct {
 	ID string `json:"id,omitempty"`
 	// PrevID is legacy internal-only log input. API v2 does not decode it.
-	PrevID    string    `json:"-"`
-	Game      string    `json:"game"`
-	Location  string    `json:"location"`
-	Quantity  int       `json:"quantity"`
-	Price     Price     `json:"price"`
-	Tag       []TagItem `json:"tag"`
-	Uncertain bool      `json:"uncertain,omitempty"`
-	PrevGame  string    `json:"prev_game,omitempty"`
-	Confirm   bool      `json:"-"`
-	RawPrice  any       `json:"-"`
-	RawTag    any       `json:"-"`
+	PrevID   string    `json:"-"`
+	Game     string    `json:"game"`
+	Location string    `json:"location"`
+	Quantity int       `json:"quantity"`
+	Price    Price     `json:"price"`
+	Tag      []TagItem `json:"tag"`
+	RawPrice any       `json:"-"`
+	RawTag   any       `json:"-"`
 }
 
 type UpdateArcadeGameBody struct {
@@ -150,7 +147,7 @@ func validateUpdateGameBody(body *UpdateArcadeGameBody) error {
 }
 
 func revisionChanged(previous *core.Record, g GameAtomInput) bool {
-	if previous == nil || previous.GetString("version") != g.Game || previous.GetString("location") != g.Location || previous.GetInt("quantity") != g.Quantity || previous.GetBool("uncertain") != g.Uncertain || previous.GetString("previous_version") != strings.TrimSpace(g.PrevGame) {
+	if previous == nil || previous.GetString("version") != g.Game || previous.GetString("location") != g.Location || previous.GetInt("quantity") != g.Quantity {
 		return true
 	}
 	price, tag := any(g.RawPrice), any(g.RawTag)
@@ -171,13 +168,11 @@ func gameRevisionSnapshot(revision *core.Record) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"version":          revision.GetString("version"),
-		"location":         revision.GetString("location"),
-		"quantity":         revision.GetInt("quantity"),
-		"price":            revision.Get("price"),
-		"tag":              arcadeinternal.DecodeGameTagPayload(revision.Get("tag")),
-		"uncertain":        revision.GetBool("uncertain"),
-		"previous_version": revision.GetString("previous_version"),
+		"version":  revision.GetString("version"),
+		"location": revision.GetString("location"),
+		"quantity": revision.GetInt("quantity"),
+		"price":    revision.Get("price"),
+		"tag":      arcadeinternal.DecodeGameTagPayload(revision.Get("tag")),
 	}
 }
 
@@ -266,12 +261,6 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 				return "", fmt.Errorf("games[%d].game must remain in the entry series", i)
 			}
 		}
-		if prevVersion := strings.TrimSpace(g.PrevGame); prevVersion != "" {
-			previousSeries, seriesErr := versionSeries(txApp, prevVersion)
-			if seriesErr != nil || previousSeries != entry.GetString("series") {
-				return "", fmt.Errorf("games[%d].prev_game must be in the entry series", i)
-			}
-		}
 		previous := previousByEntry[entryID]
 		revision := core.NewRecord(revisionColl)
 		revision.Set("batch", batch.Id)
@@ -289,8 +278,6 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		} else {
 			revision.Set("tag", NormalizeTagForStorage(g.Tag))
 		}
-		revision.Set("uncertain", g.Uncertain)
-		revision.Set("previous_version", strings.TrimSpace(g.PrevGame))
 		if previous != nil && !revisionChanged(previous, g) {
 			revision.Set("last_modified_at", previous.Get("last_modified_at"))
 			revision.Set("last_modified_by", previous.GetString("last_modified_by"))
@@ -298,21 +285,12 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 			revision.Set("last_modified_at", now)
 			revision.Set("last_modified_by", createdBy)
 		}
-		if g.Confirm {
-			revision.Set("last_confirmed_at", now)
-			revision.Set("last_confirmed_by", createdBy)
-		} else if previous != nil {
-			revision.Set("last_confirmed_at", previous.Get("last_confirmed_at"))
-			revision.Set("last_confirmed_by", previous.GetString("last_confirmed_by"))
-		}
 		if err := txApp.Save(revision); err != nil {
 			return "", fmt.Errorf("create game revision %d: %w", i, err)
 		}
 		kind := "updated"
 		if previous == nil {
 			kind = "added"
-		} else if g.Confirm {
-			kind = "confirmed"
 		} else if !revisionChanged(previous, g) {
 			kind = "unchanged"
 		}

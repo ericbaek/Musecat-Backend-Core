@@ -98,21 +98,9 @@ func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool)
 			}
 		}
 
-		uncertain := revision.GetBool("uncertain")
-		var prevGameObj any
-		if uncertain {
-			prevGameID := revision.GetString("previous_version")
-			if prevGameID != "" {
-				if bundle, err := BuildGameSeriesBundle(app, prevGameID); err == nil {
-					prevGameObj = bundle["version"]
-				}
-			}
-		}
-
 		item := map[string]any{
 			"version":    versionObj,
 			"series":     seriesObj,
-			"uncertain":  uncertain,
 			"location":   revision.GetString("location"),
 			"quantity":   revision.GetInt("quantity"),
 			"price":      price,
@@ -121,10 +109,6 @@ func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool)
 			"updated":    revision.GetString("last_modified_at"),
 			"updated_by": revision.GetString("last_modified_by"),
 		}
-		if uncertain {
-			item["prev_game"] = prevGameObj
-		}
-
 		flagRecs, _ := app.FindRecordsByFilter(CollectionArcadeFlag, "game_entry={:entry} && solved=false", "created", 0, 0, dbx.Params{"entry": entryID})
 		flags := make([]map[string]any, 0, len(flagRecs))
 		for _, flagRec := range flagRecs {

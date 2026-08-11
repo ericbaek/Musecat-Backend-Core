@@ -19,7 +19,7 @@ type gameDiffLogItem struct {
 
 // buildGameDiffLogItem keeps the existing game changelog contract but isolates
 // the field-level diffing from the write path so it is easier to debug.
-func buildGameDiffLogItem(newAtomID string, g GameAtomInput, prevAtom *core.Record, action string) gameDiffLogItem {
+func buildGameDiffLogItem(newAtomID string, g GameAtomInput, prevAtom *core.Record, _ string) gameDiffLogItem {
 	item := gameDiffLogItem{
 		AtomID:     newAtomID,
 		Game:       strings.TrimSpace(g.Game),
@@ -46,13 +46,6 @@ func buildGameDiffLogItem(newAtomID string, g GameAtomInput, prevAtom *core.Reco
 			"to": g.Quantity,
 		}))
 		item.Diff = arcadeinternal.AppendDiffEntry(item.Diff, "quantity", 0, g.Quantity)
-		if g.Uncertain {
-			item.Bullets = append(item.Bullets, arcadeinternal.BuildI18nBullet("arcade.changelog.game.uncertain.changed", map[string]any{
-				"from": false,
-				"to":   true,
-			}))
-			item.Diff = arcadeinternal.AppendDiffEntry(item.Diff, "uncertain", false, true)
-		}
 		return item
 	}
 
@@ -107,22 +100,6 @@ func buildGameDiffLogItem(newAtomID string, g GameAtomInput, prevAtom *core.Reco
 	if !arcadeinternal.JSONValueEqual(prevTag, nextTag) {
 		item.Bullets = append(item.Bullets, arcadeinternal.BuildI18nBullet("arcade.changelog.game.tag.changed", nil))
 		item.Diff = arcadeinternal.AppendDiffEntry(item.Diff, "tag", prevTag, nextTag)
-	}
-
-	prevUncertain := prevAtom.GetBool("uncertain")
-	if prevUncertain != g.Uncertain {
-		if prevUncertain && !g.Uncertain && action != "" {
-			item.Bullets = append(item.Bullets, arcadeinternal.BuildI18nBullet("arcade.changelog.game.uncertain."+action, map[string]any{
-				"from": prevUncertain,
-				"to":   g.Uncertain,
-			}))
-		} else {
-			item.Bullets = append(item.Bullets, arcadeinternal.BuildI18nBullet("arcade.changelog.game.uncertain.changed", map[string]any{
-				"from": prevUncertain,
-				"to":   g.Uncertain,
-			}))
-		}
-		item.Diff = arcadeinternal.AppendDiffEntry(item.Diff, "uncertain", prevUncertain, g.Uncertain)
 	}
 
 	if len(item.Diff) == 0 {

@@ -41,6 +41,7 @@ Definitions:
 | Immediate wiki edits on public arcade | deny | allow | allow | allow |
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
+| Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |
 
 The `GET /arcade` public endpoint MUST return `404`, rather than `403`, for every private id. A public/closed arcade remains readable through detail and search but MUST NOT enter operating discovery, nearby, update, or visit flows.
 
@@ -61,6 +62,8 @@ The `GET /arcade` public endpoint MUST return `404`, rather than `403`, for ever
 Rollback is a normal, immediate wiki action. When `report=true`, `POST /arcade/rollback` MUST atomically create the rollback changelog entry and a `rollback_report` linked to the cited prior changelog. A standalone `POST /arcade/edit_report` creates `edit_report`. Neither path bans a user nor performs an automatic rollback beyond the contributor's explicit rollback request.
 
 Game mutations require `base_state_id`; a stale value returns `409`. Existing `games[].id` values are stable entry IDs, while rows without one create a new entry. Same-series version changes retain the entry; a cross-series change is rejected. Removed entries remain durable for historical flags, which appear as `orphanFlags` while absent from the selected batch.
+
+The developer/moderator-only `POST /arcade/game/bulk_version` operation is an administrative version swap. It applies the same immutable batch and `changed="game"` changelog semantics per affected arcade as a regular game mutation, does not award XP, and does not maintain any separate review-state metadata.
 
 Every user-initiated game-state mutation writes one immutable `arcade_changelog` row with `changed="game"`. Its `from` and `to` values are revision-batch IDs; log version 2 contains `state_from`, `state_to`, and an entry-level `before`/`after` snapshot. The row's authenticated `by` and `created` are the canonical editor and timestamp for timeline UI. Legacy backfill does not create user-edit changelog rows. Full's legacy game-history import MUST preserve each source `arcade_game.id` as the corresponding history-batch ID so existing game changelog `from`/`to` values remain rollback targets; it must import every molecule and atom before cleanup. The one-time guarded Full game-catalog migration also has no authenticated editor and therefore MUST NOT invent a user changelog row: it preserves the selected batch and revisions, creates a complete immutable shadow batch, records source rows and pointer changes in the locked migration-origin catalog, and switches `arcade.game_state` atomically.
 

@@ -59,6 +59,25 @@ func RequireStrictReviewerAccess() *hook.Handler[*core.RequestEvent] {
 	}
 }
 
+// RequireAdminAccess allows only developer and moderator accounts. Unlike
+// RequireModeratorAccess, supporter tags are intentionally not accepted.
+func RequireAdminAccess() *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{
+		Id: "requireAdminAccess",
+		Func: func(re *core.RequestEvent) error {
+			if re.Auth == nil {
+				return re.UnauthorizedError("The request requires valid record authorization token.", nil)
+			}
+			if !HasStrictReviewerAccess(re.Auth) {
+				return re.JSON(http.StatusForbidden, map[string]any{
+					"error": "developer or moderator access required",
+				})
+			}
+			return re.Next()
+		},
+	}
+}
+
 func hasAnyModeratorAccessTag(auth *core.Record) bool {
 	if auth == nil {
 		return false

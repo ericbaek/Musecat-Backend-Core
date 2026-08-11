@@ -10,7 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-var arcadeUpdatePartOrder = []string{"basic", "hour", "sns", "gtk", "game", "bulk_game_version", "photo", "flag", "flag_reaction", "visit"}
+var arcadeUpdatePartOrder = []string{"basic", "hour", "sns", "gtk", "game", "photo", "flag", "flag_reaction", "visit"}
 
 type arcadeUpdateBlockRow struct {
 	ArcadeID       string

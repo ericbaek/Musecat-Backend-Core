@@ -115,9 +115,9 @@ func ensureGameRevision(app core.App, batch, entry, version, users *core.Collect
 	c, err := ensureCollection(app, "arcade_game_history",
 		relation("batch", batch.Id, true, true), relation("entry", entry.Id, false, true), relation("version", version.Id, false, true),
 		&core.TextField{Name: "location", Max: 500}, &core.NumberField{Name: "quantity", OnlyInt: true, Min: func() *float64 { v := float64(1); return &v }()},
-		&core.JSONField{Name: "price"}, &core.JSONField{Name: "tag"}, &core.BoolField{Name: "uncertain"},
-		relation("previous_version", version.Id, false, false), &core.DateField{Name: "last_modified_at"}, relation("last_modified_by", users.Id, false, false),
-		&core.DateField{Name: "last_confirmed_at"}, relation("last_confirmed_by", users.Id, false, false), &core.BoolField{Name: "legacy_imported"},
+		&core.JSONField{Name: "price"}, &core.JSONField{Name: "tag"},
+		&core.DateField{Name: "last_modified_at"}, relation("last_modified_by", users.Id, false, false),
+		&core.BoolField{Name: "legacy_imported"},
 	)
 	if err != nil {
 		return nil, err

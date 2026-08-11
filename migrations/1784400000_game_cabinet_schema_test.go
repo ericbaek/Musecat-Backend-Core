@@ -32,6 +32,15 @@ func TestApplyGameCabinetSchemaFreshAndIdempotent(t *testing.T) {
 	if arcades.Fields.GetByName("game_state") == nil {
 		t.Fatal("fresh Core is missing arcade.game_state")
 	}
+	revisions, err := app.FindCollectionByNameOrId("arcade_game_history")
+	if err != nil {
+		t.Fatalf("find arcade_game_history: %v", err)
+	}
+	for _, name := range []string{"uncertain", "previous_version", "last_confirmed_at", "last_confirmed_by"} {
+		if revisions.Fields.GetByName(name) != nil {
+			t.Fatalf("fresh Core unexpectedly contains arcade_game_history.%s", name)
+		}
+	}
 
 	before := cabinetSchemaFingerprint(t, app)
 	if err := applyGameCabinetSchema(app); err != nil {
@@ -93,12 +102,8 @@ func TestApplyGameCabinetSchemaPreservesExistingGameState(t *testing.T) {
 		&core.NumberField{Name: "quantity", OnlyInt: true, Min: &one},
 		&core.JSONField{Name: "price"},
 		&core.JSONField{Name: "tag"},
-		&core.BoolField{Name: "uncertain"},
-		cabinetMigrationTestRelation("previous_version", versions.Id, false, false),
 		&core.DateField{Name: "last_modified_at"},
 		cabinetMigrationTestRelation("last_modified_by", users.Id, false, false),
-		&core.DateField{Name: "last_confirmed_at"},
-		cabinetMigrationTestRelation("last_confirmed_by", users.Id, false, false),
 		&core.BoolField{Name: "legacy_imported"},
 		&core.AutodateField{Name: "created", OnCreate: true},
 		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
@@ -122,10 +127,6 @@ func TestApplyGameCabinetSchemaPreservesExistingGameState(t *testing.T) {
 	arcade := saveCabinetMigrationTestRecord(t, app, arcades, map[string]any{"name": "Existing arcade"})
 	user := saveCabinetMigrationTestRecord(t, app, users, map[string]any{"name": "Existing user"})
 	seriesRecord := saveCabinetMigrationTestRecord(t, app, series, map[string]any{"en": "Existing series"})
-	previousVersion := saveCabinetMigrationTestRecord(t, app, versions, map[string]any{
-		"series": seriesRecord.Id,
-		"en":     "Previous version",
-	})
 	version := saveCabinetMigrationTestRecord(t, app, versions, map[string]any{
 		"series": seriesRecord.Id,
 		"en":     "Existing version",
@@ -141,28 +142,23 @@ func TestApplyGameCabinetSchemaPreservesExistingGameState(t *testing.T) {
 		"reason":     "existing reason",
 	})
 	revision := saveCabinetMigrationTestRecord(t, app, revisions, map[string]any{
-		"batch":             batch.Id,
-		"entry":             entry.Id,
-		"version":           version.Id,
-		"location":          "second floor",
-		"quantity":          0,
-		"price":             map[string]any{"currency": "KRW", "value": 1000},
-		"tag":               []map[string]any{{"category": "cabinet", "note": "legacy"}},
-		"uncertain":         true,
-		"previous_version":  previousVersion.Id,
-		"last_modified_at":  "2026-08-01 01:02:03.000Z",
-		"last_modified_by":  user.Id,
-		"last_confirmed_at": "2026-08-02 04:05:06.000Z",
-		"last_confirmed_by": user.Id,
-		"legacy_imported":   true,
+		"batch":            batch.Id,
+		"entry":            entry.Id,
+		"version":          version.Id,
+		"location":         "second floor",
+		"quantity":         0,
+		"price":            map[string]any{"currency": "KRW", "value": 1000},
+		"tag":              []map[string]any{{"category": "cabinet", "note": "legacy"}},
+		"last_modified_at": "2026-08-01 01:02:03.000Z",
+		"last_modified_by": user.Id,
+		"legacy_imported":  true,
 	})
 
 	entryFields := []string{"arcade", "series", "created_by", "created", "updated"}
 	batchFields := []string{"arcade", "created_by", "reason", "created", "updated"}
 	revisionFields := []string{
-		"batch", "entry", "version", "location", "quantity", "price", "tag", "uncertain",
-		"previous_version", "last_modified_at", "last_modified_by", "last_confirmed_at",
-		"last_confirmed_by", "legacy_imported", "created", "updated",
+		"batch", "entry", "version", "location", "quantity", "price", "tag",
+		"last_modified_at", "last_modified_by", "legacy_imported", "created", "updated",
 	}
 	beforeEntries := cabinetMigrationRecordFingerprint(t, app, entries.Name, entryFields)
 	beforeBatches := cabinetMigrationRecordFingerprint(t, app, batches.Name, batchFields)

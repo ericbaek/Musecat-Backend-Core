@@ -38,9 +38,7 @@ Each row uses these common columns:
 | `PUT /arcade/sns` | `sns` | one row per request | `sns_diff` | Replaces the current `arcade_sns` relation. |
 | `PUT /arcade/gtk` | `gtk` | one row per request | `gtk_diff` | Replaces the current `arcade_gtk` relation. |
 | `PUT /arcade/game` | `game` | one row per request | `game_diff` | Validates `base_state_id`, creates an immutable history batch, then moves `arcade.game_state` to it. Item IDs are persistent `arcade_game_id` IDs. |
-| `POST /arcade/game/confirm` | `game` | one row per request | `game_diff` | Confirm flow for selected uncertain atoms. |
-| `POST /arcade/game/information/confirm` | `game` | one row per request | `game_information_confirm_diff` | Marks one atom as freshly confirmed and refreshes its `updated` timestamp. |
-| `POST /arcade/game/bulk_version` | `bulk_game_version` | one row per request | `bulk_game_version_diff` | Bulk version swap for many atoms at once. |
+| `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Developer/moderator-only administrative version swap. It uses the normal immutable game-state batch flow. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, or `photo`. |
 
@@ -65,8 +63,6 @@ The meaning of `type` changes per endpoint:
 - `sns_diff`
 - `gtk_diff`
 - `game_diff`
-- `game_information_confirm_diff`
-- `bulk_game_version_diff`
 - `photo_diff`
 - `<part>_diff` for rollback rows
 
@@ -146,54 +142,23 @@ Field-level diffs are usually:
 
 ### `PUT /arcade/game`
 
-`items[]` contains one object per game atom. Each item includes:
-- `atom_id`
-- `prev_id`
-- `game`
-- `change_type`
-- `bullets[]`
-- `diff[]`
+`items[]` contains one object per stable game entry. Each item includes:
+- `entry_id`
+- `change_type`: `added`, `updated`, `unchanged`, or `deleted`
+- `before`: the previous version/location/quantity/price/tag snapshot, or `null`
+- `after`: the resulting version/location/quantity/price/tag snapshot, or `null`
 
-Field-level diffs are usually:
-- `game`
-- `location`
-- `quantity`
-- `price`
-- `tag`
-- `uncertain`
-
-When a game atom is deleted, the `diff[]` payload uses a synthetic `deleted` field with the removed snapshot.
-
-### `POST /arcade/game/confirm`
-
-Uses the same `game_diff` shape as `PUT /arcade/game`.
-The important part is the `uncertain.confirm` bullet for atoms that were confirmed without rollback.
-
-### `POST /arcade/game/information/confirm`
-
-`items[]` contains exactly one object:
-- `atom_id`
-- `game_id`
-- `updated_from`
-- `updated_to`
-
-This is a lightweight confirmation log. It does not describe content changes in the game data itself.
+The row-level `state_from` and `state_to` values identify the immutable
+history batches selected before and after the mutation. This keeps the log
+self-contained without any review-only game metadata.
 
 ### `POST /arcade/game/bulk_version`
 
-The log is request-level, not atom-level.
-
-Outer fields:
-- `type`: always `bulk_game_version_diff`
-- `version`: always `1`
-- `before_game`: the shared old version id
-- `after_game`: the shared new version id
-- `items[]`: one entry per atom updated by the request
-
-Each item contains:
-- `atom_id`
-- `arcade_id`
-- `arcade_name`
+This endpoint uses the normal `game_diff` shape described for `PUT /arcade/game`.
+There is one changelog row per affected arcade. Its `state_from` and `state_to`
+identify the immutable revision batches, and `items[]` contains entry-level
+before/after snapshots. The operation is restricted to `developer` and
+`moderator` accounts and does not award XP.
 
 ### `PUT /arcade/photo`
 
@@ -246,9 +211,8 @@ If you are trying to understand one changelog row, read it in this order:
 ## How To Read The Log
 
 - `basic`, `hour`, `sns`, `gtk`, `game`, and `photo` represent the editable arcade parts.
-- `game_diff` items are atom-level diffs inside the current game molecule.
-- `game_information_confirm_diff` is a lightweight confirmation log for a single atom.
-- `bulk_game_version_diff` is a request-level summary log, not an atom-by-atom diff.
+- `game_diff` items are entry-level before/after snapshots inside the current game state.
+- Administrative bulk version swaps use the same `game_diff` log as ordinary game edits.
 - `rollback` logs use the same `<part>_diff` naming pattern as the part that was rolled back.
 
 ## Practical Rule

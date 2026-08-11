@@ -548,12 +548,6 @@ components:
           oneOf:
             - $ref: '#/components/schemas/ArcadeGameVersion'
             - type: 'null'
-        uncertain:
-          type: boolean
-        prev_game:
-          oneOf:
-            - $ref: '#/components/schemas/ArcadeGameVersion'
-            - type: 'null'
         series:
           oneOf:
             - type: object
@@ -580,23 +574,11 @@ components:
           type: string
         updated:
           type: string
-          description: Last time this specific game atom was confirmed or edited.
+          description: Last time this specific game atom was edited.
         flags:
           type: array
           items:
             $ref: '#/components/schemas/ArcadeFlagExpanded'
-    ArcadeGameInformationConfirmResponse:
-      type: object
-      required: [arcade, game, atom, updated]
-      properties:
-        arcade:
-          type: string
-        game:
-          type: string
-        atom:
-          type: string
-        updated:
-          type: string
     ArcadeGameExpanded:
       type: object
       required: [id, items]
@@ -694,7 +676,7 @@ components:
               description: Ordered list of arcade parts changed in the grouped block.
               items:
                 type: string
-                enum: [basic, hour, sns, gtk, game, bulk_game_version, photo, flag, flag_reaction]
+                enum: [basic, hour, sns, gtk, game, photo, flag, flag_reaction]
     ArcadesNearbyResponse:
       type: object
       required: [page, per_page, last_page, total, country_totals, items]
@@ -1552,10 +1534,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TagItem'
-        uncertain:
-          type: boolean
-        prev_game:
-          type: string
     UpdateArcadeGameRequest:
       type: object
       required: [arcade, base_state_id, games]
@@ -1583,34 +1561,6 @@ components:
           enum: [unplayable, major, bearable, minor]
         message:
           type: string
-    ArcadeGameUncertainRequest:
-      type: object
-      required: [arcade, base_state_id, game_ids]
-      properties:
-        arcade:
-          type: string
-        base_state_id:
-          type: string
-        game_ids:
-          type: array
-          minItems: 1
-          items:
-            type: string
-    ArcadeGameUncertainResponse:
-      type: object
-      required: [action, arcade, game, count, selected_count]
-      properties:
-        action:
-          type: string
-          enum: [rollback, confirm]
-        arcade:
-          type: string
-        game:
-          $ref: '#/components/schemas/ArcadeGameExpanded'
-        count:
-          type: integer
-        selected_count:
-          type: integer
     BulkUpdateArcadeGameVersionRequest:
       type: object
       required: [game_ids, current_game_version_series, new_game_version_series]
@@ -1624,38 +1574,6 @@ components:
           type: string
         new_game_version_series:
           type: string
-    BulkGameVersionChangelogItem:
-      type: object
-      required: [atom_id, arcade_id, arcade_name]
-      properties:
-        atom_id:
-          type: string
-        arcade_id:
-          type: string
-        arcade_name:
-          type: string
-    BulkGameVersionChangelogLog:
-      type: object
-      required: [type, version, before_game, after_game, items]
-      properties:
-        type:
-          type: string
-          description: Always `bulk_game_version_diff`.
-        version:
-          type: integer
-          description: Log schema version.
-          example: 1
-        before_game:
-          type: string
-          description: The shared game version before the bulk update.
-        after_game:
-          type: string
-          description: The shared game version after the bulk update.
-        items:
-          type: array
-          description: One item per updated atom.
-          items:
-            $ref: '#/components/schemas/BulkGameVersionChangelogItem'
     FlagActionRequest:
       type: object
       required: [flag]
@@ -1922,7 +1840,7 @@ paths:
       description: |
         Returns only a public arcade (open or closed) and relation ids by default.
         Private arcades always return `404`; use authenticated `GET /arcade/draft` for a creator or developer/moderator draft read.
-        When `expand=game`, each `game.items[]` entry includes `version`, `series`, `uncertain`, `updated`, and, when `uncertain=true`, `prev_game`.
+        When `expand=game`, each `game.items[]` entry includes `version`, `series`, `updated`, and the editable game fields.
       parameters:
         - name: id
           in: query
@@ -2031,15 +1949,6 @@ paths:
                             kr_short: A
                             jp_short: A
                             manufacturer: null
-                          uncertain: true
-                          prev_game:
-                            id: version_122
-                            series: series_123
-                            released_on: "2024-01-01"
-                            en: Version Old
-                            kr: Version Old
-                            jp: Version Old
-                            price_default: null
                           location: 2F
                           quantity: 1
                           price:
@@ -2422,7 +2331,6 @@ paths:
                             kr_short: Sydney
                             jp_short: Sydney
                             manufacturer: null
-                          uncertain: false
                           location: 1F
                           quantity: 1
                           price: {}
@@ -3970,8 +3878,8 @@ paths:
       tags: [Moderator]
       summary: /arcade/game/bulk_version
       description: |
-        Requires an authenticated user whose `tag` or `tags` includes `developer`, `moderator`, `supporter`, or `founding_supporter`.
-        The selected stable game entries may span multiple arcades. Each affected arcade receives an immutable game-state batch and its own `changed=game` changelog row.
+        Requires an authenticated user whose `tag` or `tags` includes `developer` or `moderator`.
+        Supporter and founding-supporter tags are not sufficient. The selected stable game entries may span multiple arcades. Each affected arcade receives an immutable game-state batch and its own `changed=game` changelog row. This administrative version swap records only the resulting game-state change.
       security:
         - bearerAuth: []
       requestBody:
@@ -4011,7 +3919,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Moderator access required.
+          description: Developer or moderator access required.
           content:
             application/json:
               schema:
@@ -4267,137 +4175,6 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: `base_state_id` is stale or a game version conflicts with the current state.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Missing or invalid bearer token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PocketBaseAuthError'
-        '502':
-          description: Transaction failure.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /arcade/game/rollback:
-    post:
-      tags: [Arcade Mutations]
-      summary: /arcade/game/rollback
-      description: |
-        Accepts stable `game_ids[]` for one arcade and requires the current `base_state_id`.
-        Selected entries must be uncertain and have a previous version.
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ArcadeGameUncertainRequest'
-      responses:
-        '200':
-          description: Rollback applied by creating an immutable game-state batch.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ArcadeGameUncertainResponse'
-        '400':
-          description: Invalid JSON or validation failure.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Missing or invalid bearer token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PocketBaseAuthError'
-        '502':
-          description: Transaction failure.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /arcade/game/confirm:
-    post:
-      tags: [Arcade Mutations]
-      summary: /arcade/game/confirm
-      description: |
-        Accepts stable `game_ids[]` for one arcade and requires the current `base_state_id`.
-        Selected entries must be uncertain.
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ArcadeGameUncertainRequest'
-      responses:
-        '200':
-          description: Confirmation applied by creating an immutable game-state batch.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ArcadeGameUncertainResponse'
-        '400':
-          description: Invalid JSON or validation failure.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Missing or invalid bearer token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PocketBaseAuthError'
-        '502':
-          description: Transaction failure.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-  /arcade/game/information/confirm:
-    post:
-      tags: [Arcade Mutations]
-      summary: /arcade/game/information/confirm
-      description: |
-        Accepts `arcade` and stable `game_id` query parameters. The server creates a new state batch and records the confirmation on the selected revision.
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: arcade
-          in: query
-          required: true
-          schema:
-            type: string
-          description: Arcade id.
-        - name: game_id
-          in: query
-          required: true
-          schema:
-            type: string
-          description: Stable arcade_game_id id.
-      responses:
-        '200':
-          description: Game entry confirmed.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ArcadeGameInformationConfirmResponse'
-              example:
-                arcade: arcade_123
-                game: game_123
-                atom: atom_123
-                updated: "2026-04-10 09:00:00.000Z"
-        '400':
-          description: Missing id or invalid record id.
           content:
             application/json:
               schema:

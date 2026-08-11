@@ -270,7 +270,7 @@ func makeArcadePublic(tb testing.TB, app *tests.TestApp, arcadeID string) {
 	}
 }
 
-func seedArcadeGameRevisionState(tb testing.TB, app *tests.TestApp, arcadeID, versionID, location string) {
+func seedArcadeGameRevisionState(tb testing.TB, app *tests.TestApp, arcadeID, versionID, location string) string {
 	tb.Helper()
 
 	version, err := app.FindRecordById("game_series_version", versionID)
@@ -321,4 +321,5 @@ func seedArcadeGameRevisionState(tb testing.TB, app *tests.TestApp, arcadeID, ve
 	if err := app.Save(arcade); err != nil {
 		tb.Fatalf("failed to link arcade.game_state: %v", err)
 	}
+	return entry.Id
 }

@@ -64,7 +64,7 @@ other arcade handlers own mutation flows for their respective parts.
 | `arcade_gtk` | GTK-related arcade data, including structured parking meta on `Parking` atoms | GTK updates and read expansion |
 | `arcade_game_id` | Durable installed-game identity | flags and game mutations |
 | `arcade_game_history_batch` | Immutable complete game-state snapshot selected by `arcade.game_state` | game reads, rollback, and mutations |
-| `arcade_game_history` | Per-entry version, cabinet, quantity, price, tag, and uncertainty within a batch | game reads and mutations |
+| `arcade_game_history` | Per-entry version, cabinet, quantity, price, and tag within a batch | game reads and mutations |
 | `arcade_photo` | Photo molecule record that groups photo atoms | photo updates and read expansion |
 | `arcade_photo_atoms` | Uploaded photo atoms/files | upload and photo update flows |
 | `arcade_flag` | Flag records for arcade issues | flag create/delete/read paths |
