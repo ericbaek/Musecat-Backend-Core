@@ -1540,7 +1540,7 @@ components:
           type: string
         id:
           type: string
-          description: Stable `arcade_game_entry` id. Omit only to add a new installation.
+          description: Stable `arcade_game_id` id. Omit only to add a new installation.
         location:
           type: string
         quantity:
@@ -1577,7 +1577,7 @@ components:
           type: string
         game_id:
           type: string
-          description: Stable active `arcade_game_entry` id.
+          description: Stable active `arcade_game_id` id.
         disruption:
           type: string
           enum: [unplayable, major, bearable, minor]
@@ -4383,7 +4383,7 @@ paths:
           required: true
           schema:
             type: string
-          description: Stable arcade_game_entry id.
+          description: Stable arcade_game_id id.
       responses:
         '200':
           description: Game entry confirmed.

@@ -52,7 +52,7 @@ func TestGameStateV2_PointerChangelogAndConflict(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	revisions1, err := app.FindRecordsByFilter("arcade_game_revision", "batch={:batch}", "", 0, 0, map[string]any{"batch": state1})
+	revisions1, err := app.FindRecordsByFilter("arcade_game_history", "batch={:batch}", "", 0, 0, map[string]any{"batch": state1})
 	if err != nil || len(revisions1) != 1 {
 		t.Fatalf("expected one first revision, err=%v count=%d", err, len(revisions1))
 	}

@@ -13,9 +13,9 @@ import (
 func TestListArcadeGames_FiltersByCountrySeriesAndVersion(t *testing.T) {
 	headers := map[string]string{}
 	scenario := tests.ApiScenario{
-		Name:           "GET /arcade/games filters by country, series, and version",
-		Method:         http.MethodGet,
-		Headers:        headers,
+		Name:    "GET /arcade/games filters by country, series, and version",
+		Method:  http.MethodGet,
+		Headers: headers,
 		ExpectedContent: []string{
 			"Filter Arcade",
 			"Filter Version",
@@ -37,12 +37,12 @@ func TestListArcadeGames_FiltersByCountrySeriesAndVersion(t *testing.T) {
 		headers["Authorization"] = "Bearer " + token
 
 		arcadeID, _ = seedArcade(tb, app, user.Id, arcadeSeed{
-			Name:      "Filter Arcade",
-			Address:   "Filter Street",
-			Location:  location{Lat: 37.5665, Lon: 126.9780},
-			Country:   "KR",
-			Timezone:  "Asia/Seoul",
-			Nickname:  []string{"Filter"},
+			Name:       "Filter Arcade",
+			Address:    "Filter Street",
+			Location:   location{Lat: 37.5665, Lon: 126.9780},
+			Country:    "KR",
+			Timezone:   "Asia/Seoul",
+			Nickname:   []string{"Filter"},
 			SubwayLine: []string{"2"},
 		})
 		makeArcadePublic(tb, app, arcadeID)
@@ -50,8 +50,7 @@ func TestListArcadeGames_FiltersByCountrySeriesAndVersion(t *testing.T) {
 		seriesID = seedGameSeries(tb, app, 7, "Filter Series")
 		versionID = seedGameSeriesVersionWithSeries(tb, app, seriesID, "2025-06-01", "Filter Version")
 
-		moleculeID := seedArcadeGameMolecule(tb, app, arcadeID)
-		seedArcadeGameAtom(tb, app, moleculeID, versionID, "2F")
+		seedArcadeGameRevisionState(tb, app, arcadeID, versionID, "2F")
 
 		otherArcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Other Arcade",
@@ -63,8 +62,7 @@ func TestListArcadeGames_FiltersByCountrySeriesAndVersion(t *testing.T) {
 		makeArcadePublic(tb, app, otherArcadeID)
 		otherSeriesID := seedGameSeries(tb, app, 9, "Other Series")
 		otherVersionID := seedGameSeriesVersionWithSeries(tb, app, otherSeriesID, "2026-01-01", "Other Version")
-		otherMoleculeID := seedArcadeGameMolecule(tb, app, otherArcadeID)
-		seedArcadeGameAtom(tb, app, otherMoleculeID, otherVersionID, "B1")
+		seedArcadeGameRevisionState(tb, app, otherArcadeID, otherVersionID, "B1")
 
 		scenario.URL = fmt.Sprintf(
 			"/arcade/games?country=KR&game_series=%s&game_series_version=%s",
@@ -136,10 +134,10 @@ func TestListArcadeGames_FiltersByCountrySeriesAndVersion(t *testing.T) {
 func TestListArcadeGames_SortsBySeriesAndRelease(t *testing.T) {
 	headers := map[string]string{}
 	scenario := tests.ApiScenario{
-		Name:           "GET /arcade/games sorts by series and release",
-		Method:         http.MethodGet,
-		URL:            "/arcade/games?country=KR",
-		Headers:        headers,
+		Name:    "GET /arcade/games sorts by series and release",
+		Method:  http.MethodGet,
+		URL:     "/arcade/games?country=KR",
+		Headers: headers,
 		ExpectedContent: []string{
 			"Arcade A",
 			"Arcade B",
@@ -180,11 +178,9 @@ func TestListArcadeGames_SortsBySeriesAndRelease(t *testing.T) {
 		firstVersionID = seedGameSeriesVersionWithSeries(tb, app, series2ID, "2026-01-01", "Series Two Latest")
 		secondVersionID = seedGameSeriesVersionWithSeries(tb, app, series1ID, "2024-01-01", "Series One Old")
 
-		moleculeA := seedArcadeGameMolecule(tb, app, arcadeAID)
-		seedArcadeGameAtom(tb, app, moleculeA, firstVersionID, "B1")
+		seedArcadeGameRevisionState(tb, app, arcadeAID, firstVersionID, "B1")
 
-		moleculeB := seedArcadeGameMolecule(tb, app, arcadeBID)
-		seedArcadeGameAtom(tb, app, moleculeB, secondVersionID, "1F")
+		seedArcadeGameRevisionState(tb, app, arcadeBID, secondVersionID, "1F")
 	}
 
 	scenario.AfterTestFunc = func(tb testing.TB, _ *tests.TestApp, res *http.Response) {
@@ -271,5 +267,58 @@ func makeArcadePublic(tb testing.TB, app *tests.TestApp, arcadeID string) {
 	rec.Set("closed", false)
 	if err := app.Save(rec); err != nil {
 		tb.Fatalf("failed to make arcade public: %v", err)
+	}
+}
+
+func seedArcadeGameRevisionState(tb testing.TB, app *tests.TestApp, arcadeID, versionID, location string) {
+	tb.Helper()
+
+	version, err := app.FindRecordById("game_series_version", versionID)
+	if err != nil {
+		tb.Fatalf("failed to load game_series_version: %v", err)
+	}
+	entryCollection, err := app.FindCollectionByNameOrId("arcade_game_id")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_entry: %v", err)
+	}
+	entry := core.NewRecord(entryCollection)
+	entry.Set("arcade", arcadeID)
+	entry.Set("series", version.GetString("series"))
+	if err := app.Save(entry); err != nil {
+		tb.Fatalf("failed to save arcade_game_entry: %v", err)
+	}
+
+	batchCollection, err := app.FindCollectionByNameOrId("arcade_game_history_batch")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_revision_batch: %v", err)
+	}
+	batch := core.NewRecord(batchCollection)
+	batch.Set("arcade", arcadeID)
+	batch.Set("reason", "list arcade games test")
+	if err := app.Save(batch); err != nil {
+		tb.Fatalf("failed to save arcade_game_revision_batch: %v", err)
+	}
+
+	revisionCollection, err := app.FindCollectionByNameOrId("arcade_game_history")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_revision: %v", err)
+	}
+	revision := core.NewRecord(revisionCollection)
+	revision.Set("batch", batch.Id)
+	revision.Set("entry", entry.Id)
+	revision.Set("version", versionID)
+	revision.Set("location", location)
+	revision.Set("quantity", 1)
+	if err := app.Save(revision); err != nil {
+		tb.Fatalf("failed to save arcade_game_revision: %v", err)
+	}
+
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		tb.Fatalf("failed to load arcade: %v", err)
+	}
+	arcade.Set("game_state", batch.Id)
+	if err := app.Save(arcade); err != nil {
+		tb.Fatalf("failed to link arcade.game_state: %v", err)
 	}
 }

@@ -17,8 +17,7 @@ func TestGetArcadeCandidates_RebuildsAndInvalidates(t *testing.T) {
 
 	arcadeID, basicID := seedArcadeCandidateRecord(t, app, "Original Name", "Seoul Arcade")
 	versionID := seedArcadeCandidateVersion(t, app, "Initial Series")
-	moleculeID := seedArcadeCandidateGameMolecule(t, app, arcadeID)
-	seedArcadeCandidateGameAtom(t, app, moleculeID, versionID)
+	seedArcadeCandidateGameState(t, app, arcadeID, versionID)
 
 	candidates, err := GetArcadeCandidates(app)
 	if err != nil {
@@ -172,54 +171,61 @@ func seedArcadeCandidateVersion(tb testing.TB, app *tests.TestApp, seriesName st
 	return rec.Id
 }
 
-func seedArcadeCandidateGameMolecule(tb testing.TB, app *tests.TestApp, arcadeID string) string {
+func seedArcadeCandidateGameState(tb testing.TB, app *tests.TestApp, arcadeID, versionID string) {
 	tb.Helper()
 
-	coll, err := app.FindCollectionByNameOrId("arcade_game")
+	version, err := app.FindRecordById("game_series_version", versionID)
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game collection: %v", err)
+		tb.Fatalf("failed to load game_series_version: %v", err)
 	}
-
-	rec := core.NewRecord(coll)
-	rec.Set("arcade", arcadeID)
-	if err := app.Save(rec); err != nil {
-		tb.Fatalf("failed to save arcade_game: %v", err)
-	}
-
-	arcadeRec, err := app.FindRecordById("arcade", arcadeID)
+	entryColl, err := app.FindCollectionByNameOrId("arcade_game_id")
 	if err != nil {
-		tb.Fatalf("failed to load arcade: %v", err)
+		tb.Fatalf("failed to load arcade_game_entry: %v", err)
 	}
-	arcadeRec.Set("game", rec.Id)
-	if err := app.Save(arcadeRec); err != nil {
-		tb.Fatalf("failed to link arcade.game: %v", err)
+	entry := core.NewRecord(entryColl)
+	entry.Set("arcade", arcadeID)
+	entry.Set("series", version.GetString("series"))
+	if err := app.Save(entry); err != nil {
+		tb.Fatalf("failed to save arcade_game_entry: %v", err)
 	}
 
-	return rec.Id
-}
-
-func seedArcadeCandidateGameAtom(tb testing.TB, app *tests.TestApp, moleculeID, versionID string) string {
-	tb.Helper()
-
-	coll, err := app.FindCollectionByNameOrId("arcade_game_atoms")
+	batchColl, err := app.FindCollectionByNameOrId("arcade_game_history_batch")
 	if err != nil {
-		tb.Fatalf("failed to load arcade_game_atoms collection: %v", err)
+		tb.Fatalf("failed to load arcade_game_revision_batch: %v", err)
+	}
+	batch := core.NewRecord(batchColl)
+	batch.Set("arcade", arcadeID)
+	batch.Set("reason", "candidate cache test")
+	if err := app.Save(batch); err != nil {
+		tb.Fatalf("failed to save arcade_game_revision_batch: %v", err)
 	}
 
-	rec := core.NewRecord(coll)
-	rec.Set("molecule", moleculeID)
-	rec.Set("game", versionID)
-	rec.Set("location", "1F")
-	rec.Set("quantity", 1)
-	rec.Set("price", map[string]any{
+	revisionColl, err := app.FindCollectionByNameOrId("arcade_game_history")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_game_revision: %v", err)
+	}
+	revision := core.NewRecord(revisionColl)
+	revision.Set("batch", batch.Id)
+	revision.Set("entry", entry.Id)
+	revision.Set("version", versionID)
+	revision.Set("location", "1F")
+	revision.Set("quantity", 1)
+	revision.Set("price", map[string]any{
 		"currency": "KRW",
 		"type":     "custom",
 		"list":     []map[string]any{{"value": 500}},
 		"accept":   []string{"Cash"},
 	})
-	if err := app.Save(rec); err != nil {
-		tb.Fatalf("failed to save arcade_game_atom: %v", err)
+	if err := app.Save(revision); err != nil {
+		tb.Fatalf("failed to save arcade_game_revision: %v", err)
 	}
 
-	return rec.Id
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		tb.Fatalf("failed to load arcade: %v", err)
+	}
+	arcade.Set("game_state", batch.Id)
+	if err := app.Save(arcade); err != nil {
+		tb.Fatalf("failed to link arcade.game_state: %v", err)
+	}
 }

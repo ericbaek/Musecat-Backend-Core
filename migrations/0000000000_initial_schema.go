@@ -1,6 +1,9 @@
 package migrations
 
 import (
+	"encoding/json"
+	"fmt"
+
 	"github.com/pocketbase/pocketbase/core"
 	m "github.com/pocketbase/pocketbase/migrations"
 )
@@ -4459,7 +4462,35 @@ func init() {
 			}
 		]`
 
-		return app.ImportCollectionsByMarshaledJSON([]byte(jsonData), false)
+		var collections []map[string]any
+		if err := json.Unmarshal([]byte(jsonData), &collections); err != nil {
+			return fmt.Errorf("decode initial schema: %w", err)
+		}
+		filtered := make([]map[string]any, 0, len(collections))
+		for _, collection := range collections {
+			name, _ := collection["name"].(string)
+			if name == "arcade_game" || name == "arcade_game_atoms" {
+				continue
+			}
+			if name == "arcade" {
+				fields, _ := collection["fields"].([]any)
+				kept := make([]any, 0, len(fields))
+				for _, raw := range fields {
+					field, _ := raw.(map[string]any)
+					if field["name"] == "game" {
+						continue
+					}
+					kept = append(kept, raw)
+				}
+				collection["fields"] = kept
+			}
+			filtered = append(filtered, collection)
+		}
+		finalSchema, err := json.Marshal(filtered)
+		if err != nil {
+			return fmt.Errorf("encode initial schema: %w", err)
+		}
+		return app.ImportCollectionsByMarshaledJSON(finalSchema, false)
 	}, func(app core.App) error {
 		return nil
 	})

@@ -33,8 +33,6 @@ var arcadeWriteProtectedCollections = []string{
 	"arcade_sns_atoms",
 	"arcade_gtk",
 	"arcade_gtk_atoms",
-	"arcade_game",
-	"arcade_game_atoms",
 	"arcade_photo",
 	"arcade_photo_atoms",
 	"arcade_flag",

@@ -9,6 +9,18 @@ The important rule is simple:
 
 Rows are immutable. API v2 serves timeline data through `GET /arcade/changelog`; clients must not use PocketBase collection REST to read or mutate it. A report cites an existing changelog id and derives the reported editor from the row's server-written `by` value.
 
+Deployment migrations are not user mutations. The guarded Full game-catalog
+cutover does not create a changelog row because it has no authenticated editor.
+It retains every old game batch and revision, records exact pre-change rows in
+the locked migration-origin collection, creates a complete shadow current
+batch, and moves `arcade.game_state` atomically. It must never attribute that
+system normalization to an arbitrary user.
+
+Before that cutover, Full's legacy history import preserves each source
+`arcade_game.id` as the matching history-batch ID and imports every source
+molecule/atom. This is required because existing game changelog `from`/`to`
+values are those legacy molecule IDs and must remain valid rollback targets.
+
 Each row uses these common columns:
 - `arcade`: the target arcade id
 - `changed`: the arcade part that was modified
@@ -25,7 +37,7 @@ Each row uses these common columns:
 | `PUT /arcade/hour` | `hour` | one row per request | `hour_diff` | Replaces the current `arcade_hour` relation. |
 | `PUT /arcade/sns` | `sns` | one row per request | `sns_diff` | Replaces the current `arcade_sns` relation. |
 | `PUT /arcade/gtk` | `gtk` | one row per request | `gtk_diff` | Replaces the current `arcade_gtk` relation. |
-| `PUT /arcade/game` | `game` | one row per request | `game_diff` | Validates `base_state_id`, creates an immutable revision batch, then moves `arcade.game_state` to it. Item IDs are persistent `arcade_game_entry` IDs. |
+| `PUT /arcade/game` | `game` | one row per request | `game_diff` | Validates `base_state_id`, creates an immutable history batch, then moves `arcade.game_state` to it. Item IDs are persistent `arcade_game_id` IDs. |
 | `POST /arcade/game/confirm` | `game` | one row per request | `game_diff` | Confirm flow for selected uncertain atoms. |
 | `POST /arcade/game/information/confirm` | `game` | one row per request | `game_information_confirm_diff` | Marks one atom as freshly confirmed and refreshes its `updated` timestamp. |
 | `POST /arcade/game/bulk_version` | `bulk_game_version` | one row per request | `bulk_game_version_diff` | Bulk version swap for many atoms at once. |

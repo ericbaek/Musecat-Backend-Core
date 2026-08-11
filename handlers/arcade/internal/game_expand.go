@@ -202,26 +202,6 @@ func ResolveGameMoleculeIDForFlag(app core.App, arcadeID, flagID string) string 
 		}
 	}
 
-	if flagID == "" {
-		return ""
-	}
-
-	atomRecs, err := app.FindRecordsByFilter(CollectionArcadeGameAtoms, "", "", 0, 0)
-	if err != nil {
-		return ""
-	}
-
-	for _, atom := range atomRecs {
-		if strings.TrimSpace(atom.GetString("molecule")) == "" {
-			continue
-		}
-		for _, linkedFlagID := range atom.GetStringSlice("flags") {
-			if linkedFlagID == flagID {
-				return atom.GetString("molecule")
-			}
-		}
-	}
-
 	return ""
 }
 

@@ -7,9 +7,7 @@ import (
 	m "github.com/pocketbase/pocketbase/migrations"
 )
 
-// This is phase A of the game-state cutover. It is deliberately additive: old
-// molecules remain immutable archive evidence until operations has completed
-// the legacy identity audit. New writes use only the collections created here.
+// Install the immutable game-state collections for a fresh Core database.
 func init() {
 	m.Register(func(app core.App) error {
 		arcade, err := app.FindCollectionByNameOrId("arcade")
@@ -28,11 +26,6 @@ func init() {
 		if err != nil {
 			return fmt.Errorf("find game_series_version: %w", err)
 		}
-		legacyAtoms, err := app.FindCollectionByNameOrId("arcade_game_atoms")
-		if err != nil {
-			return fmt.Errorf("find arcade_game_atoms: %w", err)
-		}
-
 		entries, err := ensureGameEntry(app, arcade, series, users)
 		if err != nil {
 			return err
@@ -50,16 +43,8 @@ func init() {
 		if err := ensureFlagGameEntryField(app, entries); err != nil {
 			return err
 		}
-		if err := ensureLegacyMap(app, arcade, legacyAtoms, entries); err != nil {
-			return err
-		}
-		if err := ensureMigrationIssue(app, arcade, legacyAtoms, entries); err != nil {
-			return err
-		}
-
 		for _, name := range []string{
-			"arcade_game_entry", "arcade_game_revision_batch", "arcade_game_revision",
-			"arcade_game_legacy_map", "arcade_game_migration_issue",
+			"arcade_game_id", "arcade_game_history_batch", "arcade_game_history",
 		} {
 			if collection, findErr := app.FindCollectionByNameOrId(name); findErr == nil {
 				collection.ListRule, collection.ViewRule, collection.CreateRule, collection.UpdateRule, collection.DeleteRule = nil, nil, nil, nil, nil
@@ -96,15 +81,15 @@ func relation(name, collectionID string, cascade bool, required bool) *core.Rela
 }
 
 func ensureGameEntry(app core.App, arcade, series, users *core.Collection) (*core.Collection, error) {
-	c, err := ensureCollection(app, "arcade_game_entry",
+	c, err := ensureCollection(app, "arcade_game_id",
 		relation("arcade", arcade.Id, true, true), relation("series", series.Id, false, true),
-		relation("created_by", users.Id, false, true),
+		relation("created_by", users.Id, false, false),
 	)
 	if err != nil {
 		return nil, err
 	}
-	c.AddIndex("idx_arcade_game_entry_arcade", false, "arcade", "")
-	c.AddIndex("idx_arcade_game_entry_series", false, "series", "")
+	c.AddIndex("idx_arcade_game_id_arcade", false, "arcade", "")
+	c.AddIndex("idx_arcade_game_id_series", false, "series", "")
 	if err := app.Save(c); err != nil {
 		return nil, err
 	}
@@ -112,14 +97,14 @@ func ensureGameEntry(app core.App, arcade, series, users *core.Collection) (*cor
 }
 
 func ensureGameBatch(app core.App, arcade, users *core.Collection) (*core.Collection, error) {
-	c, err := ensureCollection(app, "arcade_game_revision_batch",
-		relation("arcade", arcade.Id, true, true), relation("created_by", users.Id, false, true),
+	c, err := ensureCollection(app, "arcade_game_history_batch",
+		relation("arcade", arcade.Id, true, true), relation("created_by", users.Id, false, false),
 		&core.TextField{Name: "reason", Max: 120},
 	)
 	if err != nil {
 		return nil, err
 	}
-	c.AddIndex("idx_arcade_game_revision_batch_arcade_created", false, "arcade, created", "")
+	c.AddIndex("idx_arcade_game_history_batch_arcade_created", false, "arcade, created", "")
 	if err := app.Save(c); err != nil {
 		return nil, err
 	}
@@ -127,7 +112,7 @@ func ensureGameBatch(app core.App, arcade, users *core.Collection) (*core.Collec
 }
 
 func ensureGameRevision(app core.App, batch, entry, version, users *core.Collection) (*core.Collection, error) {
-	c, err := ensureCollection(app, "arcade_game_revision",
+	c, err := ensureCollection(app, "arcade_game_history",
 		relation("batch", batch.Id, true, true), relation("entry", entry.Id, false, true), relation("version", version.Id, false, true),
 		&core.TextField{Name: "location", Max: 500}, &core.NumberField{Name: "quantity", OnlyInt: true, Min: func() *float64 { v := float64(1); return &v }()},
 		&core.JSONField{Name: "price"}, &core.JSONField{Name: "tag"}, &core.BoolField{Name: "uncertain"},
@@ -137,9 +122,9 @@ func ensureGameRevision(app core.App, batch, entry, version, users *core.Collect
 	if err != nil {
 		return nil, err
 	}
-	c.AddIndex("idx_arcade_game_revision_batch_entry", true, "batch, entry", "")
-	c.AddIndex("idx_arcade_game_revision_entry", false, "entry", "")
-	c.AddIndex("idx_arcade_game_revision_batch_version", true, "batch, version", "")
+	c.AddIndex("idx_arcade_game_history_batch_entry", true, "batch, entry", "")
+	c.AddIndex("idx_arcade_game_history_entry", false, "entry", "")
+	c.AddIndex("idx_arcade_game_history_batch_version", true, "batch, version", "")
 	if err := app.Save(c); err != nil {
 		return nil, err
 	}
@@ -163,22 +148,4 @@ func ensureFlagGameEntryField(app core.App, entry *core.Collection) error {
 	}
 	flag.AddIndex("idx_arcade_flag_game_entry_open", false, "game_entry, solved, created", "")
 	return app.Save(flag)
-}
-
-func ensureLegacyMap(app core.App, arcade, atom, entry *core.Collection) error {
-	c, err := ensureCollection(app, "arcade_game_legacy_map", relation("arcade", arcade.Id, true, true), relation("legacy_atom", atom.Id, false, true), relation("entry", entry.Id, false, false), &core.SelectField{Name: "status", Values: []string{"mapped", "ambiguous", "unmapped"}, MaxSelect: 1})
-	if err != nil {
-		return err
-	}
-	c.AddIndex("idx_arcade_game_legacy_map_atom", true, "legacy_atom", "")
-	return app.Save(c)
-}
-
-func ensureMigrationIssue(app core.App, arcade, atom, entry *core.Collection) error {
-	c, err := ensureCollection(app, "arcade_game_migration_issue", relation("arcade", arcade.Id, true, true), relation("legacy_atom", atom.Id, false, false), &core.RelationField{Name: "candidates", CollectionId: entry.Id, MaxSelect: 999}, relation("resolved_entry", entry.Id, false, false), &core.TextField{Name: "reason", Max: 1000}, &core.BoolField{Name: "resolved"})
-	if err != nil {
-		return err
-	}
-	c.AddIndex("idx_arcade_game_migration_issue_open", false, "arcade, resolved", "")
-	return app.Save(c)
 }

@@ -221,12 +221,6 @@ func BuildArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
 		basicRec := basicByArcadeID[arcadeRec.Id]
 		stateID := strings.TrimSpace(arcadeRec.GetString("game_state"))
 		gameSeries := gameSeriesByStateID[stateID]
-		// Phase-A databases may still have archived legacy molecules while an
-		// operator resolves identity ambiguities. This read-only fallback never
-		// accepts legacy writes and disappears once game_state is set.
-		if stateID == "" {
-			gameSeries = loadLegacyArcadeGameSeries(app, arcadeRec.GetString("game"))
-		}
 		candidate, ok := buildArcadeCandidateFromRecords(arcadeRec, basicRec, gameSeries)
 		if !ok {
 			continue
@@ -323,30 +317,6 @@ func loadArcadeGameSeries(app core.App, stateID string) []string {
 		series = append(series, id)
 	}
 	return series
-}
-
-func loadLegacyArcadeGameSeries(app core.App, moleculeID string) []string {
-	moleculeID = strings.TrimSpace(moleculeID)
-	if app == nil || moleculeID == "" {
-		return nil
-	}
-	atoms, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameAtoms, "molecule={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
-	if err != nil {
-		return nil
-	}
-	set := map[string]struct{}{}
-	for _, atom := range atoms {
-		version, findErr := app.FindRecordById(arcadeinternal.CollectionGameSeriesVersion, atom.GetString("game"))
-		if findErr == nil && strings.TrimSpace(version.GetString("series")) != "" {
-			set[strings.TrimSpace(version.GetString("series"))] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(set))
-	for id := range set {
-		out = append(out, id)
-	}
-	sort.Strings(out)
-	return out
 }
 
 func cloneArcadeCandidates(candidates []ArcadeCandidate) []ArcadeCandidate {

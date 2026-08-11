@@ -103,15 +103,15 @@ func buildArcadeGameListQuery(countrySet, seriesSet, versionSet map[string]bool)
 SELECT
 	a.id AS arcade_id,
 	a.country AS arcade_country,
-	a.game AS game_id,
+	a.game_state AS game_id,
 	b.name AS arcade_name,
 	b.address AS arcade_address,
 	b.location AS arcade_location,
-	atom.id AS atom_id,
-	atom.location AS machine_location,
-	atom.quantity AS quantity,
-	atom.price AS price,
-	atom.tag AS tag,
+	r.entry AS atom_id,
+	r.location AS machine_location,
+	r.quantity AS quantity,
+	r.price AS price,
+	r.tag AS tag,
 	v.id AS version_id,
 	v.series AS series_id,
 	v.released_on AS released_on,
@@ -130,9 +130,8 @@ SELECT
 	s.manufacturer AS series_manufacturer
 FROM arcade a
 INNER JOIN arcade_basic b ON b.id = a.basic
-INNER JOIN arcade_game g ON g.id = a.game
-INNER JOIN arcade_game_atoms atom ON atom.molecule = g.id
-INNER JOIN game_series_version v ON v.id = atom.game
+INNER JOIN arcade_game_history r ON r.batch = a.game_state
+INNER JOIN game_series_version v ON v.id = r.version
 INNER JOIN game_series s ON s.id = v.series
 WHERE %s
 ORDER BY
@@ -140,7 +139,7 @@ ORDER BY
 	CAST(s.seriesNumber AS INTEGER) ASC,
 	CASE WHEN v.released_on IS NULL THEN 1 ELSE 0 END ASC,
 	v.released_on DESC,
-	atom.id ASC
+	r.entry ASC
 `, strings.Join(clauses, " AND "))
 
 	return sql, params
