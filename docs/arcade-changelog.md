@@ -7,7 +7,11 @@ The important rule is simple:
 - only the mutation endpoints listed below create `arcade_changelog` rows
 - if an endpoint is not listed, it does not currently write an arcade changelog row
 
-Rows are immutable. API v2 serves timeline data through `GET /arcade/changelog`; clients must not use PocketBase collection REST to read or mutate it. A report cites an existing changelog id and derives the reported editor from the row's server-written `by` value.
+Rows are immutable. API v2 serves arcade timelines through `GET /arcade/changelog`
+and user-authored timelines through `GET /user/changelog`; clients must not use
+PocketBase collection REST to read or mutate them. A report cites an existing
+changelog id and derives the reported editor from the row's server-written `by`
+value.
 
 Deployment migrations are not user mutations. The guarded Full game-catalog
 cutover does not create a changelog row because it has no authenticated editor.
@@ -41,6 +45,19 @@ Each row uses these common columns:
 | `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Developer/moderator-only administrative version swap. It uses the normal immutable game-state batch flow. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, or `photo`. |
+
+The read-only user timeline is available through `GET /user/changelog?user=...`.
+It uses the same immutable rows, but scopes them by `arcade_changelog.by` and
+adds `arcade_name` for profile timelines. Anonymous callers see only rows whose
+arcade is public; the authenticated owner may also see their private arcade
+rows, and `developer`/`moderator` reviewers may audit all rows. The optional
+`changed` filter accepts exactly `basic`, `game`, `hour`, `sns`, `gtk`, or
+`photo`. These are the complete current changelog categories in the Core
+bootstrap schema and mutation handlers; activity-only values such as `flag`,
+`flag_reaction`, `visit`, and `legacy` are not `arcade_changelog.changed`
+values and are intentionally excluded. Rows whose arcade aggregate was deleted
+are omitted, and withdrawn users return an empty page to avoid exposing
+history after profile withdrawal.
 
 When rollback includes `report=true`, its cited prior changelog and the `rollback_report` record are created/validated in the same transaction as the rollback. `POST /arcade/edit_report` is the report-only path and does not change the arcade.
 

@@ -135,6 +135,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		se.Router.GET("/rankings", rankinghandler.List)
 		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
 		se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
+		se.Router.GET("/user/changelog", user.GetUserChangelog)
 		se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
 		se.Router.GET("/arcades", arcadequery.ListArcades)
 		se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)

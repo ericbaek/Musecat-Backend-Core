@@ -554,8 +554,14 @@ components:
               additionalProperties: true
             - type: 'null'
         cabinet:
-          type: string
-          description: Canonical `game_cabinet` id selected on this revision; empty when unverified.
+          oneOf:
+            - $ref: '#/components/schemas/ArcadeGameCabinet'
+            - type: string
+            - type: 'null'
+          description: |
+            `GET /arcade` and expanded nearby game items return the catalog
+            object. `GET /arcade/games` retains the canonical ID string.
+            Unverified revisions return null in expanded game responses.
         location:
           type: string
         quantity:
@@ -582,6 +588,19 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ArcadeFlagExpanded'
+    ArcadeGameCabinet:
+      type: object
+      required: [id, en, kr, jp]
+      properties:
+        id:
+          type: string
+          description: Canonical `game_cabinet` record ID.
+        en:
+          type: string
+        kr:
+          type: string
+        jp:
+          type: string
     ArcadeGameExpanded:
       type: object
       required: [id, state_id, items]
@@ -1714,7 +1733,9 @@ components:
       properties:
         id: {type: string}
         arcade: {type: string}
-        changed: {type: string}
+        changed:
+          type: string
+          enum: [basic, game, hour, sns, gtk, photo]
         from: {}
         to: {}
         by: {type: string}
@@ -1732,6 +1753,36 @@ components:
         items:
           type: array
           items: {$ref: '#/components/schemas/ArcadeChangelogItem'}
+    UserChangelogItem:
+      type: object
+      required: [id, arcade, arcade_name, changed, by, created, updated]
+      properties:
+        id: {type: string}
+        arcade: {type: string}
+        arcade_name:
+          type: string
+          description: Current display name of the arcade containing the row.
+        changed:
+          type: string
+          enum: [basic, game, hour, sns, gtk, photo]
+        from: {}
+        to: {}
+        by: {type: string}
+        log: {}
+        created: {type: string}
+        updated:
+          type: [string, 'null']
+    UserChangelogPage:
+      type: object
+      required: [page, per_page, last_page, total, items]
+      properties:
+        page: {type: integer}
+        per_page: {type: integer}
+        last_page: {type: integer}
+        total: {type: integer, format: int64}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/UserChangelogItem'}
     ArcadePhotoAtom:
       type: object
       required: [id, arcade, photo, file_url, public, createdBy, created, updated]
@@ -2371,7 +2422,11 @@ paths:
                             kr_short: Sydney
                             jp_short: Sydney
                             manufacturer: null
-                          cabinet: cabinet_gold
+                          cabinet:
+                            id: cabinet_gold
+                            en: CHUNITHM GOLD
+                            kr: 츄니즘 골드
+                            jp: チュウニズム ゴールド
                           location: 1F
                           quantity: 1
                           price: {}
@@ -2565,6 +2620,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /user/changelog:
+    get:
+      tags: [Users]
+      summary: /user/changelog
+      description: |
+        Returns the requested user's authored arcade changelog rows in reverse
+        chronological order. Anonymous callers receive rows from public
+        arcades only. An authenticated caller may additionally receive rows
+        from private arcades they own; `developer` and `moderator` callers may
+        audit private rows. The endpoint never exposes flags, visits, or legacy
+        tickets; those remain activity aggregates rather than changelog rows.
+        Rows whose arcade aggregate was deleted are omitted, and withdrawn
+        users receive an empty page.
+      parameters:
+        - name: user
+          in: query
+          required: true
+          description: User id whose server-authored changelog rows are requested.
+          schema: {type: string}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: changed
+          in: query
+          description: Optional arcade part filter. Omit to return all supported categories.
+          schema:
+            type: string
+            enum: [basic, game, hour, sns, gtk, photo]
+      responses:
+        '200':
+          description: User-scoped immutable changelog page.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserChangelogPage'}
+        '400':
+          description: Missing user id, invalid pagination, or unsupported changed category.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: User does not exist.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Failed to query the user changelog.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /supporter/score:
     get:
       tags: [Support]
@@ -3200,7 +3307,11 @@ paths:
                       lat: 37.5665
                       lon: 126.978
                   game: game_123
-                  cabinet: cabinet_gold
+                  cabinet:
+                    id: cabinet_gold
+                    en: CHUNITHM GOLD
+                    kr: 츄니즘 골드
+                    jp: チュウニズム ゴールド
                   location: 2F
                   quantity: 1
                   price:

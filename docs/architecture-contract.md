@@ -33,6 +33,8 @@ Definitions:
 | --- | --- | --- | --- | --- |
 | Public/open detail, search, changelog, notices | allow | allow | allow | allow |
 | Public/closed detail, search, changelog, notices | allow | allow | allow | allow |
+| `/user/changelog` rows from public arcades | allow | allow | allow | allow |
+| `/user/changelog` rows from a private arcade | deny | deny | rows in own arcades | allow |
 | `/arcades` operating list | public/open only | public/open only | public/open only | public/open only |
 | Nearby, updates, visit, visit stats | public/open only | public/open only | public/open only | public/open only |
 | Private detail via `/arcade` | 404 | 404 | 404 | 404 |
@@ -69,8 +71,9 @@ version/cabinet pair. An empty cabinet means genuinely unverified cabinet
 identity. Game edits and every state-cloning flow, including confirmation,
 uncertain rollback, administrative bulk version changes, and generic game
 rollback, MUST preserve the cabinet unless that request explicitly changes it.
-The expanded game response returns the canonical cabinet ID for verified
-revisions and an empty value for unverified revisions.
+The expanded `/arcade` game response returns the cabinet catalog object
+`{id, en, kr, jp}` for verified revisions and `null` for unverified revisions.
+The mutation and filter contracts continue to use the canonical cabinet ID.
 
 The developer/moderator-only `POST /arcade/game/bulk_version` operation is an administrative version swap. It applies the same immutable batch and `changed="game"` changelog semantics per affected arcade as a regular game mutation, does not award XP, and does not maintain any separate review-state metadata.
 
@@ -95,6 +98,7 @@ The PocketBase collection API is persistence infrastructure, not the application
 | own drafts | `GET /arcade/drafts` |
 | delete own draft | `DELETE /arcade/draft?id=...` |
 | changelog timeline | `GET /arcade/changelog?arcade=...` |
+| user-authored changelog timeline | `GET /user/changelog?user=...` (optional `changed=basic|game|hour|sns|gtk|photo`) |
 | photo atom list | `GET /arcade/photo/atoms?arcade=...` |
 | photo bytes | `GET /arcade/photo/file?id=...` (the `file_url` returned for an atom) |
 | delete pending own photo atom | `DELETE /arcade/photo/atom?id=...` |

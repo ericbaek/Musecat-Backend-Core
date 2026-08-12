@@ -88,6 +88,9 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		// Public user profile read endpoint
 		se.Router.GET("/user", userhandler.GetUserByID)
 		se.Router.GET("/user/activity", userhandler.GetUserActivity)
+		// Public user-scoped changelog read endpoint; private arcade rows are
+		// returned only to their owner or strict reviewers.
+		se.Router.GET("/user/changelog", userhandler.GetUserChangelog)
 		se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback)
 		se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback)
 

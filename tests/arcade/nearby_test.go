@@ -477,7 +477,8 @@ func TestNearby_ExpandFiltersAndBoostsOnlyPairedCabinetItems(t *testing.T) {
 			t.Fatalf("expected only one paired cabinet item, got %#v", game["items"])
 		}
 		gameItem, ok := gameItems[0].(map[string]any)
-		if !ok || gameItem["cabinet"] != goldID {
+		cabinet, cabinetOK := gameItem["cabinet"].(map[string]any)
+		if !ok || !cabinetOK || cabinet["id"] != goldID {
 			t.Fatalf("expected expanded Gold cabinet %q, got %#v", goldID, gameItems[0])
 		}
 	}

@@ -327,7 +327,7 @@ func filterExpandedGameItems(items any, filters []nearbyGameFilter) []map[string
 	out := make([]map[string]any, 0, len(raw))
 	for _, item := range raw {
 		seriesID := expandedGameItemSeriesID(item)
-		cabinetID, _ := item["cabinet"].(string)
+		cabinetID := expandedGameItemCabinetID(item)
 		for _, filter := range filters {
 			if seriesID == filter.SeriesID && (filter.CabinetID == "" || strings.TrimSpace(cabinetID) == filter.CabinetID) {
 				out = append(out, item)
@@ -336,6 +336,21 @@ func filterExpandedGameItems(items any, filters []nearbyGameFilter) []map[string
 		}
 	}
 	return out
+}
+
+func expandedGameItemCabinetID(item map[string]any) string {
+	if item == nil {
+		return ""
+	}
+	switch cabinet := item["cabinet"].(type) {
+	case string:
+		return strings.TrimSpace(cabinet)
+	case map[string]any:
+		id, _ := cabinet["id"].(string)
+		return strings.TrimSpace(id)
+	default:
+		return ""
+	}
 }
 
 func expandedGameItemSeriesID(item map[string]any) string {

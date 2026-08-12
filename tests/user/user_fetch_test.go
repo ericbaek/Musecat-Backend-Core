@@ -24,6 +24,7 @@ func newUserFetchTestApp(tb testing.TB) *tests.TestApp {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		se.Router.GET("/user", userhandler.GetUserByID)
 		se.Router.GET("/user/activity", userhandler.GetUserActivity)
+		se.Router.GET("/user/changelog", userhandler.GetUserChangelog)
 		se.Router.GET("/arcade/visits", userhandler.GetArcadeVisitStats)
 
 		authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))

@@ -41,6 +41,18 @@ func exportGameSeries(rec *core.Record) map[string]any {
 	}
 }
 
+func exportGameCabinet(rec *core.Record) map[string]any {
+	if rec == nil {
+		return nil
+	}
+	return map[string]any{
+		"id": rec.Id,
+		"en": rec.GetString("en"),
+		"kr": rec.GetString("kr"),
+		"jp": rec.GetString("jp"),
+	}
+}
+
 // BuildGameSeriesBundle returns a map with { version, series } for a game_series_version id.
 func BuildGameSeriesBundle(app core.App, versionID string) (map[string]any, error) {
 	if strings.TrimSpace(versionID) == "" {
@@ -97,11 +109,26 @@ func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool)
 				seriesObj = bundle["series"]
 			}
 		}
+		cabinetID := strings.TrimSpace(revision.GetString("cabinet"))
+		var cabinetObj any
+		if cabinetID != "" {
+			cabinetRec, err := app.FindRecordById(CollectionGameCabinet, cabinetID)
+			if err == nil {
+				cabinetObj = exportGameCabinet(cabinetRec)
+			} else {
+				cabinetObj = map[string]any{
+					"id": cabinetID,
+					"en": "",
+					"kr": "",
+					"jp": "",
+				}
+			}
+		}
 
 		item := map[string]any{
 			"version":    versionObj,
 			"series":     seriesObj,
-			"cabinet":    revision.GetString("cabinet"),
+			"cabinet":    cabinetObj,
 			"location":   revision.GetString("location"),
 			"quantity":   revision.GetInt("quantity"),
 			"price":      price,
