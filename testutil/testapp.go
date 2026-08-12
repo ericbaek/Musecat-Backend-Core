@@ -9,6 +9,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/types"
+	"github.com/pocketbase/pocketbase/ui"
 
 	_ "github.com/ericbaek/musecat-backend-core/migrations"
 )
@@ -27,6 +28,9 @@ func NewTestApp(tb testing.TB) *tests.TestApp {
 	if err != nil {
 		tb.Fatalf("failed to initialize test app: %v", err)
 	}
+	// PocketBase v0.39.9 registers UI extension routes on every new API router.
+	// Core tests create multiple routers but don't exercise the bundled UI.
+	ui.DistDirFS = nil
 	ensureVisitSchema(tb, app)
 
 	return app
