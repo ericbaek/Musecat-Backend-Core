@@ -36,6 +36,7 @@ Definitions:
 | Public/closed detail, search, changelog, notices | allow | allow | allow | allow |
 | `/user/changelog` rows from public arcades | allow | allow | allow | allow |
 | `/user/changelog` rows from a private arcade | deny | deny | rows in own arcades | allow |
+| `/rankings` leaderboard | top 100; `viewer=null` | top 100 plus own eligible rank | top 100 plus own eligible rank | top 100 plus own eligible rank |
 | `/arcades` operating list | public/open only | public/open only | public/open only | public/open only |
 | Nearby, updates, visit, visit stats | public/open only | public/open only | public/open only | public/open only |
 | `/arcade/analytics` basic metrics | public/open only | public/open only | public/open only | public/open only |
@@ -49,6 +50,12 @@ Definitions:
 | Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |
 
 The `GET /arcade` public endpoint MUST return `404`, rather than `403`, for every private id. A public/closed arcade remains readable through detail and search but MUST NOT enter operating discovery, nearby, update, or visit flows.
+
+`GET /rankings` always returns the public top 100. A valid user token may add
+only that user's own `viewer` entry, calculated with the same score, tie, and
+visibility predicates as the public list; otherwise `viewer` is `null`. In
+particular, `private` visit visibility excludes explorer and visit rankings,
+including the authenticated user's own entry.
 
 ## Arcade aggregate and history
 

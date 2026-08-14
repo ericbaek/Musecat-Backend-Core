@@ -64,7 +64,11 @@ func List(re *core.RequestEvent) error {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "period must be all for level rankings"})
 	}
 
-	entries, err := load(re.App, m, p, time.Now().UTC())
+	viewerID := ""
+	if re.Auth != nil && re.Auth.Collection().Name == "user" {
+		viewerID = re.Auth.Id
+	}
+	entries, viewer, err := load(re.App, m, p, time.Now().UTC(), viewerID)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load rankings", "details": err.Error()})
 	}
@@ -72,6 +76,7 @@ func List(re *core.RequestEvent) error {
 		"metric":  m,
 		"period":  p,
 		"entries": entries,
+		"viewer":  viewer,
 	})
 }
 
@@ -110,37 +115,64 @@ func rangeStart(p period, now time.Time) string {
 	return now.Add(-duration).Format("2006-01-02 15:04:05.000Z")
 }
 
-func load(app core.App, m metric, p period, now time.Time) ([]entry, error) {
+func load(app core.App, m metric, p period, now time.Time, viewerID string) ([]entry, *entry, error) {
 	query, params := metricQuery(app, m, rangeStart(p, now))
-	rows, err := app.DB().NewQuery(query).Bind(params).Rows()
+	rows, err := app.DB().NewQuery(query + `
+ORDER BY score DESC, nickname COLLATE NOCASE ASC, id ASC
+LIMIT {:limit}
+`).Bind(params).Rows()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 
 	entries := make([]entry, 0)
-	var previousScore int64 = -1
-	for position := 1; rows.Next(); position++ {
-		var item entry
-		var exp int
-		var tags string
-		if err := rows.Scan(&item.Score, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &exp, &tags); err != nil {
-			return nil, err
-		}
-		item.Profile.Level = userhandler.LevelFromExp(exp)
-		item.Profile.Tags = parseTags(tags)
-		if m == metricLevel {
-			item.Score = int64(item.Profile.Level)
-		}
-		if item.Score != previousScore {
-			item.Rank = position
-			previousScore = item.Score
-		} else {
-			item.Rank = entries[len(entries)-1].Rank
+	for rows.Next() {
+		item, err := scanEntry(rows, m)
+		if err != nil {
+			return nil, nil, err
 		}
 		entries = append(entries, item)
 	}
-	return entries, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	if viewerID == "" {
+		return entries, nil, nil
+	}
+
+	params["viewer"] = viewerID
+	viewerRows, err := app.DB().NewQuery(query + `
+WHERE id = {:viewer}
+LIMIT 1
+`).Bind(params).Rows()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer viewerRows.Close()
+	if !viewerRows.Next() {
+		return entries, nil, viewerRows.Err()
+	}
+	viewer, err := scanEntry(viewerRows, m)
+	if err != nil {
+		return nil, nil, err
+	}
+	return entries, &viewer, viewerRows.Err()
+}
+
+func scanEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, error) {
+	var item entry
+	var exp int
+	var tags string
+	if err := rows.Scan(&item.Score, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &exp, &tags, &item.Rank); err != nil {
+		return entry{}, err
+	}
+	item.Profile.Level = userhandler.LevelFromExp(exp)
+	item.Profile.Tags = parseTags(tags)
+	if m == metricLevel {
+		item.Score = int64(item.Profile.Level)
+	}
+	return item, nil
 }
 
 func parseTags(raw string) []string {
@@ -185,7 +217,8 @@ func metricQuery(app core.App, m metric, start string) (string, dbx.Params) {
 	}
 
 	return fmt.Sprintf(`
-WITH scores AS (%s)
+WITH scores AS (%s),
+ranked AS (
 SELECT
   scores.score,
   u.id,
@@ -193,14 +226,16 @@ SELECT
   u.username,
   COALESCE(ui.avatar, '') AS avatar,
   COALESCE(ul.exp, 0) AS exp,
-  %s AS tags
+  %s AS tags,
+  RANK() OVER (ORDER BY scores.score DESC) AS rank
 FROM scores
 INNER JOIN "user" u ON u.id = scores.user
 LEFT JOIN user_info ui ON ui.id = u.id
 LEFT JOIN user_level ul ON ul.user = u.id
 WHERE COALESCE(u.withdrawn, 0) = 0
   AND scores.score > 0%s
-ORDER BY scores.score DESC, nickname COLLATE NOCASE ASC, u.id ASC
-LIMIT {:limit}
+)
+SELECT score, id, nickname, username, avatar, exp, tags, rank
+FROM ranked
 `, source, userTags, visitVisibility), params
 }

@@ -62,6 +62,66 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	}
 }
 
+func TestRankings_ReturnsAuthenticatedViewerRankOutsideLeaderboard(t *testing.T) {
+	app := newArcadeTestApp(t)
+
+	viewerToken, viewer := createAuthUser(t, app)
+	seedUserLevelExp(t, app, viewer.Id, 1)
+	for index := 0; index < 101; index++ {
+		_, higherRankedUser := createAuthUser(t, app)
+		seedUserLevelExp(t, app, higherRankedUser.Id, 1_000+index)
+	}
+
+	guest := executeJSONRequest(t, app, http.MethodGet, "/rankings?metric=level&period=all", "", nil)
+	defer guest.Body.Close()
+	var guestPayload struct {
+		Viewer *struct {
+			Rank int `json:"rank"`
+		} `json:"viewer"`
+	}
+	if err := json.NewDecoder(guest.Body).Decode(&guestPayload); err != nil {
+		t.Fatalf("decode guest ranking response: %v", err)
+	}
+	if guestPayload.Viewer != nil {
+		t.Fatalf("guest response must not include a viewer entry: %#v", guestPayload.Viewer)
+	}
+
+	response := executeJSONRequest(t, app, http.MethodGet, "/rankings?metric=level&period=all", "", map[string]string{
+		"Authorization": "Bearer " + viewerToken,
+	})
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Entries []struct {
+			Profile struct {
+				ID string `json:"id"`
+			} `json:"profile"`
+		} `json:"entries"`
+		Viewer *struct {
+			Rank    int `json:"rank"`
+			Profile struct {
+				ID string `json:"id"`
+			} `json:"profile"`
+		} `json:"viewer"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode authenticated ranking response: %v", err)
+	}
+	if len(payload.Entries) != 100 {
+		t.Fatalf("expected public leaderboard to remain capped at 100 entries, got %d", len(payload.Entries))
+	}
+	for _, item := range payload.Entries {
+		if item.Profile.ID == viewer.Id {
+			t.Fatal("viewer must not be inserted into the top-100 leaderboard")
+		}
+	}
+	if payload.Viewer == nil || payload.Viewer.Profile.ID != viewer.Id || payload.Viewer.Rank != 102 {
+		t.Fatalf("unexpected viewer entry: %#v", payload.Viewer)
+	}
+}
+
 func assertRankingTop(t *testing.T, app *tests.TestApp, url, userID string, score int64) {
 	t.Helper()
 	res := executeJSONRequest(t, app, http.MethodGet, url, "", nil)

@@ -221,13 +221,18 @@ components:
         profile: {$ref: '#/components/schemas/RankingProfile'}
     RankingResponse:
       type: object
-      required: [metric, period, entries]
+      required: [metric, period, entries, viewer]
       properties:
         metric: {type: string, enum: [explorer, visits, xp, level, photographer]}
         period: {type: string, enum: [week, month, half_year, year, all]}
         entries:
           type: array
           items: {$ref: '#/components/schemas/RankingEntry'}
+        viewer:
+          description: The authenticated user's own public leaderboard entry, or null when unauthenticated or not ranked.
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/RankingEntry'
     SearchUserItem:
       type: object
       required: [username, nickname, avatar]
@@ -3310,6 +3315,11 @@ paths:
           in: query
           required: true
           schema: {type: string, enum: [week, month, half_year, year, all]}
+        - name: Authorization
+          in: header
+          required: false
+          description: Optional bearer token used to include the requesting user's own rank.
+          schema: {type: string}
       responses:
         '200':
           description: Public user rankings. Level rankings accept only the all period.
