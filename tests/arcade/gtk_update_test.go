@@ -49,14 +49,14 @@ func TestUpdateArcadeGTK_WritesStructuredChangelog(t *testing.T) {
 		updatedPrevID = seedGTKAtom(tb, app, moleculeID, user.Id, "FreeWifi", false, "old wifi", nil)
 		deletedPrevID = seedGTKAtom(tb, app, moleculeID, user.Id, "Locker", true, "old locker", nil)
 
-			scenario.Body = strings.NewReader(fmt.Sprintf(`{
+		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 				"arcade":"%s",
 				"gtk":[
 					{"type":"FreeWifi","bool":true,"note":"new wifi"},
 					{"type":"SmokingRoom","bool":true,"note":"smoking room"}
 				]
 			}`, arcadeID))
-		}
+	}
 
 	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
 		tb.Helper()
@@ -142,6 +142,67 @@ func TestUpdateArcadeGTK_WritesStructuredChangelog(t *testing.T) {
 		}
 		if !foundUpdated || !foundAdded || !foundDeleted {
 			tb.Fatalf("expected updated+added+deleted gtk items, got %#v", items)
+		}
+	}
+
+	scenario.Test(t)
+}
+
+func TestUpdateArcadeGTK_AllowsATM(t *testing.T) {
+	headers := map[string]string{}
+	var arcadeID string
+
+	scenario := tests.ApiScenario{
+		Name:           "PUT /arcade/gtk allows ATM",
+		Method:         http.MethodPut,
+		URL:            "/arcade/gtk",
+		Headers:        headers,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"type":"ATM"`,
+		},
+		TestAppFactory: func(tb testing.TB) *tests.TestApp {
+			return newArcadeTestApp(tb)
+		},
+	}
+
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		tb.Helper()
+
+		token, user := createAuthUser(tb, app)
+		headers["Authorization"] = "Bearer " + token
+
+		arcadeID, _ = seedArcade(tb, app, user.Id, arcadeSeed{
+			Name:     "ATM Arcade",
+			Address:  "ATM Street",
+			Nickname: []string{"ATM"},
+			Location: location{Lat: 37.5665, Lon: 126.978},
+		})
+		scenario.Body = strings.NewReader(fmt.Sprintf(`{
+			"arcade":"%s",
+			"gtk":[{"type":"ATM","bool":true,"note":"near entrance"}]
+		}`, arcadeID))
+	}
+
+	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
+		tb.Helper()
+		defer res.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			tb.Fatalf("failed to decode response: %v", err)
+		}
+		gtkObj, ok := payload["gtk"].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected expanded gtk object in response, got %T", payload["gtk"])
+		}
+		items, ok := gtkObj["items"].([]any)
+		if !ok || len(items) != 1 {
+			tb.Fatalf("expected one gtk item, got %T %#v", gtkObj["items"], gtkObj["items"])
+		}
+		item, ok := items[0].(map[string]any)
+		if !ok || item["type"] != "ATM" || item["bool"] != true || item["note"] != "near entrance" {
+			tb.Fatalf("unexpected ATM item: %#v", items[0])
 		}
 	}
 

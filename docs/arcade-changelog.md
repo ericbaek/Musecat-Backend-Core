@@ -152,6 +152,10 @@ Field-level diffs are usually:
 - `bullets[]`
 - `diff[]`
 
+`gtk_type` is server-validated against the GTK catalog, including `ATM`.
+ATM uses the normal `bool` and optional `note` fields and has no special
+metadata.
+
 Field-level diffs are usually:
 - `bool`
 - `note`

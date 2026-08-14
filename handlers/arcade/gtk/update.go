@@ -98,6 +98,7 @@ var allowedGTKTypes = map[string]struct{}{
 	"SellAMPASS":      {},
 	"Parking":         {},
 	"SmokingRoom":     {},
+	"ATM":             {},
 }
 
 var allowedParkingAvailability = map[string]struct{}{

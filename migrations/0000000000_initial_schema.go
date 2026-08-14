@@ -1838,7 +1838,8 @@ func init() {
 							"SellAmusementIC",
 							"SellAMPASS",
 							"Parking",
-							"SmokingRoom"
+							"SmokingRoom",
+							"ATM"
 						]
 					},
 					{

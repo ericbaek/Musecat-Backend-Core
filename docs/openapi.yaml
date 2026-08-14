@@ -400,12 +400,38 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ArcadeSnsItem'
+    ArcadeGtkType:
+      type: string
+      enum:
+        - Basket
+        - FreeGloves
+        - FreeSlipper
+        - FreeWater
+        - FreeDrumStick
+        - FreeBachi
+        - FreeWifi
+        - Locker
+        - Toilet
+        - SmokingRoom
+        - AC
+        - Fan
+        - Refrigerator
+        - PowerOutlet
+        - SellGloves
+        - SellDrumStick
+        - SellBachi
+        - SellSlipper
+        - SellDrink
+        - SellAmusementIC
+        - SellAMPASS
+        - Parking
+        - ATM
     ArcadeGtkItem:
       type: object
       required: [type, bool]
       properties:
         type:
-          type: string
+          $ref: '#/components/schemas/ArcadeGtkType'
         bool:
           type: boolean
         note:
@@ -1527,7 +1553,7 @@ components:
       required: [type, bool]
       properties:
         type:
-          type: string
+          $ref: '#/components/schemas/ArcadeGtkType'
         bool:
           type: boolean
         note:
