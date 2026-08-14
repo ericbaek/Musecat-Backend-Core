@@ -148,6 +148,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 			arcadequery.RequireModeratorAccess(),
 		)
 		se.Router.GET("/game_series_version", arcadequery.GetGameSeriesVersion)
+		se.Router.GET("/game/catalog", arcadequery.GetGameCatalog)
 		se.Router.POST("/game_series_version", arcadequery.CreateGameSeriesVersion).Bind(
 			apis.RequireAuth("user"),
 			arcadequery.RequireModeratorAccess(),

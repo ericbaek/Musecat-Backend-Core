@@ -90,6 +90,14 @@ The expanded `/arcade` game response returns the cabinet catalog object
 `{id, en, kr, jp}` for verified revisions and `null` for unverified revisions.
 The mutation and filter contracts continue to use the canonical cabinet ID.
 
+`GET /game/catalog?locale=en-US|ko-KR|ja-JP` is the feature-neutral game
+catalog read contract. It returns localized series and versions plus only the
+explicitly compatible cabinets for each version. Every cabinet row carries its
+canonical ID and the `game_series_version_cabinet.price_default` snapshot;
+version-level `price_default` remains available as a fallback. Unverified
+cabinet identity is intentionally not a catalog row and is represented only as
+`null` in an arcade game entry or game mutation input.
+
 The developer/moderator-only `POST /arcade/game/bulk_version` operation is an administrative version swap. It applies the same immutable batch and `changed="game"` changelog semantics per affected arcade as a regular game mutation, does not award XP, and does not maintain any separate review-state metadata.
 
 Every user-initiated game-state mutation writes one immutable `arcade_changelog` row with `changed="game"`. Its `from` and `to` values are revision-batch IDs; log version 2 contains `state_from`, `state_to`, and an entry-level `before`/`after` snapshot including cabinet. The row's authenticated `by` and `created` are the canonical editor and timestamp for timeline UI. Legacy backfill does not create user-edit changelog rows. Full's legacy game-history import MUST preserve each source `arcade_game.id` as the corresponding history-batch ID so existing game changelog `from`/`to` values remain rollback targets; it must import every molecule and atom before cleanup. The one-time guarded Full game-catalog migration also has no authenticated editor and therefore MUST NOT invent a user changelog row: it preserves the selected batch and revisions, creates a complete immutable shadow batch, records source rows and pointer changes in the locked migration-origin catalog, and switches `arcade.game_v2` atomically.
@@ -121,6 +129,7 @@ The PocketBase collection API is persistence infrastructure, not the application
 | reviewer queue | `GET /moderation/arcade/edit-reports` |
 | reviewer decision | `PUT /moderation/arcade/edit-report` |
 | arcade analytics | `GET /arcade/analytics?arcade=...` and `POST /arcade/analytics/event` |
+| localized game/version/cabinet catalog | `GET /game/catalog?locale=en-US|ko-KR|ja-JP` |
 
 New frontend code MUST NOT reintroduce collection names, PocketBase record rules, collection filters, raw REST pagination, or PocketBase file URL construction as a compatibility layer. Sitemap, changelog timeline, draft list/delete, and photo atom management migrate to these custom routes.
 

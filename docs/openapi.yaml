@@ -1274,6 +1274,66 @@ components:
             - type: 'null'
         price_default:
           $ref: '#/components/schemas/GameSeriesVersionPriceDefault'
+    GameCatalog:
+      type: object
+      required: [series, versions]
+      properties:
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameCatalogSeries'
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameCatalogVersion'
+    GameCatalogSeries:
+      type: object
+      required: [id, name, series_number]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        series_number:
+          type: integer
+          description: Canonical game-series ordering number.
+    GameCatalogVersion:
+      type: object
+      required: [id, series_id, name, released_on, price_default, cabinets]
+      properties:
+        id:
+          type: string
+        series_id:
+          type: string
+        name:
+          type: string
+        released_on:
+          oneOf:
+            - type: string
+            - type: 'null'
+        price_default:
+          $ref: '#/components/schemas/GameCatalogPriceDefault'
+        cabinets:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameCatalogCabinet'
+    GameCatalogCabinet:
+      type: object
+      required: [id, name, price_default]
+      properties:
+        id:
+          type: string
+          description: Canonical `game_cabinet` record ID.
+        name:
+          type: string
+        price_default:
+          $ref: '#/components/schemas/GameCatalogPriceDefault'
+    GameCatalogPriceDefault:
+      oneOf:
+        - $ref: '#/components/schemas/GameSeriesVersionPriceDefault'
+        - type: object
+          additionalProperties: true
+        - type: 'null'
     GameSeriesVersionPriceDefaultMode:
       type: object
       required: [mode_key, represent]
@@ -3533,6 +3593,37 @@ paths:
                     manufacturer: manufacturer_123
         '502':
           description: Failed to load matching machines.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /game/catalog:
+    get:
+      tags: [Arcades]
+      summary: Localized game/version/cabinet catalog
+      description: Returns only explicitly supported cabinets for each version. An unverified cabinet is represented by `null` only in arcade game entries and mutations, never as a catalog item.
+      parameters:
+        - name: locale
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [en-US, ko-KR, ja-JP]
+      responses:
+        '200':
+          description: Localized game catalog with cabinet-specific price defaults.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameCatalog'
+        '400':
+          description: Missing or unsupported locale.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to load the catalog.
           content:
             application/json:
               schema:

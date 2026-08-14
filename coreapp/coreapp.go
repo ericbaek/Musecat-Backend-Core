@@ -80,6 +80,8 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		)
 		// Public read endpoint: returns game_series_version and its series
 		se.Router.GET("/game_series_version", arcadequery.GetGameSeriesVersion)
+		// Public read endpoint: locale-localized version/cabinet compatibility catalog.
+		se.Router.GET("/game/catalog", arcadequery.GetGameCatalog)
 		se.Router.POST("/game_series_version", arcadequery.CreateGameSeriesVersion).Bind(
 			apis.RequireAuth("user"),
 			arcadequery.RequireModeratorAccess(),
