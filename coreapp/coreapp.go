@@ -13,6 +13,7 @@ import (
 
 	"github.com/ericbaek/musecat-backend-core/handlers"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
+	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
@@ -61,6 +62,8 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		se.Router.GET("/rankings", rankinghandler.List)
 		// Public read endpoint: returns current relation ids for the arcade
 		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
+		se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
+		se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
 		// Public changelog rows are exposed only through this custom API.
 		se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
 		se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)

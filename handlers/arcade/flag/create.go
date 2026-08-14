@@ -11,6 +11,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 
+	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
@@ -158,6 +159,9 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 			return fmt.Errorf("failed to create arcade_flag: %w", err)
 		}
 		newFlagID = flagRec.Id
+		if err := arcadeanalytics.RecordFaultReportTx(txApp, body.Arcade, newFlagID); err != nil {
+			return fmt.Errorf("failed to record fault report analytics: %w", err)
+		}
 
 		if arcadeRec.GetBool("public") {
 			nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.FlagKind(newFlagID), 5, baseExp)

@@ -26,6 +26,7 @@ var arcadeDomainCollections = []string{
 	"arcade_photo",
 	"arcade_photo_atoms",
 	"arcade_request_admin",
+	"arcade_analytics_event",
 	"arcade_sns",
 	"arcade_sns_atoms",
 	"arcade_visit",

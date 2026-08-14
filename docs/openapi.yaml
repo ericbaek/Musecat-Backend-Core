@@ -670,6 +670,73 @@ components:
           $ref: '#/components/schemas/ArcadeGameValue'
         photo:
           $ref: '#/components/schemas/ArcadePhotoValue'
+    ArcadeAnalyticsCount:
+      type: object
+      required: [count]
+      properties:
+        source:
+          type: string
+        game_series:
+          type: string
+        count:
+          type: integer
+          format: int64
+    ArcadeAnalyticsResponse:
+      type: object
+      required: [arcade, page_views, fault_reports, edit_count]
+      properties:
+        arcade:
+          type: string
+        page_views:
+          type: integer
+          format: int64
+          description: Public detail-page loads. Anonymous-safe.
+        fault_reports:
+          type: integer
+          format: int64
+          description: All created fault reports, including solved reports.
+        edit_count:
+          type: integer
+          format: int64
+          description: All immutable changelog rows for the arcade.
+        page_views_by_source:
+          type: array
+          description: Returned only to an official arcade owner or developer/moderator.
+          items:
+            $ref: '#/components/schemas/ArcadeAnalyticsCount'
+        series_filter_entries:
+          type: array
+          description: Returned only to an official arcade owner or developer/moderator.
+          items:
+            $ref: '#/components/schemas/ArcadeAnalyticsCount'
+        direction_clicks:
+          type: integer
+          format: int64
+          description: Returned only to an official arcade owner or developer/moderator.
+        visit_verifications:
+          type: integer
+          format: int64
+          description: Returned only to an official arcade owner or developer/moderator.
+        distinct_visitors:
+          type: integer
+          format: int64
+          description: Returned only to an official arcade owner or developer/moderator.
+    ArcadeAnalyticsEventRequest:
+      type: object
+      required: [arcade, event_type]
+      properties:
+        arcade:
+          type: string
+        event_type:
+          type: string
+          enum: [direction_click]
+        source:
+          type: string
+          enum: [direct, search, nearby, other]
+        game_series:
+          type: array
+          items:
+            type: string
     ArcadeUpdateChange:
       type: object
       required: [part, by, created]
@@ -1924,6 +1991,22 @@ paths:
           description: |
             `none` or empty returns relation ids only. `all` expands every section.
             Comma-separated values such as `basic,hour` expand only the requested sections.
+        - name: source
+          in: query
+          schema:
+            type: string
+            enum: [direct, search, nearby, other]
+            default: direct
+          description: Optional acquisition source recorded with the page view.
+        - name: game_series
+          in: query
+          description: Optional repeated or comma-separated series IDs used to reach the arcade.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
       responses:
         '200':
           description: Arcade metadata with relation ids or expanded relation payloads.
@@ -2037,6 +2120,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /arcade/analytics:
+    get:
+      tags: [Arcades]
+      summary: /arcade/analytics
+      description: |
+        Returns cumulative analytics for a public, open arcade. Anonymous and ordinary
+        contributors receive only `page_views`, `fault_reports`, and `edit_count`.
+        `page_views_by_source`, `series_filter_entries`, `direction_clicks`,
+        `visit_verifications`, and `distinct_visitors` are omitted unless the bearer
+        user has both the `arcade_owner` tag and the arcade ID in `owns`, or has the
+        `developer` or `moderator` tag. The `createdBy` relation alone is insufficient.
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Public-safe or privileged cumulative analytics response.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeAnalyticsResponse'}
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist, is private, or is closed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /arcade/analytics/event:
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/analytics/event
+      description: Records an anonymous direction-click analytics event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ArcadeAnalyticsEventRequest'}
+      responses:
+        '200':
+          description: Analytics event recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recorded]
+                properties:
+                  recorded: {type: boolean, const: true}
+        '400':
+          description: Invalid event body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist or is private.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Analytics event persistence failure.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /arcade/draft:
     get:
       tags: [Arcades]

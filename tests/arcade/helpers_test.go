@@ -18,6 +18,7 @@ import (
 
 	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
+	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
@@ -134,6 +135,8 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		se.Router.GET("/stats", statshandler.GetStats)
 		se.Router.GET("/rankings", rankinghandler.List)
 		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
+		se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
+		se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
 		se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
 		se.Router.GET("/user/changelog", user.GetUserChangelog)
 		se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)

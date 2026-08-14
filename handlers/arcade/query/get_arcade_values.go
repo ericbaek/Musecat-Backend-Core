@@ -10,6 +10,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 
+	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadgtk "github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
 	arcadehour "github.com/ericbaek/musecat-backend-core/handlers/arcade/hour"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
@@ -65,6 +66,11 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 		return re.JSON(http.StatusNotFound, map[string]any{
 			"error": "arcade not found",
 		})
+	}
+	if !allowDraft {
+		// Analytics is deliberately best effort and never changes the public
+		// detail response if event persistence is temporarily unavailable.
+		_ = arcadeanalytics.RecordPageView(re.App, rec.Id, q.Get("source"), q["game_series"])
 	}
 
 	// Always include relation ids and selected arcade admin metadata.

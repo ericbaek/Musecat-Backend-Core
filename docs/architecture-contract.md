@@ -24,6 +24,7 @@ Definitions:
 - **anonymous**: no valid user token.
 - **contributor**: an active authenticated user without a staff role.
 - **creator**: the `arcade.createdBy` user.
+- **official arcade account**: an authenticated user with the `arcade_owner` tag and the target arcade id in `user.owns`.
 - **moderator**: a user tagged `developer` or `moderator`. Supporter tags are not moderators for review decisions.
 - **public/open**: `public=true`, `closed=false`.
 - **public/closed**: `public=true`, `closed=true`.
@@ -37,6 +38,8 @@ Definitions:
 | `/user/changelog` rows from a private arcade | deny | deny | rows in own arcades | allow |
 | `/arcades` operating list | public/open only | public/open only | public/open only | public/open only |
 | Nearby, updates, visit, visit stats | public/open only | public/open only | public/open only | public/open only |
+| `/arcade/analytics` basic metrics | public/open only | public/open only | public/open only | public/open only |
+| `/arcade/analytics` protected metrics (`page_views_by_source`, `series_filter_entries`, `direction_clicks`, `visit_verifications`, `distinct_visitors`) | omitted | omitted | omitted unless official account | allow |
 | Private detail via `/arcade` | 404 | 404 | 404 | 404 |
 | Private detail via `/arcade/draft` | deny | deny | allow | allow |
 | My draft list/delete | deny | own drafts only | own drafts only | use specific draft route |
@@ -60,6 +63,7 @@ The `GET /arcade` public endpoint MUST return `404`, rather than `403`, for ever
 | atom collections | data inside a molecule or upload staging | owning part handler | Atoms cannot be directly CRUDed through raw REST. Published photo atoms are immutable. |
 | `arcade_changelog` | append-only audit evidence | `arcadeinternal.UpdateArcadeFieldsTxWithLogs` or explicitly documented admin flow | Clients MUST NOT edit/delete rows. `by` is the server-authenticated editor. |
 | `arcade_request_admin` | support and edit-review queue | custom request/report/review handlers | `reported_editor` is derived from cited changelog; review fields are server-written. |
+| `arcade_analytics_event` | append-only public interaction and mutation markers | analytics handler or the owning mutation transaction | No IP, user-agent, or user identity is stored. Multi-series events share one `event_group`; raw REST is locked. |
 
 Rollback is a normal, immediate wiki action. When `report=true`, `POST /arcade/rollback` MUST atomically create the rollback changelog entry and a `rollback_report` linked to the cited prior changelog. A standalone `POST /arcade/edit_report` creates `edit_report`. Neither path bans a user nor performs an automatic rollback beyond the contributor's explicit rollback request.
 
@@ -105,6 +109,7 @@ The PocketBase collection API is persistence infrastructure, not the application
 | standalone edit report | `POST /arcade/edit_report` |
 | reviewer queue | `GET /moderation/arcade/edit-reports` |
 | reviewer decision | `PUT /moderation/arcade/edit-report` |
+| arcade analytics | `GET /arcade/analytics?arcade=...` and `POST /arcade/analytics/event` |
 
 New frontend code MUST NOT reintroduce collection names, PocketBase record rules, collection filters, raw REST pagination, or PocketBase file URL construction as a compatibility layer. Sitemap, changelog timeline, draft list/delete, and photo atom management migrate to these custom routes.
 
@@ -128,6 +133,9 @@ New frontend code MUST NOT reintroduce collection names, PocketBase record rules
 - XP ledger changes and aggregate mutations belong to the same transaction. No XP grant may survive a failed aggregate mutation.
 - Notification delivery is after persistence and best-effort. A Telegram/Discord failure MUST NOT roll back a completed user request.
 - Review processing has no automated ban and no automated rollback.
+- Public `GET /arcade` detail loads record one `page_view` event best-effort. The direction-click event route is anonymous and accepts only `direction_click`.
+- A successful flag creation records a `fault_report` marker in the same transaction; its flag id preserves cumulative counting after the user deletes the flag.
+- Analytics responses always include only `page_views`, `fault_reports`, and `edit_count` for anonymous/contributor callers. `page_views_by_source`, `series_filter_entries`, `direction_clicks`, `visit_verifications`, and `distinct_visitors` are omitted unless the caller is an official arcade account or a `developer|moderator`.
 
 ## Core and Full migration boundary
 
