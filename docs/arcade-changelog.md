@@ -46,8 +46,10 @@ Each row uses these common columns:
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, or `photo`. |
 
-The read-only user timeline is available through `GET /user/changelog?user=...`.
-It uses the same immutable rows, but scopes them by `arcade_changelog.by` and
+The read-only arcade timeline accepts the optional
+`changed=basic|game|hour|sns|gtk|photo` filter. The user timeline is available
+through `GET /user/changelog?user=...` and accepts the same optional filter. It
+uses the same immutable rows, but scopes them by `arcade_changelog.by` and
 adds `arcade_name` for profile timelines. Anonymous callers see only rows whose
 arcade is public; the authenticated owner may also see their private arcade
 rows, and `developer`/`moderator` reviewers may audit all rows. The optional

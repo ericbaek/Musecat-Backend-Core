@@ -12,7 +12,19 @@ import (
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 )
 
-const maxChangelogPageSize = 100
+const (
+	maxChangelogPageSize = 100
+	changelogCategories  = "basic,game,hour,sns,gtk,photo"
+)
+
+var changelogCategorySet = map[string]struct{}{
+	"basic": {},
+	"game":  {},
+	"hour":  {},
+	"sns":   {},
+	"gtk":   {},
+	"photo": {},
+}
 
 // ListArcadeChangelog is the only supported wire API for arcade history.
 // Changelog rows are immutable and are never edited or deleted by clients.
@@ -25,22 +37,32 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 	if err != nil || !canReadArcade(re, arcade) {
 		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
 	}
+	changed, err := parseChangelogCategory(re.Request.URL.Query().Get("changed"))
+	if err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
+	}
 
 	page, perPage, err := parseChangelogPagination(re.Request.URL.Query().Get("page"), re.Request.URL.Query().Get("per_page"))
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
 	}
-	total, err := re.App.CountRecords(arcadeinternal.CollectionArcadeChangelog, dbx.HashExp{"arcade": arcadeID})
+	filter := "arcade = {:arcade}"
+	params := dbx.Params{"arcade": arcadeID}
+	if changed != "" {
+		filter += " && changed = {:changed}"
+		params["changed"] = changed
+	}
+	total, err := re.App.CountRecords(arcadeinternal.CollectionArcadeChangelog, dbx.HashExp(params))
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count arcade changelog", "details": err.Error()})
 	}
 	records, err := re.App.FindRecordsByFilter(
 		arcadeinternal.CollectionArcadeChangelog,
-		"arcade = {:arcade}",
+		filter,
 		"-created",
 		perPage,
 		(page-1)*perPage,
-		dbx.Params{"arcade": arcadeID},
+		params,
 	)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to list arcade changelog", "details": err.Error()})
@@ -70,6 +92,17 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 		"total":     total,
 		"items":     items,
 	})
+}
+
+func parseChangelogCategory(raw string) (string, error) {
+	changed := strings.TrimSpace(raw)
+	if changed == "" {
+		return "", nil
+	}
+	if _, ok := changelogCategorySet[changed]; !ok {
+		return "", fmt.Errorf("changed must be one of %s", changelogCategories)
+	}
+	return changed, nil
 }
 
 func canReadArcade(re *core.RequestEvent, arcade *core.Record) bool {

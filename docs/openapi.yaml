@@ -2401,6 +2401,12 @@ paths:
         - name: per_page
           in: query
           schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: changed
+          in: query
+          description: Optional arcade part filter. Omit to return all supported categories.
+          schema:
+            type: string
+            enum: [basic, game, hour, sns, gtk, photo]
       responses:
         '200':
           description: Immutable changelog page.
@@ -2408,7 +2414,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ArcadeChangelogPage'}
         '400':
-          description: Invalid pagination or missing arcade id.
+          description: Invalid pagination, missing arcade id, or unsupported changed category.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

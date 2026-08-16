@@ -138,7 +138,7 @@ The PocketBase collection API is persistence infrastructure, not the application
 | private creator/staff draft detail | `GET /arcade/draft?id=...` |
 | own drafts | `GET /arcade/drafts` |
 | delete own draft | `DELETE /arcade/draft?id=...` |
-| changelog timeline | `GET /arcade/changelog?arcade=...` |
+| changelog timeline | `GET /arcade/changelog?arcade=...` (optional `changed=basic|game|hour|sns|gtk|photo`) |
 | user-authored changelog timeline | `GET /user/changelog?user=...` (optional `changed=basic|game|hour|sns|gtk|photo`) |
 | photo atom list | `GET /arcade/photo/atoms?arcade=...` |
 | photo bytes | `GET /arcade/photo/file?id=...` (the `file_url` returned for an atom) |

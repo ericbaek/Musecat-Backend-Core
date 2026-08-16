@@ -50,6 +50,7 @@ func TestContractV2_DraftAndHistoryCustomAPIs(t *testing.T) {
 	assertContractStatus(t, executeJSONRequest(t, app, http.MethodDelete, "/arcade/draft?id="+publicID, "", ownerHeaders), http.StatusConflict)
 
 	publicChangeID := seedArcadeChangelog(t, app, publicID, "basic", owner.Id, time.Now())
+	seedArcadeChangelog(t, app, publicID, "game", owner.Id, time.Now().Add(-time.Second))
 	publicHistory := decodeJSONMap(t, executeJSONRequest(t, app, http.MethodGet, "/arcade/changelog?arcade="+publicID+"&page=1&per_page=1", "", nil))
 	if got := publicHistory["page"]; got != float64(1) {
 		t.Fatalf("expected changelog page 1, got %v", got)
@@ -60,6 +61,11 @@ func TestContractV2_DraftAndHistoryCustomAPIs(t *testing.T) {
 	if !contractItemsContainID(publicHistory["items"], publicChangeID) {
 		t.Fatalf("expected public changelog %q, got %#v", publicChangeID, publicHistory["items"])
 	}
+	filteredHistory := decodeJSONMap(t, executeJSONRequest(t, app, http.MethodGet, "/arcade/changelog?arcade="+publicID+"&changed=basic", "", nil))
+	if filteredHistory["total"] != float64(1) || !contractItemsContainID(filteredHistory["items"], publicChangeID) {
+		t.Fatalf("expected basic-only arcade changelog, got %#v", filteredHistory)
+	}
+	assertContractStatus(t, executeJSONRequest(t, app, http.MethodGet, "/arcade/changelog?arcade="+publicID+"&changed=flag", "", nil), http.StatusBadRequest)
 
 	privateChangeID := seedArcadeChangelog(t, app, draftID, "basic", owner.Id, time.Now())
 	assertContractStatus(t, executeJSONRequest(t, app, http.MethodGet, "/arcade/changelog?arcade="+draftID, "", nil), http.StatusNotFound)
