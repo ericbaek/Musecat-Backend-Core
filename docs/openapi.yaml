@@ -920,6 +920,19 @@ components:
           type: string
         background:
           type: string
+        background_position:
+          type: object
+          description: Focal point used when rendering the profile background with cover sizing.
+          required: [x, y]
+          properties:
+            x:
+              type: number
+              minimum: 0
+              maximum: 100
+            y:
+              type: number
+              minimum: 0
+              maximum: 100
         tag:
           type: array
           items:

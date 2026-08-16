@@ -29,24 +29,30 @@ type ProfileSNS struct {
 	Items []ProfileSNSItem `json:"items"`
 }
 
+type BackgroundPosition struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
 type Profile struct {
-	ID              string          `json:"id"`
-	Created         string          `json:"created"`
-	Username        string          `json:"username"`
-	Nickname        string          `json:"nickname"`
-	Level           int             `json:"level"`
-	Bio             string          `json:"bio"`
-	Avatar          string          `json:"avatar"`
-	Background      string          `json:"background"`
-	Tag             []string        `json:"tag"`
-	Owns            *[]string       `json:"owns,omitempty"`
-	SNS             ProfileSNS      `json:"sns"`
-	Withdrawn       bool            `json:"withdrawn"`
-	SeriesPublic    bool            `json:"series_public"`
-	Warp            *bool           `json:"warp,omitempty"`
-	Series          []ProfileSeries `json:"series,omitempty"`
-	VisitVisibility string          `json:"visit_visibility,omitempty"`
-	VisitStats      *VisitStats     `json:"visit_stats,omitempty"`
+	ID                 string             `json:"id"`
+	Created            string             `json:"created"`
+	Username           string             `json:"username"`
+	Nickname           string             `json:"nickname"`
+	Level              int                `json:"level"`
+	Bio                string             `json:"bio"`
+	Avatar             string             `json:"avatar"`
+	Background         string             `json:"background"`
+	BackgroundPosition BackgroundPosition `json:"background_position"`
+	Tag                []string           `json:"tag"`
+	Owns               *[]string          `json:"owns,omitempty"`
+	SNS                ProfileSNS         `json:"sns"`
+	Withdrawn          bool               `json:"withdrawn"`
+	SeriesPublic       bool               `json:"series_public"`
+	Warp               *bool              `json:"warp,omitempty"`
+	Series             []ProfileSeries    `json:"series,omitempty"`
+	VisitVisibility    string             `json:"visit_visibility,omitempty"`
+	VisitStats         *VisitStats        `json:"visit_stats,omitempty"`
 }
 
 func FetchMergedProfile(app core.App, userID string) (*Profile, error) {
@@ -112,6 +118,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 		out.Bio = ""
 		out.Avatar = ""
 		out.Background = ""
+		out.BackgroundPosition = BackgroundPosition{X: 50, Y: 50}
 		out.Tag = []string{}
 		return out
 	}
@@ -121,6 +128,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	bio := ""
 	avatar := ""
 	background := ""
+	backgroundPosition := BackgroundPosition{X: 50, Y: 50}
 	tag := parseUserTag(userRec)
 
 	if userInfoRec != nil {
@@ -128,6 +136,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 		bio = strings.TrimSpace(userInfoRec.GetString("bio"))
 		avatar = firstFileFilename(userInfoRec, "avatar")
 		background = firstFileFilename(userInfoRec, "background")
+		backgroundPosition = parseBackgroundPosition(userInfoRec.GetString("background_position"))
 		out.SNS = parseProfileSNS(userInfoRec)
 		out.SeriesPublic = userInfoRec.GetBool("series_public")
 		out.VisitVisibility = visitVisibility(userInfoRec.GetString("visit_visibility"))
@@ -138,6 +147,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	out.Bio = bio
 	out.Avatar = avatar
 	out.Background = background
+	out.BackgroundPosition = backgroundPosition
 	out.Tag = tag
 	if includePrivateSeries {
 		owns := userRec.GetStringSlice("owns")
@@ -154,6 +164,17 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	}
 
 	return out
+}
+
+func parseBackgroundPosition(raw string) BackgroundPosition {
+	position := BackgroundPosition{X: 50, Y: 50}
+	if err := json.Unmarshal([]byte(raw), &position); err != nil {
+		return BackgroundPosition{X: 50, Y: 50}
+	}
+	if position.X < 0 || position.X > 100 || position.Y < 0 || position.Y > 100 {
+		return BackgroundPosition{X: 50, Y: 50}
+	}
+	return position
 }
 
 func parseProfileSNS(userInfoRec *core.Record) ProfileSNS {
