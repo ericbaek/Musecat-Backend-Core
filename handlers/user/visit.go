@@ -1,10 +1,13 @@
 package user
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -30,24 +33,34 @@ type visitRequest struct {
 	Accuracy float64 `json:"accuracy"`
 }
 type VisitStats struct {
-	TotalVisits     int                `json:"total_visits"`
-	DistinctArcades int                `json:"distinct_arcades"`
-	LastVisitedAt   string             `json:"last_visited_at,omitempty"`
-	Arcades         []ArcadeVisitCount `json:"arcades"`
+	TotalVisits         int                `json:"total_visits"`
+	DistinctArcades     int                `json:"distinct_arcades"`
+	TotalDistanceMeters float64            `json:"total_distance_meters"`
+	Countries           []VisitCountry     `json:"countries"`
+	Arcades             []ArcadeVisitCount `json:"arcades"`
 }
+
+type VisitCountry struct {
+	Country     string `json:"country"`
+	ArcadeCount int    `json:"arcade_count"`
+}
+
 type ArcadeVisitCount struct {
-	Arcade        string `json:"arcade"`
-	VisitCount    int    `json:"visit_count"`
-	LastVisitedAt string `json:"last_visited_at"`
+	Arcade       string   `json:"arcade"`
+	Name         string   `json:"name"`
+	Country      string   `json:"country"`
+	PhotoURL     string   `json:"photo_url,omitempty"`
+	VisitCount   int      `json:"visit_count"`
+	LastVisitDay string   `json:"last_visit_day"`
+	VisitDays    []string `json:"visit_days,omitempty"`
+
+	lastVisitedAt string
 }
 type VisitSummary struct {
-	ID             string  `json:"id"`
-	Arcade         string  `json:"arcade"`
-	VisitDay       string  `json:"visit_day"`
-	VisitedAt      string  `json:"visited_at"`
-	DistanceMeters float64 `json:"distance_meters"`
-	AccuracyMeters float64 `json:"accuracy_meters"`
-	GainedExp      int     `json:"gained_exp"`
+	Arcade   string `json:"arcade"`
+	VisitDay string `json:"visit_day"`
+
+	gainedExp int
 }
 
 func SetVisitNowForTest(nowFn func() time.Time) func() {
@@ -154,7 +167,7 @@ func VisitArcade(re *core.RequestEvent) error {
 	}
 	return re.JSON(http.StatusOK, map[string]any{"visited": granted, "already_visited": !granted, "visit": out, "gained_exp": func() int {
 		if granted {
-			return out.GainedExp
+			return out.gainedExp
 		}
 		return 0
 	}(), "exp": exp, "level": LevelFromExp(exp), "xp_feedback": BuildExpFeedback(baseExp, exp)})
@@ -164,15 +177,11 @@ func GetMyVisits(re *core.RequestEvent) error {
 	if re.Auth == nil {
 		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
 	}
-	visits, err := ListVisits(re.App, re.Auth.Id, 0, 0)
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load visits"})
-	}
-	stats, err := LoadVisitStats(re.App, re.Auth.Id)
+	stats, err := LoadVisitStats(re.App, re.Auth.Id, true)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load visit stats"})
 	}
-	return re.JSON(http.StatusOK, map[string]any{"visits": visits, "stats": stats})
+	return re.JSON(http.StatusOK, map[string]any{"stats": stats})
 }
 func GetArcadeVisitStats(re *core.RequestEvent) error {
 	id := strings.TrimSpace(re.Request.URL.Query().Get("arcade"))
@@ -225,55 +234,139 @@ func visitVisibility(v string) string {
 	}
 }
 func visitSummary(r *core.Record) VisitSummary {
-	return VisitSummary{ID: r.Id, Arcade: r.GetString("arcade"), VisitDay: r.GetString("visit_day"), VisitedAt: r.GetString("visited_at"), DistanceMeters: r.GetFloat("distance_meters"), AccuracyMeters: r.GetFloat("accuracy_meters"), GainedExp: r.GetInt("gained_exp")}
+	return VisitSummary{Arcade: r.GetString("arcade"), VisitDay: r.GetString("visit_day"), gainedExp: r.GetInt("gained_exp")}
 }
-func ListVisits(app core.App, userID string, limit, offset int) ([]VisitSummary, error) {
-	recs, err := app.FindRecordsByFilter(CollectionArcadeVisit, "user={:user}", "-visited_at", limit, offset, dbx.Params{"user": userID})
-	if err != nil {
-		return nil, err
+func LoadVisitStats(app core.App, userID string, includeVisitDays bool) (VisitStats, error) {
+	stats := VisitStats{
+		Countries: []VisitCountry{},
+		Arcades:   []ArcadeVisitCount{},
 	}
-	out := make([]VisitSummary, 0, len(recs))
-	for _, r := range recs {
-		out = append(out, visitSummary(r))
-	}
-	return out, nil
-}
-func LoadVisitStats(app core.App, userID string) (VisitStats, error) {
-	s := VisitStats{Arcades: []ArcadeVisitCount{}}
-	err := app.DB().NewQuery("SELECT COUNT(*), COUNT(DISTINCT arcade), COALESCE(MAX(visited_at), '') FROM arcade_visit WHERE user={:user}").Bind(dbx.Params{"user": userID}).Row(&s.TotalVisits, &s.DistinctArcades, &s.LastVisitedAt)
-	if err != nil {
-		return s, err
-	}
+
 	rows, err := app.DB().NewQuery(`
-SELECT arcade, COUNT(*), MAX(visited_at)
-FROM arcade_visit
-WHERE user = {:user}
-GROUP BY arcade
-ORDER BY COUNT(*) DESC, arcade ASC
+SELECT v.arcade, COALESCE(b.name, ''), a.country, a.photo, v.visit_day, v.visited_at, b.location
+FROM arcade_visit v
+INNER JOIN arcade a ON a.id = v.arcade
+LEFT JOIN arcade_basic b ON b.id = a.basic
+WHERE v.user = {:user} AND a.public = true
+ORDER BY v.visited_at ASC, v.id ASC
 `).Bind(dbx.Params{"user": userID}).Rows()
 	if err != nil {
-		return s, err
+		return stats, err
 	}
 	defer rows.Close()
-	for rows.Next() {
-		var item ArcadeVisitCount
-		if err := rows.Scan(&item.Arcade, &item.VisitCount, &item.LastVisitedAt); err != nil {
-			return s, err
-		}
-		s.Arcades = append(s.Arcades, item)
+
+	arcadesByID := map[string]*ArcadeVisitCount{}
+	photoMoleculeIDs := map[string]string{}
+	countryCounts := map[string]int{}
+	var previousLocation struct {
+		lat, lon float64
+		valid    bool
 	}
-	return s, rows.Err()
+	for rows.Next() {
+		var arcadeID, name, country, photoMoleculeID, visitDay, visitedAt string
+		var location sql.NullString
+		if err := rows.Scan(&arcadeID, &name, &country, &photoMoleculeID, &visitDay, &visitedAt, &location); err != nil {
+			return stats, err
+		}
+
+		item := arcadesByID[arcadeID]
+		if item == nil {
+			item = &ArcadeVisitCount{
+				Arcade:    arcadeID,
+				Name:      name,
+				Country:   country,
+				VisitDays: []string{},
+			}
+			arcadesByID[arcadeID] = item
+			photoMoleculeIDs[arcadeID] = photoMoleculeID
+			countryCounts[country]++
+		}
+		item.VisitCount++
+		item.LastVisitDay = visitDay
+		item.lastVisitedAt = visitedAt
+		if includeVisitDays {
+			item.VisitDays = append(item.VisitDays, visitDay)
+		}
+		stats.TotalVisits++
+
+		lat, lon, ok := readVisitLocation(location.String)
+		if !location.Valid || !ok {
+			previousLocation.valid = false
+			continue
+		}
+		if previousLocation.valid {
+			stats.TotalDistanceMeters += visitDistanceMeters(previousLocation.lat, previousLocation.lon, lat, lon)
+		}
+		previousLocation.lat = lat
+		previousLocation.lon = lon
+		previousLocation.valid = true
+	}
+	if err := rows.Err(); err != nil {
+		return stats, err
+	}
+
+	stats.DistinctArcades = len(arcadesByID)
+	for _, item := range arcadesByID {
+		item.PhotoURL = visitArcadePhotoURL(app, item.Arcade, photoMoleculeIDs[item.Arcade])
+		if includeVisitDays {
+			slicesReverse(item.VisitDays)
+		}
+		stats.Arcades = append(stats.Arcades, *item)
+	}
+	sort.Slice(stats.Arcades, func(i, j int) bool {
+		left, right := stats.Arcades[i], stats.Arcades[j]
+		if left.VisitCount != right.VisitCount {
+			return left.VisitCount > right.VisitCount
+		}
+		if left.lastVisitedAt != right.lastVisitedAt {
+			return left.lastVisitedAt > right.lastVisitedAt
+		}
+		return left.Arcade < right.Arcade
+	})
+	for country, arcadeCount := range countryCounts {
+		stats.Countries = append(stats.Countries, VisitCountry{Country: country, ArcadeCount: arcadeCount})
+	}
+	sort.Slice(stats.Countries, func(i, j int) bool {
+		if stats.Countries[i].ArcadeCount != stats.Countries[j].ArcadeCount {
+			return stats.Countries[i].ArcadeCount > stats.Countries[j].ArcadeCount
+		}
+		return stats.Countries[i].Country < stats.Countries[j].Country
+	})
+
+	return stats, nil
 }
+
+func visitArcadePhotoURL(app core.App, arcadeID, photoMoleculeID string) string {
+	if strings.TrimSpace(arcadeID) == "" || strings.TrimSpace(photoMoleculeID) == "" {
+		return ""
+	}
+	photoMolecule, err := app.FindRecordById("arcade_photo", photoMoleculeID)
+	if err != nil || photoMolecule.GetString("arcade") != arcadeID {
+		return ""
+	}
+	for _, rawAtomID := range photoMolecule.GetStringSlice("photos") {
+		atomID := strings.TrimSpace(rawAtomID)
+		if atomID == "" {
+			continue
+		}
+		atom, err := app.FindRecordById("arcade_photo_atoms", atomID)
+		if err != nil || atom.GetString("arcade") != arcadeID || !atom.GetBool("public") || strings.TrimSpace(atom.GetString("photo")) == "" {
+			continue
+		}
+		return "/arcade/photo/file?id=" + url.QueryEscape(atom.Id)
+	}
+	return ""
+}
+
 func LoadArcadeVisitStats(app core.App, arcadeID string) (map[string]any, error) {
 	var total, users int
 	err := app.DB().NewQuery("SELECT COUNT(*), COUNT(DISTINCT user) FROM arcade_visit WHERE arcade={:arcade}").Bind(dbx.Params{"arcade": arcadeID}).Row(&total, &users)
 	return map[string]any{"arcade": arcadeID, "total_visits": total, "distinct_visitors": users}, err
 }
-func parseVisitPagination(raw string) (int, error) {
-	if raw == "" {
-		return 0, nil
+func slicesReverse(values []string) {
+	for left, right := 0, len(values)-1; left < right; left, right = left+1, right-1 {
+		values[left], values[right] = values[right], values[left]
 	}
-	return strconv.Atoi(raw)
 }
 
 func validVisitCoords(lat, lon float64) bool {

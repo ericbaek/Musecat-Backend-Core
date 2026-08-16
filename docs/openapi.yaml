@@ -950,38 +950,51 @@ components:
           enum: [private, summary, full]
         visit_stats:
           $ref: '#/components/schemas/VisitStats'
-        visits:
-          type: array
-          items:
-            $ref: '#/components/schemas/Visit'
     Visit:
       type: object
-      required: [id, arcade, visit_day, visited_at, distance_meters, accuracy_meters, gained_exp]
+      required: [arcade, visit_day]
       properties:
-        id: {type: string}
         arcade: {type: string}
         visit_day: {type: string, format: date}
-        visited_at: {type: string}
-        distance_meters: {type: number}
-        accuracy_meters: {type: number}
-        gained_exp: {type: integer}
     VisitStats:
       type: object
-      required: [total_visits, distinct_arcades, arcades]
+      required: [total_visits, distinct_arcades, total_distance_meters, countries, arcades]
       properties:
         total_visits: {type: integer}
         distinct_arcades: {type: integer}
-        last_visited_at: {type: string}
-        arcades:
+        total_distance_meters:
+          type: number
+          format: double
+          description: Sum of straight-line distances between consecutive verified arcade locations in chronological visit order.
+        countries:
           type: array
-          description: Per-arcade visit totals. Exposed in public summary and full profiles.
+          description: Counts of distinct visited arcades by their current country code.
           items:
             type: object
-            required: [arcade, visit_count, last_visited_at]
+            required: [country, arcade_count]
+            properties:
+              country: {type: string}
+              arcade_count: {type: integer}
+        arcades:
+          type: array
+          description: Visited public arcades, ordered by visit count descending, then most recent visit descending.
+          items:
+            type: object
+            required: [arcade, name, country, visit_count, last_visit_day]
             properties:
               arcade: {type: string}
+              name: {type: string}
+              country: {type: string}
+              photo_url:
+                type: string
+                format: uri-reference
+                description: First publicly readable photo in the current arcade photo molecule. Omitted when no published photo is available. Uses the custom `/arcade/photo/file` route.
               visit_count: {type: integer}
-              last_visited_at: {type: string}
+              last_visit_day: {type: string, format: date}
+              visit_days:
+                type: array
+                description: All local visit dates for this arcade, newest first. Omitted for `summary` visibility.
+                items: {type: string, format: date}
     ArcadeVisitRequest:
       type: object
       required: [arcade, lat, lon, accuracy]
@@ -4948,7 +4961,7 @@ paths:
             schema: {$ref: '#/components/schemas/ArcadeVisitRequest'}
       responses:
         '200':
-          description: GPS visit verification result and XP feedback.
+          description: GPS visit verification result and XP feedback. The visit echoes only its arcade and local visit date; raw GPS verification data is not returned.
           content:
             application/json:
               schema:
@@ -4971,14 +4984,13 @@ paths:
       security: [{bearerAuth: []}]
       responses:
         '200':
-          description: Authenticated user's visit history and aggregate statistics.
+          description: Authenticated user's profile-ready visit summary. It includes all visit days per arcade without raw GPS, accuracy, XP, or visit-record data.
           content:
             application/json:
               schema:
                 type: object
-                required: [visits, stats]
+                required: [stats]
                 properties:
-                  visits: {type: array, items: {$ref: '#/components/schemas/Visit'}}
                   stats: {$ref: '#/components/schemas/VisitStats'}
   /user/visit-visibility:
     put:

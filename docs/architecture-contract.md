@@ -51,6 +51,22 @@ Definitions:
 
 The `GET /arcade` public endpoint MUST return `404`, rather than `403`, for every private id. A public/closed arcade remains readable through detail and search but MUST NOT enter operating discovery, nearby, update, or visit flows.
 
+Profile visit data is derived only from currently public arcades (open or
+closed), so a venue that later becomes private cannot leak through a visitor's
+profile. `visit_visibility=private` omits the public profile's visit summary;
+the owner receives it through `GET /user/me`. `summary` exposes one entry per
+arcade with its last local visit day and count, while `full` additionally
+exposes that arcade's complete local visit-day list. Neither form exposes
+raw GPS verification data, accuracy, XP, or visit-record ids. Arcade entries
+are ordered by descending visit count and then descending most-recent visit.
+Each entry may include `photo_url`, the first publicly readable photo in the
+current arcade photo molecule, delivered only through the custom photo-file
+route. Country counts, total visit count, distinct arcade count, and total travel
+distance are calculated from that same visible arcade visit sequence. Travel
+distance is the straight-line sum between consecutive current arcade
+locations; a visit whose location is unavailable breaks the sequence rather
+than joining the surrounding visits.
+
 `GET /rankings` always returns the public top 100. A valid user token may add
 only that user's own `viewer` entry, calculated with the same score, tie, and
 visibility predicates as the public list; otherwise `viewer` is `null`. In

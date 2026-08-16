@@ -69,6 +69,32 @@ Endpoint-specific visibility:
 - `GET /user`: `series` is included only when `series_public = true`
 - `GET /user/me`: `series_public` value is still returned, `series` is included for the authenticated user even when `series_public = false`, and `warp` is always included
 
+## Visit records
+
+`visit_stats` is the profile's only visit-record payload. It reports total
+visit verifications, distinct visited arcades, country counts by distinct
+arcade, total straight-line travel distance, and the visited arcade list.
+Each arcade item has its id, current name and country, first published image
+URL from the current photo molecule when one exists, visit count, and last
+local visit date. Image URLs always use the custom `/arcade/photo/file` route.
+Items are ordered by visit count descending and then by most recent visit
+descending.
+
+- `visit_visibility=private` omits `visit_stats` from public profiles; the
+  owner still receives it from `GET /user/me`.
+- `visit_visibility=summary` exposes the aggregate fields and arcade items,
+  but omits each item's `visit_days`.
+- `visit_visibility=full` additionally exposes each arcade's complete
+  `visit_days` list, newest first.
+- Only currently public arcades are included. This prevents a venue that is
+  later made private from being disclosed through a visitor profile.
+
+The payload never exposes raw visit record ids, timestamps, GPS distance or
+accuracy, or visit XP. Total travel distance follows chronological verified
+visits and sums straight-line distances between the current locations of
+consecutive arcades. A visit with no current arcade location breaks that
+distance sequence.
+
 ## Privacy and Masking Rules
 - Sensitive fields are not exposed: `email`, `emailVisibility`, password/token fields
 - If a user is withdrawn:

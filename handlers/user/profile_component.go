@@ -47,7 +47,6 @@ type Profile struct {
 	Series          []ProfileSeries `json:"series,omitempty"`
 	VisitVisibility string          `json:"visit_visibility,omitempty"`
 	VisitStats      *VisitStats     `json:"visit_stats,omitempty"`
-	Visits          []VisitSummary  `json:"visits,omitempty"`
 }
 
 func FetchMergedProfile(app core.App, userID string) (*Profile, error) {
@@ -148,13 +147,9 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 		out.Series = loadProfileSeries(app, userInfoRec)
 	}
 	if !out.Withdrawn {
-		if stats, err := LoadVisitStats(app, userRec.Id); err == nil && (includePrivateSeries || out.VisitVisibility != "private") {
+		includeVisitDays := includePrivateSeries || out.VisitVisibility == "full"
+		if stats, err := LoadVisitStats(app, userRec.Id, includeVisitDays); err == nil && (includePrivateSeries || out.VisitVisibility != "private") {
 			out.VisitStats = &stats
-		}
-		if includePrivateSeries || out.VisitVisibility == "full" {
-			if visits, err := ListVisits(app, userRec.Id, 0, 0); err == nil {
-				out.Visits = visits
-			}
 		}
 	}
 
