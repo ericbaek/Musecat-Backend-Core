@@ -71,6 +71,9 @@ func TestArcadeNotice_OwnerCanCreateUpdateDelete(t *testing.T) {
 	if noticeID == "" {
 		t.Fatalf("expected created notice id")
 	}
+	if got := createPayload["createdBy"]; got != user.Id {
+		t.Fatalf("expected createdBy %q, got %v", user.Id, got)
+	}
 
 	updateBody, _ := json.Marshal(map[string]any{
 		"id":       noticeID,
@@ -102,6 +105,102 @@ func TestArcadeNotice_OwnerCanCreateUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestArcadeNotice_SupporterCreateAndAuthorOnlyMutation(t *testing.T) {
+	app := newArcadeTestApp(t)
+	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
+		Name:     "Community Arcade",
+		Address:  "6 Supporter St",
+		Location: location{Lat: 37.91, Lon: 127.41},
+	})
+
+	token, _ := createAuthUserWithTags(t, app, []string{"supporter"})
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	createResp := executeJSONRequest(t, app, http.MethodPost, "/arcade/notice", string(createNoticeBody(arcadeID)), headers)
+	if createResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected supporter create to succeed, got %d", createResp.StatusCode)
+	}
+	noticeID, _ := decodeJSONMap(t, createResp)["id"].(string)
+	if noticeID == "" {
+		t.Fatal("expected supporter notice id")
+	}
+
+	otherToken, _ := createAuthUserWithTags(t, app, []string{"supporter"})
+	otherHeaders := map[string]string{"Authorization": "Bearer " + otherToken}
+	updateBody, _ := json.Marshal(map[string]any{"id": noticeID, "message": "**blocked**"})
+	if res := executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), otherHeaders); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected other supporter update to be forbidden, got %d", res.StatusCode)
+	} else {
+		res.Body.Close()
+	}
+	deleteBody, _ := json.Marshal(map[string]any{"id": noticeID})
+	if res := executeJSONRequest(t, app, http.MethodDelete, "/arcade/notice", string(deleteBody), otherHeaders); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected other supporter delete to be forbidden, got %d", res.StatusCode)
+	} else {
+		res.Body.Close()
+	}
+
+	if res := executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), headers); res.StatusCode != http.StatusOK {
+		t.Fatalf("expected author update to succeed, got %d", res.StatusCode)
+	} else {
+		res.Body.Close()
+	}
+	if res := executeJSONRequest(t, app, http.MethodDelete, "/arcade/notice", string(deleteBody), headers); res.StatusCode != http.StatusOK {
+		t.Fatalf("expected author delete to succeed, got %d", res.StatusCode)
+	} else {
+		res.Body.Close()
+	}
+}
+
+func TestArcadeNotice_SupporterCannotCreateForOfficialManagedArcade(t *testing.T) {
+	app := newArcadeTestApp(t)
+	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
+		Name:     "Official Arcade",
+		Address:  "7 Official St",
+		Location: location{Lat: 37.92, Lon: 127.42},
+	})
+
+	_, official := createAuthUserWithTags(t, app, []string{"arcade_owner"})
+	addOwnedArcade(t, app, official, arcadeID)
+	token, _ := createAuthUserWithTags(t, app, []string{"founding_supporter"})
+	res := executeJSONRequest(t, app, http.MethodPost, "/arcade/notice", string(createNoticeBody(arcadeID)), map[string]string{"Authorization": "Bearer " + token})
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected supporter create on official arcade to be forbidden, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+}
+
+func TestArcadeNotice_ModeratorCanMutateAnotherAuthorNotice(t *testing.T) {
+	app := newArcadeTestApp(t)
+	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
+		Name:     "Moderated Arcade",
+		Address:  "8 Moderator St",
+		Location: location{Lat: 37.93, Lon: 127.43},
+	})
+	token, _ := createAuthUserWithTags(t, app, []string{"supporter"})
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	created := executeJSONRequest(t, app, http.MethodPost, "/arcade/notice", string(createNoticeBody(arcadeID)), headers)
+	if created.StatusCode != http.StatusOK {
+		t.Fatalf("expected supporter create to succeed, got %d", created.StatusCode)
+	}
+	noticeID, _ := decodeJSONMap(t, created)["id"].(string)
+
+	moderatorToken, _ := createAuthUserWithTags(t, app, []string{"moderator"})
+	moderatorHeaders := map[string]string{"Authorization": "Bearer " + moderatorToken}
+	updateBody, _ := json.Marshal(map[string]any{"id": noticeID, "message": "**moderated**"})
+	if res := executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), moderatorHeaders); res.StatusCode != http.StatusOK {
+		t.Fatalf("expected moderator update to succeed, got %d", res.StatusCode)
+	} else {
+		res.Body.Close()
+	}
+	developerToken, _ := createAuthUserWithTags(t, app, []string{"developer"})
+	deleteBody, _ := json.Marshal(map[string]any{"id": noticeID})
+	if res := executeJSONRequest(t, app, http.MethodDelete, "/arcade/notice", string(deleteBody), map[string]string{"Authorization": "Bearer " + developerToken}); res.StatusCode != http.StatusOK {
+		t.Fatalf("expected developer delete to succeed, got %d", res.StatusCode)
+	} else {
+		res.Body.Close()
+	}
+}
+
 func TestArcadeNotice_ArcadeOwnerRequiresOwnership(t *testing.T) {
 	app := newArcadeTestApp(t)
 	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
@@ -118,7 +217,7 @@ func TestArcadeNotice_ArcadeOwnerRequiresOwnership(t *testing.T) {
 		t.Fatalf("expected create to be forbidden, got %d", createResp.StatusCode)
 	}
 	createPayload := decodeJSONMap(t, createResp)
-	if got := createPayload["error"]; got != "arcade owner can only manage notices for owned arcades" {
+	if got := createPayload["error"]; got != "notice creation is not allowed for this arcade" {
 		t.Fatalf("unexpected create error: %v", got)
 	}
 

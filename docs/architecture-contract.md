@@ -45,6 +45,8 @@ Definitions:
 | Private detail via `/arcade/draft` | deny | deny | allow | allow |
 | My draft list/delete | deny | own drafts only | own drafts only | use specific draft route |
 | Immediate wiki edits on public arcade | deny | allow | allow | allow |
+| Arcade notice create | deny | deny; supporters may create unless another official account manages the arcade through `owns` | official account may create only in own `owns` arcade | allow |
+| Arcade notice update/delete | deny | own authored notice only | own authored notice only | allow |
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
 | Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |

@@ -19,9 +19,11 @@ import (
 )
 
 var noticeAccessTags = map[string]struct{}{
-	"arcade_owner": {},
-	"developer":    {},
-	"moderator":    {},
+	"arcade_owner":       {},
+	"developer":          {},
+	"moderator":          {},
+	"supporter":          {},
+	"founding_supporter": {},
 }
 
 type NoticeBody struct {
@@ -146,6 +148,24 @@ func hasElevatedNoticeAccess(auth *core.Record) bool {
 	return false
 }
 
+func hasNoticeTag(auth *core.Record, want string) bool {
+	if auth == nil {
+		return false
+	}
+	for _, tags := range [][]string{auth.GetStringSlice("tag"), auth.GetStringSlice("tags")} {
+		for _, tag := range tags {
+			if strings.EqualFold(strings.TrimSpace(tag), want) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isSupporter(auth *core.Record) bool {
+	return hasNoticeTag(auth, "supporter") || hasNoticeTag(auth, "founding_supporter")
+}
+
 func ownsArcade(auth *core.Record, arcadeID string) bool {
 	if auth == nil {
 		return false
@@ -165,7 +185,25 @@ func ownsArcade(auth *core.Record, arcadeID string) bool {
 	return false
 }
 
-func rejectNoticeAccess(re *core.RequestEvent, arcadeID string) error {
+func hasOtherOfficialArcadeManager(app core.App, auth *core.Record, arcadeID string) bool {
+	users, err := app.FindAllRecords("user")
+	if err != nil {
+		// A failed management lookup must not let a supporter post to a
+		// potentially official-managed arcade.
+		return true
+	}
+	for _, user := range users {
+		if auth != nil && user.Id == auth.Id {
+			continue
+		}
+		if hasNoticeTag(user, "arcade_owner") && ownsArcade(user, arcadeID) {
+			return true
+		}
+	}
+	return false
+}
+
+func rejectNoticeCreateAccess(re *core.RequestEvent, arcadeID string) error {
 	if re.Auth == nil {
 		return re.UnauthorizedError("The request requires valid record authorization token.", nil)
 	}
@@ -176,10 +214,27 @@ func rejectNoticeAccess(re *core.RequestEvent, arcadeID string) error {
 		})
 	}
 
-	if !hasElevatedNoticeAccess(re.Auth) && !ownsArcade(re.Auth, arcadeID) {
-		return re.JSON(http.StatusForbidden, map[string]any{
-			"error": "arcade owner can only manage notices for owned arcades",
-		})
+	if hasElevatedNoticeAccess(re.Auth) {
+		return nil
+	}
+	if hasNoticeTag(re.Auth, "arcade_owner") && ownsArcade(re.Auth, arcadeID) {
+		return nil
+	}
+	if isSupporter(re.Auth) && !hasOtherOfficialArcadeManager(re.App, re.Auth, arcadeID) {
+		return nil
+	}
+	return re.JSON(http.StatusForbidden, map[string]any{"error": "notice creation is not allowed for this arcade"})
+}
+
+func rejectNoticeMutationAccess(re *core.RequestEvent, rec *core.Record) error {
+	if re.Auth == nil {
+		return re.UnauthorizedError("The request requires valid record authorization token.", nil)
+	}
+	if hasElevatedNoticeAccess(re.Auth) {
+		return nil
+	}
+	if rec.GetString("createdBy") != re.Auth.Id {
+		return re.JSON(http.StatusForbidden, map[string]any{"error": "only the notice author can modify this notice"})
 	}
 
 	return nil
@@ -187,17 +242,18 @@ func rejectNoticeAccess(re *core.RequestEvent, arcadeID string) error {
 
 func noticePayload(rec *core.Record) map[string]any {
 	return map[string]any{
-		"id":       rec.Id,
-		"arcade":   strings.TrimSpace(rec.GetString("arcade")),
-		"type":     strings.TrimSpace(rec.GetString("type")),
-		"message":  rec.GetString("message"),
-		"link":     strings.TrimSpace(rec.GetString("link")),
-		"until":    rec.Get("until"),
-		"priority": rec.Get("priority"),
-		"delete":   rec.GetBool("delete"),
-		"photos":   append([]string{}, rec.GetStringSlice("photos")...),
-		"created":  rec.Get("created"),
-		"updated":  rec.Get("updated"),
+		"id":        rec.Id,
+		"arcade":    strings.TrimSpace(rec.GetString("arcade")),
+		"createdBy": rec.GetString("createdBy"),
+		"type":      strings.TrimSpace(rec.GetString("type")),
+		"message":   rec.GetString("message"),
+		"link":      strings.TrimSpace(rec.GetString("link")),
+		"until":     rec.Get("until"),
+		"priority":  rec.Get("priority"),
+		"delete":    rec.GetBool("delete"),
+		"photos":    append([]string{}, rec.GetStringSlice("photos")...),
+		"created":   rec.Get("created"),
+		"updated":   rec.Get("updated"),
 	}
 }
 
@@ -399,7 +455,7 @@ func CreateArcadeNotice(re *core.RequestEvent) error {
 		})
 	}
 
-	if err := rejectNoticeAccess(re, body.Arcade); err != nil {
+	if err := rejectNoticeCreateAccess(re, body.Arcade); err != nil {
 		return err
 	}
 
@@ -421,6 +477,7 @@ func CreateArcadeNotice(re *core.RequestEvent) error {
 
 	rec := core.NewRecord(coll)
 	rec.Set("arcade", arcadeRec.Id)
+	rec.Set("createdBy", re.Auth.Id)
 	rec.Set("delete", false)
 	applyNoticeFields(rec, body)
 
@@ -457,8 +514,7 @@ func UpdateArcadeNotice(re *core.RequestEvent) error {
 		})
 	}
 
-	arcadeID := strings.TrimSpace(rec.GetString("arcade"))
-	if err := rejectNoticeAccess(re, arcadeID); err != nil {
+	if err := rejectNoticeMutationAccess(re, rec); err != nil {
 		return err
 	}
 
@@ -497,8 +553,7 @@ func DeleteArcadeNotice(re *core.RequestEvent) error {
 		})
 	}
 
-	arcadeID := strings.TrimSpace(rec.GetString("arcade"))
-	if err := rejectNoticeAccess(re, arcadeID); err != nil {
+	if err := rejectNoticeMutationAccess(re, rec); err != nil {
 		return err
 	}
 

@@ -32,8 +32,30 @@ func NewTestApp(tb testing.TB) *tests.TestApp {
 	// Core tests create multiple routers but don't exercise the bundled UI.
 	ui.DistDirFS = nil
 	ensureVisitSchema(tb, app)
+	ensureNoticeAuthorSchema(tb, app)
 
 	return app
+}
+
+// Production Full owns the forward migration for this field. Core's isolated
+// handler tests add the same optional relation to their cloned fixture.
+func ensureNoticeAuthorSchema(tb testing.TB, app *tests.TestApp) {
+	tb.Helper()
+	notices, err := app.FindCollectionByNameOrId("arcade_notice")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_notice: %v", err)
+	}
+	if notices.Fields.GetByName("createdBy") != nil {
+		return
+	}
+	users, err := app.FindCollectionByNameOrId("user")
+	if err != nil {
+		tb.Fatalf("failed to load user: %v", err)
+	}
+	notices.Fields.Add(&core.RelationField{Name: "createdBy", CollectionId: users.Id, MaxSelect: 1})
+	if err := app.Save(notices); err != nil {
+		tb.Fatalf("failed to add arcade_notice.createdBy: %v", err)
+	}
 }
 
 func ensureVisitSchema(tb testing.TB, app *tests.TestApp) {

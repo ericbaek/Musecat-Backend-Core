@@ -1573,12 +1573,15 @@ components:
           type: string
     ArcadeNotice:
       type: object
-      required: [id, arcade, type, message, priority, created, updated]
+      required: [id, arcade, createdBy, type, message, priority, created, updated]
       properties:
         id:
           type: string
         arcade:
           type: string
+        createdBy:
+          type: string
+          description: Author user id. Existing notices without an author return an empty string.
         type:
           type: string
           enum: [alert, close, issue, event]
@@ -4108,8 +4111,8 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Requires an authenticated user whose `tag` or `tags` includes `arcade_owner`, `moderator`, or `developer`.
-        Users with only `arcade_owner` may create notices only for arcades listed in `owns`.
+        Requires `developer`, `moderator`, `arcade_owner`, `supporter`, or `founding_supporter` in `tag` or `tags`.
+        Developers and moderators may create on any arcade. Official accounts may create only on their own `owns` arcades. Supporters may create unless another official account manages the target through `owns`.
       security:
         - bearerAuth: []
       requestBody:
@@ -4145,7 +4148,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Notice access required or arcade ownership missing.
+          description: Notice role is missing, official ownership is missing, or a supporter attempted to post on an officially managed arcade.
           content:
             application/json:
               schema:
@@ -4166,8 +4169,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Requires an authenticated user whose `tag` or `tags` includes `arcade_owner`, `moderator`, or `developer`.
-        Users with only `arcade_owner` may update notices only for arcades listed in `owns`.
+        Developers and moderators may update every notice. Every other authenticated user may update only notices they authored.
       security:
         - bearerAuth: []
       requestBody:
@@ -4203,7 +4205,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Notice access required or arcade ownership missing.
+          description: The caller is neither the notice author nor a developer or moderator.
           content:
             application/json:
               schema:
@@ -4224,8 +4226,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Requires an authenticated user whose `tag` or `tags` includes `arcade_owner`, `moderator`, or `developer`.
-        Users with only `arcade_owner` may delete notices only for arcades listed in `owns`.
+        Developers and moderators may delete every notice. Every other authenticated user may delete only notices they authored.
       security:
         - bearerAuth: []
       requestBody:
@@ -4260,7 +4261,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Notice access required or arcade ownership missing.
+          description: The caller is neither the notice author nor a developer or moderator.
           content:
             application/json:
               schema:
