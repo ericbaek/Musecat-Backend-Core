@@ -11,6 +11,8 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
+	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
 var rollbackPartCollections = map[string]string{
@@ -20,6 +22,7 @@ var rollbackPartCollections = map[string]string{
 	"gtk":   arcadeinternal.CollectionArcadeGTK,
 	"game":  arcadeinternal.CollectionArcadeGameRevisionBatch,
 	"photo": arcadeinternal.CollectionArcadePhoto,
+	"memo":  arcadeinternal.CollectionArcadeMemo,
 }
 
 type RollbackArcadeBody struct {
@@ -93,7 +96,7 @@ func validateRollbackArcadeBody(body RollbackArcadeBody) error {
 		return fmt.Errorf("arcade must be a valid arcade id")
 	}
 	if _, ok := rollbackPartCollections[body.Part]; !ok {
-		return fmt.Errorf("part must be one of basic, hour, sns, gtk, game, photo")
+		return fmt.Errorf("part must be one of basic, hour, sns, gtk, game, photo, memo")
 	}
 	if body.Value == "" {
 		return fmt.Errorf("value is required")
@@ -129,6 +132,15 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 			"details": err.Error(),
 		})
 	}
+	if body.Part == "memo" {
+		if re.Auth == nil {
+			return re.UnauthorizedError("The request requires valid record authorization token.", nil)
+		}
+		level, levelErr := userhandler.LoadUserLevelState(re.App, re.Auth.Id)
+		if levelErr != nil || level.Level < 10 {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": "level 10 is required to edit arcade memos"})
+		}
+	}
 
 	var fromValue string
 	var toValue string
@@ -138,6 +150,9 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 		arcadeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
 		if err != nil {
 			return &rollbackValidationError{message: "arcade not found"}
+		}
+		if body.Part == "memo" && !arcadeRec.GetBool("public") && (arcadeRec.GetString("createdBy") != re.Auth.Id && !arcadequery.HasStrictReviewerAccess(re.Auth)) {
+			return &rollbackValidationError{message: "arcade memo editing is not permitted"}
 		}
 
 		field := body.Part

@@ -10,11 +10,12 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	memoDiff "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo/diff"
 )
 
 const (
 	maxChangelogPageSize = 100
-	changelogCategories  = "basic,game,hour,sns,gtk,photo"
+	changelogCategories  = "basic,game,hour,sns,gtk,photo,memo"
 )
 
 var changelogCategorySet = map[string]struct{}{
@@ -24,6 +25,7 @@ var changelogCategorySet = map[string]struct{}{
 	"sns":   {},
 	"gtk":   {},
 	"photo": {},
+	"memo":  {},
 }
 
 // ListArcadeChangelog is the only supported wire API for arcade history.
@@ -69,7 +71,7 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 	}
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
-		items = append(items, map[string]any{
+		item := map[string]any{
 			"id":      record.Id,
 			"arcade":  record.GetString("arcade"),
 			"changed": record.GetString("changed"),
@@ -79,7 +81,11 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 			"log":     record.Get("log"),
 			"created": record.Get("created"),
 			"updated": record.Get("updated"),
-		})
+		}
+		if record.GetString("changed") == "memo" {
+			item["memo"] = memoDiff.Build(re.App, record.GetString("from"), record.GetString("to"))
+		}
+		items = append(items, item)
 	}
 	lastPage := 0
 	if total > 0 {

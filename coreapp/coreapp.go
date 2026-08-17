@@ -19,6 +19,7 @@ import (
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
 	arcadegtk "github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
 	arcadehour "github.com/ericbaek/musecat-backend-core/handlers/arcade/hour"
+	arcadememo "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo"
 	arcadenotice "github.com/ericbaek/musecat-backend-core/handlers/arcade/notice"
 	arcadephoto "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo"
 	arcadepublic "github.com/ericbaek/musecat-backend-core/handlers/arcade/public"
@@ -66,6 +67,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
 		// Public changelog rows are exposed only through this custom API.
 		se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
+		se.Router.GET("/arcade/memo", arcadememo.GetArcadeMemo)
 		se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
 		// Public read endpoint: list all arcades with basic info + gameSeries ids
 		se.Router.GET("/arcades", arcadequery.ListArcades)
@@ -119,6 +121,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authArcade.PUT("/hour", arcadehour.UpdateArcadeHour)
 		authArcade.PUT("/game", arcadegame.UpdateArcadeGame)
 		authArcade.PUT("/photo", arcadephoto.UpdateArcadePhoto)
+		authArcade.PUT("/memo", arcadememo.UpdateArcadeMemo)
 		authArcade.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)
 		authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
 		// Allow up to 10 * 20MB photo files (+multipart overhead) in a single request.

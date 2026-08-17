@@ -1199,7 +1199,7 @@ components:
           $ref: '#/components/schemas/SupporterScoreResponse'
     UpdateArcadeHourRequest:
       type: object
-      required: [arcade]
+      required: [arcade, document]
       properties:
         arcade:
           type: string
@@ -1492,7 +1492,7 @@ components:
             type: string
     UpdateArcadeBasicRequest:
       type: object
-      required: [arcade]
+      required: [arcade, document]
       properties:
         arcade:
           type: string
@@ -1522,9 +1522,9 @@ components:
         type:
           type: string
           enum: [alert, close, issue, event]
-        message:
-          type: string
-          description: Markdown source stored and returned as-is.
+        document:
+          $ref: '#/components/schemas/ArcadeMemoDocument'
+          description: Canonical Tiptap JSON document.
         link:
           type: string
         until:
@@ -1542,9 +1542,9 @@ components:
         type:
           type: string
           enum: [alert, close, issue, event]
-        message:
-          type: string
-          description: Markdown source stored and returned as-is.
+        document:
+          $ref: '#/components/schemas/ArcadeMemoDocument'
+          description: Canonical Tiptap JSON document serialized as multipart text.
         link:
           type: string
         until:
@@ -1568,9 +1568,9 @@ components:
         type:
           type: string
           enum: [alert, close, issue, event]
-        message:
-          type: string
-          description: Markdown source stored and returned as-is.
+        document:
+          $ref: '#/components/schemas/ArcadeMemoDocument'
+          description: Canonical Tiptap JSON document.
         link:
           type: string
         until:
@@ -1588,9 +1588,9 @@ components:
         type:
           type: string
           enum: [alert, close, issue, event]
-        message:
-          type: string
-          description: Markdown source stored and returned as-is.
+        document:
+          $ref: '#/components/schemas/ArcadeMemoDocument'
+          description: Canonical Tiptap JSON document serialized as multipart text.
         link:
           type: string
         until:
@@ -1612,7 +1612,7 @@ components:
           type: string
     ArcadeNotice:
       type: object
-      required: [id, arcade, createdBy, type, message, priority, created, updated]
+      required: [id, arcade, createdBy, type, document, priority, created, updated]
       properties:
         id:
           type: string
@@ -1624,9 +1624,9 @@ components:
         type:
           type: string
           enum: [alert, close, issue, event]
-        message:
-          type: string
-          description: Markdown source stored in the editor field.
+        document:
+          $ref: '#/components/schemas/ArcadeMemoDocument'
+          description: Canonical Tiptap JSON document.
         link:
           type: string
         delete:
@@ -1662,6 +1662,49 @@ components:
             $ref: '#/components/schemas/ArcadeNotice'
         total:
           type: integer
+    ArcadeMemoDocument:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: doc
+        content:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+    ArcadeMemo:
+      type: object
+      required: [id, arcade, document, by, created]
+      properties:
+        id: {type: string}
+        arcade: {type: string}
+        document:
+          $ref: '#/components/schemas/ArcadeMemoDocument'
+        by:
+          type: string
+          description: Authenticated author user id.
+        created:
+          type: string
+          format: date-time
+    ArcadeMemoResponse:
+      type: object
+      required: [arcade, memo]
+      properties:
+        arcade: {type: string}
+        memo:
+          oneOf:
+            - $ref: '#/components/schemas/ArcadeMemo'
+            - type: 'null'
+    PutArcadeMemoRequest:
+      type: object
+      required: [arcade, document]
+      properties:
+        arcade: {type: string}
+        document:
+          $ref: '#/components/schemas/ArcadeMemoDocument'
     ArcadeOnlyRequest:
       type: object
       required: [arcade]
@@ -1846,7 +1889,7 @@ components:
           type: string
         part:
           type: string
-          enum: [basic, hour, sns, gtk, game, photo]
+          enum: [basic, hour, sns, gtk, game, photo, memo]
         value:
           type: string
         previous_value:
@@ -1948,7 +1991,7 @@ components:
         arcade: {type: string}
         changed:
           type: string
-          enum: [basic, game, hour, sns, gtk, photo]
+          enum: [basic, game, hour, sns, gtk, photo, memo]
         from: {}
         to: {}
         by: {type: string}
@@ -1977,7 +2020,7 @@ components:
           description: Current display name of the arcade containing the row.
         changed:
           type: string
-          enum: [basic, game, hour, sns, gtk, photo]
+          enum: [basic, game, hour, sns, gtk, photo, memo]
         from: {}
         to: {}
         by: {type: string}
@@ -2424,6 +2467,76 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+  /arcade/memo:
+    get:
+      tags: [Arcades]
+      summary: /arcade/memo
+      description: Returns the current immutable memo revision. Public arcades are anonymously readable; private arcades require the creator or a developer/moderator bearer token.
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Current memo revision, or null when no memo has been written.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeMemoResponse'}
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist or private access is denied.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/memo
+      description: Creates an immutable Tiptap JSON revision and moves the arcade memo pointer. Requires an authenticated user with level 10 or higher. Saves and changelog creation are atomic.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutArcadeMemoRequest'}
+      responses:
+        '200':
+          description: Memo saved; unchanged documents return changed=false without creating a revision.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, changed, memo]
+                properties:
+                  arcade: {type: string}
+                  changed: {type: boolean}
+                  memo:
+                    $ref: '#/components/schemas/ArcadeMemo'
+        '400':
+          description: Invalid arcade id or Tiptap document.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Level 10 or higher and arcade write access are required.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist or private access is denied.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /arcade/changelog:
     get:
       tags: [Arcades]
@@ -2445,7 +2558,7 @@ paths:
           description: Optional arcade part filter. Omit to return all supported categories.
           schema:
             type: string
-            enum: [basic, game, hour, sns, gtk, photo]
+            enum: [basic, game, hour, sns, gtk, photo, memo]
       responses:
         '200':
           description: Immutable changelog page.
@@ -2955,7 +3068,7 @@ paths:
           description: Optional arcade part filter. Omit to return all supported categories.
           schema:
             type: string
-            enum: [basic, game, hour, sns, gtk, photo]
+            enum: [basic, game, hour, sns, gtk, photo, memo]
       responses:
         '200':
           description: User-scoped immutable changelog page.

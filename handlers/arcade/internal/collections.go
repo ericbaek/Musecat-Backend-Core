@@ -19,6 +19,7 @@ const (
 	CollectionArcadeFlag               = "arcade_flag"
 	CollectionArcadeFlagReaction       = "arcade_flag_reaction"
 	CollectionArcadeNotice             = "arcade_notice"
+	CollectionArcadeMemo               = "arcade_memo"
 	CollectionArcadeTicket             = "arcade_ticket_request"
 	CollectionArcadeRequestAdmin       = "arcade_request_admin"
 	CollectionArcadeAnalyticsEvent     = "arcade_analytics_event"

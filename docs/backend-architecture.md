@@ -69,7 +69,8 @@ other arcade handlers own mutation flows for their respective parts.
 | `arcade_photo_atoms` | Uploaded photo atoms/files | upload and photo update flows |
 | `arcade_flag` | Flag records for arcade issues | flag create/delete/read paths |
 | `arcade_flag_reaction` | Flag reaction records | reaction update flow |
-| `arcade_notice` | Public notices attached to arcades | notice read/write flows |
+| `arcade_notice` | Public notices attached to arcades; `document` stores canonical Tiptap JSON | notice read/write flows |
+| `arcade_memo` | Immutable Tiptap JSON memo revisions attached to arcades | memo read/write, rollback, changelog diff |
 | `arcade_request_admin` | Admin request queue for arcades | admin request creation and review |
 | `arcade_changelog` | Audit trail for arcade mutations. See [`arcade-changelog.md`](arcade-changelog.md). | supporter score, audit views, changelog UI |
 

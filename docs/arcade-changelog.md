@@ -44,17 +44,18 @@ Each row uses these common columns:
 | `PUT /arcade/game` | `game` | one row per request | `game_diff` | Validates `base_state_id`, creates an immutable history batch, then moves `arcade.game_v2` to it. Item IDs are persistent `arcade_game_id` IDs. |
 | `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Developer/moderator-only administrative version swap. It uses the normal immutable game-state batch flow. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
-| `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, or `photo`. |
+| `PUT /arcade/memo` | `memo` | one row per changed request | `memo_diff` | Creates an immutable Tiptap JSON revision, moves `arcade.memo`, and requires an authenticated level 10+ user. |
+| `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, `photo`, or `memo`; memo rollback requires level 10+. |
 
 The read-only arcade timeline accepts the optional
-`changed=basic|game|hour|sns|gtk|photo` filter. The user timeline is available
+`changed=basic|game|hour|sns|gtk|photo|memo` filter. The user timeline is available
 through `GET /user/changelog?user=...` and accepts the same optional filter. It
 uses the same immutable rows, but scopes them by `arcade_changelog.by` and
 adds `arcade_name` for profile timelines. Anonymous callers see only rows whose
 arcade is public; the authenticated owner may also see their private arcade
 rows, and `developer`/`moderator` reviewers may audit all rows. The optional
 `changed` filter accepts exactly `basic`, `game`, `hour`, `sns`, `gtk`, or
-`photo`. These are the complete current changelog categories in the Core
+`photo`, or `memo`. These are the complete current changelog categories in the Core
 bootstrap schema and mutation handlers; activity-only values such as `flag`,
 `flag_reaction`, `visit`, and `legacy` are not `arcade_changelog.changed`
 values and are intentionally excluded. Rows whose arcade aggregate was deleted
@@ -83,7 +84,17 @@ The meaning of `type` changes per endpoint:
 - `gtk_diff`
 - `game_diff`
 - `photo_diff`
+- `memo_diff`
 - `<part>_diff` for rollback rows
+
+### `memo_diff`
+
+Memo rows identify the previous and next immutable `arcade_memo` revision in
+`from` and `to`. The API additionally exposes `memo.before` and `memo.after`
+document snapshots so clients can render a Tiptap before/after comparison.
+An empty document is still a real revision and is never represented as a
+delete. A rollback points `arcade.memo` directly at the selected prior
+revision and writes another `memo_diff` row, preserving every earlier row.
 
 ### `PUT /arcade/basic`
 
@@ -224,7 +235,7 @@ Rollback logs use the same pattern as the target part, but the `items[]` payload
 - `bullets[]`: rollback-specific translation bullets
 - `diff[]`: single field-level before/after entry
 
-The `field` inside the diff is the rolled-back part, such as `basic`, `hour`, `sns`, `gtk`, `game`, or `photo`.
+The `field` inside the diff is the rolled-back part, such as `basic`, `hour`, `sns`, `gtk`, `game`, `photo`, or `memo`.
 
 ## Non-Changelog Endpoints
 
@@ -249,7 +260,8 @@ If you are trying to understand one changelog row, read it in this order:
 
 ## How To Read The Log
 
-- `basic`, `hour`, `sns`, `gtk`, `game`, and `photo` represent the editable arcade parts.
+- `basic`, `hour`, `sns`, `gtk`, `game`, `photo`, and `memo` represent the editable arcade parts.
+- Memo diffs expose document snapshots under `memo.before` and `memo.after`; an empty document is a valid revision.
 - `game_diff` items are entry-level before/after snapshots inside the current game state.
 - Administrative bulk version swaps use the same `game_diff` log as ordinary game edits.
 - `rollback` logs use the same `<part>_diff` naming pattern as the part that was rolled back.

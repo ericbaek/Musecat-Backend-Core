@@ -110,7 +110,7 @@ func TestGetUserChangelog_RejectsUnknownCategory(t *testing.T) {
 		URL:            "/user/changelog?user=test&changed=flag",
 		ExpectedStatus: http.StatusBadRequest,
 		ExpectedContent: []string{
-			`"error":"changed must be one of basic,game,hour,sns,gtk,photo"`,
+			`"error":"changed must be one of basic,game,hour,sns,gtk,photo,memo"`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp { return newUserFetchTestApp(tb) },
 	}

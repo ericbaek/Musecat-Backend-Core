@@ -24,6 +24,7 @@ import (
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
 	arcadegtk "github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
 	arcadehour "github.com/ericbaek/musecat-backend-core/handlers/arcade/hour"
+	arcadememo "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo"
 	arcadenotice "github.com/ericbaek/musecat-backend-core/handlers/arcade/notice"
 	arcadephoto "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo"
 	arcadepublic "github.com/ericbaek/musecat-backend-core/handlers/arcade/public"
@@ -138,6 +139,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
 		se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
 		se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
+		se.Router.GET("/arcade/memo", arcadememo.GetArcadeMemo)
 		se.Router.GET("/user/changelog", user.GetUserChangelog)
 		se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
 		se.Router.GET("/arcades", arcadequery.ListArcades)
@@ -186,6 +188,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		group.PUT("/hour", arcadehour.UpdateArcadeHour)
 		group.PUT("/public", arcadepublic.RequestPublicArcade)
 		group.PUT("/photo", arcadephoto.UpdateArcadePhoto)
+		group.PUT("/memo", arcadememo.UpdateArcadeMemo)
 		group.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)
 		group.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
 		group.POST("/photo/upload", arcadephoto.UploadArcadePhotos)

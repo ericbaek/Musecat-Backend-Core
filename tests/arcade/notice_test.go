@@ -27,7 +27,7 @@ func createNoticeBody(arcadeID string) []byte {
 	payload := map[string]any{
 		"arcade":   arcadeID,
 		"type":     "alert",
-		"message":  "**notice**",
+		"document": noticeDocument("**notice**"),
 		"link":     "https://example.com/notice",
 		"until":    time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC),
 		"priority": 2,
@@ -35,6 +35,70 @@ func createNoticeBody(arcadeID string) []byte {
 
 	body, _ := json.Marshal(payload)
 	return body
+}
+
+func noticeDocument(text string) map[string]any {
+	return map[string]any{
+		"type": "doc",
+		"content": []any{map[string]any{
+			"type": "paragraph",
+			"content": []any{map[string]any{
+				"type": "text",
+				"text": text,
+			}},
+		}},
+	}
+}
+
+func noticeDocumentText(value any) string {
+	if raw, ok := value.(string); ok {
+		var parsed any
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			return ""
+		}
+		return noticeDocumentText(parsed)
+	}
+	if raw, ok := value.(json.RawMessage); ok {
+		var parsed any
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return ""
+		}
+		return noticeDocumentText(parsed)
+	}
+	if raw, ok := value.(types.JSONRaw); ok {
+		var parsed any
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return ""
+		}
+		return noticeDocumentText(parsed)
+	}
+	document, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	content, ok := document["content"].([]any)
+	if !ok || len(content) == 0 {
+		return ""
+	}
+	paragraph, ok := content[0].(map[string]any)
+	if !ok {
+		return ""
+	}
+	paragraphContent, ok := paragraph["content"].([]any)
+	if !ok || len(paragraphContent) == 0 {
+		return ""
+	}
+	textNode, ok := paragraphContent[0].(map[string]any)
+	if !ok {
+		return ""
+	}
+	text, _ := textNode["text"].(string)
+	return text
+}
+
+func noticeDocumentJSON(text string) string {
+	body, _ := json.Marshal(noticeDocument(text))
+	return string(body)
 }
 
 func decodeJSONMap(tb testing.TB, res *http.Response) map[string]any {
@@ -77,7 +141,7 @@ func TestArcadeNotice_OwnerCanCreateUpdateDelete(t *testing.T) {
 
 	updateBody, _ := json.Marshal(map[string]any{
 		"id":       noticeID,
-		"message":  "**updated**",
+		"document": noticeDocument("**updated**"),
 		"priority": 5,
 	})
 	updateResp := executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), headers)
@@ -126,7 +190,7 @@ func TestArcadeNotice_SupporterCreateAndAuthorOnlyMutation(t *testing.T) {
 
 	otherToken, _ := createAuthUserWithTags(t, app, []string{"supporter"})
 	otherHeaders := map[string]string{"Authorization": "Bearer " + otherToken}
-	updateBody, _ := json.Marshal(map[string]any{"id": noticeID, "message": "**blocked**"})
+	updateBody, _ := json.Marshal(map[string]any{"id": noticeID, "document": noticeDocument("**blocked**")})
 	if res := executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), otherHeaders); res.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected other supporter update to be forbidden, got %d", res.StatusCode)
 	} else {
@@ -186,7 +250,7 @@ func TestArcadeNotice_ModeratorCanMutateAnotherAuthorNotice(t *testing.T) {
 
 	moderatorToken, _ := createAuthUserWithTags(t, app, []string{"moderator"})
 	moderatorHeaders := map[string]string{"Authorization": "Bearer " + moderatorToken}
-	updateBody, _ := json.Marshal(map[string]any{"id": noticeID, "message": "**moderated**"})
+	updateBody, _ := json.Marshal(map[string]any{"id": noticeID, "document": noticeDocument("**moderated**")})
 	if res := executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), moderatorHeaders); res.StatusCode != http.StatusOK {
 		t.Fatalf("expected moderator update to succeed, got %d", res.StatusCode)
 	} else {
@@ -224,8 +288,8 @@ func TestArcadeNotice_ArcadeOwnerRequiresOwnership(t *testing.T) {
 	seededNoticeID := seedNotice(t, app, arcadeID)
 
 	updateBody, _ := json.Marshal(map[string]any{
-		"id":      seededNoticeID,
-		"message": "**blocked**",
+		"id":       seededNoticeID,
+		"document": noticeDocument("**blocked**"),
 	})
 	updateResp := executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), headers)
 	if updateResp.StatusCode != http.StatusForbidden {
@@ -313,8 +377,8 @@ func TestArcadeNotice_ListFiltersAndSorts(t *testing.T) {
 	if got, ok := first["priority"].(float64); !ok || got != 1 {
 		t.Fatalf("expected first priority 1, got %v", got)
 	}
-	if first["message"] != "**mid**" {
-		t.Fatalf("expected priority 1 notice first, got %v", first["message"])
+	if noticeDocumentText(first["document"]) != "**mid**" {
+		t.Fatalf("expected priority 1 notice first, got %v", first["document"])
 	}
 	if got, ok := second["priority"].(float64); !ok || got != 2 {
 		t.Fatalf("expected second priority 2, got %v", got)
@@ -325,14 +389,14 @@ func TestArcadeNotice_ListFiltersAndSorts(t *testing.T) {
 	if got, ok := fourth["priority"].(float64); !ok || got != 0 {
 		t.Fatalf("expected fourth priority 0, got %v", got)
 	}
-	if second["message"] != "*newer high*" {
-		t.Fatalf("expected newer same-priority notice second, got %v", second["message"])
+	if noticeDocumentText(second["document"]) != "*newer high*" {
+		t.Fatalf("expected newer same-priority notice second, got %v", second["document"])
 	}
-	if third["message"] != "*older high*" {
-		t.Fatalf("expected older same-priority notice third, got %v", third["message"])
+	if noticeDocumentText(third["document"]) != "*older high*" {
+		t.Fatalf("expected older same-priority notice third, got %v", third["document"])
 	}
-	if fourth["message"] != "**zero**" {
-		t.Fatalf("expected priority 0 notice last, got %v", fourth["message"])
+	if noticeDocumentText(fourth["document"]) != "**zero**" {
+		t.Fatalf("expected priority 0 notice last, got %v", fourth["document"])
 	}
 }
 
@@ -374,7 +438,7 @@ func TestArcadeNotice_ListExpiresPastNotices(t *testing.T) {
 	}
 }
 
-func TestArcadeNotice_MultipartMarkdownRoundTripsAndStoresPhotos(t *testing.T) {
+func TestArcadeNotice_MultipartDocumentRoundTripsAndStoresPhotos(t *testing.T) {
 	app := newArcadeTestApp(t)
 	arcadeID, _ := seedArcade(t, app, "", arcadeSeed{
 		Name:     "Multipart Arcade",
@@ -385,7 +449,8 @@ func TestArcadeNotice_MultipartMarkdownRoundTripsAndStoresPhotos(t *testing.T) {
 	token, _ := createAuthUserWithTags(t, app, []string{"moderator"})
 	headers := map[string]string{"Authorization": "Bearer " + token}
 
-	body, contentType := buildNoticeMultipart(t, arcadeID, "first line\n**second line**", []uploadTestFile{
+	documentText := "first line\n**second line**"
+	body, contentType := buildNoticeMultipart(t, arcadeID, documentText, []uploadTestFile{
 		{Filename: "notice-a.png", Content: pngFixtureBytes()},
 		{Filename: "notice-b.jpg", Content: jpegFixtureBytes()},
 	})
@@ -402,8 +467,8 @@ func TestArcadeNotice_MultipartMarkdownRoundTripsAndStoresPhotos(t *testing.T) {
 		t.Fatalf("expected notice id in response")
 	}
 
-	if got := payload["message"]; got != "first line\n**second line**" {
-		t.Fatalf("expected markdown message to round-trip unchanged, got %v", got)
+	if got := noticeDocumentText(payload["document"]); got != documentText {
+		t.Fatalf("expected document to round-trip unchanged, got %v", payload["document"])
 	}
 	photos, ok := payload["photos"].([]any)
 	if !ok || len(photos) != 2 {
@@ -414,8 +479,11 @@ func TestArcadeNotice_MultipartMarkdownRoundTripsAndStoresPhotos(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to load arcade_notice: %v", err)
 	}
-	if got := rec.GetString("message"); got != "first line\n**second line**" {
-		t.Fatalf("expected stored markdown message, got %q", got)
+	if rec.Collection().Fields.GetByName("message") != nil {
+		t.Fatal("expected arcade_notice.message to be removed by migration")
+	}
+	if got := noticeDocumentText(rec.Get("document")); got != documentText {
+		t.Fatalf("expected stored document, got %q (%T %#v)", got, rec.Get("document"), rec.Get("document"))
 	}
 	if got := rec.GetStringSlice("photos"); len(got) != 2 {
 		t.Fatalf("expected 2 stored photos, got %#v", got)
@@ -433,7 +501,7 @@ func seedNotice(tb testing.TB, app *tests.TestApp, arcadeID string) string {
 	rec := core.NewRecord(coll)
 	rec.Set("arcade", arcadeID)
 	rec.Set("type", "alert")
-	rec.Set("message", "**seeded**")
+	rec.Set("document", noticeDocument("**seeded**"))
 	rec.Set("priority", 1)
 	if err := app.Save(rec); err != nil {
 		tb.Fatalf("failed to save arcade_notice: %v", err)
@@ -453,7 +521,7 @@ func seedNoticeWithPriority(tb testing.TB, app *tests.TestApp, arcadeID string, 
 	rec := core.NewRecord(coll)
 	rec.Set("arcade", arcadeID)
 	rec.Set("type", "alert")
-	rec.Set("message", message)
+	rec.Set("document", noticeDocument(message))
 	rec.Set("priority", priority)
 	if err := app.Save(rec); err != nil {
 		tb.Fatalf("failed to save arcade_notice: %v", err)
@@ -479,8 +547,8 @@ func buildNoticeMultipart(tb testing.TB, arcadeID, message string, files []uploa
 	if err := writer.WriteField("arcade", arcadeID); err != nil {
 		tb.Fatalf("failed to write arcade field: %v", err)
 	}
-	if err := writer.WriteField("message", message); err != nil {
-		tb.Fatalf("failed to write message field: %v", err)
+	if err := writer.WriteField("document", noticeDocumentJSON(message)); err != nil {
+		tb.Fatalf("failed to write document field: %v", err)
 	}
 	if err := writer.WriteField("type", "alert"); err != nil {
 		tb.Fatalf("failed to write type field: %v", err)

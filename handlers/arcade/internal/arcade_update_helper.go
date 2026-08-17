@@ -16,6 +16,7 @@ var arcadeChangelogTracked = map[string]struct{}{
 	// aggregate section and changelog category.
 	"game_v2": {},
 	"photo":   {},
+	"memo":    {},
 }
 
 // writeArcadeChangelog creates a single changelog row.

@@ -23,6 +23,7 @@ var arcadeDomainCollections = []string{
 	"arcade_gtk_atoms",
 	"arcade_hour",
 	"arcade_notice",
+	"arcade_memo",
 	"arcade_photo",
 	"arcade_photo_atoms",
 	"arcade_request_admin",

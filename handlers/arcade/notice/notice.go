@@ -27,13 +27,13 @@ var noticeAccessTags = map[string]struct{}{
 }
 
 type NoticeBody struct {
-	ID       string     `json:"id,omitempty"`
-	Arcade   string     `json:"arcade,omitempty"`
-	Type     *string    `json:"type,omitempty"`
-	Message  *string    `json:"message,omitempty"`
-	Link     *string    `json:"link,omitempty"`
-	Until    *time.Time `json:"until,omitempty"`
-	Priority *float64   `json:"priority,omitempty"`
+	ID       string          `json:"id,omitempty"`
+	Arcade   string          `json:"arcade,omitempty"`
+	Type     *string         `json:"type,omitempty"`
+	Document json.RawMessage `json:"document,omitempty"`
+	Link     *string         `json:"link,omitempty"`
+	Until    *time.Time      `json:"until,omitempty"`
+	Priority *float64        `json:"priority,omitempty"`
 	Photos   []*filesystem.File
 }
 
@@ -51,8 +51,8 @@ func parseNoticeBody(re *core.RequestEvent) (NoticeBody, error) {
 		if v := strings.TrimSpace(re.Request.FormValue("type")); v != "" {
 			body.Type = &v
 		}
-		if v := re.Request.FormValue("message"); v != "" {
-			body.Message = &v
+		if v := re.Request.FormValue("document"); v != "" {
+			body.Document = json.RawMessage(v)
 		}
 		if v := strings.TrimSpace(re.Request.FormValue("link")); v != "" {
 			body.Link = &v
@@ -246,7 +246,7 @@ func noticePayload(rec *core.Record) map[string]any {
 		"arcade":    strings.TrimSpace(rec.GetString("arcade")),
 		"createdBy": rec.GetString("createdBy"),
 		"type":      strings.TrimSpace(rec.GetString("type")),
-		"message":   rec.GetString("message"),
+		"document":  rec.Get("document"),
 		"link":      strings.TrimSpace(rec.GetString("link")),
 		"until":     rec.Get("until"),
 		"priority":  rec.Get("priority"),
@@ -419,12 +419,16 @@ func ListArcadeNotice(re *core.RequestEvent) error {
 	})
 }
 
-func applyNoticeFields(rec *core.Record, body NoticeBody) {
+func applyNoticeFields(rec *core.Record, body NoticeBody) error {
 	if body.Type != nil {
 		rec.Set("type", strings.TrimSpace(*body.Type))
 	}
-	if body.Message != nil {
-		rec.Set("message", *body.Message)
+	if len(body.Document) > 0 {
+		document, err := normalizeNoticeDocument(body.Document)
+		if err != nil {
+			return err
+		}
+		rec.Set("document", document)
 	}
 	if body.Link != nil {
 		rec.Set("link", strings.TrimSpace(*body.Link))
@@ -438,6 +442,7 @@ func applyNoticeFields(rec *core.Record, body NoticeBody) {
 	if body.Photos != nil {
 		rec.Set("photos", body.Photos)
 	}
+	return nil
 }
 
 func CreateArcadeNotice(re *core.RequestEvent) error {
@@ -447,6 +452,9 @@ func CreateArcadeNotice(re *core.RequestEvent) error {
 			"error":   "invalid JSON body",
 			"details": err.Error(),
 		})
+	}
+	if len(body.Document) == 0 {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "document is required"})
 	}
 
 	if body.Arcade == "" {
@@ -479,7 +487,9 @@ func CreateArcadeNotice(re *core.RequestEvent) error {
 	rec.Set("arcade", arcadeRec.Id)
 	rec.Set("createdBy", re.Auth.Id)
 	rec.Set("delete", false)
-	applyNoticeFields(rec, body)
+	if err := applyNoticeFields(rec, body); err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
+	}
 
 	if err := re.App.Save(rec); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
@@ -518,7 +528,9 @@ func UpdateArcadeNotice(re *core.RequestEvent) error {
 		return err
 	}
 
-	applyNoticeFields(rec, body)
+	if err := applyNoticeFields(rec, body); err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
+	}
 
 	if err := re.App.Save(rec); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{

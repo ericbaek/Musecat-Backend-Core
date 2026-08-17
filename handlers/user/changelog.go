@@ -9,11 +9,13 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+
+	memoDiff "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo/diff"
 )
 
 const (
 	maxUserChangelogPageSize = 100
-	userChangelogCategories  = "basic,game,hour,sns,gtk,photo"
+	userChangelogCategories  = "basic,game,hour,sns,gtk,photo,memo"
 )
 
 var userChangelogCategorySet = map[string]struct{}{
@@ -23,6 +25,7 @@ var userChangelogCategorySet = map[string]struct{}{
 	"sns":   {},
 	"gtk":   {},
 	"photo": {},
+	"memo":  {},
 }
 
 // GetUserChangelog handles GET /user/changelog?user=<userId>.
@@ -106,7 +109,7 @@ LIMIT {:limit} OFFSET {:offset}
 				"details": err.Error(),
 			})
 		}
-		items = append(items, map[string]any{
+		item := map[string]any{
 			"id":          userChangelogString(raw, "id"),
 			"arcade":      userChangelogString(raw, "arcade"),
 			"arcade_name": userChangelogString(raw, "arcade_name"),
@@ -117,7 +120,11 @@ LIMIT {:limit} OFFSET {:offset}
 			"created":     userChangelogString(raw, "created"),
 			"updated":     nil,
 			"log":         decodeUserChangelogJSON(userChangelogString(raw, "log")),
-		})
+		}
+		if item["changed"] == "memo" {
+			item["memo"] = memoDiff.Build(re.App, userChangelogString(raw, "from"), userChangelogString(raw, "to"))
+		}
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
