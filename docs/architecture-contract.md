@@ -69,7 +69,16 @@ distance is the straight-line sum between consecutive current arcade
 locations; a visit whose location is unavailable breaks the sequence rather
 than joining the surrounding visits.
 
-`GET /rankings` always returns the public top 100. A valid user token may add
+`GET /rankings` always returns the public top 100. User metrics include explorer,
+visits, XP, level, and photographer. The `arcade_visits` metric returns public
+arcades ranked by the total XP awarded by their completed visit-verification
+records; the response displays the verification count separately. Public
+closed arcades remain eligible as historical venues, while private arcades are excluded. For
+explorer entries, `score` is the number of distinct public arcades and
+`stats.travel_distance_km` is the rounded whole-kilometer straight-line distance
+between consecutive period-visible arcade locations. A missing location breaks
+the distance sequence.
+A valid user token may add
 only that user's own `viewer` entry, calculated with the same score, tie, and
 visibility predicates as the public list; otherwise `viewer` is `null`. In
 particular, `private` visit visibility excludes explorer and visit rankings,

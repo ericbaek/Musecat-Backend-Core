@@ -213,17 +213,43 @@ components:
           type: array
           items: {type: string}
     RankingEntry:
+      oneOf:
+        - type: object
+          required: [rank, score, profile]
+          properties:
+            rank: {type: integer}
+            score: {type: integer, format: int64}
+            profile: {$ref: '#/components/schemas/RankingProfile'}
+            stats: {$ref: '#/components/schemas/RankingStats'}
+        - type: object
+          required: [rank, score, arcade]
+          properties:
+            rank: {type: integer}
+            score: {type: integer, format: int64}
+            arcade: {$ref: '#/components/schemas/RankingArcade'}
+            stats: {$ref: '#/components/schemas/RankingArcadeStats'}
+    RankingStats:
       type: object
-      required: [rank, score, profile]
+      required: [travel_distance_km]
       properties:
-        rank: {type: integer}
-        score: {type: integer, format: int64}
-        profile: {$ref: '#/components/schemas/RankingProfile'}
+        travel_distance_km: {type: integer, format: int64}
+    RankingArcade:
+      type: object
+      required: [id, name, country]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        country: {type: string}
+    RankingArcadeStats:
+      type: object
+      required: [visit_count]
+      properties:
+        visit_count: {type: integer, format: int64}
     RankingResponse:
       type: object
       required: [metric, period, entries, viewer]
       properties:
-        metric: {type: string, enum: [explorer, visits, xp, level, photographer]}
+        metric: {type: string, enum: [explorer, visits, xp, level, photographer, arcade_visits]}
         period: {type: string, enum: [week, month, half_year, year, all]}
         entries:
           type: array
@@ -3405,7 +3431,7 @@ paths:
         - name: metric
           in: query
           required: true
-          schema: {type: string, enum: [explorer, visits, xp, level, photographer]}
+          schema: {type: string, enum: [explorer, visits, xp, level, photographer, arcade_visits]}
         - name: period
           in: query
           required: true
@@ -3417,7 +3443,7 @@ paths:
           schema: {type: string}
       responses:
         '200':
-          description: Public user rankings. Level rankings accept only the all period.
+          description: Public user and arcade rankings. Level rankings accept only the all period. The arcade_visits metric displays completed visit-verification counts and ranks public arcades by the total XP awarded by those verifications; public closed arcades remain eligible as historical venues.
           content:
             application/json:
               schema:

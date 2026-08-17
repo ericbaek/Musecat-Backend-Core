@@ -1,9 +1,12 @@
 package ranking
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +26,7 @@ const (
 	metricXP           metric = "xp"
 	metricLevel        metric = "level"
 	metricPhotographer metric = "photographer"
+	metricArcadeVisits metric = "arcade_visits"
 )
 
 type period string
@@ -44,13 +48,29 @@ type profile struct {
 	Tags     []string `json:"tags"`
 }
 
-type entry struct {
-	Rank    int     `json:"rank"`
-	Score   int64   `json:"score"`
-	Profile profile `json:"profile"`
+type rankingStats struct {
+	TravelDistanceKm int64 `json:"travel_distance_km"`
 }
 
-// List handles GET /rankings?metric=<explorer|visits|xp|level|photographer>&period=<week|month|half_year|year|all>.
+type arcadeRankingStats struct {
+	VisitCount int64 `json:"visit_count"`
+}
+
+type arcadeSummary struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Country string `json:"country"`
+}
+
+type entry struct {
+	Rank    int            `json:"rank"`
+	Score   int64          `json:"score"`
+	Profile *profile       `json:"profile,omitempty"`
+	Stats   any            `json:"stats,omitempty"`
+	Arcade  *arcadeSummary `json:"arcade,omitempty"`
+}
+
+// List handles GET /rankings?metric=<explorer|visits|xp|level|photographer|arcade_visits>&period=<week|month|half_year|year|all>.
 func List(re *core.RequestEvent) error {
 	m, err := parseMetric(re.Request.URL.Query().Get("metric"))
 	if err != nil {
@@ -84,6 +104,8 @@ func parseMetric(raw string) (metric, error) {
 	switch metric(strings.TrimSpace(raw)) {
 	case metricExplorer, metricVisits, metricXP, metricLevel, metricPhotographer:
 		return metric(strings.TrimSpace(raw)), nil
+	case metricArcadeVisits:
+		return metricArcadeVisits, nil
 	default:
 		return "", fmt.Errorf("invalid ranking metric")
 	}
@@ -116,6 +138,10 @@ func rangeStart(p period, now time.Time) string {
 }
 
 func load(app core.App, m metric, p period, now time.Time, viewerID string) ([]entry, *entry, error) {
+	if m == metricArcadeVisits {
+		return loadArcadeRankings(app, p, now)
+	}
+
 	query, params := metricQuery(app, m, rangeStart(p, now))
 	rows, err := app.DB().NewQuery(query + `
 ORDER BY score DESC, nickname COLLATE NOCASE ASC, id ASC
@@ -128,7 +154,7 @@ LIMIT {:limit}
 
 	entries := make([]entry, 0)
 	for rows.Next() {
-		item, err := scanEntry(rows, m)
+		item, err := scanUserEntry(rows, m)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -138,6 +164,11 @@ LIMIT {:limit}
 		return nil, nil, err
 	}
 	if viewerID == "" {
+		if m == metricExplorer {
+			if err := attachExplorerDistances(app, entries, nil, rangeStart(p, now)); err != nil {
+				return nil, nil, err
+			}
+		}
 		return entries, nil, nil
 	}
 
@@ -153,17 +184,23 @@ LIMIT 1
 	if !viewerRows.Next() {
 		return entries, nil, viewerRows.Err()
 	}
-	viewer, err := scanEntry(viewerRows, m)
+	viewer, err := scanUserEntry(viewerRows, m)
 	if err != nil {
 		return nil, nil, err
+	}
+	if m == metricExplorer {
+		if err := attachExplorerDistances(app, entries, &viewer, rangeStart(p, now)); err != nil {
+			return nil, nil, err
+		}
 	}
 	return entries, &viewer, viewerRows.Err()
 }
 
-func scanEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, error) {
+func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, error) {
 	var item entry
 	var exp int
 	var tags string
+	item.Profile = &profile{}
 	if err := rows.Scan(&item.Score, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &exp, &tags, &item.Rank); err != nil {
 		return entry{}, err
 	}
@@ -172,7 +209,62 @@ func scanEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, erro
 	if m == metricLevel {
 		item.Score = int64(item.Profile.Level)
 	}
+	if m == metricExplorer {
+		item.Stats = &rankingStats{}
+	}
 	return item, nil
+}
+
+func loadArcadeRankings(app core.App, p period, now time.Time) ([]entry, *entry, error) {
+	start := rangeStart(p, now)
+	params := dbx.Params{"limit": leaderboardLimit}
+	filter := ""
+	if start != "" {
+		params["start"] = start
+		filter = " AND v.visited_at >= {:start}"
+	}
+	rows, err := app.DB().NewQuery(`
+WITH scores AS (
+SELECT v.arcade, SUM(COALESCE(v.gained_exp, 0)) AS score, COUNT(*) AS visit_count
+FROM arcade_visit v
+INNER JOIN arcade a ON a.id = v.arcade
+WHERE a.public = true` + filter + `
+GROUP BY v.arcade
+HAVING SUM(COALESCE(v.gained_exp, 0)) > 0
+), ranked AS (
+SELECT
+  scores.score,
+  scores.visit_count,
+  a.id,
+  COALESCE(NULLIF(ab.name, ''), a.id) AS name,
+  COALESCE(a.country, '') AS country,
+  RANK() OVER (ORDER BY scores.score DESC) AS rank
+FROM scores
+INNER JOIN arcade a ON a.id = scores.arcade
+LEFT JOIN arcade_basic ab ON ab.id = a.basic
+)
+SELECT score, visit_count, id, name, country, rank
+FROM ranked
+ORDER BY score DESC, name COLLATE NOCASE ASC, id ASC
+LIMIT {:limit}
+`).Bind(params).Rows()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	entries := make([]entry, 0)
+	for rows.Next() {
+		var item entry
+		item.Arcade = &arcadeSummary{}
+		var visitCount int64
+		if err := rows.Scan(&item.Score, &visitCount, &item.Arcade.ID, &item.Arcade.Name, &item.Arcade.Country, &item.Rank); err != nil {
+			return nil, nil, err
+		}
+		item.Stats = &arcadeRankingStats{VisitCount: visitCount}
+		entries = append(entries, item)
+	}
+	return entries, nil, rows.Err()
 }
 
 func parseTags(raw string) []string {
@@ -196,9 +288,9 @@ func metricQuery(app core.App, m metric, start string) (string, dbx.Params) {
 	var source string
 	switch m {
 	case metricExplorer:
-		source = `SELECT user, COUNT(DISTINCT arcade) AS score FROM arcade_visit WHERE 1=1` + filterFor("visited_at") + ` GROUP BY user`
+		source = `SELECT v.user, COUNT(DISTINCT v.arcade) AS score FROM arcade_visit v INNER JOIN arcade a ON a.id = v.arcade AND a.public = true WHERE 1=1` + filterFor("v.visited_at") + ` GROUP BY v.user`
 	case metricVisits:
-		source = `SELECT user, COUNT(*) AS score FROM arcade_visit WHERE 1=1` + filterFor("visited_at") + ` GROUP BY user`
+		source = `SELECT v.user, COUNT(*) AS score FROM arcade_visit v INNER JOIN arcade a ON a.id = v.arcade AND a.public = true WHERE 1=1` + filterFor("v.visited_at") + ` GROUP BY v.user`
 	case metricXP:
 		source = `SELECT user, SUM(diff_exp) AS score FROM user_level_log WHERE 1=1` + filterFor("created") + ` GROUP BY user HAVING SUM(diff_exp) > 0`
 	case metricLevel:
@@ -238,4 +330,142 @@ WHERE COALESCE(u.withdrawn, 0) = 0
 SELECT score, id, nickname, username, avatar, exp, tags, rank
 FROM ranked
 `, source, userTags, visitVisibility), params
+}
+
+func attachExplorerDistances(app core.App, entries []entry, viewer *entry, start string) error {
+	ids := make([]string, 0, len(entries)+1)
+	seen := make(map[string]struct{}, len(entries)+1)
+	add := func(item *entry) {
+		if item == nil || item.Profile == nil {
+			return
+		}
+		if _, ok := seen[item.Profile.ID]; ok {
+			return
+		}
+		seen[item.Profile.ID] = struct{}{}
+		ids = append(ids, item.Profile.ID)
+	}
+	for index := range entries {
+		add(&entries[index])
+	}
+	add(viewer)
+	if len(ids) == 0 {
+		return nil
+	}
+
+	params := dbx.Params{}
+	placeholders := make([]string, 0, len(ids))
+	for index, id := range ids {
+		key := fmt.Sprintf("user%d", index)
+		params[key] = id
+		placeholders = append(placeholders, "{:"+key+"}")
+	}
+	filter := ""
+	if start != "" {
+		params["start"] = start
+		filter = " AND v.visited_at >= {:start}"
+	}
+	rows, err := app.DB().NewQuery(`
+SELECT v.user, v.visited_at, ab.location
+FROM arcade_visit v
+INNER JOIN arcade a ON a.id = v.arcade AND a.public = true
+LEFT JOIN arcade_basic ab ON ab.id = a.basic
+INNER JOIN user_info ui ON ui.id = v.user
+WHERE v.user IN (` + strings.Join(placeholders, ", ") + `)
+  AND COALESCE(NULLIF(ui.visit_visibility, ''), 'summary') IN ('summary', 'full')` + filter + `
+ORDER BY v.user ASC, v.visited_at ASC, v.id ASC
+`).Bind(params).Rows()
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	distances := make(map[string]float64, len(ids))
+	var currentUser string
+	var previousLat, previousLon float64
+	var previousValid bool
+	for rows.Next() {
+		var userID, visitedAt string
+		var location sql.NullString
+		if err := rows.Scan(&userID, &visitedAt, &location); err != nil {
+			return err
+		}
+		if userID != currentUser {
+			currentUser = userID
+			previousValid = false
+		}
+		lat, lon, ok := rankingLocation(location)
+		if !ok {
+			previousValid = false
+			continue
+		}
+		if previousValid {
+			distances[userID] += rankingDistanceKm(previousLat, previousLon, lat, lon) * 1000
+		}
+		previousLat, previousLon, previousValid = lat, lon, true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for index := range entries {
+		if entries[index].Profile != nil {
+			if stats, ok := entries[index].Stats.(*rankingStats); ok {
+				stats.TravelDistanceKm = int64(math.Round(distances[entries[index].Profile.ID] / 1000))
+			}
+		}
+	}
+	if viewer != nil && viewer.Profile != nil {
+		if stats, ok := viewer.Stats.(*rankingStats); ok {
+			stats.TravelDistanceKm = int64(math.Round(distances[viewer.Profile.ID] / 1000))
+		}
+	}
+	return nil
+}
+
+func rankingLocation(raw sql.NullString) (float64, float64, bool) {
+	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return 0, 0, false
+	}
+	var value any
+	if json.Unmarshal([]byte(raw.String), &value) != nil {
+		return 0, 0, false
+	}
+	location, ok := value.(map[string]any)
+	if !ok {
+		return 0, 0, false
+	}
+	lat, latOK := rankingFloat(location["lat"])
+	lon, lonOK := rankingFloat(location["lon"])
+	if !latOK || !lonOK {
+		lat, latOK = rankingFloat(location["latitude"])
+		lon, lonOK = rankingFloat(location["longitude"])
+	}
+	return lat, lon, latOK && lonOK
+}
+
+func rankingFloat(value any) (float64, bool) {
+	switch number := value.(type) {
+	case float64:
+		return number, true
+	case json.Number:
+		parsed, err := number.Float64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseFloat(number, 64)
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func rankingDistanceKm(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusKm = 6371.0
+	toRadians := func(value float64) float64 { return value * math.Pi / 180 }
+	dLat := toRadians(lat2 - lat1)
+	dLon := toRadians(lon2 - lon1)
+	lat1Radians := toRadians(lat1)
+	lat2Radians := toRadians(lat2)
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1Radians)*math.Cos(lat2Radians)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	return earthRadiusKm * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }

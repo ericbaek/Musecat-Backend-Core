@@ -25,8 +25,8 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	}
 	setVisitVisibility(t, app, privateVisitor.Id, "private")
 
-	arcadeOne, _ := seedArcade(t, app, explorer.Id, arcadeSeed{Name: "Ranking One", Address: "1 Rank St", Location: location{Lat: 37.5665, Lon: 126.978}})
-	arcadeTwo, _ := seedArcade(t, app, explorer.Id, arcadeSeed{Name: "Ranking Two", Address: "2 Rank St", Location: location{Lat: 37.5666, Lon: 126.9781}})
+	arcadeOne, _ := seedPublicArcade(t, app, explorer.Id, arcadeSeed{Name: "Ranking One", Address: "1 Rank St", Location: location{Lat: 37.5665, Lon: 126.978}})
+	arcadeTwo, _ := seedPublicArcade(t, app, explorer.Id, arcadeSeed{Name: "Ranking Two", Address: "2 Rank St", Location: location{Lat: 35.1796, Lon: 129.0756}})
 	now := time.Now().UTC()
 	seedArcadeVisit(t, app, explorer.Id, arcadeOne, now.Add(-time.Hour))
 	seedArcadeVisit(t, app, explorer.Id, arcadeTwo, now.Add(-2*time.Hour))
@@ -34,6 +34,12 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	seedArcadeVisit(t, app, privateVisitor.Id, arcadeOne, now.Add(-time.Hour))
 	seedArcadeVisit(t, app, privateVisitor.Id, arcadeTwo, now.Add(-2*time.Hour))
 	seedArcadeVisit(t, app, privateVisitor.Id, arcadeOne, now.Add(-48*time.Hour))
+	setArcadeVisitGainedExp(t, app, explorer.Id, arcadeOne, now.Add(-time.Hour), 1)
+	setArcadeVisitGainedExp(t, app, explorer.Id, arcadeTwo, now.Add(-2*time.Hour), 10)
+	setArcadeVisitGainedExp(t, app, explorer.Id, arcadeOne, now.Add(-48*time.Hour), 1)
+	setArcadeVisitGainedExp(t, app, privateVisitor.Id, arcadeOne, now.Add(-time.Hour), 1)
+	setArcadeVisitGainedExp(t, app, privateVisitor.Id, arcadeTwo, now.Add(-2*time.Hour), 10)
+	setArcadeVisitGainedExp(t, app, privateVisitor.Id, arcadeOne, now.Add(-48*time.Hour), 1)
 
 	seedSupporterLedgerEntry(t, app, explorer.Id, "xp:rank-positive", 0, 15, now.Add(-time.Hour))
 	seedSupporterLedgerEntry(t, app, explorer.Id, "xp:rank-reversal", 15, 10, now.Add(-30*time.Minute))
@@ -54,12 +60,92 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	assertRankingTop(t, app, "/rankings?metric=xp&period=week", explorer.Id, 10)
 	assertRankingTop(t, app, "/rankings?metric=level&period=all", photographer.Id, 16)
 	assertRankingTop(t, app, "/rankings?metric=photographer&period=week", photographer.Id, 1)
+	assertArcadeRankingTop(t, app, "/rankings?metric=arcade_visits&period=week", arcadeTwo, 20, 2)
+	assertExplorerDistance(t, app, "/rankings?metric=explorer&period=week", explorer.Id)
 
 	res := executeJSONRequest(t, app, http.MethodGet, "/rankings?metric=level&period=week", "", nil)
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected invalid level period to return 400, got %d", res.StatusCode)
 	}
+}
+
+func assertArcadeRankingTop(t *testing.T, app *tests.TestApp, url, arcadeID string, score int64, visitCount int64) {
+	t.Helper()
+	res := executeJSONRequest(t, app, http.MethodGet, url, "", nil)
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("%s: expected 200, got %d", url, res.StatusCode)
+	}
+	var payload struct {
+		Entries []struct {
+			Score int64 `json:"score"`
+			Stats struct {
+				VisitCount int64 `json:"visit_count"`
+			} `json:"stats"`
+			Arcade struct {
+				ID string `json:"id"`
+			} `json:"arcade"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("%s: decode response: %v", url, err)
+	}
+	if len(payload.Entries) == 0 || payload.Entries[0].Arcade.ID != arcadeID || payload.Entries[0].Score != score || payload.Entries[0].Stats.VisitCount != visitCount {
+		t.Fatalf("%s: unexpected top entry: %#v", url, payload.Entries)
+	}
+}
+
+func setArcadeVisitGainedExp(t *testing.T, app *tests.TestApp, userID, arcadeID string, ts time.Time, exp int64) {
+	t.Helper()
+	result, err := app.NonconcurrentDB().NewQuery(`
+UPDATE arcade_visit
+SET gained_exp={:exp}
+WHERE user={:user} AND arcade={:arcade} AND visit_day={:visit_day}
+`).Bind(dbx.Params{
+		"exp":       exp,
+		"user":      userID,
+		"arcade":    arcadeID,
+		"visit_day": ts.Format("2006-01-02"),
+	}).Execute()
+	if err != nil {
+		t.Fatalf("failed to set visit XP: %v", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		t.Fatalf("failed to inspect visit XP update: %v", err)
+	}
+	if affected == 0 {
+		t.Fatalf("no visit matched XP update for %s/%s at %s", userID, arcadeID, ts.Format(time.RFC3339Nano))
+	}
+}
+
+func assertExplorerDistance(t *testing.T, app *tests.TestApp, url, userID string) {
+	t.Helper()
+	res := executeJSONRequest(t, app, http.MethodGet, url, "", nil)
+	defer res.Body.Close()
+	var payload struct {
+		Entries []struct {
+			Profile struct {
+				ID string `json:"id"`
+			} `json:"profile"`
+			Stats struct {
+				TravelDistanceKm int64 `json:"travel_distance_km"`
+			} `json:"stats"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("%s: decode response: %v", url, err)
+	}
+	for _, entry := range payload.Entries {
+		if entry.Profile.ID == userID {
+			if entry.Stats.TravelDistanceKm <= 0 {
+				t.Fatalf("%s: expected explorer distance, got %v", url, entry.Stats.TravelDistanceKm)
+			}
+			return
+		}
+	}
+	t.Fatalf("%s: explorer %s not found", url, userID)
 }
 
 func TestRankings_ReturnsAuthenticatedViewerRankOutsideLeaderboard(t *testing.T) {
