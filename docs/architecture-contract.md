@@ -45,7 +45,7 @@ Definitions:
 | Private detail via `/arcade/draft` | deny | deny | allow | allow |
 | My draft list/delete | deny | own drafts only | own drafts only | use specific draft route |
 | Immediate wiki edits on public arcade | deny | allow for level 10+ | allow for level 10+ | allow |
-| Arcade memo create/update/rollback | deny | level 10+ only | level 10+ only | level 10+ only |
+| Arcade memo create/update/rollback | deny | authenticated users with arcade write access | authenticated users with arcade write access | authenticated users with arcade write access |
 | Arcade notice create | deny | deny; supporters may create unless another official account manages the arcade through `owns` | official account may create only in own `owns` arcade | allow |
 | Arcade notice update/delete | deny | own authored notice only | own authored notice only | allow |
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
@@ -92,7 +92,7 @@ including the authenticated user's own entry.
 | `arcade` | aggregate root and current relation pointers | dedicated custom mutation handler | No client writes it through PocketBase REST. |
 | `arcade_basic`, `hour`, `sns`, `gtk`, `photo` | versioned molecule for one aggregate section | corresponding `handlers/arcade/<part>` handler | A replacement molecule is created, then the root pointer changes in the same transaction. |
 | `arcade.game_v2` | `arcade_game_history_batch` pointer | `PUT /arcade/game`, game rollback | One immutable batch contains all active revisions. Rollback changes only this pointer. The API wire fields remain `base_state_id` and `state_id`. |
-| `arcade.memo` | `arcade_memo` pointer | `PUT /arcade/memo`, memo rollback | Each save creates an immutable Tiptap JSON revision. Rollback changes only this pointer; level 10+ is required for every write. |
+| `arcade.memo` | `arcade_memo` pointer | `PUT /arcade/memo`, memo rollback | Each save creates an immutable Tiptap JSON revision. Rollback changes only this pointer; authenticated arcade write access is required. |
 | `arcade_game_id` | durable installation identity | game mutation handler | `arcade`, `series`, and creator are immutable during normal mutations. Version/location/quantity never live here. Durable features such as `arcade_flag.game_id` reference this ID. The API wire fields remain `games[].id` and `game_id`. The guarded Full catalog migration may reparent `series` only after recording the exact prior row in `game_catalog_migration_origin`; the entry ID and all dependants remain unchanged. |
 | `arcade_game_history` | immutable state for one entry in one batch | game mutation handler | `(batch, entry)` is unique. A known cabinet is unique by `(batch, version, cabinet)`; a current (non-imported) unverified cabinet is unique by `(batch, version)`. Historical imported rows may retain multiple unverified entries for one version because the legacy schema had no cabinet identity. Version must belong to entry.series. A missing entry from a batch is removed from that state. |
 | `game_series_version_cabinet` | supported cabinet catalog for a canonical game version | guarded catalog migration and later custom catalog handlers | `(version, cabinet)` is unique. `price_default` is the source version's cabinet-specific snapshot when one exists; it may be empty when compatibility is known but no cabinet-specific source price exists. |

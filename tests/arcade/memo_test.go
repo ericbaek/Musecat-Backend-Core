@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
-
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
-func TestArcadeMemo_RequiresLevelTenAndKeepsImmutableHistory(t *testing.T) {
+func TestArcadeMemo_AuthenticatedUserKeepsImmutableHistory(t *testing.T) {
 	app := newArcadeTestApp(t)
 	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
 		Name:     "Memo Arcade",
@@ -16,29 +14,15 @@ func TestArcadeMemo_RequiresLevelTenAndKeepsImmutableHistory(t *testing.T) {
 		Location: location{Lat: 37.5, Lon: 127.0},
 	})
 
-	lowToken, lowUser := createAuthUserWithTags(t, app, nil)
-	seedUserLevelExp(t, app, lowUser.Id, userLevelExp(t, 9))
+	authToken, _ := createAuthUserWithTags(t, app, nil)
 	document := map[string]any{
 		"type":    "doc",
 		"content": []any{map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "Low"}}}},
 	}
 	body, _ := json.Marshal(map[string]any{"arcade": arcadeID, "document": document})
-	lowResponse := executeJSONRequest(t, app, http.MethodPut, "/arcade/memo", string(body), map[string]string{"Authorization": "Bearer " + lowToken})
-	defer lowResponse.Body.Close()
-	if lowResponse.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected level 9 memo write to be forbidden")
-	}
-
-	highToken, highUser := createAuthUserWithTags(t, app, nil)
-	seedUserLevelExp(t, app, highUser.Id, userLevelExp(t, 10))
-	firstDocument := map[string]any{
-		"type":    "doc",
-		"content": []any{map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "First"}}}},
-	}
-	firstBody, _ := json.Marshal(map[string]any{"arcade": arcadeID, "document": firstDocument})
-	firstResponse := executeJSONRequest(t, app, http.MethodPut, "/arcade/memo", string(firstBody), map[string]string{"Authorization": "Bearer " + highToken})
+	firstResponse := executeJSONRequest(t, app, http.MethodPut, "/arcade/memo", string(body), map[string]string{"Authorization": "Bearer " + authToken})
 	if firstResponse.StatusCode != http.StatusOK {
-		t.Fatalf("expected first memo write to succeed, got %d", firstResponse.StatusCode)
+		t.Fatalf("expected authenticated memo write to succeed, got %d", firstResponse.StatusCode)
 	}
 	firstMemoID := decodeJSONMap(t, firstResponse)["memo"].(map[string]any)["id"].(string)
 
@@ -47,7 +31,7 @@ func TestArcadeMemo_RequiresLevelTenAndKeepsImmutableHistory(t *testing.T) {
 		"content": []any{map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "Second"}}}},
 	}
 	secondBody, _ := json.Marshal(map[string]any{"arcade": arcadeID, "document": secondDocument})
-	secondResponse := executeJSONRequest(t, app, http.MethodPut, "/arcade/memo", string(secondBody), map[string]string{"Authorization": "Bearer " + highToken})
+	secondResponse := executeJSONRequest(t, app, http.MethodPut, "/arcade/memo", string(secondBody), map[string]string{"Authorization": "Bearer " + authToken})
 	if secondResponse.StatusCode != http.StatusOK {
 		t.Fatalf("expected second memo write to succeed, got %d", secondResponse.StatusCode)
 	}
@@ -57,7 +41,7 @@ func TestArcadeMemo_RequiresLevelTenAndKeepsImmutableHistory(t *testing.T) {
 		"arcade":   arcadeID,
 		"document": map[string]any{"type": "doc", "content": []any{}},
 	})
-	emptyResponse := executeJSONRequest(t, app, http.MethodPut, "/arcade/memo", string(emptyBody), map[string]string{"Authorization": "Bearer " + highToken})
+	emptyResponse := executeJSONRequest(t, app, http.MethodPut, "/arcade/memo", string(emptyBody), map[string]string{"Authorization": "Bearer " + authToken})
 	if emptyResponse.StatusCode != http.StatusOK {
 		t.Fatalf("expected empty memo write to succeed, got %d", emptyResponse.StatusCode)
 	}
@@ -67,7 +51,7 @@ func TestArcadeMemo_RequiresLevelTenAndKeepsImmutableHistory(t *testing.T) {
 	}
 
 	rollbackBody, _ := json.Marshal(map[string]any{"arcade": arcadeID, "part": "memo", "value": firstMemoID})
-	rollbackResponse := executeJSONRequest(t, app, http.MethodPost, "/arcade/rollback", string(rollbackBody), map[string]string{"Authorization": "Bearer " + highToken})
+	rollbackResponse := executeJSONRequest(t, app, http.MethodPost, "/arcade/rollback", string(rollbackBody), map[string]string{"Authorization": "Bearer " + authToken})
 	if rollbackResponse.StatusCode != http.StatusOK {
 		t.Fatalf("expected memo rollback to succeed, got %d", rollbackResponse.StatusCode)
 	}
@@ -124,9 +108,4 @@ func TestArcadeMemo_RequiresLevelTenAndKeepsImmutableHistory(t *testing.T) {
 	if _, ok := lastItem["memo"].(map[string]any); !ok {
 		t.Fatalf("expected memo changelog row to include before/after snapshots")
 	}
-}
-
-func userLevelExp(t *testing.T, level int) int {
-	t.Helper()
-	return userhandler.LevelBaseExp(level)
 }

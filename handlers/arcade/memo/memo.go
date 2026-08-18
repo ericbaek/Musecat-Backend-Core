@@ -11,7 +11,6 @@ import (
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
 const maxMemoDocumentBytes = 200_000
@@ -46,11 +45,6 @@ func UpdateArcadeMemo(re *core.RequestEvent) error {
 	if re.Auth == nil {
 		return re.UnauthorizedError("The request requires valid record authorization token.", nil)
 	}
-	level, err := userhandler.LoadUserLevelState(re.App, re.Auth.Id)
-	if err != nil || level.Level < 10 {
-		return re.JSON(http.StatusForbidden, map[string]any{"error": "level 10 is required to edit arcade memos"})
-	}
-
 	var body memoUpdateBody
 	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})

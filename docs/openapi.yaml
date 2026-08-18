@@ -2496,7 +2496,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: /arcade/memo
-      description: Creates an immutable Tiptap JSON revision and moves the arcade memo pointer. Requires an authenticated user with level 10 or higher. Saves and changelog creation are atomic.
+      description: Creates an immutable Tiptap JSON revision and moves the arcade memo pointer. Requires an authenticated user with arcade write access. Saves and changelog creation are atomic.
       security:
         - bearerAuth: []
       requestBody:
@@ -2528,7 +2528,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '403':
-          description: Level 10 or higher and arcade write access are required.
+          description: Authenticated arcade write access is required.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

@@ -12,7 +12,6 @@ import (
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
 var rollbackPartCollections = map[string]string{
@@ -135,10 +134,6 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 	if body.Part == "memo" {
 		if re.Auth == nil {
 			return re.UnauthorizedError("The request requires valid record authorization token.", nil)
-		}
-		level, levelErr := userhandler.LoadUserLevelState(re.App, re.Auth.Id)
-		if levelErr != nil || level.Level < 10 {
-			return re.JSON(http.StatusForbidden, map[string]any{"error": "level 10 is required to edit arcade memos"})
 		}
 	}
 
