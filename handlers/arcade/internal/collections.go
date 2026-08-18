@@ -23,6 +23,8 @@ const (
 	CollectionArcadeTicket             = "arcade_ticket_request"
 	CollectionArcadeRequestAdmin       = "arcade_request_admin"
 	CollectionArcadeAnalyticsEvent     = "arcade_analytics_event"
+	CollectionArcadeCampaign           = "arcade_campaign"
+	CollectionArcadeCampaignCheck      = "arcade_campaign_check"
 	CollectionSupporterRequest         = "supporter_request"
 	CollectionSupportFeedback          = "support_feedback"
 	CollectionArcadeChangelog          = "arcade_changelog"

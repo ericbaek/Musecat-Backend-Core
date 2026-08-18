@@ -3,6 +3,7 @@ package arcade_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -194,6 +195,48 @@ func TestNearby_CabinetFilterMatchesSameSeriesRevision(t *testing.T) {
 	paired := decodeNearbyItems(t, app, "/arcades/nearby?game_series="+chunithmID+"&game_cabinet="+goldID+"&lat=37.5665&lon=126.9780")
 	if len(paired) != 1 || paired[0]["id"] != goldArcadeID {
 		t.Fatalf("expected only same-revision CHUNITHM Gold arcade %q, got %#v", goldArcadeID, paired)
+	}
+}
+
+func TestNearby_GroupedCabinetFiltersSupportWildcardAndSingleCabinet(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	maimaiID := seedNearbyGameSeries(t, app, "maimai")
+	sdvxID := seedNearbyGameSeries(t, app, "SDVX")
+	maimaiVersionID := seedNearbyGameSeriesVersion(t, app, maimaiID, "maimai Version")
+	sdvxVersionID := seedNearbyGameSeriesVersion(t, app, sdvxID, "SDVX Version")
+	maimaiCabinetID := seedNearbyGameCabinet(t, app, "maimai DX")
+	valkyrieID := seedNearbyGameCabinet(t, app, "Sound Voltex Valkyrie")
+	standardID := seedNearbyGameCabinet(t, app, "Sound Voltex")
+
+	matchingID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "maimai + Valkyrie", Address: "Matching Road", Location: location{Lat: 37.5665, Lon: 126.9790},
+	})
+	setArcadeVisibility(t, app, matchingID, true, false)
+	matchingBatch := seedNearbyGameMolecule(t, app, matchingID)
+	seedNearbyGameAtomWithCabinet(t, app, matchingBatch, maimaiVersionID, maimaiCabinetID)
+	seedNearbyGameAtomWithCabinet(t, app, matchingBatch, sdvxVersionID, valkyrieID)
+
+	wrongCabinetID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "maimai + Standard", Address: "Wrong Cabinet Road", Location: location{Lat: 37.5665, Lon: 126.9800},
+	})
+	setArcadeVisibility(t, app, wrongCabinetID, true, false)
+	wrongCabinetBatch := seedNearbyGameMolecule(t, app, wrongCabinetID)
+	seedNearbyGameAtomWithCabinet(t, app, wrongCabinetBatch, maimaiVersionID, maimaiCabinetID)
+	seedNearbyGameAtomWithCabinet(t, app, wrongCabinetBatch, sdvxVersionID, standardID)
+
+	missingSeriesID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name: "Valkyrie Only", Address: "Missing Series Road", Location: location{Lat: 37.5665, Lon: 126.9810},
+	})
+	setArcadeVisibility(t, app, missingSeriesID, true, false)
+	missingSeriesBatch := seedNearbyGameMolecule(t, app, missingSeriesID)
+	seedNearbyGameAtomWithCabinet(t, app, missingSeriesBatch, sdvxVersionID, valkyrieID)
+
+	maimaiFilter := url.QueryEscape(`{"series":"` + maimaiID + `"}`)
+	sdvxFilter := url.QueryEscape(`{"series":"` + sdvxID + `","cabinet":"` + valkyrieID + `"}`)
+	items := decodeNearbyItems(t, app, "/arcades/nearby?game_filter="+maimaiFilter+"&game_filter="+sdvxFilter+"&lat=37.5665&lon=126.9780")
+	if len(items) != 1 || items[0]["id"] != matchingID {
+		t.Fatalf("expected wildcard maimai AND Valkyrie SDVX to match only %q, got %#v", matchingID, items)
 	}
 }
 

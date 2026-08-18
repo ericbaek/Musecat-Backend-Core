@@ -15,6 +15,7 @@ import (
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
+	arcadecampaign "github.com/ericbaek/musecat-backend-core/handlers/arcade/campaign"
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
 	arcadegtk "github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
@@ -72,6 +73,18 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		// Public read endpoint: list all arcades with basic info + gameSeries ids
 		se.Router.GET("/arcades", arcadequery.ListArcades)
 		se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
+		se.Router.GET("/campaigns", arcadecampaign.ListCampaigns)
+		se.Router.GET("/campaign", arcadecampaign.GetCampaign)
+		se.Router.POST("/campaign", arcadecampaign.CreateCampaign).Bind(
+			apis.RequireAuth("user"),
+			userhandler.RequireActiveUser(),
+			arcadequery.RequireAdminAccess(),
+		)
+		se.Router.PUT("/campaign", arcadecampaign.UpdateCampaign).Bind(
+			apis.RequireAuth("user"),
+			userhandler.RequireActiveUser(),
+			arcadequery.RequireAdminAccess(),
+		)
 		// Public read endpoint: list arcades by game series near a location with pagination
 		se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)
 		se.Router.GET("/arcade/visits", userhandler.GetArcadeVisitStats)
@@ -135,6 +148,10 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
 		authArcade.POST("/nearby", nil)
 		authArcade.POST("/visit", userhandler.VisitArcade)
+		se.Router.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
+			apis.RequireAuth("user"),
+			userhandler.RequireActiveUser(),
+		)
 
 		authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))
 		authUser.GET("/me", userhandler.GetMe)

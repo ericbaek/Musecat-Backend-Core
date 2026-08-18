@@ -92,6 +92,42 @@ func TestBuildNearbyGameFilters(t *testing.T) {
 	}
 }
 
+func TestParseGroupedNearbyGameFilters(t *testing.T) {
+	t.Parallel()
+
+	filters, err := parseGroupedNearbyGameFilters([]string{
+		`{"series":"series_a"}`,
+		`{"series":"series_b","cabinet":"cabinet_b"}`,
+	})
+	if err != nil {
+		t.Fatalf("expected grouped filters, got %v", err)
+	}
+	want := []nearbyGameFilter{
+		{SeriesID: "series_a"},
+		{SeriesID: "series_b", CabinetID: "cabinet_b"},
+	}
+	if !reflect.DeepEqual(filters, want) {
+		t.Fatalf("parseGroupedNearbyGameFilters() = %#v, want %#v", filters, want)
+	}
+
+	invalid := []string{
+		`{"series":"series_a"`,
+		`{"series":"","cabinet":"cabinet_a"}`,
+		`{"series":"series_a","cabinet":1}`,
+	}
+	for _, raw := range invalid {
+		if _, err := parseGroupedNearbyGameFilters([]string{raw}); err == nil {
+			t.Fatalf("expected invalid grouped filter %q to fail", raw)
+		}
+	}
+	if _, err := parseGroupedNearbyGameFilters([]string{
+		`{"series":"series_a"}`,
+		`{"series":"series_a","cabinet":"cabinet_a"}`,
+	}); err == nil {
+		t.Fatal("expected duplicate grouped series to fail")
+	}
+}
+
 func TestMatchesAllGameFilters_RequiresSameRevisionPairs(t *testing.T) {
 	t.Parallel()
 
@@ -110,5 +146,25 @@ func TestMatchesAllGameFilters_RequiresSameRevisionPairs(t *testing.T) {
 	}
 	if !matchesAllGameFilters([]ArcadeGameInstallation{{SeriesID: "series_a"}}, []nearbyGameFilter{{SeriesID: "series_a"}}) {
 		t.Fatal("expected unknown cabinet to match a series-only filter")
+	}
+}
+
+func TestMatchesAllGameFiltersSupportsWildcardAndSeparateSeries(t *testing.T) {
+	t.Parallel()
+
+	installations := []ArcadeGameInstallation{
+		{SeriesID: "maimai", CabinetID: "maimai_dx"},
+		{SeriesID: "sdvx", CabinetID: "valkyrie"},
+	}
+	if !matchesAllGameFilters(installations, []nearbyGameFilter{
+		{SeriesID: "maimai"},
+		{SeriesID: "sdvx", CabinetID: "valkyrie"},
+	}) {
+		t.Fatal("expected wildcard maimai and Valkyrie SDVX filters to match")
+	}
+	if matchesAllGameFilters(installations, []nearbyGameFilter{
+		{SeriesID: "sdvx", CabinetID: "exceed"},
+	}) {
+		t.Fatal("expected an unselected SDVX cabinet to fail")
 	}
 }

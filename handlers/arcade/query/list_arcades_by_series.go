@@ -1,6 +1,7 @@
 package query
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -56,15 +57,31 @@ type nearbyGameFilter struct {
 	CabinetID string
 }
 
-// ListArcadesBySeriesAndLocation 는 GET /arcades/nearby?game_series=...&lat=...&lon=...&address=...&country=...&page=... 요청을 처리한다.
+type nearbyGameFilterQuery struct {
+	SeriesID  string `json:"series"`
+	CabinetID string `json:"cabinet"`
+}
+
+// ListArcadesBySeriesAndLocation 는 GET /arcades/nearby?game_filter=...&lat=...&lon=...&address=...&country=...&page=... 요청을 처리한다.
 // 여러 game_series 를 모두 포함하는 공개·영업 중 오락실을 거리순으로 최대 15개씩 페이지네이션해 반환한다.
 func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 	q := re.Request.URL.Query()
 
 	// 1. 쿼리 파라미터에서 게임 시리즈 ID 들을 읽어온다. 쉼표 또는 다중 쿼리 파라미터를 모두 허용한다.
-	seriesIDs := parseOrderedIDs(q["game_series"])
-	cabinetIDs := parseOrderedIDs(q["game_cabinet"])
-	gameFilters, err := buildNearbyGameFilters(seriesIDs, cabinetIDs)
+	var gameFilters []nearbyGameFilter
+	var err error
+	if len(q["game_filter"]) > 0 {
+		if len(q["game_series"]) > 0 || len(q["game_cabinet"]) > 0 {
+			return re.JSON(http.StatusBadRequest, map[string]any{
+				"error": "game_filter cannot be combined with game_series or game_cabinet",
+			})
+		}
+		gameFilters, err = parseGroupedNearbyGameFilters(q["game_filter"])
+	} else {
+		seriesIDs := parseOrderedIDs(q["game_series"])
+		cabinetIDs := parseOrderedIDs(q["game_cabinet"])
+		gameFilters, err = buildNearbyGameFilters(seriesIDs, cabinetIDs)
+	}
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error": err.Error(),
@@ -296,6 +313,36 @@ func buildNearbyGameFilters(seriesIDs, cabinetIDs []string) ([]nearbyGameFilter,
 	return filters, nil
 }
 
+func parseGroupedNearbyGameFilters(params []string) ([]nearbyGameFilter, error) {
+	if len(params) == 0 {
+		return nil, errors.New("game_filter requires at least one filter")
+	}
+
+	filters := make([]nearbyGameFilter, 0, len(params))
+	seenSeries := make(map[string]struct{}, len(params))
+	for _, raw := range params {
+		var query nearbyGameFilterQuery
+		if err := json.Unmarshal([]byte(raw), &query); err != nil {
+			return nil, errors.New("game_filter must be valid JSON")
+		}
+
+		seriesID := strings.TrimSpace(query.SeriesID)
+		if seriesID == "" {
+			return nil, errors.New("game_filter series is required")
+		}
+		if _, exists := seenSeries[seriesID]; exists {
+			return nil, errors.New("game_filter cannot contain duplicate series")
+		}
+		seenSeries[seriesID] = struct{}{}
+
+		filters = append(filters, nearbyGameFilter{
+			SeriesID:  seriesID,
+			CabinetID: strings.TrimSpace(query.CabinetID),
+		})
+	}
+	return filters, nil
+}
+
 func parseDistanceLimit(raw string) (float64, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -329,7 +376,7 @@ func filterExpandedGameItems(items any, filters []nearbyGameFilter) []map[string
 		seriesID := expandedGameItemSeriesID(item)
 		cabinetID := expandedGameItemCabinetID(item)
 		for _, filter := range filters {
-			if seriesID == filter.SeriesID && (filter.CabinetID == "" || strings.TrimSpace(cabinetID) == filter.CabinetID) {
+			if seriesID == filter.SeriesID && nearbyCabinetMatches(filter, cabinetID) {
 				out = append(out, item)
 				break
 			}
@@ -413,7 +460,7 @@ func matchesAllGameFilters(installations []ArcadeGameInstallation, filters []nea
 			if installation.SeriesID != filter.SeriesID {
 				continue
 			}
-			if filter.CabinetID != "" && installation.CabinetID != filter.CabinetID {
+			if !nearbyCabinetMatches(filter, installation.CabinetID) {
 				continue
 			}
 			matched = true
@@ -424,6 +471,10 @@ func matchesAllGameFilters(installations []ArcadeGameInstallation, filters []nea
 		}
 	}
 	return true
+}
+
+func nearbyCabinetMatches(filter nearbyGameFilter, cabinetID string) bool {
+	return filter.CabinetID == "" || strings.TrimSpace(cabinetID) == filter.CabinetID
 }
 
 func addressMatchesFilter(rawAddress any, normalizedFilter string) bool {

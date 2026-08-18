@@ -2717,6 +2717,21 @@ paths:
       tags: [Arcades]
       summary: /arcades/nearby
       parameters:
+        - name: game_filter
+          in: query
+          description: |
+            Repeat this parameter once per selected game series with a
+            URL-encoded JSON object such as
+            `{"series":"sdvx","cabinet":"valkyrie"}`. Omitting
+            `cabinet` means all cabinets for that series. Separate objects
+            use AND semantics across series. For example, maimai without a
+            cabinet and SDVX with `"valkyrie"` requires both series while
+            leaving maimai's cabinet unrestricted. `game_filter` cannot be combined
+            with the legacy `game_series` or `game_cabinet` parameters.
+          schema:
+            type: array
+            items:
+              type: string
         - name: game_series
           in: query
           description: |
@@ -2785,8 +2800,10 @@ paths:
           description: |
             When true, expands each item's `game` payload with arcade game details,
             including each revision's cabinet. When game filters are supplied,
-            expanded items contain only revisions matching the requested series or
-            positional series/cabinet pairs.
+            expanded items contain only revisions matching the requested series
+            and, when supplied, its selected cabinet. Separate grouped series
+            remain required. Legacy positional series/cabinet pairs retain
+            their compatibility behavior.
           schema:
             type: boolean
       responses:
@@ -2853,8 +2870,9 @@ paths:
                     distance_km: 0.4
         '400':
           description: |
-            Invalid or missing location/page value; a `game_cabinet` without
-            `game_series`; or unequal expanded
+            Invalid or missing location/page value; an invalid grouped
+            `game_filter`; mixed grouped and legacy game parameters; a
+            `game_cabinet` without `game_series`; or unequal expanded
             `game_series` and `game_cabinet` list lengths.
           content:
             application/json:
