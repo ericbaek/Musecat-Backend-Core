@@ -17,6 +17,7 @@ type arcadeUpdateBlockRow struct {
 	Changed        string
 	ChangedBy      string
 	Created        string
+	BulkID         string
 	BlockStartedAt string
 	BlockEndedAt   string
 }
@@ -61,6 +62,7 @@ WITH filtered AS (
 		c.changed,
 		c."by" AS changed_by,
 		c.created,
+		json_extract(c.log, '$.game.bulk_id') AS bulk_id,
 		c.id
 	FROM arcade_changelog c
 	INNER JOIN arcade a ON a.id = c.arcade
@@ -71,6 +73,7 @@ WITH filtered AS (
 		'flag' AS changed,
 		f."createdBy" AS changed_by,
 		f.created,
+		NULL AS bulk_id,
 		f.id
 	FROM arcade_flag f
 	INNER JOIN arcade a ON a.id = f.arcade
@@ -81,6 +84,7 @@ WITH filtered AS (
 		'flag_reaction' AS changed,
 		r."createdBy" AS changed_by,
 		r.created,
+		NULL AS bulk_id,
 		r.id
 	FROM arcade_flag_reaction r
 	INNER JOIN arcade_flag f ON f.id = r.flag
@@ -92,6 +96,7 @@ WITH filtered AS (
 		'visit' AS changed,
 		v.user AS changed_by,
 		v.visited_at AS created,
+		NULL AS bulk_id,
 		v.id
 	FROM arcade_visit v
 	INNER JOIN arcade a ON a.id = v.arcade
@@ -104,6 +109,7 @@ ordered AS (
 		changed,
 		changed_by,
 		created,
+		bulk_id,
 		id,
 		LAG(arcade) OVER (ORDER BY created DESC, id DESC) AS prev_arcade
 	FROM filtered
@@ -114,6 +120,7 @@ blocks AS (
 		changed,
 		changed_by,
 		created,
+		bulk_id,
 		id,
 		SUM(
 			CASE
@@ -160,6 +167,7 @@ SELECT
 	b.changed,
 	b.changed_by,
 	b.created,
+	b.bulk_id,
 	s.block_started_at,
 	s.block_ended_at
 FROM blocks b
@@ -198,6 +206,7 @@ ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 			Changed:        nullStringMapValue(raw, "changed"),
 			ChangedBy:      nullStringMapValue(raw, "changed_by"),
 			Created:        nullStringMapValue(raw, "created"),
+			BulkID:         nullStringMapValue(raw, "bulk_id"),
 			BlockStartedAt: nullStringMapValue(raw, "block_started_at"),
 			BlockEndedAt:   nullStringMapValue(raw, "block_ended_at"),
 		}
@@ -239,6 +248,7 @@ ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 			"part":    row.Changed,
 			"by":      row.ChangedBy,
 			"created": row.Created,
+			"bulk_id": row.BulkID,
 		})
 	}
 

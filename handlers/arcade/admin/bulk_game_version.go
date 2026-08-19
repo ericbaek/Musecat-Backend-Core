@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/security"
 
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
@@ -37,6 +38,7 @@ func BulkUpdateArcadeGameVersion(re *core.RequestEvent) error {
 		}
 	}
 	updated := 0
+	bulkID := security.RandomString(15)
 	if err := re.App.RunInTransaction(func(tx core.App) error {
 		newVersion, err := tx.FindRecordById(arcadeinternal.CollectionGameSeriesVersion, body.NewGameVersionSeries)
 		if err != nil {
@@ -76,7 +78,7 @@ func BulkUpdateArcadeGameVersion(re *core.RequestEvent) error {
 				update.Games[i].Game = body.NewGameVersionSeries
 				updated++
 			}
-			if _, err := arcadegame.UpdateArcadeGameTxFromExistingAtoms(tx, update, re.Auth.Id, "bulk_version"); err != nil {
+			if _, err := arcadegame.BulkUpdateArcadeGameTx(tx, update, re.Auth.Id, bulkID); err != nil {
 				return err
 			}
 		}

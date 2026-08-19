@@ -28,8 +28,6 @@ const (
 
 type campaignMutationBody struct {
 	ID           string   `json:"id,omitempty"`
-	Title        string   `json:"title"`
-	Description  string   `json:"description"`
 	FromVersion  string   `json:"from_version"`
 	ToVersion    string   `json:"to_version"`
 	CabinetScope string   `json:"cabinet_scope"`
@@ -49,10 +47,12 @@ type campaignCheckBody struct {
 	Result   string `json:"result"`
 }
 
+type campaignEndBody struct {
+	ID string `json:"id"`
+}
+
 type campaignConfig struct {
 	ID           string
-	Title        string
-	Description  string
 	FromVersion  string
 	ToVersion    string
 	CabinetScope string
@@ -143,6 +143,52 @@ func GetCampaign(re *core.RequestEvent) error {
 	return re.JSON(http.StatusOK, map[string]any{"campaign": summary, "items": items})
 }
 
+// ListArcadeCampaigns returns active campaign prompts for the public/open
+// arcade identified by id. Keeping this as a dedicated aggregate endpoint lets
+// the arcade detail render its prompts without exposing raw campaign records.
+func ListArcadeCampaigns(re *core.RequestEvent) error {
+	arcadeID := strings.TrimSpace(re.Request.URL.Query().Get("id"))
+	if arcadeID == "" {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "arcade id is required"})
+	}
+	now := time.Now().UTC()
+	records, err := re.App.FindRecordsByFilter(
+		arcadeinternal.CollectionArcadeCampaign,
+		"status={:status} && start_at <= {:now} && end_at >= {:now}",
+		"-start_at",
+		20,
+		0,
+		dbx.Params{"status": statusActive, "now": now},
+	)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load arcade campaigns", "details": err.Error()})
+	}
+
+	items := make([]map[string]any, 0)
+	for _, record := range records {
+		config, err := loadCampaignConfig(record)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to decode campaign", "details": err.Error()})
+		}
+		rows, err := loadCandidateRowsForArcade(re.App, config, arcadeID)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load campaign targets", "details": err.Error()})
+		}
+		summary, err := buildCampaignSummary(re.App, config, len(rows))
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build campaign", "details": err.Error()})
+		}
+		for _, row := range rows {
+			targets, err := buildCampaignItems(re.App, []candidateRow{row})
+			if err != nil {
+				return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build campaign target", "details": err.Error()})
+			}
+			items = append(items, map[string]any{"campaign": summary, "target": targets[0]})
+		}
+	}
+	return re.JSON(http.StatusOK, map[string]any{"items": items})
+}
+
 func CreateCampaign(re *core.RequestEvent) error {
 	var body campaignMutationBody
 	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
@@ -199,6 +245,34 @@ func UpdateCampaign(re *core.RequestEvent) error {
 	summary, err := buildCampaignSummary(re.App, config, 0)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build updated campaign", "details": err.Error()})
+	}
+	return re.JSON(http.StatusOK, map[string]any{"campaign": summary})
+}
+
+func EndCampaign(re *core.RequestEvent) error {
+	var body campaignEndBody
+	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
+	}
+	body.ID = strings.TrimSpace(body.ID)
+	if body.ID == "" {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "id is required"})
+	}
+	campaign, err := re.App.FindRecordById(arcadeinternal.CollectionArcadeCampaign, body.ID)
+	if err != nil {
+		return re.JSON(http.StatusNotFound, map[string]any{"error": "campaign not found"})
+	}
+	campaign.Set("status", statusEnded)
+	if err := re.App.Save(campaign); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to end campaign", "details": err.Error()})
+	}
+	config, err := loadCampaignConfig(campaign)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to read ended campaign", "details": err.Error()})
+	}
+	summary, err := buildCampaignSummary(re.App, config, 0)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build ended campaign", "details": err.Error()})
 	}
 	return re.JSON(http.StatusOK, map[string]any{"campaign": summary})
 }
@@ -333,8 +407,6 @@ type httpError struct {
 func (e httpError) Error() string { return e.message }
 
 func normalizeAndValidateCampaignBody(app core.App, body *campaignMutationBody, requireID bool) error {
-	body.Title = strings.TrimSpace(body.Title)
-	body.Description = strings.TrimSpace(body.Description)
 	body.FromVersion = strings.TrimSpace(body.FromVersion)
 	body.ToVersion = strings.TrimSpace(body.ToVersion)
 	body.CabinetScope = strings.TrimSpace(body.CabinetScope)
@@ -351,12 +423,6 @@ func normalizeAndValidateCampaignBody(app core.App, body *campaignMutationBody, 
 	}
 	if body.RewardExp <= 0 {
 		return fmt.Errorf("reward_exp must be positive")
-	}
-	if body.Title == "" || len(body.Title) > 120 {
-		return fmt.Errorf("title is required and must be at most 120 characters")
-	}
-	if body.Description != "" && len(body.Description) > 500 {
-		return fmt.Errorf("description must be at most 500 characters")
 	}
 	if requireID && strings.TrimSpace(body.ID) == "" {
 		return fmt.Errorf("id is required")
@@ -426,8 +492,6 @@ func normalizeAndValidateCampaignBody(app core.App, body *campaignMutationBody, 
 }
 
 func applyCampaignBody(record *core.Record, body campaignMutationBody, createdBy string) {
-	record.Set("title", body.Title)
-	record.Set("description", body.Description)
 	record.Set("from_version", body.FromVersion)
 	record.Set("to_version", body.ToVersion)
 	record.Set("cabinet_scope", body.CabinetScope)
@@ -453,7 +517,7 @@ func loadCampaignConfig(record *core.Record) (campaignConfig, error) {
 		return campaignConfig{}, fmt.Errorf("campaign dates are invalid")
 	}
 	return campaignConfig{
-		ID: record.Id, Title: record.GetString("title"), Description: record.GetString("description"),
+		ID:          record.Id,
 		FromVersion: record.GetString("from_version"), ToVersion: record.GetString("to_version"),
 		CabinetScope: record.GetString("cabinet_scope"), Cabinets: normalizeIDs(record.GetStringSlice("cabinets")),
 		CountryScope: record.GetString("country_scope"), Countries: normalizeCountries(readStringArray(record.Get("countries"))),
@@ -479,7 +543,7 @@ func buildCampaignSummary(app core.App, config campaignConfig, targetCount int) 
 		cabinets = append(cabinets, cabinetObject(record))
 	}
 	return map[string]any{
-		"id": config.ID, "title": config.Title, "description": config.Description,
+		"id":           config.ID,
 		"from_version": from, "to_version": to,
 		"cabinet_scope": config.CabinetScope, "cabinets": cabinets,
 		"country_scope": config.CountryScope, "countries": config.Countries,
@@ -531,12 +595,20 @@ func buildCampaignItems(app core.App, rows []candidateRow) ([]map[string]any, er
 }
 
 func loadCandidateRows(app core.App, config campaignConfig) ([]candidateRow, error) {
+	return loadCandidateRowsForArcade(app, config, "")
+}
+
+func loadCandidateRowsForArcade(app core.App, config campaignConfig, arcadeID string) ([]candidateRow, error) {
 	clauses := []string{
 		"a.public = 1", "a.closed = 0", "a.game_v2 <> ''",
 		"r.version = {:from_version}",
 		"(TRIM(COALESCE(r.cabinet, '')) = '' OR EXISTS (SELECT 1 FROM game_series_version_cabinet target_support WHERE target_support.version = {:to_version} AND target_support.cabinet = r.cabinet))",
 	}
 	params := dbx.Params{"from_version": config.FromVersion, "to_version": config.ToVersion}
+	if arcadeID = strings.TrimSpace(arcadeID); arcadeID != "" {
+		clauses = append(clauses, "a.id = {:arcade_id}")
+		params["arcade_id"] = arcadeID
+	}
 	if config.CabinetScope == "include" {
 		placeholders := make([]string, 0, len(config.Cabinets))
 		for i, id := range config.Cabinets {

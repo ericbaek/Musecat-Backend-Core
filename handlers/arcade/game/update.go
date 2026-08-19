@@ -187,7 +187,7 @@ func versionSeries(app core.App, versionID string) (string, error) {
 	return strings.TrimSpace(rec.GetString("series")), nil
 }
 
-func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy string, validate bool, action string) (string, error) {
+func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy string, validate bool, action, bulkID string) (string, error) {
 	if validate {
 		if err := validateUpdateGameBody(&body); err != nil {
 			return "", err
@@ -341,6 +341,12 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		"state_to":   batch.Id,
 		"items":      logItems,
 	}
+	if action == "bulk_version" {
+		log["source"] = "bulk_version"
+		if bulkID != "" {
+			log["bulk_id"] = bulkID
+		}
+	}
 	if err := arcadeinternal.UpdateArcadeFieldsTxWithLogs(txApp, arcadeRec.Id, map[string]any{"game_v2": batch.Id}, map[string]any{"game": log}, createdBy); err != nil {
 		return "", err
 	}
@@ -348,10 +354,16 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 }
 
 func UpdateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy string) (string, error) {
-	return updateArcadeGameTx(txApp, body, createdBy, true, "edit")
+	return updateArcadeGameTx(txApp, body, createdBy, true, "edit", "")
 }
 func UpdateArcadeGameTxFromExistingAtoms(txApp core.App, body UpdateArcadeGameBody, createdBy string, action string) (string, error) {
-	return updateArcadeGameTx(txApp, body, createdBy, false, action)
+	return updateArcadeGameTx(txApp, body, createdBy, false, action, "")
+}
+
+// BulkUpdateArcadeGameTx writes a per-arcade immutable game revision while
+// associating every row produced by one administrative request with bulkID.
+func BulkUpdateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy, bulkID string) (string, error) {
+	return updateArcadeGameTx(txApp, body, createdBy, false, "bulk_version", bulkID)
 }
 
 func UpdateArcadeGame(re *core.RequestEvent) error {
