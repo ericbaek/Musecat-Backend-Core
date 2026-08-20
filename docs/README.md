@@ -26,4 +26,6 @@ When adding or changing an endpoint:
 - Backend architecture notes: `/backend-architecture.md`
 - API v2 architecture contract: `/architecture-contract.md`
 - Arcade changelog rules: `/arcade-changelog.md`
+- Arcade game Delta API handoff: `/arcade-game-delta-api.md`
 - Supporter API notes: `/supporter-api.md`
+- Community translation prototype: `/community-translation-prototype.md`

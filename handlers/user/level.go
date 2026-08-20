@@ -3,6 +3,7 @@ package user
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,15 @@ type ExpFeedback struct {
 	LevelDiff                   int `json:"level_diff"`
 	RemainingExpToNextLevel     int `json:"remaining_exp_to_next_level"`
 	RemainingPercentToNextLevel int `json:"remaining_percent_to_next_level"`
+}
+
+type ArcadePublicExpPreview struct {
+	CurrentExp    int         `json:"current_exp"`
+	PublicExp     int         `json:"public_exp"`
+	BackfillExp   int         `json:"backfill_exp"`
+	EstimatedExp  int         `json:"estimated_exp"`
+	EstimatedGain int         `json:"estimated_gain"`
+	XPFeedback    ExpFeedback `json:"xp_feedback"`
 }
 
 func SetAttendanceNowForTest(nowFn func() time.Time) func() {
@@ -132,8 +142,62 @@ func ArcadeEditKind(arcadeID, part string) string {
 	return "xp:arcade-edit:" + strings.TrimSpace(part) + ":" + strings.TrimSpace(arcadeID)
 }
 
+func ArcadePublicBackfillKind(arcadeID, part string) string {
+	// Keep the one-time backfill key stable. AwardArcadeEditExpTx explicitly
+	// excludes this key from its weekly cooldown query below.
+	return ArcadeEditKind(arcadeID, part)
+}
+
 func ArcadeEditGrantKind(arcadeID, part string, at time.Time) string {
 	return ArcadeEditKind(arcadeID, part) + ":" + strconv.FormatInt(at.UTC().UnixNano(), 10)
+}
+
+func ArcadeGameEditGrantKind(arcadeID string, at time.Time, entryIDs []string) string {
+	ids := uniqueGameEntryIDs(entryIDs)
+	return ArcadeEditKind(arcadeID, "game") + ":" + strconv.FormatInt(at.UTC().UnixNano(), 10) + ":" + strings.Join(ids, ",")
+}
+
+func uniqueGameEntryIDs(entryIDs []string) []string {
+	seen := make(map[string]struct{}, len(entryIDs))
+	ids := make([]string, 0, len(entryIDs))
+	for _, entryID := range entryIDs {
+		entryID = strings.TrimSpace(entryID)
+		if entryID == "" {
+			continue
+		}
+		if _, ok := seen[entryID]; ok {
+			continue
+		}
+		seen[entryID] = struct{}{}
+		ids = append(ids, entryID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func gameEntryIDsFromGrantKind(kind, arcadeID string) []string {
+	prefix := ArcadeEditKind(arcadeID, "game") + ":"
+	if !strings.HasPrefix(kind, prefix) {
+		return nil
+	}
+	parts := strings.SplitN(strings.TrimPrefix(kind, prefix), ":", 2)
+	if len(parts) != 2 {
+		return nil
+	}
+	return uniqueGameEntryIDs(strings.Split(parts[1], ","))
+}
+
+// ArcadeGameEditExp returns the target XP for the number of distinct durable
+// game entries counted in the rolling window. A single entry may contain many
+// field changes, but it still counts as one entry.
+func ArcadeGameEditExp(changedEntries int) int {
+	if changedEntries <= 0 {
+		return 0
+	}
+	if exp := 2*changedEntries + 1; exp < 10 {
+		return exp
+	}
+	return 10
 }
 
 func ArcadePhotoSubmissionKind(arcadeID string) string {
@@ -293,9 +357,14 @@ SELECT COALESCE(created, '') AS created
 FROM user_level_log
 WHERE "user" = {:user}
   AND kind LIKE {:kind}
+  AND kind != {:backfill_kind}
 ORDER BY created DESC, id DESC
 LIMIT 1
-`).Bind(dbx.Params{"user": userID, "kind": prefix}).Rows()
+`).Bind(dbx.Params{
+		"user":          userID,
+		"kind":          prefix,
+		"backfill_kind": ArcadePublicBackfillKind(arcadeID, part),
+	}).Rows()
 	if err != nil {
 		return 0, false, fmt.Errorf("query arcade edit cooldown failed: %w", err)
 	}
@@ -319,6 +388,140 @@ LIMIT 1
 	return AwardExpTx(txApp, userID, kind, diff, baseExp)
 }
 
+// AwardArcadeGameEditExpTx awards only the incremental XP represented by new
+// durable game entries touched during the rolling seven-day window. The entry
+// ids are encoded in the grant kind because user_level_log has no metadata
+// column and private draft changelogs must not be mistaken for public edit XP.
+func AwardArcadeGameEditExpTx(txApp core.App, userID, arcadeID string, entryIDs []string, baseExp int, now time.Time) (int, bool, error) {
+	userID = strings.TrimSpace(userID)
+	arcadeID = strings.TrimSpace(arcadeID)
+	entryIDs = uniqueGameEntryIDs(entryIDs)
+	if userID == "" {
+		return 0, false, fmt.Errorf("user id is required")
+	}
+	if arcadeID == "" {
+		return 0, false, fmt.Errorf("arcade id is required")
+	}
+	if len(entryIDs) == 0 {
+		return baseExp, false, nil
+	}
+
+	currentExp, err := ensureUserLevelBaseTx(txApp, userID, baseExp)
+	if err != nil {
+		return 0, false, err
+	}
+
+	cutoff := now.UTC().Add(-7 * 24 * time.Hour)
+	prefix := ArcadeEditKind(arcadeID, "game") + ":%"
+	rows, err := txApp.DB().NewQuery(`
+SELECT kind, COALESCE(diff_exp, 0) AS diff_exp, COALESCE(created, '') AS created
+FROM user_level_log
+WHERE "user" = {:user}
+  AND kind LIKE {:kind}
+ORDER BY created ASC, id ASC
+`).Bind(dbx.Params{"user": userID, "kind": prefix}).Rows()
+	if err != nil {
+		return 0, false, fmt.Errorf("query arcade game edit window failed: %w", err)
+	}
+	defer rows.Close()
+
+	seenEntries := make(map[string]struct{}, len(entryIDs))
+	for _, entryID := range entryIDs {
+		seenEntries[entryID] = struct{}{}
+	}
+	awardedExp := 0
+	for rows.Next() {
+		var kind, created string
+		var diffExp int
+		if err := rows.Scan(&kind, &diffExp, &created); err != nil {
+			return 0, false, fmt.Errorf("scan arcade game edit window failed: %w", err)
+		}
+		lastCreated, parseErr := parseLevelLogCreated(created)
+		if parseErr != nil || !lastCreated.After(cutoff) {
+			continue
+		}
+		priorEntries := gameEntryIDsFromGrantKind(kind, arcadeID)
+		if len(priorEntries) == 0 {
+			// Ignore legacy fixed-cooldown game grants that predate entry-aware
+			// grants. They cannot identify which entries were already counted.
+			continue
+		}
+		for _, entryID := range priorEntries {
+			seenEntries[entryID] = struct{}{}
+		}
+		if diffExp > 0 {
+			awardedExp += diffExp
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, fmt.Errorf("iterate arcade game edit window failed: %w", err)
+	}
+
+	targetExp := ArcadeGameEditExp(len(seenEntries))
+	diffExp := targetExp - awardedExp
+	if diffExp <= 0 {
+		return currentExp, false, nil
+	}
+
+	kind := ArcadeGameEditGrantKind(arcadeID, now, entryIDs)
+	return AwardExpTx(txApp, userID, kind, diffExp, baseExp)
+}
+
+type arcadePublicBackfillGrant struct {
+	kind string
+	diff int
+}
+
+func PreviewArcadePublicExp(app core.App, userID, arcadeID string) (ArcadePublicExpPreview, error) {
+	userID = strings.TrimSpace(userID)
+	arcadeID = strings.TrimSpace(arcadeID)
+	if userID == "" {
+		return ArcadePublicExpPreview{}, fmt.Errorf("user id is required")
+	}
+	if arcadeID == "" {
+		return ArcadePublicExpPreview{}, fmt.Errorf("arcade id is required")
+	}
+
+	baseExp, err := LoadCurrentExp(app, userID)
+	if err != nil {
+		return ArcadePublicExpPreview{}, fmt.Errorf("failed to load current exp: %w", err)
+	}
+	currentExp := baseExp
+	publicExp := 0
+	if awarded, err := HasLevelLogKind(app, userID, ArcadePublicKind(arcadeID)); err != nil {
+		return ArcadePublicExpPreview{}, err
+	} else if !awarded {
+		publicExp = 10
+		currentExp += publicExp
+	}
+
+	grants, err := collectArcadePublicBackfillGrants(app, userID, arcadeID, false)
+	if err != nil {
+		return ArcadePublicExpPreview{}, err
+	}
+	backfillExp := 0
+	for _, grant := range grants {
+		awarded, err := HasLevelLogKind(app, userID, grant.kind)
+		if err != nil {
+			return ArcadePublicExpPreview{}, err
+		}
+		if awarded {
+			continue
+		}
+		backfillExp += grant.diff
+		currentExp += grant.diff
+	}
+
+	return ArcadePublicExpPreview{
+		CurrentExp:    baseExp,
+		PublicExp:     publicExp,
+		BackfillExp:   backfillExp,
+		EstimatedExp:  currentExp,
+		EstimatedGain: currentExp - baseExp,
+		XPFeedback:    BuildExpFeedback(baseExp, currentExp),
+	}, nil
+}
+
 func GrantArcadePublicBackfillTx(txApp core.App, userID, arcadeID string, baseExp int) (int, error) {
 	userID = strings.TrimSpace(userID)
 	arcadeID = strings.TrimSpace(arcadeID)
@@ -330,32 +533,51 @@ func GrantArcadePublicBackfillTx(txApp core.App, userID, arcadeID string, baseEx
 	}
 
 	currentExp := baseExp
-	type rowInfo struct {
-		ID      string
-		Created string
+	grants, err := collectArcadePublicBackfillGrants(txApp, userID, arcadeID, true)
+	if err != nil {
+		return 0, err
+	}
+	for _, grant := range grants {
+		nextExp, granted, err := AwardExpTx(txApp, userID, grant.kind, grant.diff, currentExp)
+		if err != nil {
+			return 0, err
+		}
+		if granted {
+			currentExp = nextExp
+		}
 	}
 
-	changeRows, err := txApp.DB().NewQuery(`
+	return currentExp, nil
+}
+
+func collectArcadePublicBackfillGrants(app core.App, userID, arcadeID string, publicOnly bool) ([]arcadePublicBackfillGrant, error) {
+	publicFilter := ""
+	if publicOnly {
+		publicFilter = " AND a.public = 1"
+	}
+
+	grants := make([]arcadePublicBackfillGrant, 0)
+	changeRows, err := app.DB().NewQuery(`
 SELECT c.id AS id, c.changed AS changed, COALESCE(c.created, '') AS created
 FROM arcade_changelog c
 INNER JOIN arcade a ON a.id = c.arcade
 WHERE c."by" = {:user}
   AND c.arcade = {:arcade}
-  AND a.public = 1
   AND c.changed IN ('basic', 'game', 'hour', 'sns', 'gtk', 'photo')
+` + publicFilter + `
 ORDER BY c.created ASC, c.id ASC
 `).Bind(dbx.Params{"user": userID, "arcade": arcadeID}).Rows()
 	if err != nil {
-		return 0, fmt.Errorf("query arcade backfill changelog failed: %w", err)
+		return nil, fmt.Errorf("query arcade backfill changelog failed: %w", err)
 	}
 	defer changeRows.Close()
 
 	seenChange := map[string]struct{}{}
 	for changeRows.Next() {
-		var row rowInfo
+		var rowID, created string
 		var changed string
-		if err := changeRows.Scan(&row.ID, &changed, &row.Created); err != nil {
-			return 0, fmt.Errorf("scan arcade backfill changelog failed: %w", err)
+		if err := changeRows.Scan(&rowID, &changed, &created); err != nil {
+			return nil, fmt.Errorf("scan arcade backfill changelog failed: %w", err)
 		}
 		changed = strings.TrimSpace(changed)
 		if changed == "" {
@@ -365,107 +587,91 @@ ORDER BY c.created ASC, c.id ASC
 			continue
 		}
 		seenChange[changed] = struct{}{}
-		if _, granted, err := AwardExpTx(txApp, userID, ArcadeEditKind(arcadeID, changed), 3, currentExp); err != nil {
-			return 0, err
-		} else if granted {
-			currentExp += 3
-		}
+		grants = append(grants, arcadePublicBackfillGrant{kind: ArcadePublicBackfillKind(arcadeID, changed), diff: 3})
 	}
 	if err := changeRows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate arcade backfill changelog failed: %w", err)
+		return nil, fmt.Errorf("iterate arcade backfill changelog failed: %w", err)
 	}
 
-	flagRows, err := txApp.DB().NewQuery(`
+	flagRows, err := app.DB().NewQuery(`
 SELECT f.id AS id, COALESCE(f.created, '') AS created
 FROM arcade_flag f
 INNER JOIN arcade a ON a.id = f.arcade
 WHERE f.createdBy = {:user}
   AND f.arcade = {:arcade}
-  AND a.public = 1
+` + publicFilter + `
 ORDER BY f.created ASC, f.id ASC
 `).Bind(dbx.Params{"user": userID, "arcade": arcadeID}).Rows()
 	if err != nil {
-		return 0, fmt.Errorf("query arcade backfill flags failed: %w", err)
+		return nil, fmt.Errorf("query arcade backfill flags failed: %w", err)
 	}
 	defer flagRows.Close()
 
 	for flagRows.Next() {
-		var row rowInfo
-		if err := flagRows.Scan(&row.ID, &row.Created); err != nil {
-			return 0, fmt.Errorf("scan arcade backfill flag failed: %w", err)
+		var rowID, created string
+		if err := flagRows.Scan(&rowID, &created); err != nil {
+			return nil, fmt.Errorf("scan arcade backfill flag failed: %w", err)
 		}
-		if _, granted, err := AwardExpTx(txApp, userID, FlagKind(row.ID), 5, currentExp); err != nil {
-			return 0, err
-		} else if granted {
-			currentExp += 5
-		}
+		grants = append(grants, arcadePublicBackfillGrant{kind: FlagKind(rowID), diff: 5})
 	}
 	if err := flagRows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate arcade backfill flags failed: %w", err)
+		return nil, fmt.Errorf("iterate arcade backfill flags failed: %w", err)
 	}
 
-	reactionRows, err := txApp.DB().NewQuery(`
+	reactionRows, err := app.DB().NewQuery(`
 SELECT r.id AS id, COALESCE(r.created, '') AS created
 FROM arcade_flag_reaction r
 INNER JOIN arcade_flag f ON f.id = r.flag
 INNER JOIN arcade a ON a.id = f.arcade
 WHERE r.createdBy = {:user}
   AND f.arcade = {:arcade}
-  AND a.public = 1
+` + publicFilter + `
 ORDER BY r.created ASC, r.id ASC
 `).Bind(dbx.Params{"user": userID, "arcade": arcadeID}).Rows()
 	if err != nil {
-		return 0, fmt.Errorf("query arcade backfill reactions failed: %w", err)
+		return nil, fmt.Errorf("query arcade backfill reactions failed: %w", err)
 	}
 	defer reactionRows.Close()
 
 	for reactionRows.Next() {
-		var row rowInfo
-		if err := reactionRows.Scan(&row.ID, &row.Created); err != nil {
-			return 0, fmt.Errorf("scan arcade backfill reaction failed: %w", err)
+		var rowID, created string
+		if err := reactionRows.Scan(&rowID, &created); err != nil {
+			return nil, fmt.Errorf("scan arcade backfill reaction failed: %w", err)
 		}
-		if _, granted, err := AwardExpTx(txApp, userID, FlagReactionKind(row.ID), 3, currentExp); err != nil {
-			return 0, err
-		} else if granted {
-			currentExp += 3
-		}
+		grants = append(grants, arcadePublicBackfillGrant{kind: FlagReactionKind(rowID), diff: 3})
 	}
 	if err := reactionRows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate arcade backfill reactions failed: %w", err)
+		return nil, fmt.Errorf("iterate arcade backfill reactions failed: %w", err)
 	}
 
-	photoRows, err := txApp.DB().NewQuery(`
+	photoRows, err := app.DB().NewQuery(`
 SELECT p.arcade AS arcade_id
 FROM arcade_photo_atoms p
 INNER JOIN arcade a ON a.id = p.arcade
 WHERE p.createdBy = {:user}
   AND p.arcade = {:arcade}
   AND p.public = 1
-  AND a.public = 1
+` + publicFilter + `
 ORDER BY p.created ASC, p.id ASC
 LIMIT 1
 `).Bind(dbx.Params{"user": userID, "arcade": arcadeID}).Rows()
 	if err != nil {
-		return 0, fmt.Errorf("query arcade backfill photo submission failed: %w", err)
+		return nil, fmt.Errorf("query arcade backfill photo submission failed: %w", err)
 	}
 	defer photoRows.Close()
 
 	if photoRows.Next() {
 		var rowArcade string
 		if err := photoRows.Scan(&rowArcade); err != nil {
-			return 0, fmt.Errorf("scan arcade backfill photo submission failed: %w", err)
+			return nil, fmt.Errorf("scan arcade backfill photo submission failed: %w", err)
 		}
-		if _, granted, err := AwardExpTx(txApp, userID, ArcadePhotoSubmissionKind(arcadeID), 5, currentExp); err != nil {
-			return 0, err
-		} else if granted {
-			currentExp += 5
-		}
+		grants = append(grants, arcadePublicBackfillGrant{kind: ArcadePhotoSubmissionKind(arcadeID), diff: 5})
 	}
 	if err := photoRows.Err(); err != nil {
-		return 0, fmt.Errorf("iterate arcade backfill photo submission failed: %w", err)
+		return nil, fmt.Errorf("iterate arcade backfill photo submission failed: %w", err)
 	}
 
-	return currentExp, nil
+	return grants, nil
 }
 
 func ensureUserLevelBaseTx(txApp core.App, userID string, baseExp int) (int, error) {

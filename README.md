@@ -36,6 +36,15 @@ PocketBase data is stored in `./pb_data` by default and is ignored by Git. A fre
 
 Deployment-injected environment variables take precedence over `.env`, including intentionally empty values. Docker build context excludes `.env`, `pb_data`, caches, and `.git` via `.dockerignore`.
 
+The community translation prototype publishes Korean originals immediately and
+queues English/Japanese translations five minutes later. Set
+`MUSECAT_TRANSLATION_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` (or the generic
+`MUSECAT_TRANSLATION_API_KEY`) to enable the development worker. Leave
+`MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC=false` while reviewing stored results;
+switch it to `true` when `locale=en-US|ja-JP` should serve them. The optional
+`MUSECAT_TRANSLATION_GLOSSARY` adds deployment-specific arcade terminology to
+the built-in preservation rules.
+
 ## Docker
 
 ```sh

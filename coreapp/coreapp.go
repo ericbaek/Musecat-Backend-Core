@@ -27,6 +27,7 @@ import (
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
 	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
+	communityhandler "github.com/ericbaek/musecat-backend-core/handlers/community"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
@@ -49,6 +50,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 	arcadequery.RegisterCandidateSnapshotHooks(app)
 	arcadeflag.RegisterAutoSolveCron(app)
 	arcadeflag.RegisterAutoSolveReactionCreateHook(app)
+	communityhandler.RegisterTranslationCron(app)
 	userhandler.RegisterHooks(app)
 	// arcade.RegisterArcadeChangelogHook(app)
 
@@ -119,6 +121,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		se.Router.GET("/user/changelog", userhandler.GetUserChangelog)
 		se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback)
 		se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback)
+		communityhandler.RegisterRoutes(se)
 
 		authArcade := se.Router.Group("/arcade").Bind(
 			apis.RequireAuth("user"),
@@ -128,6 +131,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authArcade.GET("/draft", arcadequery.GetArcadeDraft)
 		authArcade.GET("/drafts", arcadequery.ListMyArcadeDrafts)
 		authArcade.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
+		authArcade.GET("/public", arcadepublic.PreviewPublicArcade)
 		authArcade.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin)
 		authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
 		authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)

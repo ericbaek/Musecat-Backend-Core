@@ -17,6 +17,36 @@ API v2 is a deliberate breaking cutover. Existing frontend calls to PocketBase c
 4. Every cross-record arcade mutation MUST use a transaction. External HTTP, notification delivery, and unbounded work MUST NOT occur inside that transaction.
 5. Core owns reusable schema and API semantics. Full owns deployment-only migration execution and operational notification delivery.
 
+## Community post prototype
+
+`community_post` is the source of truth for the first community vertical slice.
+Its raw PocketBase REST rules are locked; clients use only `GET /community/posts`,
+`GET /community/post`, `POST /community/post`, and `PUT /community/post`.
+
+- Phase one labels originals as Korean (`ko-KR`) and assumes Korean authors;
+  it does not reject Latin-only game or venue names. Active authenticated users
+  may publish, and active posts are publicly readable immediately after persistence.
+- An author may edit the original only until `editable_until`, exactly five
+  minutes after creation. Editing does not extend the deadline.
+- `translate_after` initially equals `editable_until`. The translation worker
+  creates English (`en-US`) and Japanese (`ja-JP`) variants from the final
+  Korean source after that time; it never delays or removes the Korean post.
+- External translation HTTP is outside database transactions. A short claim
+  transaction marks one post as processing; a second transaction stores a
+  validated result or retry state. Source hashes prevent stale results from
+  overwriting a concurrently changed post.
+- Translation retries are bounded to five attempts. Provider failures remain
+  visible only as translation status while the Korean original stays readable.
+- `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC` defaults off. Until explicitly
+  enabled, `locale=en-US|ja-JP` falls back to the Korean original even when
+  translations are ready. This allows translation quality to be verified
+  before the non-Korean experience is launched.
+- Translation providers are selected only through server environment variables.
+  Full development uses DeepSeek V4 Flash in non-thinking JSON mode; the Gemini
+  adapter remains available as a fallback. Prompts preserve official arcade,
+  game, cabinet, version, product, username, URL, price, and mention values and
+  may include an operator-maintained Musecat glossary.
+
 ## Visibility and role matrix
 
 Definitions:
@@ -43,6 +73,7 @@ Definitions:
 | `/arcade/analytics` protected metrics (`page_views_by_source`, `series_filter_entries`, `direction_clicks`, `visit_verifications`, `distinct_visitors`) | omitted | omitted | omitted unless official account | allow |
 | Private detail via `/arcade` | 404 | 404 | 404 | 404 |
 | Private detail via `/arcade/draft` | deny | deny | allow | allow |
+| Public-conversion XP preview | deny | deny | creator only | deny |
 | My draft list/delete | deny | own drafts only | own drafts only | use specific draft route |
 | Immediate wiki edits on public arcade | deny | allow for level 10+ | allow for level 10+ | allow |
 | Arcade memo create/update/rollback | deny | authenticated users with arcade write access | authenticated users with arcade write access | authenticated users with arcade write access |
@@ -91,9 +122,9 @@ including the authenticated user's own entry.
 | --- | --- | --- | --- |
 | `arcade` | aggregate root and current relation pointers | dedicated custom mutation handler | No client writes it through PocketBase REST. |
 | `arcade_basic`, `hour`, `sns`, `gtk`, `photo` | versioned molecule for one aggregate section | corresponding `handlers/arcade/<part>` handler | A replacement molecule is created, then the root pointer changes in the same transaction. |
-| `arcade.game_v2` | `arcade_game_history_batch` pointer | `PUT /arcade/game`, game rollback | One immutable batch contains all active revisions. Rollback changes only this pointer. The API wire fields remain `base_state_id` and `state_id`. |
+| `arcade.game_v2` | `arcade_game_history_batch` pointer | `PUT /arcade/game`, game rollback | One immutable batch contains all active revisions. `PUT /arcade/game` applies the public `add`/`modify`/`remove` delta after materializing the current batch; rollback changes only this pointer. The API wire fields remain `base_state_id` and `state_id`. |
 | `arcade.memo` | `arcade_memo` pointer | `PUT /arcade/memo`, memo rollback | Each save creates an immutable Tiptap JSON revision. Rollback changes only this pointer; authenticated arcade write access is required. |
-| `arcade_game_id` | durable installation identity | game mutation handler | `arcade`, `series`, and creator are immutable during normal mutations. Version/location/quantity never live here. Durable features such as `arcade_flag.game_id` reference this ID. The API wire fields remain `games[].id` and `game_id`. The guarded Full catalog migration may reparent `series` only after recording the exact prior row in `game_catalog_migration_origin`; the entry ID and all dependants remain unchanged. |
+| `arcade_game_id` | durable installation identity | game mutation handler | `arcade`, `series`, and creator are immutable during normal mutations. Version/location/quantity never live here. Durable features such as `arcade_flag.game_id` reference this ID. The public API uses `modify[].id` and `remove[]`; `add[]` omits IDs. An inactive entry may be reused only for the same arcade, canonical series, and verified cabinet, preserving its flags. The guarded Full catalog migration may reparent `series` only after recording the exact prior row in `game_catalog_migration_origin`; the entry ID and all dependants remain unchanged. |
 | `arcade_game_history` | immutable state for one entry in one batch | game mutation handler | `(batch, entry)` is unique. A known cabinet is unique by `(batch, version, cabinet)`; a current (non-imported) unverified cabinet is unique by `(batch, version)`. Historical imported rows may retain multiple unverified entries for one version because the legacy schema had no cabinet identity. Version must belong to entry.series. A missing entry from a batch is removed from that state. |
 | `game_series_version_cabinet` | supported cabinet catalog for a canonical game version | guarded catalog migration and later custom catalog handlers | `(version, cabinet)` is unique. `price_default` is the source version's cabinet-specific snapshot when one exists; it may be empty when compatibility is known but no cabinet-specific source price exists. |
 | atom collections | data inside a molecule or upload staging | owning part handler | Atoms cannot be directly CRUDed through raw REST. Published photo atoms are immutable. |
@@ -108,7 +139,7 @@ only the shared `note` field; it does not use `Parking` metadata.
 
 Rollback is a normal, immediate wiki action. When `report=true`, `POST /arcade/rollback` MUST atomically create the rollback changelog entry and a `rollback_report` linked to the cited prior changelog. A standalone `POST /arcade/edit_report` creates `edit_report`. Neither path bans a user nor performs an automatic rollback beyond the contributor's explicit rollback request.
 
-Game mutations require `base_state_id`; a stale value returns `409`. Existing `games[].id` values are stable entry IDs, while rows without one create a new entry. Same-series version changes retain the entry; a cross-series change is rejected. Removed entries remain durable for historical flags, which appear as `orphanFlags` while absent from the selected batch.
+Game mutations require `base_state_id`; a stale value returns `409`. The public request is a delta with required `add`, `modify`, and `remove` arrays. `modify` is a complete replacement object, not a patch, and a single modify cannot delete other active entries. Same-series version changes retain the entry; a cross-series change is rejected. Removed entries remain durable for historical flags, which appear as `orphanFlags` while absent from the selected batch. Re-addition can reuse the newest inactive history match for the same canonical series and verified cabinet; empty/unverified cabinets never reuse an identity.
 
 Every game revision round-trips its canonical `game_cabinet` ID. A non-empty
 cabinet is valid only when `game_series_version_cabinet` contains the submitted
@@ -148,6 +179,7 @@ The PocketBase collection API is persistence infrastructure, not the application
 | --- | --- |
 | public arcade detail | `GET /arcade?id=...` |
 | private creator/staff draft detail | `GET /arcade/draft?id=...` |
+| public-conversion XP preview | `GET /arcade/public?arcade=...` |
 | own drafts | `GET /arcade/drafts` |
 | delete own draft | `DELETE /arcade/draft?id=...` |
 | arcade memo | `GET /arcade/memo?arcade=...`, `PUT /arcade/memo` |
@@ -181,7 +213,9 @@ New frontend code MUST NOT reintroduce collection names, PocketBase record rules
 - Nearby remains an operating-discovery route: private and public/closed arcades, historical unselected batches, and unverified cabinet revisions for a cabinet-qualified pair MUST NOT affect results, pagination, country totals, or nearest-arcade summaries.
 - Candidate invalidation follows changes to arcade/basic data, `arcade.game_v2`, current game entries/revisions, versions, cabinets, and version/cabinet compatibility records.
 - `/arcades` is paginated `{page, per_page, last_page, total, items}` and includes only public/open candidates. Search intentionally includes public/closed candidates.
+- `GET /arcade/public?arcade=...` is a creator-only, read-only XP estimate. It uses the same idempotent public and draft-backfill grant keys as `PUT /arcade/public`, writes no visibility or ledger state, and the successful PUT response is authoritative if the draft changes afterward. Draft backfill is independent of the seven-day arcade-edit cooldown: each changed area earns its backfill once per arcade, regardless of how recently that area received normal edit XP.
 - XP ledger changes and aggregate mutations belong to the same transaction. No XP grant may survive a failed aggregate mutation.
+- Normal edit XP remains scoped by user, arcade, and part. Basic/hour/sns/gtk/photo edits continue to grant 3 XP with their existing seven-day cooldown. Game edits use a rolling seven-day window of distinct durable `arcade_game_id` values: the target is `min(10, 2*n + 1)` and each request receives only the increase over XP already granted in that window. Revisiting an entry already counted in the window grants 0; entries become eligible again after they leave the window. Administrative bulk game-version updates and public-conversion backfill do not use this scale.
 - Notification delivery is after persistence and best-effort. A Telegram/Discord failure MUST NOT roll back a completed user request.
 - Review processing has no automated ban and no automated rollback.
 - Public `GET /arcade` detail loads record one `page_view` event best-effort. The direction-click event route is anonymous and accepts only `direction_click`.

@@ -2,6 +2,7 @@ package game
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -31,6 +32,8 @@ type Price struct {
 // Game is a game_series_version id and may change only within the same series.
 type GameAtomInput struct {
 	ID string `json:"id,omitempty"`
+	// idProvided distinguishes an omitted add id from an explicit null/empty id.
+	idProvided bool
 	// PrevID is legacy internal-only log input. API v2 does not decode it.
 	PrevID   string    `json:"-"`
 	Game     string    `json:"game"`
@@ -43,15 +46,59 @@ type GameAtomInput struct {
 	RawTag   any       `json:"-"`
 }
 
+func (g *GameAtomInput) UnmarshalJSON(data []byte) error {
+	type gameAtomInputAlias GameAtomInput
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	var decoded gameAtomInputAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*g = GameAtomInput(decoded)
+	_, g.idProvided = fields["id"]
+	return nil
+}
+
 type UpdateArcadeGameBody struct {
 	Arcade      string          `json:"arcade"`
 	BaseStateID string          `json:"base_state_id"`
 	Games       []GameAtomInput `json:"games"`
 }
 
-func parseUpdateGameBody(re *core.RequestEvent) (UpdateArcadeGameBody, error) {
-	var body UpdateArcadeGameBody
-	return body, json.NewDecoder(re.Request.Body).Decode(&body)
+// UpdateArcadeGameDeltaBody is the public request contract. The internal
+// UpdateArcadeGameBody remains a complete-state representation for immutable
+// batch creation and for non-HTTP callers such as campaign and bulk updates.
+type UpdateArcadeGameDeltaBody struct {
+	Arcade      string          `json:"arcade"`
+	BaseStateID string          `json:"base_state_id"`
+	Add         []GameAtomInput `json:"add"`
+	Modify      []GameAtomInput `json:"modify"`
+	Remove      []string        `json:"remove"`
+}
+
+func parseUpdateGameBody(re *core.RequestEvent) (UpdateArcadeGameDeltaBody, error) {
+	var wire struct {
+		Arcade      string           `json:"arcade"`
+		BaseStateID string           `json:"base_state_id"`
+		Add         *[]GameAtomInput `json:"add"`
+		Modify      *[]GameAtomInput `json:"modify"`
+		Remove      *[]string        `json:"remove"`
+	}
+	if err := json.NewDecoder(re.Request.Body).Decode(&wire); err != nil {
+		return UpdateArcadeGameDeltaBody{}, err
+	}
+	if wire.Add == nil || wire.Modify == nil || wire.Remove == nil {
+		return UpdateArcadeGameDeltaBody{}, fmt.Errorf("add, modify, and remove are required arrays")
+	}
+	return UpdateArcadeGameDeltaBody{
+		Arcade:      wire.Arcade,
+		BaseStateID: wire.BaseStateID,
+		Add:         *wire.Add,
+		Modify:      *wire.Modify,
+		Remove:      *wire.Remove,
+	}, nil
 }
 
 func NormalizePriceForRead(p Price) Price {
@@ -112,6 +159,43 @@ func validatePrice(p Price) error {
 	return ValidatePriceAccept(p.Accept)
 }
 
+func validateGameAtomFields(label string, g *GameAtomInput) error {
+	g.ID, g.Game, g.Cabinet = strings.TrimSpace(g.ID), strings.TrimSpace(g.Game), strings.TrimSpace(g.Cabinet)
+	if g.Game == "" {
+		return fmt.Errorf("%s.game is required", label)
+	}
+	if g.Quantity <= 0 {
+		return fmt.Errorf("%s.quantity must be > 0", label)
+	}
+	price := g.Price
+	if g.RawPrice != nil {
+		encoded, err := json.Marshal(g.RawPrice)
+		if err != nil {
+			return fmt.Errorf("%s.price is invalid", label)
+		}
+		if err := json.Unmarshal(encoded, &price); err != nil {
+			return fmt.Errorf("%s.price is invalid", label)
+		}
+	}
+	if err := validatePrice(price); err != nil {
+		return fmt.Errorf("%s.%v", label, err)
+	}
+	tags := g.Tag
+	if g.RawTag != nil {
+		encoded, err := json.Marshal(g.RawTag)
+		if err != nil {
+			return fmt.Errorf("%s.tag is invalid", label)
+		}
+		if err := json.Unmarshal(encoded, &tags); err != nil {
+			return fmt.Errorf("%s.tag is invalid", label)
+		}
+	}
+	if err := ValidateTagItems(tags); err != nil {
+		return fmt.Errorf("%s.%v", label, err)
+	}
+	return nil
+}
+
 func validateUpdateGameBody(body *UpdateArcadeGameBody) error {
 	body.Arcade, body.BaseStateID = strings.TrimSpace(body.Arcade), strings.TrimSpace(body.BaseStateID)
 	if body.Arcade == "" {
@@ -120,12 +204,8 @@ func validateUpdateGameBody(body *UpdateArcadeGameBody) error {
 	seenEntries, seenVersions := map[string]struct{}{}, map[string]struct{}{}
 	for i := range body.Games {
 		g := &body.Games[i]
-		g.ID, g.Game, g.Cabinet = strings.TrimSpace(g.ID), strings.TrimSpace(g.Game), strings.TrimSpace(g.Cabinet)
-		if g.Game == "" {
-			return fmt.Errorf("games[%d].game is required", i)
-		}
-		if g.Quantity <= 0 {
-			return fmt.Errorf("games[%d].quantity must be > 0", i)
+		if err := validateGameAtomFields(fmt.Sprintf("games[%d]", i), g); err != nil {
+			return err
 		}
 		versionKey := g.Game + "\x00" + g.Cabinet
 		if _, ok := seenVersions[versionKey]; ok {
@@ -138,11 +218,207 @@ func validateUpdateGameBody(body *UpdateArcadeGameBody) error {
 			}
 			seenEntries[g.ID] = struct{}{}
 		}
-		if err := validatePrice(g.Price); err != nil {
-			return fmt.Errorf("games[%d].%v", i, err)
+	}
+	return nil
+}
+
+func validateUpdateGameDeltaBody(body *UpdateArcadeGameDeltaBody) error {
+	body.Arcade, body.BaseStateID = strings.TrimSpace(body.Arcade), strings.TrimSpace(body.BaseStateID)
+	if body.Arcade == "" {
+		return fmt.Errorf("arcade is required")
+	}
+	if len(body.Add) == 0 && len(body.Modify) == 0 && len(body.Remove) == 0 {
+		return fmt.Errorf("at least one add, modify, or remove item is required")
+	}
+
+	seenModify, seenRemove := map[string]struct{}{}, map[string]struct{}{}
+	for i := range body.Add {
+		g := &body.Add[i]
+		if g.idProvided || strings.TrimSpace(g.ID) != "" {
+			return fmt.Errorf("add[%d].id must be omitted", i)
 		}
-		if err := ValidateTagItems(g.Tag); err != nil {
-			return fmt.Errorf("games[%d].%v", i, err)
+		if err := validateGameAtomFields(fmt.Sprintf("add[%d]", i), g); err != nil {
+			return err
+		}
+	}
+	for i := range body.Modify {
+		g := &body.Modify[i]
+		g.ID = strings.TrimSpace(g.ID)
+		if g.ID == "" {
+			return fmt.Errorf("modify[%d].id is required", i)
+		}
+		if _, exists := seenModify[g.ID]; exists {
+			return fmt.Errorf("modify[%d].id is duplicated", i)
+		}
+		seenModify[g.ID] = struct{}{}
+		if err := validateGameAtomFields(fmt.Sprintf("modify[%d]", i), g); err != nil {
+			return err
+		}
+	}
+	for i := range body.Remove {
+		body.Remove[i] = strings.TrimSpace(body.Remove[i])
+		if body.Remove[i] == "" {
+			return fmt.Errorf("remove[%d] is required", i)
+		}
+		if _, exists := seenRemove[body.Remove[i]]; exists {
+			return fmt.Errorf("remove[%d] is duplicated", i)
+		}
+		if _, modifies := seenModify[body.Remove[i]]; modifies {
+			return fmt.Errorf("remove[%d] conflicts with modify", i)
+		}
+		seenRemove[body.Remove[i]] = struct{}{}
+	}
+	return nil
+}
+
+type gameRequestValidationError struct {
+	message string
+}
+
+func (e *gameRequestValidationError) Error() string { return e.message }
+
+func materializeUpdateGameDelta(txApp core.App, delta UpdateArcadeGameDeltaBody) (UpdateArcadeGameBody, int, error) {
+	arcadeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, delta.Arcade)
+	if err != nil {
+		return UpdateArcadeGameBody{}, 0, fmt.Errorf("arcade not found: %w", err)
+	}
+	currentState := strings.TrimSpace(arcadeRec.GetString("game_v2"))
+	if strings.TrimSpace(delta.BaseStateID) != currentState {
+		return UpdateArcadeGameBody{}, 0, fmt.Errorf("game state conflict")
+	}
+
+	full := UpdateArcadeGameBody{
+		Arcade:      delta.Arcade,
+		BaseStateID: currentState,
+		Games:       []GameAtomInput{},
+	}
+	if currentState != "" {
+		full, err = BuildUpdateBodyFromCurrentState(txApp, delta.Arcade)
+		if err != nil {
+			return UpdateArcadeGameBody{}, 0, err
+		}
+		full.BaseStateID = currentState
+	}
+
+	previousByEntry := map[string]*core.Record{}
+	if currentState != "" {
+		rows, findErr := txApp.FindRecordsByFilter(
+			arcadeinternal.CollectionArcadeGameRevision,
+			"batch={:batch}",
+			"",
+			0,
+			0,
+			dbx.Params{"batch": currentState},
+		)
+		if findErr != nil {
+			return UpdateArcadeGameBody{}, 0, findErr
+		}
+		for _, row := range rows {
+			previousByEntry[row.GetString("entry")] = row
+		}
+	}
+
+	indexByEntry := make(map[string]int, len(full.Games))
+	reserved := make(map[string]struct{}, len(full.Games))
+	for i := range full.Games {
+		id := strings.TrimSpace(full.Games[i].ID)
+		indexByEntry[id] = i
+		reserved[id] = struct{}{}
+	}
+
+	changedEntries := 0
+	for i := range delta.Modify {
+		g := delta.Modify[i]
+		entryIndex, ok := indexByEntry[g.ID]
+		if !ok {
+			return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: fmt.Sprintf("modify[%d].id is not active", i)}
+		}
+
+		seriesID, seriesErr := versionSeries(txApp, g.Game)
+		if seriesErr != nil || seriesID == "" {
+			return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: fmt.Sprintf("modify[%d].game not found", i)}
+		}
+		entry, entryErr := txApp.FindRecordById(arcadeinternal.CollectionArcadeGameEntry, g.ID)
+		if entryErr != nil {
+			return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: fmt.Sprintf("modify[%d].id not found", i)}
+		}
+		if entry.GetString("arcade") != delta.Arcade {
+			return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: fmt.Sprintf("modify[%d].id does not belong to arcade", i)}
+		}
+		if entry.GetString("series") != seriesID {
+			return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: fmt.Sprintf("modify[%d].game must remain in the entry series", i)}
+		}
+		if revisionChanged(previousByEntry[g.ID], g) {
+			changedEntries++
+		}
+		full.Games[entryIndex] = g
+	}
+
+	removeSet := make(map[string]struct{}, len(delta.Remove))
+	for i, id := range delta.Remove {
+		if _, ok := indexByEntry[id]; !ok {
+			return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: fmt.Sprintf("remove[%d] is not active", i)}
+		}
+		removeSet[id] = struct{}{}
+	}
+	if len(removeSet) > 0 {
+		remaining := make([]GameAtomInput, 0, len(full.Games)-len(removeSet))
+		for _, g := range full.Games {
+			if _, removed := removeSet[strings.TrimSpace(g.ID)]; removed {
+				continue
+			}
+			remaining = append(remaining, g)
+		}
+		full.Games = remaining
+		changedEntries += len(removeSet)
+	}
+
+	for i := range delta.Add {
+		g := delta.Add[i]
+		seriesID, seriesErr := versionSeries(txApp, g.Game)
+		if seriesErr != nil || seriesID == "" {
+			return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: fmt.Sprintf("add[%d].game not found", i)}
+		}
+		entryID, reuseErr := findReusableGameEntryID(txApp, delta.Arcade, seriesID, g.Cabinet, currentState, reserved)
+		if reuseErr != nil {
+			return UpdateArcadeGameBody{}, 0, reuseErr
+		}
+		g.ID = entryID
+		full.Games = append(full.Games, g)
+		if entryID != "" {
+			reserved[entryID] = struct{}{}
+		}
+		changedEntries++
+	}
+
+	if err := validateUpdateGameBody(&full); err != nil {
+		return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: err.Error()}
+	}
+	if err := validateGameAtomReferences(txApp, full); err != nil {
+		return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: err.Error()}
+	}
+	return full, changedEntries, nil
+}
+
+func validateGameAtomReferences(app core.App, body UpdateArcadeGameBody) error {
+	for i := range body.Games {
+		g := body.Games[i]
+		seriesID, err := versionSeries(app, g.Game)
+		if err != nil || seriesID == "" {
+			return fmt.Errorf("games[%d].game not found", i)
+		}
+		if g.Cabinet == "" {
+			continue
+		}
+		if _, err := app.FindRecordById(arcadeinternal.CollectionGameCabinet, g.Cabinet); err != nil {
+			return fmt.Errorf("games[%d].cabinet not found", i)
+		}
+		if _, err := app.FindFirstRecordByFilter(
+			arcadeinternal.CollectionGameSeriesVersionCabinet,
+			"version={:version} && cabinet={:cabinet}",
+			dbx.Params{"version": g.Game, "cabinet": g.Cabinet},
+		); err != nil {
+			return fmt.Errorf("games[%d].cabinet is not supported by game version", i)
 		}
 	}
 	return nil
@@ -235,6 +511,10 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		return "", err
 	}
 	now := time.Now().UTC()
+	reservedEntryIDs := make(map[string]struct{}, len(previousByEntry))
+	for entryID := range previousByEntry {
+		reservedEntryIDs[entryID] = struct{}{}
+	}
 	logItems := make([]map[string]any, 0, len(body.Games))
 	for i, g := range body.Games {
 		entryID := strings.TrimSpace(g.ID)
@@ -256,14 +536,25 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		}
 		var entry *core.Record
 		if entryID == "" {
-			entry = core.NewRecord(entryColl)
-			entry.Set("arcade", body.Arcade)
-			entry.Set("series", versionSeriesID)
-			entry.Set("created_by", createdBy)
-			if err := txApp.Save(entry); err != nil {
+			entryID, err = findReusableGameEntryID(txApp, body.Arcade, versionSeriesID, g.Cabinet, currentState, reservedEntryIDs)
+			if err != nil {
 				return "", err
 			}
-			entryID = entry.Id
+			if entryID == "" {
+				entry = core.NewRecord(entryColl)
+				entry.Set("arcade", body.Arcade)
+				entry.Set("series", versionSeriesID)
+				entry.Set("created_by", createdBy)
+				if err := txApp.Save(entry); err != nil {
+					return "", err
+				}
+				entryID = entry.Id
+			} else {
+				entry, err = txApp.FindRecordById(arcadeinternal.CollectionArcadeGameEntry, entryID)
+				if err != nil {
+					return "", fmt.Errorf("games[%d].reusable id not found", i)
+				}
+			}
 		} else {
 			entry, err = txApp.FindRecordById(arcadeinternal.CollectionArcadeGameEntry, entryID)
 			if err != nil {
@@ -276,6 +567,7 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 				return "", fmt.Errorf("games[%d].game must remain in the entry series", i)
 			}
 		}
+		reservedEntryIDs[entryID] = struct{}{}
 		previous := previousByEntry[entryID]
 		revision := core.NewRecord(revisionColl)
 		revision.Set("batch", batch.Id)
@@ -366,18 +658,54 @@ func BulkUpdateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy
 	return updateArcadeGameTx(txApp, body, createdBy, false, "bulk_version", bulkID)
 }
 
+func loadChangedGameEntryIDs(app core.App, arcadeID, stateID string) ([]string, error) {
+	change, err := app.FindFirstRecordByFilter(
+		arcadeinternal.CollectionArcadeChangelog,
+		"arcade={:arcade} && changed='game' && to={:state}",
+		dbx.Params{"arcade": arcadeID, "state": stateID},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("game changelog not found for state: %w", err)
+	}
+
+	encoded, err := json.Marshal(change.Get("log"))
+	if err != nil {
+		return nil, fmt.Errorf("encode game changelog: %w", err)
+	}
+	var payload struct {
+		Items []struct {
+			EntryID    string `json:"entry_id"`
+			ChangeType string `json:"change_type"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		return nil, fmt.Errorf("decode game changelog: %w", err)
+	}
+
+	ids := make([]string, 0, len(payload.Items))
+	for _, item := range payload.Items {
+		if item.ChangeType == "unchanged" || strings.TrimSpace(item.EntryID) == "" {
+			continue
+		}
+		ids = append(ids, item.EntryID)
+	}
+	return ids, nil
+}
+
 func UpdateArcadeGame(re *core.RequestEvent) error {
-	body, err := parseUpdateGameBody(re)
+	delta, err := parseUpdateGameBody(re)
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
 	}
-	if err := validateUpdateGameBody(&body); err != nil {
+	if err := validateUpdateGameDeltaBody(&delta); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "validation failed", "details": err.Error()})
 	}
 	var stateID string
+	var materialized UpdateArcadeGameBody
+	var changedEntryIDs []string
 	var xp userhandler.ExpFeedback
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
-		arcadeRec, findErr := txApp.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
+		arcadeRec, findErr := txApp.FindRecordById(arcadeinternal.CollectionArcade, delta.Arcade)
 		if findErr != nil {
 			return fmt.Errorf("arcade not found: %w", findErr)
 		}
@@ -385,13 +713,21 @@ func UpdateArcadeGame(re *core.RequestEvent) error {
 		if expErr != nil {
 			return expErr
 		}
-		stateID, err = UpdateArcadeGameTx(txApp, body, re.Auth.Id)
+		materialized, _, err = materializeUpdateGameDelta(txApp, delta)
+		if err != nil {
+			return err
+		}
+		stateID, err = UpdateArcadeGameTx(txApp, materialized, re.Auth.Id)
+		if err != nil {
+			return err
+		}
+		changedEntryIDs, err = loadChangedGameEntryIDs(txApp, delta.Arcade, stateID)
 		if err != nil {
 			return err
 		}
 		current := base
 		if arcadeRec.GetBool("public") {
-			current, _, err = userhandler.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "game", 3, base, time.Now().UTC())
+			current, _, err = userhandler.AwardArcadeGameEditExpTx(txApp, re.Auth.Id, delta.Arcade, changedEntryIDs, base, time.Now().UTC())
 			if err != nil {
 				return err
 			}
@@ -400,7 +736,10 @@ func UpdateArcadeGame(re *core.RequestEvent) error {
 		return nil
 	}); err != nil {
 		status := http.StatusBadGateway
-		if strings.Contains(err.Error(), "game state conflict") {
+		var validationErr *gameRequestValidationError
+		if errors.As(err, &validationErr) {
+			status = http.StatusBadRequest
+		} else if strings.Contains(err.Error(), "game state conflict") {
 			status = http.StatusConflict
 		}
 		return re.JSON(status, map[string]any{"error": "game update failed", "details": err.Error()})
@@ -409,5 +748,5 @@ func UpdateArcadeGame(re *core.RequestEvent) error {
 	if !ok {
 		gameValue = map[string]any{"id": stateID, "items": []map[string]any{}}
 	}
-	return re.JSON(http.StatusOK, map[string]any{"arcade": body.Arcade, "game": gameValue, "count": len(body.Games), "xp_feedback": xp})
+	return re.JSON(http.StatusOK, map[string]any{"arcade": delta.Arcade, "game": gameValue, "count": len(materialized.Games), "xp_feedback": xp})
 }

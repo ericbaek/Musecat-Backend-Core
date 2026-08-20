@@ -9,13 +9,21 @@ The score endpoint is ledger-based. It reads `user_level_log` and exposes the XP
 
 ## XP Rules
 - `public` arcade creation: `10` XP
-- Arcade edit bonus: `3` XP per granted edit log
+- Arcade edit bonus: basic/hour/sns/gtk/photo edits grant `3` XP when eligible. Game edits use the rolling seven-day distinct-entry target `0 → 0`, `1 → 3`, `2 → 5`, `3 → 7`, `4 → 9`, and `5+ → 10` XP; each request receives only the incremental difference from that target already awarded in the window.
 - `photo_submission`: `5` XP
 - `flag`: `5` XP
 - `flag_reaction`: `3` XP
 - attendance check-in: `2` XP per successful KST-day first check-in
 
-Edit grants can repeat after the same user has left that arcade unchanged for more than 7 days.
+Basic/hour/sns/gtk/photo grants use the existing seven-day cooldown per user +
+arcade + part. Game edits instead use a rolling seven-day set of distinct
+`arcade_game_id` values. The target is `min(10, 2*n + 1)` and each request gets
+only the incremental difference from XP already granted in that window. A
+second edit to an entry already counted in the window gets `0`; once the entry
+falls out of the seven-day window it can count again. Different users, arcades,
+and parts have separate windows. Private arcade edits do not award normal edit
+XP. Administrative bulk version updates, campaign updates, and historical
+backfill keep their existing policies.
 
 ## Ledger Entry Shape
 `entries[]` is the machine-readable timeline used by the frontend, ordered from latest to oldest.

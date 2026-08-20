@@ -55,3 +55,24 @@ func TestBuildExpFeedbackPreviousAndNewPercentZeroBase(t *testing.T) {
 		t.Fatalf("expected new_percent_to_next_level 25, got %d", feedback.NewPercentToNextLevel)
 	}
 }
+
+func TestArcadeGameEditExpScalesByChangedEntryCount(t *testing.T) {
+	cases := []struct {
+		changed int
+		want    int
+	}{
+		{changed: 0, want: 0},
+		{changed: 1, want: 3},
+		{changed: 2, want: 5},
+		{changed: 3, want: 7},
+		{changed: 4, want: 9},
+		{changed: 5, want: 10},
+		{changed: 20, want: 10},
+	}
+
+	for _, tc := range cases {
+		if got := ArcadeGameEditExp(tc.changed); got != tc.want {
+			t.Fatalf("ArcadeGameEditExp(%d) = %d, want %d", tc.changed, got, tc.want)
+		}
+	}
+}

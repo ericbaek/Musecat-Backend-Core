@@ -25,6 +25,8 @@ tags:
     description: Supporter XP and request endpoints.
   - name: Users
     description: Public and authenticated user profile endpoints.
+  - name: Community
+    description: Community posts and delayed cached translations.
   - name: Arcade Mutations
     description: Authenticated arcade editing endpoints.
 components:
@@ -70,6 +72,59 @@ components:
           type: string
         code:
           type: string
+    CommunityPostInput:
+      type: object
+      required: [body]
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        body:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        flair:
+          type: string
+          enum: [achievement, question, tip, news, event, art, chitchat]
+          default: chitchat
+        game_series:
+          type: string
+          description: Optional canonical game_series id.
+    CommunityPost:
+      type: object
+      required: [id, author, game_series, title, body, flair, locale, requested_locale, source_locale, translated, translation_status, editable_until, created, updated]
+      properties:
+        id: {type: string}
+        author: {type: string}
+        game_series: {type: string}
+        title: {type: string}
+        body: {type: string}
+        flair: {type: string, enum: [achievement, question, tip, news, event, art, chitchat]}
+        locale: {type: string, enum: [ko-KR, en-US, ja-JP]}
+        requested_locale: {type: string, enum: [ko-KR, en-US, ja-JP]}
+        source_locale: {type: string, enum: [ko-KR]}
+        translated:
+          type: boolean
+          description: True only when a cached translation is served.
+        translation_status: {type: string, enum: [pending, processing, ready, failed]}
+        editable_until: {type: string, format: date-time}
+        translated_at:
+          oneOf:
+            - {type: string, format: date-time}
+            - {type: string, maxLength: 0}
+        created: {type: string, format: date-time}
+        updated: {type: string, format: date-time}
+    CommunityPostList:
+      type: object
+      required: [page, per_page, last_page, total, items]
+      properties:
+        page: {type: integer}
+        per_page: {type: integer}
+        last_page: {type: integer}
+        total: {type: integer, format: int64}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/CommunityPost'}
     PocketBaseAuthError:
       type: object
       required: [data, message, status]
@@ -129,6 +184,27 @@ components:
         remaining_percent_to_next_level:
           type: integer
           description: Percent remaining to the next level. Use `100 - remaining_percent_to_next_level` for progress fill.
+    ArcadePublicExpPreview:
+      type: object
+      required: [current_exp, public_exp, backfill_exp, estimated_exp, estimated_gain, xp_feedback]
+      properties:
+        current_exp:
+          type: integer
+          description: Creator's current XP before public conversion.
+        public_exp:
+          type: integer
+          description: XP currently eligible from the public-conversion grant.
+        backfill_exp:
+          type: integer
+          description: XP currently eligible from draft contributions and other backfilled grants. Draft arcade areas are backfilled once per arcade independently of the seven-day edit cooldown.
+        estimated_exp:
+          type: integer
+          description: Estimated creator XP after a successful public conversion.
+        estimated_gain:
+          type: integer
+          description: Estimated total XP increase. The PUT response is authoritative if the draft changes before conversion.
+        xp_feedback:
+          $ref: '#/components/schemas/XpFeedback'
     GeoLookupResponse:
       type: object
       required: [country, timezone]
@@ -1803,7 +1879,7 @@ components:
           type: string
         id:
           type: string
-          description: Stable `arcade_game_id` id. Omit only to add a new installation.
+          description: Stable `arcade_game_id` id. Forbidden in `add`; required in `modify` and never supplied in `remove`.
         cabinet:
           oneOf:
             - type: string
@@ -1825,17 +1901,28 @@ components:
             $ref: '#/components/schemas/TagItem'
     UpdateArcadeGameRequest:
       type: object
-      required: [arcade, base_state_id, games]
+      required: [arcade, base_state_id, add, modify, remove]
       properties:
         arcade:
           type: string
         base_state_id:
           type: string
-          description: Current `arcade.game_v2`; stale values return 409. The wire name remains `base_state_id`.
-        games:
+          description: Current `arcade.game_v2`; stale values return 409. Use an empty string only for the first registration.
+        add:
           type: array
           items:
             $ref: '#/components/schemas/GameAtomInput'
+          description: Complete game objects without `id`. Each object creates one active installation identity, or reuses an eligible inactive identity.
+        modify:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameAtomInput'
+          description: Complete replacement objects with an active `id`; this is not a partial patch.
+        remove:
+          type: array
+          items:
+            type: string
+          description: Active `arcade_game_id` values to remove from the next state. The durable entries remain in history.
     CreateArcadeFlagRequest:
       type: object
       required: [arcade, game_id, disruption, message]
@@ -2884,6 +2971,137 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /community/posts:
+    get:
+      tags: [Community]
+      summary: List immediately public community posts
+      parameters:
+        - name: locale
+          in: query
+          schema: {type: string, enum: [ko-KR, en-US, ja-JP], default: ko-KR}
+          description: Requested display locale. Non-Korean variants fall back to ko-KR until translation publication is enabled.
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 30}
+      responses:
+        '200':
+          description: Paginated active posts.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityPostList'}
+        '400':
+          description: Invalid locale or pagination.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Failed to load posts.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /community/post:
+    get:
+      tags: [Community]
+      summary: Get an immediately public community post
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: locale
+          in: query
+          schema: {type: string, enum: [ko-KR, en-US, ja-JP], default: ko-KR}
+      responses:
+        '200':
+          description: Active post, localized only when translation publication is enabled and ready.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityPost'}
+        '400':
+          description: Missing id or invalid locale.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Post not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    post:
+      tags: [Community]
+      summary: Publish a Korean community post immediately
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommunityPostInput'}
+      responses:
+        '201':
+          description: Korean original is public immediately; translation is scheduled five minutes later.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityPost'}
+        '400':
+          description: Invalid body, flair, or game series.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Authentication required.
+        '403':
+          description: Withdrawn or banned user.
+        '502':
+          description: Failed to create post.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    put:
+      tags: [Community]
+      summary: Edit the author's Korean original within five minutes
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommunityPostInput'}
+      responses:
+        '200':
+          description: Updated Korean original. The original translation deadline is unchanged.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityPost'}
+        '400':
+          description: Invalid request.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Authentication required.
+        '403':
+          description: Not the author, withdrawn, or banned.
+        '404':
+          description: Post not found.
+        '409':
+          description: Five-minute edit window has closed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Failed to update post.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /user:
     get:
       tags: [Users]
@@ -4618,6 +4836,63 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /arcade/public:
+    get:
+      tags: [Arcade Mutations]
+      summary: Preview public-conversion XP
+      description: Reads the creator's currently eligible public-conversion and draft-backfill XP without changing visibility or the XP ledger. Only the private arcade creator may call this endpoint. The PUT response remains authoritative if the draft changes afterward.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Current XP preview for converting the private arcade to public.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, public, xp_preview]
+                properties:
+                  arcade:
+                    type: string
+                  public:
+                    type: boolean
+                    const: false
+                  xp_preview:
+                    $ref: '#/components/schemas/ArcadePublicExpPreview'
+        '400':
+          description: Missing arcade id, closed arcade, or already-public arcade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Only the draft creator may preview its public-conversion XP.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to calculate the XP preview.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     put:
       tags: [Arcade Mutations]
       summary: /arcade/public
@@ -4766,11 +5041,15 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/game
       description: |
-        Creates an immutable revision batch and updates only `arcade.game_v2`.
-        Existing item ids are durable entries; the submitted version must remain in that entry's series.
-        Cabinet ids are round-tripped on every revision and must be supported by
-        the submitted version. The wire fields remain `base_state_id`, `games[].id`,
-        and response `game.id`/`state_id` where present.
+        Applies an add/modify/remove delta to the current immutable game state and
+        updates only `arcade.game_v2`. All three arrays are required. `modify`
+        objects are complete replacements, not partial patches. Existing item ids
+        are durable entries; a deleted entry may be reused when the same arcade,
+        series, and verified cabinet match historical state. Cabinet ids must be
+        supported by the submitted version. Public game edits use a rolling
+        seven-day distinct-entry XP window with target `min(10, 2*n + 1)`;
+        private edits do not award normal edit XP, and administrative bulk
+        updates do not award it either.
       security:
         - bearerAuth: []
       requestBody:
@@ -4794,6 +5073,7 @@ paths:
                     $ref: '#/components/schemas/ArcadeGameExpanded'
                   count:
                     type: integer
+                    description: Number of active entries in the resulting state.
                   xp_feedback:
                     $ref: '#/components/schemas/XpFeedback'
         '400':
@@ -4803,7 +5083,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: "`base_state_id` is stale or a game version conflicts with the current state."
+          description: "`base_state_id` is stale and does not equal the current `arcade.game_v2`."
           content:
             application/json:
               schema:

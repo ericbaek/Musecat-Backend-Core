@@ -91,6 +91,7 @@ other arcade handlers own mutation flows for their respective parts.
 | `support_feedback` | Public support feedback queue | support endpoints and admin review |
 | `supporter_request` | Supporter qualification request workflow | supporter score and request endpoints |
 | `feed` | General feed items | feed queries and related moderation flows |
+| `community_post` | Immediately public Korean posts plus delayed cached English/Japanese translations | community custom API and translation worker |
 | `z_error_log` | Error log sink | operational logging and debugging |
 
 ### Legacy Or Deleted Collections

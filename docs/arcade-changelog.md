@@ -41,7 +41,7 @@ Each row uses these common columns:
 | `PUT /arcade/hour` | `hour` | one row per request | `hour_diff` | Replaces the current `arcade_hour` relation. |
 | `PUT /arcade/sns` | `sns` | one row per request | `sns_diff` | Replaces the current `arcade_sns` relation. |
 | `PUT /arcade/gtk` | `gtk` | one row per request | `gtk_diff` | Replaces the current `arcade_gtk` relation. |
-| `PUT /arcade/game` | `game` | one row per request | `game_diff` | Validates `base_state_id`, creates an immutable history batch, then moves `arcade.game_v2` to it. Item IDs are persistent `arcade_game_id` IDs. |
+| `PUT /arcade/game` | `game` | one row per request | `game_diff` | Accepts required `add`/`modify`/`remove` arrays, materializes the current immutable state, validates `base_state_id`, creates a new immutable history batch, then moves `arcade.game_v2` to it. Item IDs are persistent `arcade_game_id` IDs. |
 | `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Developer/moderator-only administrative version swap. It uses the normal immutable game-state batch flow. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `PUT /arcade/memo` | `memo` | one row per changed request | `memo_diff` | Creates an immutable Tiptap JSON revision and moves `arcade.memo` for an authenticated user with arcade write access. |
@@ -175,6 +175,46 @@ Field-level diffs are usually:
 - `meta` for `Parking` atoms
 
 ### `PUT /arcade/game`
+
+The public request is a Delta payload, not the legacy full `games[]` payload:
+
+```json
+{
+  "arcade": "arcade_123",
+  "base_state_id": "batch_current",
+  "add": [],
+  "modify": [{
+    "id": "arcade_game_123",
+    "game": "version_2",
+    "cabinet": "cabinet_dx",
+    "location": "2F",
+    "quantity": 2,
+    "price": {"currency": "KRW", "type": "custom", "list": [{"value": 500}], "accept": []},
+    "tag": [{"category": "기타", "note": "updated"}]
+  }],
+  "remove": []
+}
+```
+
+All three arrays are required. `add` contains complete objects without `id`,
+`modify` contains complete replacement objects with an active `id`, and
+`remove` contains active `arcade_game_id` strings. A single modify does not
+remove any other active game. A stale `base_state_id` returns `409`; clients
+should reload the current game state and retry their intended delta. The old
+`games[]` request must not be sent to this endpoint.
+
+The server writes one immutable batch and one `game_diff` row for every
+successful request. Each item records `before` and `after` snapshots and one of
+`added`, `updated`, `unchanged`, or `deleted`. Removed entries are not deleted
+from `arcade_game_id`, so historical flags remain attached and are returned as
+`orphanFlags` until that entry becomes active again.
+
+When an add has a verified cabinet, the server may reuse the newest inactive
+entry for the same arcade, canonical series, and cabinet. It orders candidates
+by matching history revision `created`, entry `created`, and entry id, all
+descending. Empty/unverified cabinets never participate in reuse. Reusing an
+entry also reactivates its durable flags. A different cabinet creates a new
+entry. Version changes are allowed only within the entry's series.
 
 `items[]` contains one object per stable game entry. Each item includes:
 - `entry_id`

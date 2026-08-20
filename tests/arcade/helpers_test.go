@@ -170,6 +170,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		group.GET("/draft", arcadequery.GetArcadeDraft)
 		group.GET("/drafts", arcadequery.ListMyArcadeDrafts)
 		group.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
+		group.GET("/public", arcadepublic.PreviewPublicArcade)
 		group.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin)
 		group.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
 		group.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)

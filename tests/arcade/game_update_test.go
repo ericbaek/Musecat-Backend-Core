@@ -24,32 +24,32 @@ func TestUpdateArcadeGame_PriceValidation(t *testing.T) {
 		{
 			name:   "missing currency",
 			price:  `{"type":"custom","list":[{"value":500}],"accept":[]}`,
-			detail: `"details":"games[0].price.currency is required"`,
+			detail: `"details":"add[0].price.currency is required"`,
 		},
 		{
 			name:   "missing type",
 			price:  `{"currency":"KRW","list":[{"value":500}],"accept":[]}`,
-			detail: `"details":"games[0].price.type is required"`,
+			detail: `"details":"add[0].price.type is required"`,
 		},
 		{
 			name:   "invalid type enum",
 			price:  `{"currency":"KRW","type":"package","list":[{"value":500}],"accept":[]}`,
-			detail: `"details":"games[0].price.type must be one of gamemode, credit, song, time, free, custom"`,
+			detail: `"details":"add[0].price.type must be one of gamemode, credit, song, time, free, custom"`,
 		},
 		{
 			name:   "list validation kept",
 			price:  `{"currency":"KRW","type":"free","list":[],"accept":[]}`,
-			detail: `"details":"games[0].price.list must have at least 1 item"`,
+			detail: `"details":"add[0].price.list must have at least 1 item"`,
 		},
 		{
 			name:   "value must be positive or null",
 			price:  `{"currency":"KRW","type":"custom","list":[{"value":0}],"accept":[]}`,
-			detail: `"details":"games[0].price.list[0].value must be \u003e 0 or null"`,
+			detail: `"details":"add[0].price.list[0].value must be \u003e 0 or null"`,
 		},
 		{
 			name:   "accept validation kept",
 			price:  `{"currency":"KRW","type":"custom","list":[{"value":500}],"accept":["Invalid"]}`,
-			detail: `"details":"games[0].price.accept[0] must be one of enum values"`,
+			detail: `"details":"add[0].price.accept[0] must be one of enum values"`,
 		},
 	}
 
@@ -88,7 +88,7 @@ func TestUpdateArcadeGame_PriceValidation(t *testing.T) {
 
 				scenario.Body = strings.NewReader(fmt.Sprintf(`{
 					"arcade":"%s",
-					"games":[
+					"add":[
 						{
 							"game":"%s",
 							"location":"1F",
@@ -96,7 +96,9 @@ func TestUpdateArcadeGame_PriceValidation(t *testing.T) {
 							"price":%s,
 							"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 						}
-					]
+					],
+					"modify":[],
+					"remove":[]
 				}`, arcadeID, versionID, tc.price))
 			}
 
@@ -105,20 +107,18 @@ func TestUpdateArcadeGame_PriceValidation(t *testing.T) {
 	}
 }
 
-func TestUpdateArcadeGame_AllowsEmptyArray(t *testing.T) {
+func TestUpdateArcadeGame_RejectsEmptyDelta(t *testing.T) {
 	headers := map[string]string{}
-	var arcadeID string
 
 	scenario := tests.ApiScenario{
-		Name:           "PUT /arcade/game allows empty games array",
+		Name:           "PUT /arcade/game rejects empty delta",
 		Method:         http.MethodPut,
 		URL:            "/arcade/game",
 		Headers:        headers,
-		ExpectedStatus: http.StatusOK,
+		ExpectedStatus: http.StatusBadRequest,
 		ExpectedContent: []string{
-			`"count":0`,
-			`"game":{"id":"`,
-			`"items":[]`,
+			`"error":"validation failed"`,
+			`"details":"at least one add, modify, or remove item is required"`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {
 			return newArcadeTestApp(tb)
@@ -131,7 +131,7 @@ func TestUpdateArcadeGame_AllowsEmptyArray(t *testing.T) {
 		token, user := createAuthUser(tb, app)
 		headers["Authorization"] = "Bearer " + token
 
-		arcadeID, _ = seedArcade(tb, app, user.Id, arcadeSeed{
+		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Empty Game Arcade",
 			Address:  "Empty Street",
 			Nickname: []string{"Empty"},
@@ -140,42 +140,10 @@ func TestUpdateArcadeGame_AllowsEmptyArray(t *testing.T) {
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
-			"games":[]
+			"add":[],
+			"modify":[],
+			"remove":[]
 		}`, arcadeID))
-	}
-
-	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
-		tb.Helper()
-		defer res.Body.Close()
-
-		var payload map[string]any
-		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-			tb.Fatalf("failed to decode response: %v", err)
-		}
-
-		gameObj, ok := payload["game"].(map[string]any)
-		if !ok {
-			tb.Fatalf("expected expanded game object in response, got %T", payload["game"])
-		}
-		moleculeID, _ := gameObj["id"].(string)
-		if moleculeID == "" {
-			tb.Fatalf("expected game molecule id in response")
-		}
-		items, ok := gameObj["items"].([]any)
-		if !ok {
-			tb.Fatalf("expected game.items array, got %T", gameObj["items"])
-		}
-		if len(items) != 0 {
-			tb.Fatalf("expected empty game.items array, got %#v", items)
-		}
-
-		atoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": moleculeID})
-		if err != nil {
-			tb.Fatalf("failed to load game atoms: %v", err)
-		}
-		if len(atoms) != 0 {
-			tb.Fatalf("expected no game atoms, got %d", len(atoms))
-		}
 	}
 
 	scenario.Test(t)
@@ -215,7 +183,7 @@ func TestUpdateArcadeGame_StoresPriceAcceptAsEmptyArray(t *testing.T) {
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
-			"games":[
+			"add":[
 				{
 					"game":"%s",
 					"location":"B1",
@@ -227,7 +195,9 @@ func TestUpdateArcadeGame_StoresPriceAcceptAsEmptyArray(t *testing.T) {
 					},
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
-			]
+			],
+			"modify":[],
+			"remove":[]
 		}`, arcadeID, versionID))
 	}
 
@@ -324,7 +294,7 @@ func TestUpdateArcadeGame_IgnoresTagQuantityWhenStoring(t *testing.T) {
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
-			"games":[
+			"add":[
 				{
 					"game":"%s",
 					"location":"B2",
@@ -337,7 +307,9 @@ func TestUpdateArcadeGame_IgnoresTagQuantityWhenStoring(t *testing.T) {
 					},
 					"tag":[{"category":"기타","quantity":0,"note":"ignore me"}]
 				}
-			]
+			],
+			"modify":[],
+			"remove":[]
 		}`, arcadeID, versionID))
 	}
 
@@ -437,7 +409,7 @@ func TestUpdateArcadeGame_AllowsNullPriceValue(t *testing.T) {
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
-			"games":[
+			"add":[
 				{
 					"game":"%s",
 					"location":"2F",
@@ -450,7 +422,9 @@ func TestUpdateArcadeGame_AllowsNullPriceValue(t *testing.T) {
 					},
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
-			]
+			],
+			"modify":[],
+			"remove":[]
 		}`, arcadeID, versionID))
 	}
 
@@ -535,7 +509,7 @@ func TestUpdateArcadeGame_AllowsMissingLocation(t *testing.T) {
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
-			"games":[
+			"add":[
 				{
 					"game":"%s",
 					"quantity":1,
@@ -547,7 +521,9 @@ func TestUpdateArcadeGame_AllowsMissingLocation(t *testing.T) {
 					},
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
-			]
+			],
+			"modify":[],
+			"remove":[]
 		}`, arcadeID, versionID))
 	}
 
@@ -618,7 +594,7 @@ func TestUpdateArcadeGame_PreservesGamemodeMetadata(t *testing.T) {
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
-			"games":[
+			"add":[
 				{
 					"game":"%s",
 					"location":"3F",
@@ -634,7 +610,9 @@ func TestUpdateArcadeGame_PreservesGamemodeMetadata(t *testing.T) {
 					},
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
-			]
+			],
+			"modify":[],
+			"remove":[]
 		}`, arcadeID, versionID))
 	}
 
@@ -784,7 +762,8 @@ func TestUpdateArcadeGame_InheritsFlagsFromPrevAtom(t *testing.T) {
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
 			"base_state_id":"%s",
-			"games":[
+			"add":[],
+			"modify":[
 				{
 					"game":"%s",
 					"id":"%s",
@@ -798,7 +777,8 @@ func TestUpdateArcadeGame_InheritsFlagsFromPrevAtom(t *testing.T) {
 					},
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
-			]
+			],
+			"remove":[]
 		}`, arcadeID, prevMoleculeID, versionID, prevAtoms[0].GetString("entry")))
 		prevAtomID = prevAtoms[0].GetString("entry")
 	}
@@ -955,7 +935,8 @@ func TestUpdateArcadeGame_LogsUnchangedWhenNoDiff(t *testing.T) {
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
 			"base_state_id":"%s",
-			"games":[
+			"add":[],
+			"modify":[
 				{
 					"game":"%s",
 					"id":"%s",
@@ -969,7 +950,8 @@ func TestUpdateArcadeGame_LogsUnchangedWhenNoDiff(t *testing.T) {
 					},
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
-			]
+			],
+			"remove":[]
 		}`, arcadeID, prevMoleculeID, versionID, prevAtomID))
 	}
 
@@ -1045,7 +1027,11 @@ func TestUpdateArcadeGame_LogsDeletedPrevGameAtom(t *testing.T) {
 		})
 
 		versionID := seedGameSeriesVersion(tb, app)
-		deletedVersionID := seedGameSeriesVersion(tb, app)
+		seriesVersion, err := app.FindRecordById("game_series_version", versionID)
+		if err != nil {
+			tb.Fatalf("failed to load game_series_version: %v", err)
+		}
+		deletedVersionID := seedGameSeriesVersionWithSeries(tb, app, seriesVersion.GetString("series"), "", "Deleted Test Version")
 		seedGameAtom(tb, app, arcadeID, versionID, map[string]any{
 			"currency": "KRW",
 			"type":     "custom",
@@ -1113,7 +1099,8 @@ func TestUpdateArcadeGame_LogsDeletedPrevGameAtom(t *testing.T) {
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
 			"base_state_id":"%s",
-			"games":[
+			"add":[],
+			"modify":[
 				{
 					"game":"%s",
 					"id":"%s",
@@ -1127,8 +1114,9 @@ func TestUpdateArcadeGame_LogsDeletedPrevGameAtom(t *testing.T) {
 					},
 					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
 				}
-			]
-		}`, arcadeID, prevMoleculeID, versionID, keptPrevID))
+			],
+			"remove":["%s"]
+		}`, arcadeID, prevMoleculeID, versionID, keptPrevID, deletedPrevID))
 	}
 
 	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {

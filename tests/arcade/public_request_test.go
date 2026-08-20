@@ -7,16 +7,19 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
+	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
 func TestRequestPublicArcade_Success(t *testing.T) {
 	headers := map[string]string{}
 	var arcadeID string
+	var userID string
 	var sentMessage string
 	var sentDiscordMessage string
 
@@ -50,6 +53,7 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 		tb.Helper()
 
 		token, user := createAuthUser(tb, app)
+		userID = user.Id
 		headers["Authorization"] = "Bearer " + token
 
 		arcadeID, _ = seedArcade(tb, app, user.Id, arcadeSeed{
@@ -66,6 +70,9 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 			"Monday": map[string]int{"start": 1000, "end": 2200},
 		})
 		seedPhotoMolecule(tb, app, arcadeID, user.Id, []string{seedExistingPhotoAtomID(tb, app, arcadeID, user.Id)})
+		seedArcadeChangelog(tb, app, arcadeID, "basic", user.Id, time.Now().Add(-3*time.Minute))
+		seedArcadeChangelog(tb, app, arcadeID, "game", user.Id, time.Now().Add(-2*time.Minute))
+		seedArcadeChangelog(tb, app, arcadeID, "hour", user.Id, time.Now().Add(-time.Minute))
 
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{"arcade":"%s"}`, arcadeID))
 	}
@@ -83,6 +90,49 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 		}
 		if got := payload["public"]; got != true {
 			tb.Fatalf("expected public=true, got %v", got)
+		}
+		feedback, ok := payload["xp_feedback"].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected xp_feedback object, got %T", payload["xp_feedback"])
+		}
+		if got := feedback["diff_exp"]; got != float64(24) {
+			tb.Fatalf("expected total public conversion XP diff=24, got %#v", got)
+		}
+
+		logs, err := app.FindRecordsByFilter("user_level_log", "user={:user}", "created", 0, 0, map[string]any{"user": userID})
+		if err != nil {
+			tb.Fatalf("failed to load XP ledger: %v", err)
+		}
+		expectedLogs := map[string]int{
+			userhandler.ArcadePublicKind(arcadeID):                  10,
+			userhandler.ArcadePublicBackfillKind(arcadeID, "basic"): 3,
+			userhandler.ArcadePublicBackfillKind(arcadeID, "game"):  3,
+			userhandler.ArcadePublicBackfillKind(arcadeID, "hour"):  3,
+			userhandler.ArcadePhotoSubmissionKind(arcadeID):         5,
+		}
+		if len(logs) != len(expectedLogs) {
+			tb.Fatalf("expected %d XP ledger rows, got %d", len(expectedLogs), len(logs))
+		}
+		for _, log := range logs {
+			kind := log.GetString("kind")
+			want, ok := expectedLogs[kind]
+			if !ok {
+				tb.Fatalf("unexpected XP ledger kind %q", kind)
+			}
+			if got := log.GetInt("diff_exp"); got != want {
+				tb.Fatalf("XP ledger kind %q diff=%d, want %d", kind, got, want)
+			}
+			delete(expectedLogs, kind)
+		}
+		if len(expectedLogs) != 0 {
+			tb.Fatalf("missing XP ledger kinds: %#v", expectedLogs)
+		}
+		level, err := app.FindRecordById("user_level", userID)
+		if err != nil {
+			tb.Fatalf("failed to load user level: %v", err)
+		}
+		if got := level.GetInt("exp"); got != 24 {
+			tb.Fatalf("expected user level exp=24, got %d", got)
 		}
 
 		arcadeRec, err := app.FindRecordById("arcade", arcadeID)
@@ -116,6 +166,186 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 	}
 
 	scenario.Test(t)
+}
+
+func TestPreviewPublicArcadeXP(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name:     "Preview Arcade",
+		Address:  "Preview Street",
+		Location: location{Lat: 37.5665, Lon: 126.978},
+	})
+	seedArcadeChangelog(t, app, arcadeID, "basic", user.Id, time.Now().Add(-3*time.Minute))
+	seedArcadeChangelog(t, app, arcadeID, "game", user.Id, time.Now().Add(-2*time.Minute))
+	seedArcadeChangelog(t, app, arcadeID, "hour", user.Id, time.Now().Add(-time.Minute))
+
+	res := executeJSONRequest(t, app, http.MethodGet, "/arcade/public?arcade="+arcadeID, "", map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
+		t.Fatalf("expected preview status 200, got %d", res.StatusCode)
+	}
+	defer res.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode preview response: %v", err)
+	}
+	preview, ok := payload["xp_preview"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected xp_preview object, got %T", payload["xp_preview"])
+	}
+	for key, want := range map[string]float64{
+		"current_exp":    0,
+		"public_exp":     10,
+		"backfill_exp":   9,
+		"estimated_exp":  19,
+		"estimated_gain": 19,
+	} {
+		if got := preview[key]; got != want {
+			t.Fatalf("preview %s=%v, want %v", key, got, want)
+		}
+	}
+
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatalf("failed to load arcade: %v", err)
+	}
+	if arcade.GetBool("public") {
+		t.Fatalf("XP preview must not publish the arcade")
+	}
+	logs, err := app.FindRecordsByFilter("user_level_log", "user={:user}", "", 0, 0, map[string]any{"user": user.Id})
+	if err != nil {
+		t.Fatalf("failed to query XP ledger after preview: %v", err)
+	}
+	if len(logs) != 0 {
+		t.Fatalf("XP preview must not write ledger rows, got %d", len(logs))
+	}
+}
+
+func TestArcadePublicBackfillIgnoresEditCooldownAndDeduplicatesArea(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name:     "Backfill Arcade",
+		Address:  "Backfill Street",
+		Location: location{Lat: 37.5665, Lon: 126.978},
+	})
+	now := time.Now().UTC()
+
+	// A recent normal game edit grant must not suppress the draft game's
+	// one-time public-conversion backfill.
+	if err := app.RunInTransaction(func(txApp core.App) error {
+		_, granted, err := userhandler.AwardArcadeEditExpTx(txApp, user.Id, arcadeID, "game", 3, 0, now)
+		if err != nil {
+			return err
+		}
+		if !granted {
+			return fmt.Errorf("expected the normal game edit grant to be awarded")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to seed recent normal edit XP: %v", err)
+	}
+
+	// Two changelog rows in the same area still produce one backfill grant.
+	seedArcadeChangelog(t, app, arcadeID, "basic", user.Id, now.Add(-2*time.Minute))
+	seedArcadeChangelog(t, app, arcadeID, "basic", user.Id, now.Add(-time.Minute))
+	seedArcadeChangelog(t, app, arcadeID, "game", user.Id, now.Add(-30*time.Second))
+
+	res := executeJSONRequest(t, app, http.MethodGet, "/arcade/public?arcade="+arcadeID, "", map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
+		t.Fatalf("expected preview status 200, got %d", res.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		res.Body.Close()
+		t.Fatalf("failed to decode preview response: %v", err)
+	}
+	res.Body.Close()
+	preview, ok := payload["xp_preview"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected xp_preview object, got %T", payload["xp_preview"])
+	}
+	for key, want := range map[string]float64{
+		"current_exp":    3,
+		"public_exp":     10,
+		"backfill_exp":   6,
+		"estimated_exp":  19,
+		"estimated_gain": 16,
+	} {
+		if got := preview[key]; got != want {
+			t.Fatalf("preview %s=%v, want %v", key, got, want)
+		}
+	}
+
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatalf("failed to load arcade: %v", err)
+	}
+	arcade.Set("public", true)
+	if err := app.Save(arcade); err != nil {
+		t.Fatalf("failed to make arcade public for backfill test: %v", err)
+	}
+
+	if err := app.RunInTransaction(func(txApp core.App) error {
+		current, err := userhandler.LoadCurrentExp(txApp, user.Id)
+		if err != nil {
+			return err
+		}
+		next, err := userhandler.GrantArcadePublicBackfillTx(txApp, user.Id, arcadeID, current)
+		if err != nil {
+			return err
+		}
+		if next != 9 {
+			return fmt.Errorf("expected current exp 9 after backfill, got %d", next)
+		}
+
+		// The backfill must not consume the normal edit cooldown for another area.
+		next, granted, err := userhandler.AwardArcadeEditExpTx(txApp, user.Id, arcadeID, "basic", 3, next, now)
+		if err != nil {
+			return err
+		}
+		if !granted || next != 12 {
+			return fmt.Errorf("expected immediate normal basic edit grant after backfill, granted=%t exp=%d", granted, next)
+		}
+
+		// Re-running the backfill is idempotent for both areas.
+		next, err = userhandler.GrantArcadePublicBackfillTx(txApp, user.Id, arcadeID, next)
+		if err != nil {
+			return err
+		}
+		if next != 12 {
+			return fmt.Errorf("expected repeated backfill to leave exp at 12, got %d", next)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("failed to apply public backfill: %v", err)
+	}
+
+	logs, err := app.FindRecordsByFilter("user_level_log", "user={:user}", "created", 0, 0, map[string]any{"user": user.Id})
+	if err != nil {
+		t.Fatalf("failed to load XP ledger: %v", err)
+	}
+	if len(logs) != 4 {
+		t.Fatalf("expected one normal game, two backfill, and one normal basic log, got %d", len(logs))
+	}
+	for _, part := range []string{"basic", "game"} {
+		count := 0
+		for _, log := range logs {
+			if log.GetString("kind") == userhandler.ArcadePublicBackfillKind(arcadeID, part) {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("expected exactly one %s backfill log, got %d", part, count)
+		}
+	}
 }
 
 func TestRequestPublicArcade_RequiresGame(t *testing.T) {
