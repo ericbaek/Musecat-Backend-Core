@@ -84,15 +84,22 @@ Definitions:
 | Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |
 
 Update campaign checks use `POST /campaign/check`. An active authenticated user
-may confirm whether a public/open campaign target is still old or updated, and
-the updated result awards the campaign XP atomically with the game-state
-mutation. The default path requires a same-day verified arcade visit. The
+may confirm whether a public/open campaign target is still old or updated. A
+`still_old` result awards 1 XP once per user and campaign target; an updated
+result awards the campaign XP atomically with the game-state mutation. The
+default path requires a same-day verified arcade visit. The
 optional `bypass_location=true` path is restricted to users tagged
 `supporter`, `founding_supporter`, `developer`, or `moderator`; it skips only
 the visit-location check and does not relax campaign, arcade, or target
 validation. An updated result through the bypass path awards 1 XP instead of
 the campaign's configured reward. Clients must show a two-step warning
-confirmation before sending the bypass flag.
+confirmation before sending the bypass flag. `GET /campaign?id=...` returns
+the remaining old-version targets, current `to_version` targets, newest-first
+report logs, and the latest `still_old` reporter/time. The updated target view
+is derived from the current public game state at the campaign's `to_version`,
+not only from campaign `result=updated` checks, so machines already on the
+target version are included. The report view includes only currently
+public/open arcades.
 
 The `GET /arcade` public endpoint MUST return `404`, rather than `403`, for every private id. A public/closed arcade remains readable through detail and search but MUST NOT enter operating discovery, nearby, update, or visit flows.
 
@@ -204,6 +211,7 @@ The PocketBase collection API is persistence infrastructure, not the application
 | reviewer decision | `PUT /moderation/arcade/edit-report` |
 | arcade analytics | `GET /arcade/analytics?arcade=...` and `POST /arcade/analytics/event` |
 | localized game/version/cabinet catalog | `GET /game/catalog?locale=en-US|ko-KR|ja-JP` |
+| campaign progress and report log | `GET /campaign?id=...` |
 
 New frontend code MUST NOT reintroduce collection names, PocketBase record rules, collection filters, raw REST pagination, or PocketBase file URL construction as a compatibility layer. Sitemap, changelog timeline, draft list/delete, and photo atom management migrate to these custom routes.
 

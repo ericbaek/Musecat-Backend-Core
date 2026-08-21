@@ -3,6 +3,7 @@ package arcade_test
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -70,6 +71,127 @@ func TestCampaignLocationBypassRequiresSupporterAccess(t *testing.T) {
 	}
 	if arcade.GetString("game_v2") != initialStateID {
 		t.Fatal("rejected bypass moved the game state")
+	}
+}
+
+func TestCampaignStillOldAwardsOneXPOnlyOnce(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, arcadeID, campaignID, gameID, _ := seedCampaignCheckFixture(t, app, []string{"supporter"})
+	body := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"still_old","bypass_location":true}`, campaignID, arcadeID, gameID)
+
+	for index, wantExp := range []int{1, 0} {
+		response := executeJSONRequest(t, app, http.MethodPost, "/campaign/check", body, map[string]string{
+			"Authorization": "Bearer " + token,
+		})
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("request %d: expected 200, got %d", index+1, response.StatusCode)
+		}
+		var responseBody struct {
+			GainedExp int `json:"gained_exp"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&responseBody); err != nil {
+			t.Fatalf("request %d: failed to decode response: %v", index+1, err)
+		}
+		if responseBody.GainedExp != wantExp {
+			t.Fatalf("request %d: expected %d XP, got %d", index+1, wantExp, responseBody.GainedExp)
+		}
+	}
+}
+
+func TestGetCampaignIncludesUpdatedItemsAndReportLog(t *testing.T) {
+	app := newArcadeTestApp(t)
+	firstToken, arcadeID, campaignID, gameID, _ := seedCampaignCheckFixture(t, app, []string{"supporter"})
+	secondToken, _ := createAuthUserWithTags(t, app, []string{"supporter"})
+	campaign, err := app.FindRecordById("arcade_campaign", campaignID)
+	if err != nil {
+		t.Fatalf("failed to load campaign: %v", err)
+	}
+	_, alreadyUpdatedOwner := createAuthUserWithTags(t, app, nil)
+	alreadyUpdatedArcadeID, _ := seedPublicArcade(t, app, alreadyUpdatedOwner.Id, arcadeSeed{
+		Name:     "Already Updated Arcade",
+		Address:  "Updated Street",
+		Country:  "KR",
+		Timezone: "Asia/Seoul",
+		Location: location{Lat: 37.51, Lon: 127.01},
+	})
+	seedBulkHistoryState(t, app, alreadyUpdatedArcadeID, alreadyUpdatedOwner.Id, campaign.GetString("to_version"))
+
+	stillOld := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"still_old","bypass_location":true}`, campaignID, arcadeID, gameID)
+	response := executeJSONRequest(t, app, http.MethodPost, "/campaign/check", stillOld, map[string]string{
+		"Authorization": "Bearer " + firstToken,
+	})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected still_old report to succeed, got %d", response.StatusCode)
+	}
+
+	updated := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"updated","bypass_location":true}`, campaignID, arcadeID, gameID)
+	response = executeJSONRequest(t, app, http.MethodPost, "/campaign/check", updated, map[string]string{
+		"Authorization": "Bearer " + secondToken,
+	})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected updated report to succeed, got %d", response.StatusCode)
+	}
+
+	response = executeJSONRequest(t, app, http.MethodGet, "/campaign?id="+campaignID, "", nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("expected campaign detail to succeed, got %d: %s", response.StatusCode, body)
+	}
+	var payload struct {
+		Campaign map[string]any   `json:"campaign"`
+		Items    []map[string]any `json:"items"`
+		Updated  []map[string]any `json:"updated_items"`
+		Logs     []map[string]any `json:"logs"`
+		Latest   map[string]any   `json:"latest_still_old_report"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode campaign detail: %v", err)
+	}
+	if len(payload.Items) != 0 {
+		t.Fatalf("expected old target to leave the pending list after update, got %d", len(payload.Items))
+	}
+	if len(payload.Updated) != 2 {
+		t.Fatalf("expected both reported and already-updated targets, got %d", len(payload.Updated))
+	}
+	foundAlreadyUpdated := false
+	for _, item := range payload.Updated {
+		if item["status"] != "updated" {
+			t.Fatalf("expected updated target status, got %#v", item["status"])
+		}
+		arcade, ok := item["arcade"].(map[string]any)
+		if ok && arcade["id"] == alreadyUpdatedArcadeID {
+			foundAlreadyUpdated = true
+		}
+	}
+	if !foundAlreadyUpdated {
+		t.Fatalf("expected already-updated arcade %q in updated targets", alreadyUpdatedArcadeID)
+	}
+	var reportedTarget map[string]any
+	for _, item := range payload.Updated {
+		arcade, _ := item["arcade"].(map[string]any)
+		if arcade["id"] == arcadeID {
+			reportedTarget = item
+			break
+		}
+	}
+	if reportedTarget["last_still_old_report"] == nil {
+		t.Fatal("expected updated target to retain the latest still_old reporter")
+	}
+	if len(payload.Logs) != 2 {
+		t.Fatalf("expected two campaign reports, got %d", len(payload.Logs))
+	}
+	if payload.Logs[0]["reaction"] != "updated" || payload.Logs[1]["reaction"] != "still_old" {
+		t.Fatalf("expected newest-first report reactions, got %#v and %#v", payload.Logs[0]["reaction"], payload.Logs[1]["reaction"])
+	}
+	if payload.Latest == nil || payload.Latest["reaction"] != "still_old" {
+		t.Fatalf("expected latest still_old report, got %#v", payload.Latest)
+	}
+	if got, ok := payload.Campaign["updated_count"].(float64); !ok || got != 2 {
+		t.Fatalf("expected campaign updated_count=2, got %#v", payload.Campaign["updated_count"])
 	}
 }
 
@@ -176,6 +298,8 @@ func ensureCampaignCollectionsForTest(tb testing.TB, app core.App) {
 			&core.RelationField{Name: "user", CollectionId: users.Id, Required: true, MaxSelect: 1},
 			&core.SelectField{Name: "result", Values: []string{"still_old", "updated"}, Required: true, MaxSelect: 1},
 			&core.TextField{Name: "state_id", Max: 15},
+			&core.AutodateField{Name: "created", OnCreate: true},
+			&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 		)
 		if err := app.Save(checks); err != nil {
 			tb.Fatalf("failed to create campaign check collection: %v", err)

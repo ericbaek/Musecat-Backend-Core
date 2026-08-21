@@ -25,6 +25,7 @@ const (
 	resultStillOld          = "still_old"
 	resultUpdated           = "updated"
 	campaignBypassRewardExp = 1
+	campaignReportLimit     = 500
 )
 
 type campaignMutationBody struct {
@@ -81,6 +82,15 @@ type candidateRow struct {
 	Quantity       int
 }
 
+type campaignCheckRow struct {
+	CheckID string
+	UserID  string
+	Result  string
+	Created string
+	Updated string
+	candidateRow
+}
+
 func ListCampaigns(re *core.RequestEvent) error {
 	now := time.Now().UTC()
 	records, err := re.App.FindRecordsByFilter(
@@ -105,7 +115,11 @@ func ListCampaigns(re *core.RequestEvent) error {
 		if err != nil {
 			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count campaign targets", "details": err.Error()})
 		}
-		item, err := buildCampaignSummary(re.App, config, len(rows))
+		updatedRows, err := loadUpdatedCampaignRows(re.App, config)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count updated campaign targets", "details": err.Error()})
+		}
+		item, err := buildCampaignSummary(re.App, config, len(rows)+len(updatedRows))
 		if err != nil {
 			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build campaign", "details": err.Error()})
 		}
@@ -134,15 +148,60 @@ func GetCampaign(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load campaign targets", "details": err.Error()})
 	}
+	checkRows, err := loadCampaignCheckRows(re.App, config)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load campaign reports", "details": err.Error()})
+	}
+	updatedRows, err := loadUpdatedCampaignRows(re.App, config)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load updated campaign targets", "details": err.Error()})
+	}
 	items, err := buildCampaignItems(re.App, rows)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build campaign targets", "details": err.Error()})
 	}
-	summary, err := buildCampaignSummary(re.App, config, len(items))
+	updatedItems, err := buildCampaignItems(re.App, updatedRows)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build updated campaign targets", "details": err.Error()})
+	}
+	userCache := map[string]map[string]any{}
+	latestStillOldByTarget := latestCampaignCheckByTarget(checkRows, resultStillOld)
+	latestUpdatedByTarget := latestCampaignCheckByTarget(checkRows, resultUpdated)
+	for index, row := range rows {
+		items[index]["status"] = "pending"
+		if report, ok := latestStillOldByTarget[campaignTargetKey(row.ArcadeID, row.GameID)]; ok {
+			items[index]["status"] = resultStillOld
+			items[index]["last_still_old_report"] = campaignReportSummary(re.App, report, userCache)
+		}
+	}
+	for index, row := range updatedRows {
+		updatedItems[index]["status"] = resultUpdated
+		if report, ok := latestUpdatedByTarget[campaignTargetKey(row.ArcadeID, row.GameID)]; ok {
+			updatedItems[index]["updated_report"] = campaignReportSummary(re.App, report, userCache)
+		}
+		if report, ok := latestStillOldByTarget[campaignTargetKey(row.ArcadeID, row.GameID)]; ok {
+			updatedItems[index]["last_still_old_report"] = campaignReportSummary(re.App, report, userCache)
+		}
+	}
+	logs, latestStillOldReport, err := buildCampaignReportLogs(re.App, checkRows, userCache)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build campaign reports", "details": err.Error()})
+	}
+	summary, err := buildCampaignSummary(re.App, config, len(items)+len(updatedItems))
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build campaign", "details": err.Error()})
 	}
-	return re.JSON(http.StatusOK, map[string]any{"campaign": summary, "items": items})
+	summary["remaining_count"] = len(items)
+	summary["updated_count"] = len(updatedItems)
+	summary["reported_count"] = len(checkRows)
+	summary["still_old_count"] = len(latestStillOldByTarget)
+	return re.JSON(http.StatusOK, map[string]any{
+		"campaign":                summary,
+		"items":                   items,
+		"updated_items":           updatedItems,
+		"logs":                    logs,
+		"latest_still_old_report": latestStillOldReport,
+	})
 }
 
 // ListArcadeCampaigns returns active campaign prompts for the public/open
@@ -352,10 +411,14 @@ func CheckCampaign(re *core.RequestEvent) error {
 			if check != nil && check.GetString("result") == resultUpdated {
 				return httpError{status: http.StatusConflict, message: "campaign check is already completed"}
 			}
+			currentExp, granted, err := userhandler.AwardExpTx(tx, re.Auth.Id, campaignStillOldXPKind(config.ID, body.GameID), 1, baseExp)
+			if err != nil {
+				return err
+			}
 			if err := saveCampaignCheck(tx, check, config.ID, body.Arcade, body.GameID, re.Auth.Id, resultStillOld, stateID); err != nil {
 				return err
 			}
-			response = campaignCheckResponse(baseExp, baseExp, false, resultStillOld, stateID, nil)
+			response = campaignCheckResponse(baseExp, currentExp, granted, resultStillOld, stateID, nil)
 			return nil
 		}
 
@@ -610,12 +673,23 @@ func loadCandidateRows(app core.App, config campaignConfig) ([]candidateRow, err
 }
 
 func loadCandidateRowsForArcade(app core.App, config campaignConfig, arcadeID string) ([]candidateRow, error) {
+	return loadCampaignRowsByVersion(app, config, config.FromVersion, true, arcadeID)
+}
+
+func loadUpdatedCampaignRows(app core.App, config campaignConfig) ([]candidateRow, error) {
+	return loadCampaignRowsByVersion(app, config, config.ToVersion, false, "")
+}
+
+func loadCampaignRowsByVersion(app core.App, config campaignConfig, versionID string, requireTargetCompatibility bool, arcadeID string) ([]candidateRow, error) {
 	clauses := []string{
 		"a.public = 1", "a.closed = 0", "a.game_v2 <> ''",
-		"r.version = {:from_version}",
-		"(TRIM(COALESCE(r.cabinet, '')) = '' OR EXISTS (SELECT 1 FROM game_series_version_cabinet target_support WHERE target_support.version = {:to_version} AND target_support.cabinet = r.cabinet))",
+		"r.version = {:version}",
 	}
-	params := dbx.Params{"from_version": config.FromVersion, "to_version": config.ToVersion}
+	params := dbx.Params{"version": versionID}
+	if requireTargetCompatibility {
+		clauses = append(clauses, "(TRIM(COALESCE(r.cabinet, '')) = '' OR EXISTS (SELECT 1 FROM game_series_version_cabinet target_support WHERE target_support.version = {:to_version} AND target_support.cabinet = r.cabinet))")
+		params["to_version"] = config.ToVersion
+	}
 	if arcadeID = strings.TrimSpace(arcadeID); arcadeID != "" {
 		clauses = append(clauses, "a.id = {:arcade_id}")
 		params["arcade_id"] = arcadeID
@@ -668,6 +742,189 @@ ORDER BY UPPER(TRIM(a.country)), b.name, a.id, r.entry`
 		})
 	}
 	return result, rows.Err()
+}
+
+func loadCampaignCheckRows(app core.App, config campaignConfig) ([]campaignCheckRow, error) {
+	clauses := []string{
+		"c.campaign = {:campaign}",
+		"a.public = 1",
+		"a.closed = 0",
+		"a.game_v2 <> ''",
+		"r.batch = c.state_id",
+		"r.version IN ({:from_version}, {:to_version})",
+		"(r.version = {:to_version} OR TRIM(COALESCE(r.cabinet, '')) = '' OR EXISTS (SELECT 1 FROM game_series_version_cabinet target_support WHERE target_support.version = {:to_version} AND target_support.cabinet = r.cabinet))",
+	}
+	params := dbx.Params{
+		"campaign":     config.ID,
+		"from_version": config.FromVersion,
+		"to_version":   config.ToVersion,
+		"limit":        campaignReportLimit,
+	}
+	if config.CabinetScope == "include" {
+		placeholders := make([]string, 0, len(config.Cabinets))
+		for index, id := range config.Cabinets {
+			key := "cabinet_" + strconv.Itoa(index)
+			placeholders = append(placeholders, "{:"+key+"}")
+			params[key] = id
+		}
+		clauses = append(clauses, "r.cabinet IN ("+strings.Join(placeholders, ",")+")")
+	}
+	if config.CountryScope != "all" {
+		placeholders := make([]string, 0, len(config.Countries))
+		for index, country := range config.Countries {
+			key := "country_" + strconv.Itoa(index)
+			placeholders = append(placeholders, "{:"+key+"}")
+			params[key] = country
+		}
+		operator := "IN"
+		if config.CountryScope == "exclude" {
+			operator = "NOT IN"
+		}
+		clauses = append(clauses, "UPPER(TRIM(a.country)) "+operator+" ("+strings.Join(placeholders, ",")+")")
+	}
+	query := `
+SELECT c.id AS check_id, c.user AS user_id, c.result, c.created, c.updated,
+       c.state_id, c.arcade AS arcade_id, a.country,
+       b.name, b.address, b.location AS arcade_location,
+       c.game_id, r.version AS version_id, r.cabinet AS cabinet_id,
+       r.location AS game_location, r.quantity
+FROM arcade_campaign_check c
+INNER JOIN arcade a ON a.id = c.arcade
+INNER JOIN arcade_basic b ON b.id = a.basic
+INNER JOIN arcade_game_history r ON r.batch = c.state_id AND r.entry = c.game_id
+WHERE ` + strings.Join(clauses, " AND ") + `
+ORDER BY c.updated DESC, c.created DESC, c.id DESC
+LIMIT {:limit}`
+	rows, err := app.DB().NewQuery(query).Bind(params).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]campaignCheckRow, 0)
+	for rows.Next() {
+		raw := dbx.NullStringMap{}
+		if err := rows.ScanMap(raw); err != nil {
+			return nil, err
+		}
+		result = append(result, campaignCheckRow{
+			CheckID: nullString(raw, "check_id"),
+			UserID:  nullString(raw, "user_id"),
+			Result:  nullString(raw, "result"),
+			Created: nullString(raw, "created"),
+			Updated: nullString(raw, "updated"),
+			candidateRow: candidateRow{
+				ArcadeID:       nullString(raw, "arcade_id"),
+				Country:        nullString(raw, "country"),
+				Name:           nullString(raw, "name"),
+				Address:        nullString(raw, "address"),
+				ArcadeLocation: nullString(raw, "arcade_location"),
+				StateID:        nullString(raw, "state_id"),
+				GameID:         nullString(raw, "game_id"),
+				VersionID:      nullString(raw, "version_id"),
+				CabinetID:      nullString(raw, "cabinet_id"),
+				GameLocation:   nullString(raw, "game_location"),
+				Quantity:       nullInt(raw, "quantity"),
+			},
+		})
+	}
+	return result, rows.Err()
+}
+
+func campaignCheckCandidates(rows []campaignCheckRow) []candidateRow {
+	result := make([]candidateRow, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, row.candidateRow)
+	}
+	return result
+}
+
+func latestCampaignCheckByTarget(rows []campaignCheckRow, result string) map[string]campaignCheckRow {
+	latest := map[string]campaignCheckRow{}
+	for _, row := range rows {
+		if row.Result != result {
+			continue
+		}
+		key := campaignTargetKey(row.ArcadeID, row.GameID)
+		if _, ok := latest[key]; !ok {
+			latest[key] = row
+		}
+	}
+	return latest
+}
+
+func campaignTargetKey(arcadeID, gameID string) string {
+	return arcadeID + "\x00" + gameID
+}
+
+func buildCampaignReportLogs(app core.App, rows []campaignCheckRow, userCache map[string]map[string]any) ([]map[string]any, map[string]any, error) {
+	targets, err := buildCampaignItems(app, campaignCheckCandidates(rows))
+	if err != nil {
+		return nil, nil, err
+	}
+	logs := make([]map[string]any, 0, len(rows))
+	var latestStillOld map[string]any
+	for index, row := range rows {
+		log := map[string]any{
+			"id":          row.CheckID,
+			"created":     row.Created,
+			"updated":     row.Updated,
+			"reported_at": campaignReportTime(row),
+			"reaction":    row.Result,
+			"result":      row.Result,
+			"user":        campaignUser(app, row.UserID, userCache),
+			"arcade":      targets[index]["arcade"],
+			"game":        targets[index]["game"],
+		}
+		logs = append(logs, log)
+		if row.Result == resultStillOld && latestStillOld == nil {
+			latestStillOld = log
+		}
+	}
+	return logs, latestStillOld, nil
+}
+
+func campaignReportSummary(app core.App, row campaignCheckRow, userCache map[string]map[string]any) map[string]any {
+	return map[string]any{
+		"id":          row.CheckID,
+		"reported_at": campaignReportTime(row),
+		"reaction":    row.Result,
+		"user":        campaignUser(app, row.UserID, userCache),
+	}
+}
+
+func campaignReportTime(row campaignCheckRow) string {
+	if row.Updated != "" {
+		return row.Updated
+	}
+	return row.Created
+}
+
+func campaignUser(app core.App, userID string, cache map[string]map[string]any) map[string]any {
+	if user, ok := cache[userID]; ok {
+		return user
+	}
+	user := map[string]any{"id": userID, "username": userID, "nickname": userID}
+	if record, err := app.FindRecordById(userhandler.CollectionUser, userID); err == nil {
+		if record.GetBool("withdrawn") {
+			withdrawn := userhandler.WithdrawnDisplayName()
+			user["username"] = withdrawn
+			user["nickname"] = withdrawn
+		} else {
+			username := strings.TrimSpace(record.GetString("username"))
+			if username != "" {
+				user["username"] = username
+				user["nickname"] = username
+			}
+			if info, err := app.FindRecordById(userhandler.CollectionUserInfo, userID); err == nil {
+				if nickname := strings.TrimSpace(info.GetString("nickname")); nickname != "" {
+					user["nickname"] = nickname
+				}
+			}
+		}
+	}
+	cache[userID] = user
+	return user
 }
 
 func validateRevisionTarget(app core.App, config campaignConfig, revision *core.Record) error {
@@ -766,6 +1023,10 @@ func campaignCheckResponse(previousExp, currentExp int, granted bool, result, st
 
 func campaignXPKind(campaignID, gameID string) string {
 	return "xp:campaign:" + campaignID + ":" + gameID
+}
+
+func campaignStillOldXPKind(campaignID, gameID string) string {
+	return "xp:campaign-still-old:" + campaignID + ":" + gameID
 }
 
 func campaignIsActive(config campaignConfig, now time.Time) bool {

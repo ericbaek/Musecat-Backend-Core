@@ -1131,7 +1131,7 @@ components:
         bypass_location:
           type: boolean
           default: false
-          description: Skips same-day verified-visit validation. Requires supporter, founding_supporter, developer, or moderator access. An updated result through this path awards 1 XP.
+          description: Skips same-day verified-visit validation. Requires supporter, founding_supporter, developer, or moderator access. A still_old result awards 1 XP once per user and target; an updated result through this path awards 1 XP.
     CampaignCheckResponse:
       type: object
       required: [result, updated, gained_exp, exp, level, state_id, xp_feedback]
@@ -1146,6 +1146,99 @@ components:
         game_id: {type: string}
         xp_feedback:
           $ref: '#/components/schemas/XpFeedback'
+    CampaignReporter:
+      type: object
+      required: [id, username, nickname]
+      properties:
+        id: {type: string}
+        username: {type: string}
+        nickname: {type: string}
+    CampaignReportSummary:
+      type: object
+      required: [id, reported_at, reaction, user]
+      properties:
+        id: {type: string}
+        reported_at: {type: string, format: date-time}
+        reaction: {type: string, enum: [still_old, updated]}
+        user: {$ref: '#/components/schemas/CampaignReporter'}
+    CampaignTarget:
+      type: object
+      required: [arcade, game, status]
+      properties:
+        status: {type: string, enum: [pending, still_old, updated]}
+        arcade:
+          type: object
+          required: [id, country, name, address, location]
+          properties:
+            id: {type: string}
+            country: {type: string}
+            name: {type: string}
+            address: {type: string}
+            location: {type: object}
+        game:
+          type: object
+          required: [id, state_id, version, series, cabinet, location, quantity]
+          properties:
+            id: {type: string}
+            state_id: {type: string}
+            version: {type: object}
+            series: {type: object}
+            cabinet: {type: object, nullable: true}
+            location: {type: string}
+            quantity: {type: integer}
+        last_still_old_report: {$ref: '#/components/schemas/CampaignReportSummary'}
+        updated_report: {$ref: '#/components/schemas/CampaignReportSummary'}
+    CampaignReport:
+      type: object
+      required: [id, created, updated, reported_at, reaction, result, user, arcade, game]
+      properties:
+        id: {type: string}
+        created: {type: string, format: date-time}
+        updated: {type: string, format: date-time}
+        reported_at: {type: string, format: date-time}
+        reaction: {type: string, enum: [still_old, updated]}
+        result: {type: string, enum: [still_old, updated]}
+        user: {$ref: '#/components/schemas/CampaignReporter'}
+        arcade: {type: object}
+        game: {type: object}
+    CampaignSummary:
+      type: object
+      required: [id, from_version, to_version, cabinet_scope, cabinets, country_scope, countries, reward_exp, status, start_at, end_at, target_count]
+      properties:
+        id: {type: string}
+        from_version: {type: object}
+        to_version: {type: object}
+        cabinet_scope: {type: string, enum: [all, include]}
+        cabinets: {type: array, items: {type: object}}
+        country_scope: {type: string, enum: [all, include, exclude]}
+        countries: {type: array, items: {type: string}}
+        reward_exp: {type: integer}
+        status: {type: string, enum: [draft, active, ended]}
+        start_at: {type: string, format: date-time}
+        end_at: {type: string, format: date-time}
+        target_count: {type: integer}
+        remaining_count: {type: integer}
+        updated_count: {type: integer}
+        reported_count: {type: integer}
+        still_old_count: {type: integer}
+    CampaignDetailResponse:
+      type: object
+      required: [campaign, items, updated_items, logs, latest_still_old_report]
+      properties:
+        campaign: {$ref: '#/components/schemas/CampaignSummary'}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/CampaignTarget'}
+        updated_items:
+          type: array
+          items: {$ref: '#/components/schemas/CampaignTarget'}
+        logs:
+          type: array
+          items: {$ref: '#/components/schemas/CampaignReport'}
+        latest_still_old_report:
+          allOf:
+            - $ref: '#/components/schemas/CampaignReport'
+          nullable: true
     VisitVisibilityRequest:
       type: object
       required: [visit_visibility]
@@ -5466,13 +5559,52 @@ paths:
         '400': {description: Invalid coordinates or GPS accuracy.}
         '403': {description: Inactive user, ineligible arcade, or outside the 100m radius.}
         '409': {description: Missing arcade coordinates or timezone.}
+  /campaign:
+    get:
+      tags: [Arcade Mutations]
+      summary: /campaign
+      description: |
+        Returns the active campaign detail for the requested id. The response
+        separates current old-version targets from current to-version targets,
+        so the updated list includes machines already on the target version
+        even when they were not updated through this campaign. It includes
+        newest-first report logs with the user, arcade, game, reaction, and
+        report time, plus the latest still_old report. Only currently
+        public/open arcades are included.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Campaign progress, updated targets, and report log.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignDetailResponse'}
+        '400':
+          description: Missing campaign id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Campaign is not active or was not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Campaign detail could not be loaded.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /campaign/check:
     post:
       tags: [Arcade Mutations]
       summary: /campaign/check
       description: |
         Confirms whether one active update-campaign target is still on the old
-        version or has been updated. The default request requires a same-day
+        version or has been updated. A `still_old` result awards 1 XP once per
+        user and target. The default request requires a same-day
         verified visit at the public/open arcade. `bypass_location=true` skips
         only that visit check and requires `supporter`, `founding_supporter`,
         `developer`, or `moderator` access; an updated result through this path
@@ -5487,7 +5619,7 @@ paths:
             schema: {$ref: '#/components/schemas/CampaignCheckRequest'}
       responses:
         '200':
-          description: Campaign check persisted; updated results atomically move the game state and award campaign XP, or 1 XP when location is bypassed.
+          description: Campaign check persisted; still_old results award 1 XP, while updated results atomically move the game state and award campaign XP, or 1 XP when location is bypassed.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/CampaignCheckResponse'}
