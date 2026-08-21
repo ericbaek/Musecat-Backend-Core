@@ -1815,6 +1815,10 @@ components:
       properties:
         arcade:
           type: string
+        bypass_requirements:
+          type: boolean
+          default: false
+          description: Skips the game, contact-hours, and KR facility-photo publication requirements. Only the creator with supporter, founding_supporter, developer, or moderator access may set this flag; stored geo, visibility, and ownership validation still apply.
     GTKAtomInput:
       type: object
       required: [type, bool]
@@ -4960,7 +4964,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Creator restriction or account restriction.
+          description: Creator restriction or an account attempted to set bypass_requirements without supporter, founding_supporter, developer, or moderator access.
           content:
             application/json:
               schema:

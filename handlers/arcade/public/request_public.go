@@ -23,7 +23,8 @@ var (
 )
 
 type RequestPublicArcadeBody struct {
-	Arcade string `json:"arcade"`
+	Arcade             string `json:"arcade"`
+	BypassRequirements bool   `json:"bypass_requirements"`
 }
 
 func parseRequestPublicArcadeBody(re *core.RequestEvent) (RequestPublicArcadeBody, error) {
@@ -149,6 +150,11 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 			"error": "only the creator can request public conversion",
 		})
 	}
+	if body.BypassRequirements && !hasPublicConversionRequirementBypassAccess(re.Auth) {
+		return re.JSON(http.StatusForbidden, map[string]any{
+			"error": "supporter access is required to bypass public conversion requirements",
+		})
+	}
 	if arcade.GetBool("closed") {
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error": "cannot request public conversion for closed arcade",
@@ -160,39 +166,41 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		})
 	}
 
-	hasGame, err := hasGameRegistration(re.App, arcade.GetString("game_v2"))
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to validate game registration",
-			"details": err.Error(),
-		})
-	}
-	if !hasGame {
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error":   "validation failed",
-			"details": "at least one game must be registered before making arcade public",
-		})
-	}
+	if !body.BypassRequirements {
+		hasGame, err := hasGameRegistration(re.App, arcade.GetString("game_v2"))
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{
+				"error":   "failed to validate game registration",
+				"details": err.Error(),
+			})
+		}
+		if !hasGame {
+			return re.JSON(http.StatusBadRequest, map[string]any{
+				"error":   "validation failed",
+				"details": "at least one game must be registered before making arcade public",
+			})
+		}
 
-	hasSNS, err := hasSNSRegistration(re.App, arcade.GetString("sns"))
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to validate sns registration",
-			"details": err.Error(),
-		})
-	}
-	hasHour, err := hasHourRegistration(re.App, arcade.GetString("hour"))
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to validate hour registration",
-			"details": err.Error(),
-		})
-	}
-	if !hasSNS && !hasHour {
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error":   "validation failed",
-			"details": "either sns or hour must be registered before making arcade public",
-		})
+		hasSNS, err := hasSNSRegistration(re.App, arcade.GetString("sns"))
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{
+				"error":   "failed to validate sns registration",
+				"details": err.Error(),
+			})
+		}
+		hasHour, err := hasHourRegistration(re.App, arcade.GetString("hour"))
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{
+				"error":   "failed to validate hour registration",
+				"details": err.Error(),
+			})
+		}
+		if !hasSNS && !hasHour {
+			return re.JSON(http.StatusBadRequest, map[string]any{
+				"error":   "validation failed",
+				"details": "either sns or hour must be registered before making arcade public",
+			})
+		}
 	}
 
 	// 5) make arcade public immediately.
@@ -225,7 +233,7 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 			return ErrArcadeGeoUnavailable
 		}
 
-		if requiresFacilityPhoto(country) {
+		if !body.BypassRequirements && requiresFacilityPhoto(country) {
 			hasPhoto, err := hasPhotoRegistration(txApp, txArcade.GetString("photo"))
 			if err != nil {
 				return fmt.Errorf("failed to validate photo registration: %w", err)
@@ -288,4 +296,19 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		"public":      true,
 		"xp_feedback": xpFeedback,
 	})
+}
+
+func hasPublicConversionRequirementBypassAccess(auth *core.Record) bool {
+	if auth == nil {
+		return false
+	}
+	for _, tags := range [][]string{auth.GetStringSlice("tag"), auth.GetStringSlice("tags")} {
+		for _, tag := range tags {
+			switch strings.ToLower(strings.TrimSpace(tag)) {
+			case "supporter", "founding_supporter", "developer", "moderator":
+				return true
+			}
+		}
+	}
+	return false
 }

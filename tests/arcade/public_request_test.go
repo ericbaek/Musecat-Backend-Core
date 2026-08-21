@@ -168,6 +168,60 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 	scenario.Test(t)
 }
 
+func TestRequestPublicArcade_SupporterCanBypassPublishRequirements(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUserWithTags(t, app, []string{"supporter"})
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name:     "Supporter Draft",
+		Address:  "Supporter Street",
+		Location: location{Lat: 37.5665, Lon: 126.978},
+	})
+
+	res := executeJSONRequest(t, app, http.MethodPut, "/arcade/public", fmt.Sprintf(`{"arcade":%q,"bypass_requirements":true}`, arcadeID), map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
+		t.Fatalf("expected supporter bypass status 200, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatalf("failed to load supporter draft: %v", err)
+	}
+	if !arcade.GetBool("public") {
+		t.Fatalf("expected supporter-owned draft to become public")
+	}
+}
+
+func TestRequestPublicArcade_BypassRequirementsRequiresSupporterAccess(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name:     "Member Draft",
+		Address:  "Member Street",
+		Location: location{Lat: 37.5665, Lon: 126.978},
+	})
+
+	res := executeJSONRequest(t, app, http.MethodPut, "/arcade/public", fmt.Sprintf(`{"arcade":%q,"bypass_requirements":true}`, arcadeID), map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if res.StatusCode != http.StatusForbidden {
+		res.Body.Close()
+		t.Fatalf("expected non-supporter bypass status 403, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatalf("failed to load member draft: %v", err)
+	}
+	if arcade.GetBool("public") {
+		t.Fatalf("expected rejected bypass to leave draft private")
+	}
+}
+
 func TestPreviewPublicArcadeXP(t *testing.T) {
 	app := newArcadeTestApp(t)
 	token, user := createAuthUser(t, app)
