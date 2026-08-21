@@ -43,6 +43,7 @@ Each row uses these common columns:
 | `PUT /arcade/gtk` | `gtk` | one row per request | `gtk_diff` | Replaces the current `arcade_gtk` relation. |
 | `PUT /arcade/game` | `game` | one row per request | `game_diff` | Accepts required `add`/`modify`/`remove` arrays, materializes the current immutable state, validates `base_state_id`, creates a new immutable history batch, then moves `arcade.game_v2` to it. Item IDs are persistent `arcade_game_id` IDs. |
 | `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Developer/moderator-only administrative version swap. It uses the normal immutable game-state batch flow. |
+| `POST /campaign/check` | `game` when an old target is updated | one row | `game_diff` | A successful `result=updated` campaign check uses the normal immutable game-state batch flow. `result=still_old` and already-updated checks do not create a row. A location-bypassed update awards 1 XP. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `PUT /arcade/memo` | `memo` | one row per changed request | `memo_diff` | Creates an immutable Tiptap JSON revision and moves `arcade.memo` for an authenticated user with arcade write access. |
 | `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, `photo`, or `memo`; memo rollback requires authenticated arcade write access. |

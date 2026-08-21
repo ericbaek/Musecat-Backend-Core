@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	statusDraft    = "draft"
-	statusActive   = "active"
-	statusEnded    = "ended"
-	resultStillOld = "still_old"
-	resultUpdated  = "updated"
+	statusDraft             = "draft"
+	statusActive            = "active"
+	statusEnded             = "ended"
+	resultStillOld          = "still_old"
+	resultUpdated           = "updated"
+	campaignBypassRewardExp = 1
 )
 
 type campaignMutationBody struct {
@@ -41,10 +42,11 @@ type campaignMutationBody struct {
 }
 
 type campaignCheckBody struct {
-	Campaign string `json:"campaign"`
-	Arcade   string `json:"arcade"`
-	GameID   string `json:"game_id"`
-	Result   string `json:"result"`
+	Campaign       string `json:"campaign"`
+	Arcade         string `json:"arcade"`
+	GameID         string `json:"game_id"`
+	Result         string `json:"result"`
+	BypassLocation bool   `json:"bypass_location"`
 }
 
 type campaignEndBody struct {
@@ -292,6 +294,9 @@ func CheckCampaign(re *core.RequestEvent) error {
 	if body.Result != resultStillOld && body.Result != resultUpdated {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "result must be still_old or updated"})
 	}
+	if body.BypassLocation && !hasCampaignLocationBypassAccess(re.Auth) {
+		return re.JSON(http.StatusForbidden, map[string]any{"error": "supporter access is required to bypass location verification"})
+	}
 
 	var response map[string]any
 	err := re.App.RunInTransaction(func(tx core.App) error {
@@ -313,8 +318,10 @@ func CheckCampaign(re *core.RequestEvent) error {
 		if !countryMatches(config, arcade.GetString("country")) {
 			return httpError{status: http.StatusConflict, message: "arcade is outside campaign country scope"}
 		}
-		if err := requireSameDayVisit(tx, re.Auth.Id, arcade); err != nil {
-			return httpError{status: http.StatusForbidden, message: err.Error()}
+		if !body.BypassLocation {
+			if err := requireSameDayVisit(tx, re.Auth.Id, arcade); err != nil {
+				return httpError{status: http.StatusForbidden, message: err.Error()}
+			}
 		}
 
 		stateID := strings.TrimSpace(arcade.GetString("game_v2"))
@@ -379,7 +386,11 @@ func CheckCampaign(re *core.RequestEvent) error {
 		currentExp := baseExp
 		granted := false
 		if check == nil || check.GetString("result") != resultUpdated {
-			currentExp, granted, err = userhandler.AwardExpTx(tx, re.Auth.Id, campaignXPKind(config.ID, body.GameID), config.RewardExp, baseExp)
+			rewardExp := config.RewardExp
+			if body.BypassLocation {
+				rewardExp = campaignBypassRewardExp
+			}
+			currentExp, granted, err = userhandler.AwardExpTx(tx, re.Auth.Id, campaignXPKind(config.ID, body.GameID), rewardExp, baseExp)
 			if err != nil {
 				return err
 			}
@@ -691,6 +702,21 @@ func requireSameDayVisit(app core.App, userID string, arcade *core.Record) error
 		return fmt.Errorf("a verified visit is required before campaign check")
 	}
 	return nil
+}
+
+func hasCampaignLocationBypassAccess(auth *core.Record) bool {
+	if auth == nil {
+		return false
+	}
+	for _, tags := range [][]string{auth.GetStringSlice("tag"), auth.GetStringSlice("tags")} {
+		for _, tag := range tags {
+			switch strings.ToLower(strings.TrimSpace(tag)) {
+			case "supporter", "founding_supporter", "developer", "moderator":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func findCampaignCheck(app core.App, campaignID, userID, gameID string) (*core.Record, error) {

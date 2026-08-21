@@ -1118,6 +1118,34 @@ components:
         lat: {type: number}
         lon: {type: number}
         accuracy: {type: number, description: GPS accuracy in meters; must be at most 100.}
+    CampaignCheckRequest:
+      type: object
+      required: [campaign, arcade, game_id, result]
+      properties:
+        campaign: {type: string}
+        arcade: {type: string}
+        game_id: {type: string}
+        result:
+          type: string
+          enum: [still_old, updated]
+        bypass_location:
+          type: boolean
+          default: false
+          description: Skips same-day verified-visit validation. Requires supporter, founding_supporter, developer, or moderator access. An updated result through this path awards 1 XP.
+    CampaignCheckResponse:
+      type: object
+      required: [result, updated, gained_exp, exp, level, state_id, xp_feedback]
+      properties:
+        result: {type: string, enum: [still_old, updated]}
+        updated: {type: boolean}
+        gained_exp: {type: integer}
+        exp: {type: integer}
+        level: {type: integer}
+        state_id: {type: string}
+        arcade: {type: string}
+        game_id: {type: string}
+        xp_feedback:
+          $ref: '#/components/schemas/XpFeedback'
     VisitVisibilityRequest:
       type: object
       required: [visit_visibility]
@@ -5434,6 +5462,61 @@ paths:
         '400': {description: Invalid coordinates or GPS accuracy.}
         '403': {description: Inactive user, ineligible arcade, or outside the 100m radius.}
         '409': {description: Missing arcade coordinates or timezone.}
+  /campaign/check:
+    post:
+      tags: [Arcade Mutations]
+      summary: /campaign/check
+      description: |
+        Confirms whether one active update-campaign target is still on the old
+        version or has been updated. The default request requires a same-day
+        verified visit at the public/open arcade. `bypass_location=true` skips
+        only that visit check and requires `supporter`, `founding_supporter`,
+        `developer`, or `moderator` access; an updated result through this path
+        awards 1 XP; clients must obtain two warning
+        confirmations before sending it.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignCheckRequest'}
+      responses:
+        '200':
+          description: Campaign check persisted; updated results atomically move the game state and award campaign XP, or 1 XP when location is bypassed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignCheckResponse'}
+        '400':
+          description: Invalid campaign check body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Active user is missing the required visit or supporter access for a location bypass.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Campaign or public arcade was not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Campaign is inactive, target is outside scope, or game state is no longer eligible.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Campaign check transaction failed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /user/visits:
     get:
       tags: [Users]

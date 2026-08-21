@@ -20,6 +20,7 @@ import (
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
+	arcadecampaign "github.com/ericbaek/musecat-backend-core/handlers/arcade/campaign"
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
 	arcadegtk "github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
@@ -207,6 +208,10 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		supporter := se.Router.Group("/supporter").Bind(apis.RequireAuth("user"), user.RequireActiveUser())
 		supporter.GET("/score", arcadeadmin.GetSupporterScore)
 		supporter.POST("/request", arcadeadmin.CreateSupporterRequest)
+		se.Router.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
+			apis.RequireAuth("user"),
+			user.RequireActiveUser(),
+		)
 		return se.Next()
 	})
 	return app

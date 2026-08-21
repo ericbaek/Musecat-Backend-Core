@@ -83,6 +83,17 @@ Definitions:
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
 | Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |
 
+Update campaign checks use `POST /campaign/check`. An active authenticated user
+may confirm whether a public/open campaign target is still old or updated, and
+the updated result awards the campaign XP atomically with the game-state
+mutation. The default path requires a same-day verified arcade visit. The
+optional `bypass_location=true` path is restricted to users tagged
+`supporter`, `founding_supporter`, `developer`, or `moderator`; it skips only
+the visit-location check and does not relax campaign, arcade, or target
+validation. An updated result through the bypass path awards 1 XP instead of
+the campaign's configured reward. Clients must show a two-step warning
+confirmation before sending the bypass flag.
+
 The `GET /arcade` public endpoint MUST return `404`, rather than `403`, for every private id. A public/closed arcade remains readable through detail and search but MUST NOT enter operating discovery, nearby, update, or visit flows.
 
 Profile visit data is derived only from currently public arcades (open or
