@@ -31,6 +31,7 @@ import (
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
+	subwayhandler "github.com/ericbaek/musecat-backend-core/handlers/subway"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
@@ -64,6 +65,25 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		se.Router.GET("/search", searchhandler.Search)
 		se.Router.GET("/stats", statshandler.GetStats)
 		se.Router.GET("/rankings", rankinghandler.List)
+		se.Router.GET("/subway/map", subwayhandler.GetMap)
+		se.Router.GET("/subway/map/file", subwayhandler.DownloadMapFile)
+		se.Router.POST("/subway/map", subwayhandler.CreateMap).Bind(
+			apis.BodyLimit(24<<20),
+			apis.RequireAuth("user"),
+			userhandler.RequireActiveUser(),
+			arcadequery.RequireAdminAccess(),
+		)
+		se.Router.PUT("/subway/map", subwayhandler.UpdateMap).Bind(
+			apis.BodyLimit(24<<20),
+			apis.RequireAuth("user"),
+			userhandler.RequireActiveUser(),
+			arcadequery.RequireAdminAccess(),
+		)
+		se.Router.DELETE("/subway/map", subwayhandler.DeleteMap).Bind(
+			apis.RequireAuth("user"),
+			userhandler.RequireActiveUser(),
+			arcadequery.RequireAdminAccess(),
+		)
 		// Public read endpoint: returns current relation ids for the arcade
 		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
 		se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)

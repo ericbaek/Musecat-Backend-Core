@@ -82,6 +82,8 @@ Definitions:
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
 | Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |
+| Latest subway map metadata and file bytes | allow | allow | allow | allow |
+| Subway map create/update/delete | deny | deny | deny | allow |
 
 Update campaign checks use `POST /campaign/check`. An active authenticated user
 may confirm whether a public/open campaign target is still old or updated. A
@@ -189,6 +191,13 @@ An unresolved report is unique per `(arcade, changelog)` across report kinds. Re
 
 The PocketBase collection API is persistence infrastructure, not the application API.
 
+`subwayMap` is a versioned public asset store outside the arcade aggregate. Public
+clients read the latest regional version through `GET /subway/map` and download
+only URLs returned by that response. A developer/moderator may create a new
+version, update an explicitly selected version, or hard-delete one version. A
+delete deliberately reveals the previous regional version as current. These
+single-record operations do not write arcade changelog or XP rows.
+
 - All arcade-domain `list`, `view`, `create`, `update`, and `delete` rules are locked (`nil`) by `1784200000_contract_v2.go`.
 - `arcade_photo_atoms` retains only the narrow view rule `public = true && arcade.public = true`; its `photo` field is protected so PocketBase evaluates that rule before direct file delivery. List and mutation remain blocked. Clients MUST NOT treat this as a supported REST record API or construct `/api/files` URLs.
 - Custom replacements are:
@@ -212,6 +221,9 @@ The PocketBase collection API is persistence infrastructure, not the application
 | arcade analytics | `GET /arcade/analytics?arcade=...` and `POST /arcade/analytics/event` |
 | localized game/version/cabinet catalog | `GET /game/catalog?locale=en-US|ko-KR|ja-JP` |
 | campaign progress and report log | `GET /campaign?id=...` |
+| latest regional subway map | `GET /subway/map?region=center|busan` |
+| subway map file bytes | `GET /subway/map/file?id=...&field=lightSVG|darkSVG|image|file` (the `file_url` returned by the map response) |
+| subway map version management | `POST /subway/map`, `PUT /subway/map`, `DELETE /subway/map?id=...` (developer/moderator only) |
 
 New frontend code MUST NOT reintroduce collection names, PocketBase record rules, collection filters, raw REST pagination, or PocketBase file URL construction as a compatibility layer. Sitemap, changelog timeline, draft list/delete, and photo atom management migrate to these custom routes.
 
