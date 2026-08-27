@@ -140,6 +140,7 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 			"total":          0,
 			"country_totals": map[string]countryTotal{},
 			"items":          []any{},
+			"campaigns":      []any{},
 		}
 		return re.JSON(http.StatusOK, response)
 	}
@@ -205,6 +206,7 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 			"total":          0,
 			"country_totals": map[string]countryTotal{},
 			"items":          []any{},
+			"campaigns":      []any{},
 		}
 		return re.JSON(http.StatusOK, response)
 	}
@@ -240,6 +242,27 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 	for _, res := range results[start:end] {
 		items = append(items, res.payload)
 	}
+	campaignFilters := make([]arcadeinternal.NearbyCampaignFilter, 0, len(gameFilters))
+	for _, filter := range gameFilters {
+		campaignFilters = append(campaignFilters, arcadeinternal.NearbyCampaignFilter{
+			SeriesID:  filter.SeriesID,
+			CabinetID: filter.CabinetID,
+		})
+	}
+	nearbyCampaigns, err := arcadeinternal.BuildNearbyCampaigns(re.App, campaignFilters)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to load nearby campaign targets",
+			"details": err.Error(),
+		})
+	}
+	campaignSummaries, err := decorateNearbyCampaigns(re.App, results[start:end], nearbyCampaigns)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to build nearby campaigns",
+			"details": err.Error(),
+		})
+	}
 	countryTotals := summarizeCountryTotals(results)
 	response := map[string]any{
 		"page":           page,
@@ -248,6 +271,7 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 		"total":          total,
 		"country_totals": countryTotals,
 		"items":          items,
+		"campaigns":      campaignSummaries,
 	}
 
 	// 8. 페이지 정보와 함께 응답한다.

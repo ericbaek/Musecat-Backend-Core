@@ -904,7 +904,7 @@ components:
                 enum: [basic, hour, sns, gtk, game, photo, flag, flag_reaction]
     ArcadesNearbyResponse:
       type: object
-      required: [page, per_page, last_page, total, country_totals, items]
+      required: [page, per_page, last_page, total, country_totals, items, campaigns]
       properties:
         page:
           type: integer
@@ -944,6 +944,16 @@ components:
                     format: double
                   game:
                     $ref: '#/components/schemas/ArcadeGameValue'
+                  campaigns:
+                    type: array
+                    description: Campaigns with at least one pending target in this arcade.
+                    items:
+                      $ref: '#/components/schemas/NearbyArcadeCampaign'
+        campaigns:
+          type: array
+          description: Active campaigns with pending targets in the current nearby response page.
+          items:
+            $ref: '#/components/schemas/NearbyCampaignSummary'
     UserProfileSnsItem:
       type: object
       required: [type, link]
@@ -1221,6 +1231,23 @@ components:
         updated_count: {type: integer}
         reported_count: {type: integer}
         still_old_count: {type: integer}
+    NearbyCampaignSummary:
+      allOf:
+        - $ref: '#/components/schemas/CampaignSummary'
+        - type: object
+          required: [nearby_target_count]
+          properties:
+            nearby_target_count:
+              type: integer
+              description: Number of pending old-version target rows in public/open arcades included in the current nearby response page.
+    NearbyArcadeCampaign:
+      type: object
+      required: [id, target_count]
+      properties:
+        id: {type: string}
+        target_count:
+          type: integer
+          description: Number of pending target rows in this arcade for the campaign.
     CampaignDetailResponse:
       type: object
       required: [campaign, items, updated_items, logs, latest_still_old_report]
@@ -3020,7 +3047,7 @@ paths:
             type: boolean
       responses:
         '200':
-          description: Distance-sorted paginated nearby results.
+          description: Distance-sorted paginated nearby results. The response also marks campaign-target arcades and includes campaigns that have pending targets in the current page.
           content:
             application/json:
               schema:
@@ -3080,6 +3107,7 @@ paths:
                           tag: []
                           flags: []
                     distance_km: 0.4
+                campaigns: []
         '400':
           description: |
             Invalid or missing location/page value; an invalid grouped

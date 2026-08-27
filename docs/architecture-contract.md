@@ -103,6 +103,13 @@ not only from campaign `result=updated` checks, so machines already on the
 target version are included. The report view includes only currently
 public/open arcades.
 
+`GET /arcades/nearby` is the home-page campaign discovery aggregate. Its
+response includes `campaigns` for active campaigns with pending targets in
+the current filtered page, plus `items[].campaigns` with each arcade's target
+counts. Campaign visibility therefore follows the nearby page's existing
+address, country, distance, game, and pagination filters; no separate campaign
+radius is applied.
+
 The `GET /arcade` public endpoint MUST return `404`, rather than `403`, for every private id. A public/closed arcade remains readable through detail and search but MUST NOT enter operating discovery, nearby, update, or visit flows.
 
 Profile visit data is derived only from currently public arcades (open or

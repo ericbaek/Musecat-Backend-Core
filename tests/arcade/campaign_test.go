@@ -195,6 +195,86 @@ func TestGetCampaignIncludesUpdatedItemsAndReportLog(t *testing.T) {
 	}
 }
 
+func TestNearbyIncludesCampaignsForVisibleArcades(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, arcadeID, campaignID, gameID, _ := seedCampaignCheckFixture(t, app, []string{"supporter"})
+	campaign, err := app.FindRecordById("arcade_campaign", campaignID)
+	if err != nil {
+		t.Fatalf("failed to load campaign: %v", err)
+	}
+	fromVersion, err := app.FindRecordById("game_series_version", campaign.GetString("from_version"))
+	if err != nil {
+		t.Fatalf("failed to load campaign version: %v", err)
+	}
+	seriesID := fromVersion.GetString("series")
+
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatalf("failed to load arcade: %v", err)
+	}
+	basic, err := app.FindRecordById("arcade_basic", arcade.GetString("basic"))
+	if err != nil {
+		t.Fatalf("failed to load arcade basic: %v", err)
+	}
+	basic.Set("location", map[string]any{"lat": 38.0, "lon": 127.0})
+	if err := app.Save(basic); err != nil {
+		t.Fatalf("failed to move arcade: %v", err)
+	}
+
+	response := executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?lat=37.5&lon=127.0&game_series="+seriesID, "", nil)
+	var payload struct {
+		Items     []map[string]any `json:"items"`
+		Campaigns []map[string]any `json:"campaigns"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		response.Body.Close()
+		t.Fatalf("failed to decode nearby response: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected nearby request to succeed, got %d", response.StatusCode)
+	}
+	var visibleItem map[string]any
+	for _, item := range payload.Items {
+		if item["id"] == arcadeID {
+			visibleItem = item
+			break
+		}
+	}
+	if visibleItem == nil {
+		t.Fatalf("expected moved arcade %q in nearby results", arcadeID)
+	}
+	itemCampaigns, ok := visibleItem["campaigns"].([]any)
+	if !ok || len(itemCampaigns) != 1 || itemCampaigns[0].(map[string]any)["id"] != campaignID {
+		t.Fatalf("expected campaign marker on nearby arcade, got %#v", visibleItem["campaigns"])
+	}
+	if len(payload.Campaigns) != 1 || payload.Campaigns[0]["id"] != campaignID || payload.Campaigns[0]["nearby_target_count"] != float64(1) {
+		t.Fatalf("expected current-page campaign summary, got %#v", payload.Campaigns)
+	}
+
+	check := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"updated","bypass_location":true}`, campaignID, arcadeID, gameID)
+	response = executeJSONRequest(t, app, http.MethodPost, "/campaign/check", check, map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected campaign update to succeed, got %d", response.StatusCode)
+	}
+
+	response = executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?lat=37.5&lon=127.0&game_series="+seriesID, "", nil)
+	defer response.Body.Close()
+	payload = struct {
+		Items     []map[string]any `json:"items"`
+		Campaigns []map[string]any `json:"campaigns"`
+	}{}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode updated nearby response: %v", err)
+	}
+	if len(payload.Campaigns) != 0 {
+		t.Fatalf("expected no campaign after the visible target was updated, got %#v", payload.Campaigns)
+	}
+}
+
 func seedCampaignCheckFixture(tb testing.TB, app *tests.TestApp, tags []string) (token, arcadeID, campaignID, gameID, stateID string) {
 	tb.Helper()
 	ensureCampaignCollectionsForTest(tb, app)
