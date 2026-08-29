@@ -63,6 +63,9 @@ func GetGameCatalog(re *core.RequestEvent) error {
 	}
 	seriesByID := make(map[string]gameCatalogSeries, len(seriesRecords))
 	for _, record := range seriesRecords {
+		if record.GetBool("archived") {
+			continue
+		}
 		seriesByID[record.Id] = gameCatalogSeries{
 			ID:           record.Id,
 			Name:         catalogSeriesName(record, locale),
@@ -85,6 +88,9 @@ func GetGameCatalog(re *core.RequestEvent) error {
 	}
 	versionsByID := make(map[string]gameCatalogVersion, len(versionRecords))
 	for _, record := range versionRecords {
+		if record.GetBool("archived") {
+			continue
+		}
 		seriesID := record.GetString("series")
 		if _, exists := seriesByID[seriesID]; !exists {
 			continue
@@ -114,6 +120,9 @@ func GetGameCatalog(re *core.RequestEvent) error {
 	}
 	cabinetsByID := make(map[string]gameCatalogCabinet, len(cabinetRecords))
 	for _, record := range cabinetRecords {
+		if record.GetBool("archived") {
+			continue
+		}
 		cabinetsByID[record.Id] = gameCatalogCabinet{
 			ID:   record.Id,
 			Name: catalogName(record, locale),
@@ -134,6 +143,9 @@ func GetGameCatalog(re *core.RequestEvent) error {
 		})
 	}
 	for _, record := range compatibilityRecords {
+		if record.GetBool("archived") {
+			continue
+		}
 		version, versionExists := versionsByID[record.GetString("version")]
 		cabinet, cabinetExists := cabinetsByID[record.GetString("cabinet")]
 		if !versionExists || !cabinetExists {

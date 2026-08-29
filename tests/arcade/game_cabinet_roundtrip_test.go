@@ -66,6 +66,20 @@ func TestGameCabinetRoundTripAndCompatibility(t *testing.T) {
 
 func seedGameCabinet(tb testing.TB, app core.App, name string) string {
 	tb.Helper()
+	series, err := app.FindFirstRecordByFilter("game_series", "", nil)
+	if err != nil {
+		seriesCollection, findErr := app.FindCollectionByNameOrId("game_series")
+		if findErr != nil {
+			tb.Fatalf("find game series collection: %v", findErr)
+		}
+		series = core.NewRecord(seriesCollection)
+		series.Set("en", "Test Series")
+		series.Set("kr", "Test Series")
+		series.Set("jp", "Test Series")
+		if saveErr := app.Save(series); saveErr != nil {
+			tb.Fatalf("save test game series: %v", saveErr)
+		}
+	}
 	coll, err := app.FindCollectionByNameOrId("game_cabinet")
 	if err != nil {
 		tb.Fatalf("find game cabinet collection: %v", err)
@@ -74,6 +88,7 @@ func seedGameCabinet(tb testing.TB, app core.App, name string) string {
 	rec.Set("en", name)
 	rec.Set("kr", name)
 	rec.Set("jp", name)
+	rec.Set("series", series.Id)
 	if err := app.Save(rec); err != nil {
 		tb.Fatalf("save game cabinet: %v", err)
 	}

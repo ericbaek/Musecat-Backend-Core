@@ -98,10 +98,12 @@ func TestGameCabinetSchemaRevisionUniqueness(t *testing.T) {
 
 	cabinetCollection := requireSchemaCollection(t, app, "game_cabinet")
 	cabinetA := newCabinetRecord(cabinetCollection, "Cabinet A")
+	cabinetA.Set("series", series.Id)
 	if err := app.Save(cabinetA); err != nil {
 		t.Fatal(err)
 	}
 	cabinetB := newCabinetRecord(cabinetCollection, "Cabinet B")
+	cabinetB.Set("series", series.Id)
 	if err := app.Save(cabinetB); err != nil {
 		t.Fatal(err)
 	}

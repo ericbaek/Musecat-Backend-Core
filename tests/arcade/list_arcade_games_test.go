@@ -230,16 +230,16 @@ func TestListArcadeGames_SortsBySeriesAndRelease(t *testing.T) {
 	scenario.Test(t)
 }
 
-func TestListArcadeGames_RejectsNonModerator(t *testing.T) {
+func TestListArcadeGames_RejectsUnauthorizedGameToolsUser(t *testing.T) {
 	headers := map[string]string{}
 	scenario := tests.ApiScenario{
-		Name:           "GET /arcade/games rejects users without moderator tags",
+		Name:           "GET /arcade/games rejects users without game tools access",
 		Method:         http.MethodGet,
 		URL:            "/arcade/games",
 		Headers:        headers,
 		ExpectedStatus: http.StatusForbidden,
 		ExpectedContent: []string{
-			`"error":"moderator access required"`,
+			`"error":"supporter level 30 or staff access required"`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {
 			return newArcadeTestApp(tb)

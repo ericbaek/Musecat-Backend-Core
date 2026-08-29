@@ -681,6 +681,10 @@ func seedNearbyGameAtomWithCabinet(tb testing.TB, app *tests.TestApp, batchID, v
 
 func seedNearbyGameCabinet(tb testing.TB, app *tests.TestApp, name string) string {
 	tb.Helper()
+	series, err := app.FindFirstRecordByFilter("game_series", "", nil)
+	if err != nil {
+		tb.Fatalf("failed to load game_series: %v", err)
+	}
 	coll, err := app.FindCollectionByNameOrId("game_cabinet")
 	if err != nil {
 		tb.Fatalf("failed to load game_cabinet: %v", err)
@@ -689,6 +693,7 @@ func seedNearbyGameCabinet(tb testing.TB, app *tests.TestApp, name string) strin
 	rec.Set("en", name)
 	rec.Set("kr", name)
 	rec.Set("jp", name)
+	rec.Set("series", series.Id)
 	if err := app.Save(rec); err != nil {
 		tb.Fatalf("failed to save game_cabinet: %v", err)
 	}

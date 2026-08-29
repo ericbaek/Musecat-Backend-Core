@@ -28,6 +28,7 @@ import (
 	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
 	communityhandler "github.com/ericbaek/musecat-backend-core/handlers/community"
+	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
@@ -119,20 +120,26 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		// Public read endpoint: list machine rows filtered by country, game series, and version
 		se.Router.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(
 			apis.RequireAuth("user"),
-			arcadequery.RequireModeratorAccess(),
+			userhandler.RequireActiveUser(),
+			arcadequery.RequireGameToolsAccess(),
 		)
 		// Public read endpoint: returns game_series_version and its series
 		se.Router.GET("/game_series_version", arcadequery.GetGameSeriesVersion)
 		// Public read endpoint: locale-localized version/cabinet compatibility catalog.
 		se.Router.GET("/game/catalog", arcadequery.GetGameCatalog)
-		se.Router.POST("/game_series_version", arcadequery.CreateGameSeriesVersion).Bind(
+		catalogManagement := se.Router.Group("/moderation/game").Bind(
+			apis.BodyLimit(128<<10),
 			apis.RequireAuth("user"),
-			arcadequery.RequireModeratorAccess(),
+			userhandler.RequireActiveUser(),
+			arcadequery.RequireGameToolsAccess(),
 		)
-		se.Router.PUT("/game_series_version", arcadequery.UpdateGameSeriesVersion).Bind(
-			apis.RequireAuth("user"),
-			arcadequery.RequireModeratorAccess(),
-		)
+		catalogManagement.GET("/catalog", gamecataloghandler.GetCatalog)
+		catalogManagement.POST("/catalog", gamecataloghandler.Create)
+		catalogManagement.PUT("/catalog", gamecataloghandler.Update)
+		catalogManagement.DELETE("/catalog", gamecataloghandler.Archive)
+		catalogManagement.POST("/catalog/restore", gamecataloghandler.Restore)
+		catalogManagement.GET("/catalog/changes", gamecataloghandler.ListChanges)
+		catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
 		// Public user profile read endpoint
 		se.Router.GET("/user", userhandler.GetUserByID)
 		se.Router.GET("/user/activity", userhandler.GetUserActivity)
@@ -156,7 +163,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
 		authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
 		authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart)
-		authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
+		authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireGameToolsAccess())
 		authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic)
 		authArcade.PUT("/public", arcadepublic.RequestPublicArcade)
 		authArcade.PUT("/gtk", arcadegtk.UpdateArcadeGTK)

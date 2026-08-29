@@ -202,6 +202,10 @@ func seedArcadeCandidateVersion(tb testing.TB, app *tests.TestApp, seriesName st
 
 func seedArcadeCandidateCabinet(tb testing.TB, app *tests.TestApp, name string) string {
 	tb.Helper()
+	series, err := app.FindFirstRecordByFilter("game_series", "", nil)
+	if err != nil {
+		tb.Fatalf("failed to load game_series: %v", err)
+	}
 	coll, err := app.FindCollectionByNameOrId("game_cabinet")
 	if err != nil {
 		tb.Fatalf("failed to load game_cabinet: %v", err)
@@ -210,6 +214,7 @@ func seedArcadeCandidateCabinet(tb testing.TB, app *tests.TestApp, name string) 
 	record.Set("en", name)
 	record.Set("kr", name)
 	record.Set("jp", name)
+	record.Set("series", series.Id)
 	if err := app.Save(record); err != nil {
 		tb.Fatalf("failed to save game_cabinet: %v", err)
 	}
