@@ -42,7 +42,7 @@ Each row uses these common columns:
 | `PUT /arcade/sns` | `sns` | one row per request | `sns_diff` | Replaces the current `arcade_sns` relation. |
 | `PUT /arcade/gtk` | `gtk` | one row per request | `gtk_diff` | Replaces the current `arcade_gtk` relation. |
 | `PUT /arcade/game` | `game` | one row per request | `game_diff` | Accepts required `add`/`modify`/`remove` arrays, materializes the current immutable state, validates `base_state_id`, creates a new immutable history batch, then moves `arcade.game_v2` to it. Item IDs are persistent `arcade_game_id` IDs. |
-| `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Developer/moderator-only administrative version swap. It uses the normal immutable game-state batch flow. |
+| `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Administrative version swap for developer/moderator or level-30 supporter accounts. It uses the normal immutable game-state batch flow. |
 | `POST /campaign/check` | `game` when an old target is updated | one row | `game_diff` | A successful `result=updated` campaign check uses the normal immutable game-state batch flow. `result=still_old` persists the check and awards 1 XP once per user and target; it does not create a game changelog row. A location-bypassed update awards 1 XP. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `PUT /arcade/memo` | `memo` | one row per changed request | `memo_diff` | Creates an immutable Tiptap JSON revision and moves `arcade.memo` for an authenticated user with arcade write access. |
@@ -248,8 +248,8 @@ self-contained without any review-only game metadata.
 This endpoint uses the normal `game_diff` shape described for `PUT /arcade/game`.
 There is one changelog row per affected arcade. Its `state_from` and `state_to`
 identify the immutable revision batches, and `items[]` contains entry-level
-before/after snapshots. The operation is restricted to `developer` and
-`moderator` accounts and does not award XP.
+before/after snapshots. The operation is restricted to `developer`/`moderator`
+accounts and supporters who have reached level 30; it does not award XP.
 
 ### `PUT /arcade/photo`
 

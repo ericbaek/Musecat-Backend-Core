@@ -15,6 +15,11 @@ The score endpoint is ledger-based. It reads `user_level_log` and exposes the XP
 - `flag_reaction`: `3` XP
 - attendance check-in: `2` XP per successful KST-day first check-in
 
+XP is awarded only to authenticated users whose `username` is non-empty. Until
+the one-time username setup is complete, XP-producing actions award `0` and do
+not create `user_level` or `user_level_log` records. Public-conversion XP
+previews likewise report no eligible XP during this period.
+
 Basic/hour/sns/gtk/photo grants use the existing seven-day cooldown per user +
 arcade + part. Game edits instead use a rolling seven-day set of distinct
 `arcade_game_id` values. The target is `min(10, 2*n + 1)` and each request gets

@@ -81,7 +81,7 @@ Definitions:
 | Arcade notice update/delete | deny | own authored notice only | own authored notice only | allow |
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
-| Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |
+| Bulk game version update (`POST /arcade/game/bulk_version`) | deny | allow only for level-30 supporter | deny | allow |
 | Latest subway map metadata and file bytes | allow | allow | allow | allow |
 | Subway map create/update/delete | deny | deny | deny | allow |
 
@@ -186,7 +186,29 @@ version-level `price_default` remains available as a fallback. Unverified
 cabinet identity is intentionally not a catalog row and is represented only as
 `null` in an arcade game entry or game mutation input.
 
-The developer/moderator-only `POST /arcade/game/bulk_version` operation is an administrative version swap. It applies the same immutable batch and `changed="game"` changelog semantics per affected arcade as a regular game mutation, does not award XP, and does not maintain any separate review-state metadata.
+`/moderation/game/catalog` is the only game-catalog write boundary. An active
+authenticated user with `developer` or `moderator` access, or a
+`supporter`/`founding_supporter` who has reached level 30, may create or update
+a manufacturer, game series, version, cabinet, or explicit version/cabinet
+compatibility. Every request carries a UUID `operation_id`, a 10–500 character
+`reason`, and (except creation) the current `expected_revision`; duplicate
+operation IDs replay only an identical request from the same actor and stale
+revisions return `409`.
+
+Catalog records are never hard-deleted. Archive and restore are revisioned
+operations. Archive fails when the record is referenced by a current arcade
+installation, active child catalog relation, or active campaign. Every accepted
+operation writes one immutable `game_catalog_changelog` record containing the
+authenticated actor and tags, reason, before/after snapshots, and revisions.
+`GET /moderation/game/catalog/changes` lists that evidence and a guarded
+`POST /moderation/game/catalog/changes/revert` records a new revert operation;
+it does not erase history. Full owns notifications for those log records.
+
+The `POST /arcade/game/bulk_version` operation is an administrative version
+swap for developer/moderator accounts and level-30 supporters. It applies the
+same immutable batch and `changed="game"` changelog semantics per affected
+arcade as a regular game mutation, does not award XP, and does not maintain any
+separate review-state metadata.
 
 Every user-initiated game-state mutation writes one immutable `arcade_changelog` row with `changed="game"`. Its `from` and `to` values are revision-batch IDs; log version 2 contains `state_from`, `state_to`, and an entry-level `before`/`after` snapshot including cabinet. The row's authenticated `by` and `created` are the canonical editor and timestamp for timeline UI. Legacy backfill does not create user-edit changelog rows. Full's legacy game-history import MUST preserve each source `arcade_game.id` as the corresponding history-batch ID so existing game changelog `from`/`to` values remain rollback targets; it must import every molecule and atom before cleanup. The one-time guarded Full game-catalog migration also has no authenticated editor and therefore MUST NOT invent a user changelog row: it preserves the selected batch and revisions, creates a complete immutable shadow batch, records source rows and pointer changes in the locked migration-origin catalog, and switches `arcade.game_v2` atomically.
 
@@ -227,6 +249,7 @@ single-record operations do not write arcade changelog or XP rows.
 | reviewer decision | `PUT /moderation/arcade/edit-report` |
 | arcade analytics | `GET /arcade/analytics?arcade=...` and `POST /arcade/analytics/event` |
 | localized game/version/cabinet catalog | `GET /game/catalog?locale=en-US|ko-KR|ja-JP` |
+| protected game catalog management | `GET|POST|PUT|DELETE /moderation/game/catalog`, `POST /moderation/game/catalog/restore`, `GET /moderation/game/catalog/changes`, `POST /moderation/game/catalog/changes/revert` |
 | campaign progress and report log | `GET /campaign?id=...` |
 | latest regional subway map | `GET /subway/map?region=center|busan` |
 | subway map file bytes | `GET /subway/map/file?id=...&field=lightSVG|darkSVG|image|file` (the `file_url` returned by the map response) |
@@ -254,11 +277,14 @@ New frontend code MUST NOT reintroduce collection names, PocketBase record rules
 - `GET /arcade/public?arcade=...` is a creator-only, read-only XP estimate. It uses the same idempotent public and draft-backfill grant keys as `PUT /arcade/public`, writes no visibility or ledger state, and the successful PUT response is authoritative if the draft changes afterward. Draft backfill is independent of the seven-day arcade-edit cooldown: each changed area earns its backfill once per arcade, regardless of how recently that area received normal edit XP.
 - Public conversion remains creator-only. A creator tagged `supporter`, `founding_supporter`, `developer`, or `moderator` may set `bypass_requirements=true` on `PUT /arcade/public` to skip only the game, contact-or-hours, and Korea facility-photo publication requirements. Stored country/timezone validation, private/open state validation, and all other public-conversion checks remain mandatory. Clients must show a two-step warning confirmation before sending this flag.
 - XP ledger changes and aggregate mutations belong to the same transaction. No XP grant may survive a failed aggregate mutation.
+- XP is available only after the authenticated user has a non-empty `username`. Before one-time username setup, XP-producing actions retain their normal mutation semantics where applicable but award `0`; they must not create `user_level` or `user_level_log` state, and public-conversion XP previews must report no eligible XP.
 - Normal edit XP remains scoped by user, arcade, and part. Basic/hour/sns/gtk/photo edits continue to grant 3 XP with their existing seven-day cooldown. Game edits use a rolling seven-day window of distinct durable `arcade_game_id` values: the target is `min(10, 2*n + 1)` and each request receives only the increase over XP already granted in that window. Revisiting an entry already counted in the window grants 0; entries become eligible again after they leave the window. Administrative bulk game-version updates and public-conversion backfill do not use this scale.
 - Notification delivery is after persistence and best-effort. A Telegram/Discord failure MUST NOT roll back a completed user request.
 - Review processing has no automated ban and no automated rollback.
 - Public `GET /arcade` detail loads record one `page_view` event best-effort. The direction-click event route is anonymous and accepts only `direction_click`.
 - A successful flag creation records a `fault_report` marker in the same transaction; its flag id preserves cumulative counting after the user deletes the flag.
+- Flag resolution is owned by Core. `arcade_flag.resolution_vote_state` is `idle|active`; the first current-round `fixed` reaction starts a round, while `issue_persist` before that point appends report history and starts the next report round semantics. During an active round, `fixed` and `wrong` are one mutually exclusive vote per user, with `level_snapshot` captured at creation. The score is the fixed snapshot-level sum minus the wrong snapshot-level sum. A fixed voter keeps a zero score active for 72 hours; a negative score or zero fixed voters closes the round. The delay is 15 minutes at 30+, 3 hours at 20–29, 24 hours at 10–19, 48 hours at 5–9, and 72 hours at 0–4. Every score-changing event calculates a candidate deadline from the server event time, but an active flag keeps the earlier of its existing `resolveAt` and that candidate so a vote can never postpone resolution. Successful flag reactions refresh the flag's `updated` activity timestamp. A flag with no reaction activity for 120 days is opened by the nightly stale sweep as a zero-score, 72-hour resolution window; this window is allowed to remain active without a user fixed vote until it receives a user vote or reaches its deadline. Legacy reactions remain stored with `resolution_context=legacy` and never enter new-round totals. Deadline reconciliation runs inside reaction transactions and the every-minute Core cron, while the 120-day stale sweep runs once per night; tagged-user immediate resolution is not supported.
+- The flag read and reaction mutation responses include the authoritative `resolution` summary, `myVote`, and newest-first `reportHistory`. Clients may calculate only display countdown/progress from `resolveAt`; they MUST NOT infer score, thresholds, rounds, or solve state from raw reaction counts.
 - Analytics responses always include only `page_views`, `fault_reports`, and `edit_count` for anonymous/contributor callers. `page_views_by_source`, `series_filter_entries`, `direction_clicks`, `visit_verifications`, and `distinct_visitors` are omitted unless the caller is an official arcade account or a `developer|moderator`.
 
 ## Core and Full migration boundary

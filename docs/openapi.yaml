@@ -149,6 +149,7 @@ components:
           format: double
     XpFeedback:
       type: object
+      description: XP is awarded only when the authenticated user's account has a non-empty username. Before username setup, XP feedback reports no XP change.
       required:
         - previous_exp
         - new_exp
@@ -595,9 +596,88 @@ components:
           type: string
         updated:
           type: string
+        resolutionContext:
+          type: string
+          enum: [legacy, report, vote]
+          description: Legacy history, pre-vote report history, or current resolution vote context.
+        voteRound:
+          type: string
+          description: Resolution round for fixed/wrong votes.
+        levelSnapshot:
+          type: integer
+          minimum: 0
+          description: Voter level captured when the current-round vote was created.
+    ArcadeFlagMyReport:
+      type: object
+      required: [action, nextAt]
+      properties:
+        action:
+          type: string
+          enum: [add, delete, cooldown]
+          description: Server-authorized next action for the authenticated user's latest issue_persist report.
+        nextAt:
+          oneOf:
+            - type: string
+            - type: 'null'
+    ArcadeFlagResolution:
+      type: object
+      required: [state, round, startedAt, resolveAt, delaySeconds, fixedLevelTotal, wrongLevelTotal, score, fixedVoterCount, wrongVoterCount, myVote]
+      properties:
+        state:
+          type: string
+          enum: [idle, active]
+        round:
+          type: string
+        startedAt:
+          oneOf:
+            - type: string
+            - type: 'null'
+        resolveAt:
+          oneOf:
+            - type: string
+            - type: 'null'
+        delaySeconds:
+          type: integer
+          minimum: 0
+        fixedLevelTotal:
+          type: integer
+          minimum: 0
+        wrongLevelTotal:
+          type: integer
+          minimum: 0
+        score:
+          type: integer
+        fixedVoterCount:
+          type: integer
+          minimum: 0
+        wrongVoterCount:
+          type: integer
+          minimum: 0
+        myVote:
+          oneOf:
+            - type: string
+              enum: [fixed, wrong]
+            - type: 'null'
+        myReport:
+          oneOf:
+            - $ref: '#/components/schemas/ArcadeFlagMyReport'
+            - type: 'null'
+    ArcadeFlagReportHistoryItem:
+      type: object
+      required: [id, kind, createdBy, created]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [initial, issue_persist]
+        createdBy:
+          type: string
+        created:
+          type: string
     ArcadeFlagExpanded:
       type: object
-      required: [id, arcade, disruption, solved, message, photos, createdBy, created, updated, reactions]
+      required: [id, arcade, disruption, solved, message, photos, createdBy, created, updated, reactions, resolution, reportHistory]
       description: Open flag payload returned under game items or orphan flag lists.
       properties:
         id:
@@ -624,6 +704,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ArcadeFlagReaction'
+        resolution:
+          $ref: '#/components/schemas/ArcadeFlagResolution'
+        reportHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArcadeFlagReportHistoryItem'
+        canWithdraw:
+          type: boolean
+          description: Whether the authenticated flag creator may withdraw this unresolved flag now.
     ArcadeGameArcade:
       type: object
       required: [id, country, name, address, location]
@@ -1610,6 +1699,40 @@ components:
         - type: object
           additionalProperties: true
         - type: 'null'
+    GameCatalogMutationRequest:
+      type: object
+      required: [entity, operation_id, reason]
+      properties:
+        entity:
+          type: string
+          enum: [series, version, cabinet, compatibility, manufacturer]
+        id:
+          type: string
+        operation_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 500
+        expected_revision:
+          type: integer
+          minimum: 1
+        values:
+          type: object
+          additionalProperties: true
+        change_id:
+          type: string
+    GameCatalogMutationResponse:
+      type: object
+      required: [item, change]
+      properties:
+        item:
+          type: object
+          additionalProperties: true
+        change:
+          type: object
+          additionalProperties: true
     GameSeriesVersionPriceDefaultMode:
       type: object
       required: [mode_key, represent]
@@ -2111,6 +2234,7 @@ components:
     FlagReactionRequest:
       type: object
       required: [flag, reaction, action]
+      description: Use issue_persist before resolution voting starts, fixed to support a resolution, and wrong as the opposing vote during an active resolution round. The wrong reaction is not a user-facing invalid-report action.
       properties:
         flag:
           type: string
@@ -4075,8 +4199,8 @@ paths:
     get:
       tags: [Moderator]
       summary: /arcade/games
-      description: &moderatorAccessDescription |
-        Requires an authenticated user whose `tag` or `tags` includes `developer`, `moderator`, `supporter`, or `founding_supporter`.
+      description: &gameToolsAccessDescription |
+        Requires an authenticated user with `developer` or `moderator` access, or a `supporter` or `founding_supporter` role at level 30 or above.
       security:
         - bearerAuth: []
       parameters:
@@ -4220,10 +4344,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /moderation/game/catalog:
+    get:
+      tags: [Moderator]
+      summary: Read protected game catalog management data
+      description: Active developer or moderator, or an active supporter or founding supporter at level 30 or above.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: locale
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [en-US, ko-KR, ja-JP]
+      responses:
+        '200':
+          description: Full catalog management view.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
     post:
       tags: [Moderator]
-      summary: /game_series_version
-      description: *moderatorAccessDescription
+      summary: Create a catalog item
       security:
         - bearerAuth: []
       requestBody:
@@ -4231,42 +4376,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GameSeriesVersionCreateRequest'
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
       responses:
         '200':
-          description: Created version bundle.
+          description: Created item and immutable audit change.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GameSeriesBundle'
-        '400':
-          description: Invalid JSON body or validation failure.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Missing or invalid bearer token.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PocketBaseAuthError'
-        '403':
-          description: Moderator access required.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '502':
-          description: Failed to create or load the version bundle.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+        '409': { description: Duplicate or conflicting operation. }
     put:
       tags: [Moderator]
-      summary: /game_series_version
-      description: *moderatorAccessDescription
+      summary: Update a catalog item with optimistic concurrency
       security:
         - bearerAuth: []
       requestBody:
@@ -4274,44 +4395,87 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GameSeriesVersionUpdateRequest'
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
       responses:
         '200':
-          description: Updated version bundle.
+          description: Updated item and immutable audit change.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GameSeriesBundle'
-        '400':
-          description: Invalid JSON body or validation failure.
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+        '409': { description: Stale revision or dependency conflict. }
+    delete:
+      tags: [Moderator]
+      summary: Archive a catalog item
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
+      responses:
+        '200':
+          description: Archived item and immutable audit change.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '401':
-          description: Missing or invalid bearer token.
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+        '409': { description: Item is referenced by active data. }
+  /moderation/game/catalog/restore:
+    post:
+      tags: [Moderator]
+      summary: Restore an archived catalog item
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
+      responses:
+        '200':
+          description: Restored item and immutable audit change.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PocketBaseAuthError'
-        '403':
-          description: Moderator access required.
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+  /moderation/game/catalog/changes:
+    get:
+      tags: [Moderator]
+      summary: List immutable game catalog changes
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Paginated catalog audit evidence.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '404':
-          description: Version not found.
+                type: object
+                additionalProperties: true
+  /moderation/game/catalog/changes/revert:
+    post:
+      tags: [Moderator]
+      summary: Revert a catalog change as a new audited operation
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
+      responses:
+        '200':
+          description: Reverted item and new immutable audit change.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
-        '502':
-          description: Failed to update or load the version bundle.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+        '409': { description: Current item cannot safely be reverted. }
   /support_feedback:
     get:
       tags: [Support]
@@ -4875,8 +5039,7 @@ paths:
       tags: [Moderator]
       summary: /arcade/game/bulk_version
       description: |
-        Requires an authenticated user whose `tag` or `tags` includes `developer` or `moderator`.
-        Supporter and founding-supporter tags are not sufficient. The selected stable game entries may span multiple arcades. Each affected arcade receives an immutable game-state batch and its own `changed=game` changelog row. This administrative version swap records only the resulting game-state change.
+        Requires an authenticated user with `developer` or `moderator` access, or a `supporter` or `founding_supporter` role at level 30 or above. The selected stable game entries may span multiple arcades. Each affected arcade receives an immutable game-state batch and its own `changed=game` changelog row. This administrative version swap records only the resulting game-state change.
       security:
         - bearerAuth: []
       requestBody:
@@ -4916,7 +5079,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Developer or moderator access required.
+          description: Supporter level 30 or staff access required.
           content:
             application/json:
               schema:
@@ -5377,12 +5540,12 @@ paths:
               $ref: '#/components/schemas/FlagReactionRequest'
       responses:
         '200':
-          description: Reaction state updated.
+          description: Reaction state updated. The response includes the authoritative resolution summary, current user vote, and newest-first report history.
           content:
             application/json:
               schema:
                 type: object
-                required: [flag, reaction, action, reaction_id, solved, game, xp_feedback]
+                required: [flag, reaction, action, reaction_id, solved, game, xp_feedback, resolution, reportHistory]
                 properties:
                   flag:
                     type: string
@@ -5398,6 +5561,12 @@ paths:
                     $ref: '#/components/schemas/ArcadeGameExpanded'
                   xp_feedback:
                     $ref: '#/components/schemas/XpFeedback'
+                  resolution:
+                    $ref: '#/components/schemas/ArcadeFlagResolution'
+                  reportHistory:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ArcadeFlagReportHistoryItem'
         '400':
           description: Invalid body or reaction rule failure.
           content:
@@ -5411,7 +5580,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '502':
-          description: Auto-solve follow-up failed after a successful reaction write.
+          description: The reaction transaction succeeded but the authoritative resolution response could not be built.
           content:
             application/json:
               schema:
