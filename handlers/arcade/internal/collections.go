@@ -32,4 +32,5 @@ const (
 	CollectionGameSeries               = "game_series"
 	CollectionGameCabinet              = "game_cabinet"
 	CollectionGameSeriesVersionCabinet = "game_series_version_cabinet"
+	CollectionGameCatalogChangelog     = "game_catalog_changelog"
 )

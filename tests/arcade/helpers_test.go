@@ -12,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/types"
 
 	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
@@ -149,7 +151,8 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		se.Router.GET("/campaign", arcadecampaign.GetCampaign)
 		se.Router.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(
 			apis.RequireAuth("user"),
-			arcadequery.RequireModeratorAccess(),
+			user.RequireActiveUser(),
+			arcadequery.RequireGameToolsAccess(),
 		)
 		se.Router.GET("/game_series_version", arcadequery.GetGameSeriesVersion)
 		se.Router.GET("/game/catalog", arcadequery.GetGameCatalog)
@@ -177,7 +180,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		group.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
 		group.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
 		group.POST("/rollback", arcadeadmin.RollbackArcadePart)
-		group.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
+		group.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireGameToolsAccess())
 		group.PUT("/basic", arcadebasic.UpdateArcadeBasic)
 		group.PUT("/gtk", arcadegtk.UpdateArcadeGTK)
 		group.PUT("/sns", arcadesns.UpdateArcadeSNS)
@@ -476,6 +479,86 @@ func executeJSONRequest(tb testing.TB, app *tests.TestApp, method, url, body str
 	}
 	mux.ServeHTTP(recorder, req)
 	return recorder.Result()
+}
+
+type reactionSeed struct {
+	reaction  string
+	createdAt time.Time
+}
+
+func createFlagWithReactions(tb testing.TB, app *tests.TestApp, arcadeID, createdBy string, createdAt time.Time, reactions []reactionSeed) string {
+	tb.Helper()
+
+	flagColl, err := app.FindCollectionByNameOrId("arcade_flag")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_flag collection: %v", err)
+	}
+
+	flagRec := core.NewRecord(flagColl)
+	flagRec.Set("arcade", arcadeID)
+	flagRec.Set("disruption", "minor")
+	flagRec.Set("solved", false)
+	flagRec.Set("message", "auto-solve target")
+	flagRec.Set("createdBy", createdBy)
+	if err := app.Save(flagRec); err != nil {
+		tb.Fatalf("failed to save arcade_flag: %v", err)
+	}
+
+	setRecordTimestamp(tb, app, "arcade_flag", flagRec.Id, createdAt)
+
+	if len(reactions) == 0 {
+		return flagRec.Id
+	}
+
+	reactionColl, err := app.FindCollectionByNameOrId("arcade_flag_reaction")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_flag_reaction collection: %v", err)
+	}
+
+	for _, seed := range reactions {
+		reactionRec := core.NewRecord(reactionColl)
+		reactionRec.Set("flag", flagRec.Id)
+		reactionRec.Set("reaction", seed.reaction)
+		reactionRec.Set("createdBy", createdBy)
+		if err := app.Save(reactionRec); err != nil {
+			tb.Fatalf("failed to save arcade_flag_reaction: %v", err)
+		}
+
+		setRecordTimestamp(tb, app, "arcade_flag_reaction", reactionRec.Id, seed.createdAt)
+	}
+
+	return flagRec.Id
+}
+
+func addReaction(tb testing.TB, app *tests.TestApp, flagID, createdBy, reaction string) string {
+	tb.Helper()
+
+	reactionColl, err := app.FindCollectionByNameOrId("arcade_flag_reaction")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_flag_reaction collection: %v", err)
+	}
+
+	reactionRec := core.NewRecord(reactionColl)
+	reactionRec.Set("flag", flagID)
+	reactionRec.Set("reaction", reaction)
+	reactionRec.Set("createdBy", createdBy)
+	if err := app.Save(reactionRec); err != nil {
+		tb.Fatalf("failed to save reaction(%s): %v", reaction, err)
+	}
+
+	return reactionRec.Id
+}
+
+func setRecordTimestamp(tb testing.TB, app *tests.TestApp, table, id string, ts time.Time) {
+	tb.Helper()
+
+	when := ts.UTC().Format(types.DefaultDateLayout)
+	if _, err := app.NonconcurrentDB().
+		NewQuery("UPDATE " + table + " SET created={:created}, updated={:updated} WHERE id={:id}").
+		Bind(dbx.Params{"created": when, "updated": when, "id": id}).
+		Execute(); err != nil {
+		tb.Fatalf("failed to update %s timestamps for %s: %v", table, id, err)
+	}
 }
 
 func seedGameSeriesVersion(tb testing.TB, app *tests.TestApp) string {

@@ -1,264 +1,152 @@
 package arcade_test
 
 import (
+	"net/http"
 	"testing"
 	"time"
-
-	"github.com/pocketbase/dbx"
-	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tests"
-	"github.com/pocketbase/pocketbase/tools/types"
 
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 )
 
-type reactionSeed struct {
-	reaction  string
-	createdAt time.Time
+func TestFlagResolutionDelayBoundaries(t *testing.T) {
+	tests := []struct {
+		score int
+		want  time.Duration
+	}{
+		{score: 0, want: 72 * time.Hour},
+		{score: 1, want: 72 * time.Hour},
+		{score: 4, want: 72 * time.Hour},
+		{score: 5, want: 48 * time.Hour},
+		{score: 9, want: 48 * time.Hour},
+		{score: 10, want: 24 * time.Hour},
+		{score: 19, want: 24 * time.Hour},
+		{score: 20, want: 3 * time.Hour},
+		{score: 29, want: 3 * time.Hour},
+		{score: 30, want: 15 * time.Minute},
+		{score: 100, want: 15 * time.Minute},
+	}
+	for _, test := range tests {
+		if got := arcadeflag.ResolutionDelay(test.score); got != test.want {
+			t.Errorf("score %d: delay %s, want %s", test.score, got, test.want)
+		}
+	}
 }
 
-func TestArcadeFlagAutoSolve_RunAutoSolve(t *testing.T) {
+func TestArcadeFlagAutoSolve_ResolvesOnlyDueActiveVotes(t *testing.T) {
 	app := newArcadeTestApp(t)
-	_, user := createAuthUser(t, app)
-	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
-		Name:     "Auto Solve Arcade",
-		Address:  "Auto Solve Street",
-		Nickname: []string{"AutoSolve"},
-		Location: location{Lat: 37.5665, Lon: 126.978},
-	})
-
+	t.Cleanup(app.Cleanup)
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Resolution Cron Arcade", Address: "Resolution Cron Street", Nickname: []string{"ResolutionCron"}, Location: location{Lat: 37.5665, Lon: 126.978}})
 	now := time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC)
-	daysAgo := func(days int) time.Time {
-		return now.Add(-time.Duration(days) * 24 * time.Hour)
+	flagID := createFlagWithReactions(t, app, arcadeID, user.Id, now.Add(-time.Hour), nil)
+	flag, err := app.FindRecordById("arcade_flag", flagID)
+	if err != nil {
+		t.Fatalf("load flag: %v", err)
 	}
-
-	ids := map[string]string{
-		"lt7_fixed3": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(2), []reactionSeed{
-			{reaction: "fixed", createdAt: now.Add(-36 * time.Hour)},
-			{reaction: "fixed", createdAt: now.Add(-24 * time.Hour)},
-			{reaction: "fixed", createdAt: now.Add(-12 * time.Hour)},
-		}),
-		"between7and30_fixed2_after_issue_persist": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(20), []reactionSeed{
-			{reaction: "fixed", createdAt: daysAgo(19)},
-			{reaction: "issue_persist", createdAt: daysAgo(10)},
-			{reaction: "fixed", createdAt: daysAgo(9)},
-			{reaction: "fixed", createdAt: daysAgo(8)},
-		}),
-		"gt30_fixed1": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(40), []reactionSeed{
-			{reaction: "fixed", createdAt: daysAgo(35)},
-		}),
-		"wrong2_anytime": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(1), []reactionSeed{
-			{reaction: "wrong", createdAt: now.Add(-20 * time.Hour)},
-			{reaction: "wrong", createdAt: now.Add(-10 * time.Hour)},
-		}),
-		"stale_no_reaction_90d": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(91), nil),
-		"stale_last_reaction_90d": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(200), []reactionSeed{
-			{reaction: "issue_persist", createdAt: daysAgo(150)},
-		}),
-		"lt7_fixed2_only": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(3), []reactionSeed{
-			{reaction: "fixed", createdAt: daysAgo(2)},
-			{reaction: "fixed", createdAt: daysAgo(1)},
-		}),
-		"between7and30_fixed1_after_issue_persist": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(20), []reactionSeed{
-			{reaction: "issue_persist", createdAt: daysAgo(9)},
-			{reaction: "fixed", createdAt: daysAgo(8)},
-		}),
-		"gt30_no_fixed": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(40), []reactionSeed{
-			{reaction: "wrong", createdAt: daysAgo(2)},
-		}),
-		"recent_no_reaction": createFlagWithReactions(t, app, arcadeID, user.Id, daysAgo(10), nil),
+	flag.Set("resolution_vote_state", "active")
+	flag.Set("resolution_vote_round", "round-1")
+	flag.Set("resolution_vote_resolve_at", now.Add(-time.Minute))
+	if err := app.Save(flag); err != nil {
+		t.Fatalf("save active flag: %v", err)
+	}
+	reactionID := addReaction(t, app, flagID, user.Id, "fixed")
+	reaction, err := app.FindRecordById("arcade_flag_reaction", reactionID)
+	if err != nil {
+		t.Fatalf("load reaction: %v", err)
+	}
+	reaction.Set("resolution_context", "vote")
+	reaction.Set("vote_round", "round-1")
+	reaction.Set("level_snapshot", 5)
+	if err := app.Save(reaction); err != nil {
+		t.Fatalf("save vote reaction: %v", err)
 	}
 
 	solved, err := arcadeflag.RunAutoSolve(app, now)
 	if err != nil {
-		t.Fatalf("RunAutoSolve failed: %v", err)
+		t.Fatalf("run resolution cron: %v", err)
 	}
-	if solved < 6 {
-		t.Fatalf("expected solved count >= 6, got %d", solved)
+	if solved != 1 {
+		t.Fatalf("expected one solved flag, got %d", solved)
+	}
+	flag, err = app.FindRecordById("arcade_flag", flagID)
+	if err != nil || !flag.GetBool("solved") {
+		t.Fatalf("expected due active flag to be solved: err=%v solved=%v", err, flag.GetBool("solved"))
+	}
+	response := postFlagReaction(t, app, token, flagID, "fixed", "add")
+	assertStatus(t, response, http.StatusBadRequest)
+	response.Body.Close()
+}
+
+func TestArcadeFlagStaleResolutionSweep_OpensZeroScoreWindow(t *testing.T) {
+	app := newArcadeTestApp(t)
+	t.Cleanup(app.Cleanup)
+	_, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Stale Resolution Arcade", Address: "Stale Resolution Street", Nickname: []string{"StaleResolution"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	now := time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC)
+	flagID := createFlagWithReactions(t, app, arcadeID, user.Id, now.Add(-arcadeflag.StaleResolutionAge), nil)
+	flag, err := app.FindRecordById("arcade_flag", flagID)
+	if err != nil {
+		t.Fatalf("load stale flag: %v", err)
+	}
+	flag.Set("resolution_vote_state", "idle")
+	flag.Set("resolution_vote_mode", "standard")
+	if err := app.Save(flag); err != nil {
+		t.Fatalf("initialize stale flag state: %v", err)
+	}
+	setRecordTimestamp(t, app, "arcade_flag", flagID, now.Add(-arcadeflag.StaleResolutionAge))
+
+	opened, err := arcadeflag.RunStaleResolutionSweep(app, now)
+	if err != nil {
+		t.Fatalf("run stale resolution sweep: %v", err)
+	}
+	if opened != 1 {
+		t.Fatalf("expected one stale resolution window, got %d", opened)
 	}
 
-	expectedSolved := map[string]bool{
-		"lt7_fixed3": true,
-		"between7and30_fixed2_after_issue_persist": true,
-		"gt30_fixed1":                              true,
-		"wrong2_anytime":                           true,
-		"stale_no_reaction_90d":                    true,
-		"stale_last_reaction_90d":                  true,
-		"lt7_fixed2_only":                          false,
-		"between7and30_fixed1_after_issue_persist": false,
-		"gt30_no_fixed":                            false,
-		"recent_no_reaction":                       false,
+	flag, err = app.FindRecordById("arcade_flag", flagID)
+	if err != nil {
+		t.Fatalf("reload stale flag: %v", err)
+	}
+	if flag.GetString("resolution_vote_state") != "active" || flag.GetString("resolution_vote_mode") != "stale" {
+		t.Fatalf("expected stale active resolution, got state=%q mode=%q", flag.GetString("resolution_vote_state"), flag.GetString("resolution_vote_mode"))
+	}
+	if got := flag.GetDateTime("resolution_vote_resolve_at").Time().UTC(); !got.Equal(now.Add(72 * time.Hour)) {
+		t.Fatalf("expected stale resolution deadline at %s, got %s", now.Add(72*time.Hour), got)
 	}
 
-	for name, id := range ids {
-		flagRec, err := app.FindRecordById("arcade_flag", id)
-		if err != nil {
-			t.Fatalf("failed to load %s flag: %v", name, err)
-		}
-
-		if got := flagRec.GetBool("solved"); got != expectedSolved[name] {
-			t.Fatalf("%s solved mismatch: expected %v, got %v", name, expectedSolved[name], got)
-		}
+	solved, err := arcadeflag.RunAutoSolve(app, now.Add(72*time.Hour))
+	if err != nil {
+		t.Fatalf("resolve stale window: %v", err)
+	}
+	if solved != 1 {
+		t.Fatalf("expected stale window to solve after 72 hours, got %d", solved)
 	}
 }
 
-func TestArcadeFlagAutoSolve_RegisterAutoSolveCron(t *testing.T) {
+func TestArcadeFlagAutoSolve_CronRunsEveryMinute(t *testing.T) {
 	app := newArcadeTestApp(t)
-	_, user := createAuthUser(t, app)
-	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
-		Name:     "Auto Solve Cron Arcade",
-		Address:  "Cron Street",
-		Nickname: []string{"AutoSolveCron"},
-		Location: location{Lat: 37.5665, Lon: 126.978},
-	})
-
-	flagID := createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC().Add(-120*24*time.Hour), nil)
+	t.Cleanup(app.Cleanup)
 	arcadeflag.RegisterAutoSolveCron(app)
-
-	var matched bool
+	foundResolution := false
+	foundStale := false
 	for _, job := range app.Cron().Jobs() {
-		if job.Id() != arcadeflag.AutoSolveCronJobID {
-			continue
+		if job.Id() == arcadeflag.AutoSolveCronJobID {
+			foundResolution = true
+			if job.Expression() != arcadeflag.AutoSolveCronExprUTC {
+				t.Fatalf("cron expression=%q, want %q", job.Expression(), arcadeflag.AutoSolveCronExprUTC)
+			}
 		}
-
-		matched = true
-		if job.Expression() != arcadeflag.AutoSolveCronExprUTC {
-			t.Fatalf("expected cron expr %q, got %q", arcadeflag.AutoSolveCronExprUTC, job.Expression())
+		if job.Id() == arcadeflag.StaleResolutionCronJobID {
+			foundStale = true
+			if job.Expression() != arcadeflag.StaleResolutionCronExprUTC {
+				t.Fatalf("stale cron expression=%q, want %q", job.Expression(), arcadeflag.StaleResolutionCronExprUTC)
+			}
 		}
-
-		job.Run()
-		break
 	}
-
-	if !matched {
-		t.Fatalf("expected cron job %q to be registered", arcadeflag.AutoSolveCronJobID)
+	if !foundResolution {
+		t.Fatalf("expected cron job %q", arcadeflag.AutoSolveCronJobID)
 	}
-
-	flagRec, err := app.FindRecordById("arcade_flag", flagID)
-	if err != nil {
-		t.Fatalf("failed to load flag after cron run: %v", err)
-	}
-	if !flagRec.GetBool("solved") {
-		t.Fatalf("expected flag to be solved by cron run")
-	}
-}
-
-func TestArcadeFlagAutoSolve_ReactionCreateHook(t *testing.T) {
-	app := newArcadeTestApp(t)
-	_, user := createAuthUser(t, app)
-	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
-		Name:     "Reaction Hook Arcade",
-		Address:  "Reaction Hook Street",
-		Nickname: []string{"ReactionHook"},
-		Location: location{Lat: 37.5665, Lon: 126.978},
-	})
-
-	targetFlagID := createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC().Add(-24*time.Hour), nil)
-	otherFlagID := createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC().Add(-24*time.Hour), nil)
-
-	arcadeflag.RegisterAutoSolveReactionCreateHook(app)
-
-	addReaction(t, app, targetFlagID, user.Id, "fixed")
-	addReaction(t, app, targetFlagID, user.Id, "fixed")
-
-	targetFlag, err := app.FindRecordById("arcade_flag", targetFlagID)
-	if err != nil {
-		t.Fatalf("failed to load target flag after 2 reactions: %v", err)
-	}
-	if targetFlag.GetBool("solved") {
-		t.Fatalf("expected target flag to remain unsolved with 2 fixed reactions (<7d)")
-	}
-
-	addReaction(t, app, targetFlagID, user.Id, "fixed")
-
-	targetFlag, err = app.FindRecordById("arcade_flag", targetFlagID)
-	if err != nil {
-		t.Fatalf("failed to load target flag after 3 reactions: %v", err)
-	}
-	if !targetFlag.GetBool("solved") {
-		t.Fatalf("expected target flag to be auto-solved on reaction create")
-	}
-
-	otherFlag, err := app.FindRecordById("arcade_flag", otherFlagID)
-	if err != nil {
-		t.Fatalf("failed to load other flag: %v", err)
-	}
-	if otherFlag.GetBool("solved") {
-		t.Fatalf("expected other flag to remain unsolved (targeted flag only)")
-	}
-}
-
-func createFlagWithReactions(tb testing.TB, app *tests.TestApp, arcadeID, createdBy string, createdAt time.Time, reactions []reactionSeed) string {
-	tb.Helper()
-
-	flagColl, err := app.FindCollectionByNameOrId("arcade_flag")
-	if err != nil {
-		tb.Fatalf("failed to load arcade_flag collection: %v", err)
-	}
-
-	flagRec := core.NewRecord(flagColl)
-	flagRec.Set("arcade", arcadeID)
-	flagRec.Set("disruption", "minor")
-	flagRec.Set("solved", false)
-	flagRec.Set("message", "auto-solve target")
-	flagRec.Set("createdBy", createdBy)
-	if err := app.Save(flagRec); err != nil {
-		tb.Fatalf("failed to save arcade_flag: %v", err)
-	}
-
-	setRecordTimestamp(tb, app, "arcade_flag", flagRec.Id, createdAt)
-
-	if len(reactions) == 0 {
-		return flagRec.Id
-	}
-
-	reactionColl, err := app.FindCollectionByNameOrId("arcade_flag_reaction")
-	if err != nil {
-		tb.Fatalf("failed to load arcade_flag_reaction collection: %v", err)
-	}
-
-	for _, seed := range reactions {
-		reactionRec := core.NewRecord(reactionColl)
-		reactionRec.Set("flag", flagRec.Id)
-		reactionRec.Set("reaction", seed.reaction)
-		reactionRec.Set("createdBy", createdBy)
-		if err := app.Save(reactionRec); err != nil {
-			tb.Fatalf("failed to save arcade_flag_reaction: %v", err)
-		}
-
-		setRecordTimestamp(tb, app, "arcade_flag_reaction", reactionRec.Id, seed.createdAt)
-	}
-
-	return flagRec.Id
-}
-
-func addReaction(tb testing.TB, app *tests.TestApp, flagID, createdBy, reaction string) string {
-	tb.Helper()
-
-	reactionColl, err := app.FindCollectionByNameOrId("arcade_flag_reaction")
-	if err != nil {
-		tb.Fatalf("failed to load arcade_flag_reaction collection: %v", err)
-	}
-
-	reactionRec := core.NewRecord(reactionColl)
-	reactionRec.Set("flag", flagID)
-	reactionRec.Set("reaction", reaction)
-	reactionRec.Set("createdBy", createdBy)
-	if err := app.Save(reactionRec); err != nil {
-		tb.Fatalf("failed to save reaction(%s): %v", reaction, err)
-	}
-
-	return reactionRec.Id
-}
-
-func setRecordTimestamp(tb testing.TB, app *tests.TestApp, table, id string, ts time.Time) {
-	tb.Helper()
-
-	when := ts.UTC().Format(types.DefaultDateLayout)
-	if _, err := app.NonconcurrentDB().
-		NewQuery("UPDATE " + table + " SET created={:created}, updated={:updated} WHERE id={:id}").
-		Bind(dbx.Params{"created": when, "updated": when, "id": id}).
-		Execute(); err != nil {
-		tb.Fatalf("failed to update %s timestamps for %s: %v", table, id, err)
+	if !foundStale {
+		t.Fatalf("expected cron job %q", arcadeflag.StaleResolutionCronJobID)
 	}
 }

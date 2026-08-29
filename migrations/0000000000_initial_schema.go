@@ -1313,16 +1313,80 @@ func init() {
 							"minor"
 						]
 					},
-					{
-						"hidden": false,
-						"id": "bool1422874794",
-						"name": "solved",
+						{
+							"hidden": false,
+							"id": "bool1422874794",
+							"name": "solved",
 						"presentable": false,
 						"required": false,
 						"system": false,
-						"type": "bool"
-					},
-					{
+							"type": "bool"
+						},
+						{
+							"hidden": false,
+							"id": "select3849571021",
+							"maxSelect": 1,
+							"name": "resolution_vote_state",
+							"presentable": false,
+							"required": false,
+							"system": false,
+							"type": "select",
+							"values": [
+								"idle",
+								"active"
+							]
+						},
+						{
+							"hidden": false,
+							"id": "select3849571025",
+							"maxSelect": 1,
+							"name": "resolution_vote_mode",
+							"presentable": false,
+							"required": false,
+							"system": false,
+							"type": "select",
+							"values": [
+								"standard",
+								"stale"
+							]
+						},
+						{
+							"autogeneratePattern": "",
+							"hidden": false,
+							"id": "text3849571022",
+							"max": 64,
+							"min": 0,
+							"name": "resolution_vote_round",
+							"pattern": "",
+							"presentable": false,
+							"primaryKey": false,
+							"required": false,
+							"system": false,
+							"type": "text"
+						},
+						{
+							"hidden": false,
+							"id": "date3849571023",
+							"max": "",
+							"min": "",
+							"name": "resolution_vote_started_at",
+							"presentable": false,
+							"required": false,
+							"system": false,
+							"type": "date"
+						},
+						{
+							"hidden": false,
+							"id": "date3849571024",
+							"max": "",
+							"min": "",
+							"name": "resolution_vote_resolve_at",
+							"presentable": false,
+							"required": false,
+							"system": false,
+							"type": "date"
+						},
+						{
 						"hidden": false,
 						"id": "file142008537",
 						"maxSelect": 3,
@@ -1388,7 +1452,9 @@ func init() {
 					}
 				],
 				"id": "pbc_4125925934",
-				"indexes": [],
+				"indexes": [
+					"CREATE INDEX ` + "`" + `idx_arcade_flag_resolution_state_deadline` + "`" + ` ON ` + "`" + `arcade_flag` + "`" + ` (resolution_vote_state,resolution_vote_resolve_at)"
+				],
 				"listRule": null,
 				"name": "arcade_flag",
 				"system": false,
@@ -1427,21 +1493,62 @@ func init() {
 						"system": false,
 						"type": "relation"
 					},
-					{
-						"hidden": false,
-						"id": "select2765555703",
+						{
+							"hidden": false,
+							"id": "select2765555703",
 						"maxSelect": 1,
 						"name": "reaction",
 						"presentable": false,
 						"required": false,
 						"system": false,
 						"type": "select",
-						"values": [
-							"fixed",
-							"issue_persist",
-							"wrong"
-						]
-					},
+							"values": [
+								"fixed",
+								"issue_persist",
+								"wrong"
+							]
+						},
+						{
+							"hidden": false,
+							"id": "select3849571025",
+							"maxSelect": 1,
+							"name": "resolution_context",
+							"presentable": false,
+							"required": false,
+							"system": false,
+							"type": "select",
+							"values": [
+								"legacy",
+								"report",
+								"vote"
+							]
+						},
+						{
+							"autogeneratePattern": "",
+							"hidden": false,
+							"id": "text3849571026",
+							"max": 64,
+							"min": 0,
+							"name": "vote_round",
+							"pattern": "",
+							"presentable": false,
+							"primaryKey": false,
+							"required": false,
+							"system": false,
+							"type": "text"
+						},
+						{
+							"hidden": false,
+							"id": "number3849571027",
+							"max": null,
+							"min": 0,
+							"name": "level_snapshot",
+							"onlyInt": true,
+							"presentable": false,
+							"required": false,
+							"system": false,
+							"type": "number"
+						},
 					{
 						"cascadeDelete": false,
 						"collectionId": "_pb_users_auth_",
@@ -1477,7 +1584,9 @@ func init() {
 					}
 				],
 				"id": "pbc_495501495",
-				"indexes": [],
+				"indexes": [
+					"CREATE UNIQUE INDEX ` + "`" + `idx_arcade_flag_resolution_vote_user` + "`" + ` ON ` + "`" + `arcade_flag_reaction` + "`" + ` (flag,vote_round,createdBy) WHERE resolution_context = 'vote'"
+				],
 				"listRule": null,
 				"name": "arcade_flag_reaction",
 				"system": false,

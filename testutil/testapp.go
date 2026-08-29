@@ -33,8 +33,67 @@ func NewTestApp(tb testing.TB) *tests.TestApp {
 	ui.DistDirFS = nil
 	ensureVisitSchema(tb, app)
 	ensureNoticeAuthorSchema(tb, app)
+	ensureFlagResolutionSchema(tb, app)
 
 	return app
+}
+
+// Production Core's bootstrap schema and Backend Full's forward migration own
+// these fields. Test fixtures are intentionally older than the current schema,
+// so keep isolated handler tests compatible without changing fixture databases.
+func ensureFlagResolutionSchema(tb testing.TB, app *tests.TestApp) {
+	tb.Helper()
+	flags, err := app.FindCollectionByNameOrId("arcade_flag")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_flag: %v", err)
+	}
+	reactions, err := app.FindCollectionByNameOrId("arcade_flag_reaction")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_flag_reaction: %v", err)
+	}
+	flagChanged := false
+	if flags.Fields.GetByName("resolution_vote_state") == nil {
+		flags.Fields.Add(&core.SelectField{Name: "resolution_vote_state", Values: []string{"idle", "active"}, MaxSelect: 1})
+		flagChanged = true
+	}
+	if flags.Fields.GetByName("resolution_vote_mode") == nil {
+		flags.Fields.Add(&core.SelectField{Name: "resolution_vote_mode", Values: []string{"standard", "stale"}, MaxSelect: 1})
+		flagChanged = true
+	}
+	if flags.Fields.GetByName("resolution_vote_round") == nil {
+		flags.Fields.Add(&core.TextField{Name: "resolution_vote_round", Max: 64})
+		flagChanged = true
+	}
+	for _, name := range []string{"resolution_vote_started_at", "resolution_vote_resolve_at"} {
+		if flags.Fields.GetByName(name) == nil {
+			flags.Fields.Add(&core.DateField{Name: name})
+			flagChanged = true
+		}
+	}
+	if flagChanged {
+		if err := app.Save(flags); err != nil {
+			tb.Fatalf("failed to add flag resolution fields: %v", err)
+		}
+	}
+	reactionChanged := false
+	if reactions.Fields.GetByName("resolution_context") == nil {
+		reactions.Fields.Add(&core.SelectField{Name: "resolution_context", Values: []string{"legacy", "report", "vote"}, MaxSelect: 1})
+		reactionChanged = true
+	}
+	if reactions.Fields.GetByName("vote_round") == nil {
+		reactions.Fields.Add(&core.TextField{Name: "vote_round", Max: 64})
+		reactionChanged = true
+	}
+	if reactions.Fields.GetByName("level_snapshot") == nil {
+		min := float64(0)
+		reactions.Fields.Add(&core.NumberField{Name: "level_snapshot", OnlyInt: true, Min: &min})
+		reactionChanged = true
+	}
+	if reactionChanged {
+		if err := app.Save(reactions); err != nil {
+			tb.Fatalf("failed to add reaction resolution fields: %v", err)
+		}
+	}
 }
 
 // Production Full owns the forward migration for this field. Core's isolated

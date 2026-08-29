@@ -183,7 +183,11 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 	}
 
 	if want["game"] && gameId != "" {
-		if gameObj, ok := arcadeinternal.BuildExpandedGameValue(re.App, gameId); ok {
+		userID := ""
+		if re.Auth != nil {
+			userID = re.Auth.Id
+		}
+		if gameObj, ok := arcadeinternal.BuildExpandedGameValueForUser(re.App, gameId, userID); ok {
 			out["game"] = gameObj
 		}
 	}
@@ -279,26 +283,33 @@ func expandFlag(app core.App, flagID string, flagRec *core.Record) (map[string]a
 	for _, rr := range reactionRecs {
 		createdByID := rr.GetString("createdBy")
 		reactions = append(reactions, map[string]any{
-			"id":        rr.Id,
-			"reaction":  rr.GetString("reaction"),
-			"createdBy": createdByID,
-			"created":   rr.Get("created"),
-			"updated":   rr.Get("updated"),
+			"id":                rr.Id,
+			"reaction":          rr.GetString("reaction"),
+			"createdBy":         createdByID,
+			"created":           rr.Get("created"),
+			"updated":           rr.Get("updated"),
+			"resolutionContext": rr.GetString("resolution_context"),
+			"voteRound":         rr.GetString("vote_round"),
+			"levelSnapshot":     rr.GetInt("level_snapshot"),
 		})
 	}
+	resolution, _ := arcadeinternal.BuildFlagResolutionValue(app, flagRec)
+	reportHistory, _ := arcadeinternal.BuildFlagReportHistoryValue(app, flagRec)
 
 	createdByID := flagRec.GetString("createdBy")
 	return map[string]any{
-		"id":         flagRec.Id,
-		"arcade":     flagRec.GetString("arcade"),
-		"disruption": flagRec.GetString("disruption"),
-		"solved":     flagRec.GetBool("solved"),
-		"message":    flagRec.GetString("message"),
-		"photos":     flagRec.GetStringSlice("photos"),
-		"createdBy":  createdByID,
-		"created":    flagRec.Get("created"),
-		"updated":    flagRec.Get("updated"),
-		"reactions":  reactions,
+		"id":            flagRec.Id,
+		"arcade":        flagRec.GetString("arcade"),
+		"disruption":    flagRec.GetString("disruption"),
+		"solved":        flagRec.GetBool("solved"),
+		"message":       flagRec.GetString("message"),
+		"photos":        flagRec.GetStringSlice("photos"),
+		"createdBy":     createdByID,
+		"created":       flagRec.Get("created"),
+		"updated":       flagRec.Get("updated"),
+		"reactions":     reactions,
+		"resolution":    resolution,
+		"reportHistory": reportHistory,
 	}, true
 }
 

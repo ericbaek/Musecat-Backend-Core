@@ -20,9 +20,7 @@ const (
 )
 
 var validReactionTypes = map[string]struct{}{
-	"fixed":         {},
-	"issue_persist": {},
-	"wrong":         {},
+	"fixed": {}, "issue_persist": {}, "wrong": {},
 }
 
 type UpdateArcadeFlagReactionBody struct {
@@ -41,7 +39,6 @@ func validateUpdateArcadeFlagReactionBody(body *UpdateArcadeFlagReactionBody) er
 	body.Flag = strings.TrimSpace(body.Flag)
 	body.Reaction = strings.TrimSpace(body.Reaction)
 	body.Action = strings.TrimSpace(strings.ToLower(body.Action))
-
 	if body.Flag == "" {
 		return fmt.Errorf("flag is required")
 	}
@@ -57,35 +54,35 @@ func validateUpdateArcadeFlagReactionBody(body *UpdateArcadeFlagReactionBody) er
 	if body.Action != "add" && body.Action != "delete" {
 		return fmt.Errorf("action must be one of add, delete")
 	}
-
 	return nil
 }
 
 func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 	body, err := parseUpdateArcadeFlagReactionBody(re)
 	if err != nil {
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error":   "invalid JSON body",
-			"details": err.Error(),
-		})
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
 	}
 	if err := validateUpdateArcadeFlagReactionBody(&body); err != nil {
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error":   "validation failed",
-			"details": err.Error(),
-		})
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "validation failed", "details": err.Error()})
 	}
 
 	var reactionID string
 	var xpFeedback userhandler.ExpFeedback
 	now := time.Now().UTC()
-	immediateSolve := body.Action == "add" && (body.Reaction == "fixed" || body.Reaction == "wrong") && hasAnyAuthTag(re.Auth)
-
-	if err := re.App.RunInTransaction(func(txApp core.App) error {
+	err = re.App.RunInTransaction(func(txApp core.App) error {
 		flagRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeFlag, body.Flag)
 		if err != nil {
 			return fmt.Errorf("flag not found: %w", err)
 		}
+		if flagRec.GetBool("solved") {
+			return fmt.Errorf("flag is already solved")
+		}
+		if solved, err := arcadeinternal.ReconcileFlagResolutionTx(txApp, flagRec, now, false); err != nil {
+			return err
+		} else if solved {
+			return fmt.Errorf("flag is already solved")
+		}
+
 		arcadeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, flagRec.GetString("arcade"))
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
@@ -97,179 +94,227 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 		currentExp := baseExp
 
 		if body.Action == "add" {
-			if err := addFlagReactionTx(txApp, re.Auth.Id, body.Flag, body.Reaction, now, &reactionID); err != nil {
-				return err
+			if body.Reaction == "issue_persist" {
+				if flagRec.GetString("resolution_vote_state") == arcadeinternal.FlagResolutionStateActive {
+					return fmt.Errorf("issue_persist is only available before resolution voting starts")
+				}
+				if err := ensureIssuePersistAvailable(txApp, re.Auth.Id, body.Flag, now); err != nil {
+					return err
+				}
+				if err := createFlagReactionTx(txApp, re.Auth.Id, body.Flag, body.Reaction, "", 0, &reactionID); err != nil {
+					return err
+				}
+			} else {
+				if body.Reaction == "wrong" && flagRec.GetString("resolution_vote_state") != arcadeinternal.FlagResolutionStateActive {
+					return fmt.Errorf("wrong vote is only available after resolution voting starts")
+				}
+				if flagRec.GetString("resolution_vote_state") != arcadeinternal.FlagResolutionStateActive {
+					if err := arcadeinternal.StartFlagResolutionTx(txApp, flagRec, now); err != nil {
+						return err
+					}
+				}
+				round := flagRec.GetString("resolution_vote_round")
+				currentVote, err := findCurrentUserVote(txApp, body.Flag, round, re.Auth.Id)
+				if err != nil {
+					return err
+				}
+				if currentVote != nil {
+					if currentVote.Reaction == body.Reaction {
+						return fmt.Errorf("reaction %s already exists for this user", body.Reaction)
+					}
+					if err := removeReactionRecordTx(txApp, currentVote.Record, re.Auth.Id, baseExp, &currentExp); err != nil {
+						return err
+					}
+				}
+				if flagRec.GetString("resolution_vote_mode") == arcadeinternal.FlagResolutionModeStale {
+					flagRec.Set("resolution_vote_mode", arcadeinternal.FlagResolutionModeStandard)
+					if err := txApp.Save(flagRec); err != nil {
+						return fmt.Errorf("failed to activate stale resolution vote: %w", err)
+					}
+				}
+				level, err := arcadeinternal.LevelSnapshot(txApp, re.Auth.Id)
+				if err != nil {
+					return fmt.Errorf("failed to snapshot user level: %w", err)
+				}
+				if err := createFlagReactionTx(txApp, re.Auth.Id, body.Flag, body.Reaction, round, level, &reactionID); err != nil {
+					return err
+				}
 			}
 			if arcadeRec.GetBool("public") {
-				nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.FlagReactionKind(reactionID), 3, baseExp)
+				nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.FlagReactionKind(reactionID), 3, currentExp)
 				if err != nil {
 					return err
 				}
 				currentExp = nextExp
 			}
 			xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
-			if immediateSolve {
-				return solveFlagImmediatelyTx(txApp, body.Flag)
-			}
-			return nil
-		}
-		if err := deleteFlagReactionTx(txApp, re.Auth.Id, body.Flag, body.Reaction, now, &reactionID); err != nil {
-			return err
-		}
-		if reactionID != "" {
-			positiveKind := userhandler.FlagReactionKind(reactionID)
-			wasAwarded, err := userhandler.HasLevelLogKind(txApp, re.Auth.Id, positiveKind)
-			if err != nil {
+			if _, err = arcadeinternal.ReconcileFlagResolutionTx(txApp, flagRec, now, true); err != nil {
 				return err
 			}
-			if wasAwarded {
-				nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, "xp:flag-reaction-delete:"+reactionID, -3, baseExp)
-				if err != nil {
-					return err
-				}
-				currentExp = nextExp
+			return touchFlagActivityTx(txApp, flagRec)
+		}
+
+		var target *core.Record
+		if body.Reaction == "issue_persist" {
+			target, err = findLatestReaction(txApp, re.Auth.Id, body.Flag, body.Reaction, "", "")
+		} else {
+			round := flagRec.GetString("resolution_vote_round")
+			vote, voteErr := findCurrentUserVote(txApp, body.Flag, round, re.Auth.Id)
+			if voteErr != nil {
+				return voteErr
+			}
+			if vote != nil && vote.Reaction == body.Reaction {
+				target = vote.Record
 			}
 		}
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
-		return nil
-	}); err != nil {
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error":   "reaction update failed",
-			"details": err.Error(),
-		})
-	}
-
-	if body.Action == "add" && !immediateSolve {
-		if _, err := RunAutoSolveForFlag(re.App, body.Flag, now); err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{
-				"error":   "failed to evaluate flag solved state",
-				"details": err.Error(),
-			})
+		if err != nil {
+			return err
 		}
+		if target == nil {
+			return fmt.Errorf("no deletable reaction found")
+		}
+		createdAt := target.GetDateTime("created").Time().UTC()
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+		if now.Sub(createdAt) > reactionDeleteWindow {
+			return fmt.Errorf("reaction can only be deleted within 15 minutes of creation")
+		}
+		reactionID = target.Id
+		if err := removeReactionRecordTx(txApp, target, re.Auth.Id, baseExp, &currentExp); err != nil {
+			return err
+		}
+		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+		if body.Reaction != "issue_persist" {
+			if _, err = arcadeinternal.ReconcileFlagResolutionTx(txApp, flagRec, now, true); err != nil {
+				return err
+			}
+		}
+		return touchFlagActivityTx(txApp, flagRec)
+	})
+	if err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "reaction update failed", "details": err.Error()})
 	}
 
 	flagRec, err := re.App.FindRecordById(arcadeinternal.CollectionArcadeFlag, body.Flag)
 	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to load updated flag",
-			"details": err.Error(),
-		})
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load updated flag", "details": err.Error()})
+	}
+	resolution, err := arcadeinternal.BuildFlagResolutionValueForUser(re.App, flagRec, re.Auth.Id)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build flag resolution", "details": err.Error()})
+	}
+	reportHistory, err := arcadeinternal.BuildFlagReportHistoryValue(re.App, flagRec)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build flag report history", "details": err.Error()})
 	}
 
 	out := map[string]any{
-		"flag":        body.Flag,
-		"reaction":    body.Reaction,
-		"action":      body.Action,
-		"reaction_id": reactionID,
-		"solved":      flagRec.GetBool("solved"),
-		"xp_feedback": xpFeedback,
+		"flag": body.Flag, "reaction": body.Reaction, "action": body.Action,
+		"reaction_id": reactionID, "solved": flagRec.GetBool("solved"),
+		"xp_feedback": xpFeedback, "resolution": resolution, "reportHistory": reportHistory,
 	}
 	gameValue, _ := arcadeinternal.BuildExpandedGameValueForArcadeFlag(re.App, flagRec.GetString("arcade"), body.Flag)
 	out["game"] = gameValue
-
 	return re.JSON(http.StatusOK, out)
 }
 
-func hasAnyAuthTag(auth *core.Record) bool {
-	if auth == nil {
-		return false
+func touchFlagActivityTx(app core.App, flagRec *core.Record) error {
+	if err := app.Save(flagRec); err != nil {
+		return fmt.Errorf("failed to update flag activity timestamp: %w", err)
 	}
-
-	return len(auth.GetStringSlice("tag")) > 0 || len(auth.GetStringSlice("tags")) > 0
-}
-
-func solveFlagImmediatelyTx(txApp core.App, flagID string) error {
-	flagRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeFlag, flagID)
-	if err != nil {
-		return fmt.Errorf("failed to reload flag for immediate solve: %w", err)
-	}
-
-	if flagRec.GetBool("solved") {
-		return nil
-	}
-
-	flagRec.Set("solved", true)
-	if err := txApp.Save(flagRec); err != nil {
-		return fmt.Errorf("failed to solve flag immediately: %w", err)
-	}
-
 	return nil
 }
 
-func addFlagReactionTx(txApp core.App, userID, flagID, reaction string, now time.Time, outReactionID *string) error {
-	existing, err := txApp.FindRecordsByFilter(
-		arcadeinternal.CollectionArcadeFlagReaction,
-		"flag={:flag} && reaction={:reaction} && createdBy={:user}",
-		"-created",
-		1,
-		0,
-		dbx.Params{"flag": flagID, "reaction": reaction, "user": userID},
-	)
+func ensureIssuePersistAvailable(app core.App, userID, flagID string, now time.Time) error {
+	last, err := findLatestReaction(app, userID, flagID, "issue_persist", "", "")
 	if err != nil {
-		return fmt.Errorf("failed to query existing reaction: %w", err)
+		return err
 	}
+	if last == nil {
+		return nil
+	}
+	lastCreated := last.GetDateTime("created").Time().UTC()
+	if !lastCreated.IsZero() && now.Sub(lastCreated) < issuePersistCooldown {
+		return fmt.Errorf("issue_persist can be reported again only after 24 hours")
+	}
+	return nil
+}
 
-	if reaction == "fixed" || reaction == "wrong" {
-		if len(existing) > 0 {
-			return fmt.Errorf("reaction %s already exists for this user", reaction)
+func findLatestReaction(app core.App, userID, flagID, reaction, context, round string) (*core.Record, error) {
+	filter := "flag={:flag} && reaction={:reaction} && createdBy={:user}"
+	params := dbx.Params{"flag": flagID, "reaction": reaction, "user": userID}
+	if context != "" {
+		filter += " && resolution_context={:context}"
+		params["context"] = context
+	}
+	if round != "" {
+		filter += " && vote_round={:round}"
+		params["round"] = round
+	}
+	records, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeFlagReaction, filter, "-created", 1, 0, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query existing reaction: %w", err)
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+	return records[0], nil
+}
+
+func findCurrentUserVote(app core.App, flagID, round, userID string) (*arcadeinternal.FlagResolutionVote, error) {
+	votes, err := arcadeinternal.FindCurrentFlagVotes(app, flagID, round)
+	if err != nil {
+		return nil, err
+	}
+	for _, vote := range votes {
+		if vote.UserID == userID {
+			copy := vote
+			return &copy, nil
 		}
 	}
+	return nil, nil
+}
 
-	if reaction == "issue_persist" && len(existing) > 0 {
-		lastCreated := existing[0].GetDateTime("created").Time().UTC()
-		if !lastCreated.IsZero() {
-			if now.Sub(lastCreated) < issuePersistCooldown {
-				return fmt.Errorf("issue_persist can be reported again only after 24 hours")
-			}
-		}
-	}
-
-	reactionColl, err := txApp.FindCollectionByNameOrId(arcadeinternal.CollectionArcadeFlagReaction)
+func createFlagReactionTx(app core.App, userID, flagID, reaction, round string, level int, outReactionID *string) error {
+	collection, err := app.FindCollectionByNameOrId(arcadeinternal.CollectionArcadeFlagReaction)
 	if err != nil {
 		return fmt.Errorf("failed to find arcade_flag_reaction: %w", err)
 	}
-
-	rec := core.NewRecord(reactionColl)
+	rec := core.NewRecord(collection)
 	rec.Set("flag", flagID)
 	rec.Set("reaction", reaction)
 	rec.Set("createdBy", userID)
-	if err := txApp.Save(rec); err != nil {
+	if reaction == "issue_persist" {
+		rec.Set("resolution_context", arcadeinternal.FlagResolutionContextReport)
+	} else {
+		rec.Set("resolution_context", arcadeinternal.FlagResolutionContextVote)
+		rec.Set("vote_round", round)
+		rec.Set("level_snapshot", level)
+	}
+	if err := app.Save(rec); err != nil {
 		return fmt.Errorf("failed to create reaction: %w", err)
 	}
-
 	*outReactionID = rec.Id
 	return nil
 }
 
-func deleteFlagReactionTx(txApp core.App, userID, flagID, reaction string, now time.Time, outReactionID *string) error {
-	existing, err := txApp.FindRecordsByFilter(
-		arcadeinternal.CollectionArcadeFlagReaction,
-		"flag={:flag} && reaction={:reaction} && createdBy={:user}",
-		"-created",
-		1,
-		0,
-		dbx.Params{"flag": flagID, "reaction": reaction, "user": userID},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to query reaction for delete: %w", err)
-	}
-	if len(existing) == 0 {
-		return fmt.Errorf("no deletable reaction found")
-	}
-
-	target := existing[0]
-	createdAt := target.GetDateTime("created").Time().UTC()
-	if createdAt.IsZero() {
-		createdAt = now
-	}
-	if now.Sub(createdAt) > reactionDeleteWindow {
-		return fmt.Errorf("reaction can only be deleted within 15 minutes of creation")
-	}
-
-	if err := txApp.Delete(target); err != nil {
+func removeReactionRecordTx(app core.App, target *core.Record, userID string, baseExp int, currentExp *int) error {
+	reactionID := target.Id
+	if err := app.Delete(target); err != nil {
 		return fmt.Errorf("failed to delete reaction: %w", err)
 	}
-
-	*outReactionID = target.Id
+	wasAwarded, err := userhandler.HasLevelLogKind(app, userID, userhandler.FlagReactionKind(reactionID))
+	if err != nil {
+		return err
+	}
+	if !wasAwarded {
+		return nil
+	}
+	nextExp, _, err := userhandler.AwardExpTx(app, userID, "xp:flag-reaction-delete:"+reactionID, -3, baseExp)
+	if err != nil {
+		return err
+	}
+	*currentExp = nextExp
 	return nil
 }

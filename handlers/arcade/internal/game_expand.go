@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -78,6 +79,17 @@ func BuildGameSeriesBundle(app core.App, versionID string) (map[string]any, erro
 // BuildExpandedGameValue expands an immutable game-state batch. Item ids are
 // durable arcade_game_id ids; state data always comes from this batch.
 func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool) {
+	return buildExpandedGameValue(app, stateID, "")
+}
+
+// BuildExpandedGameValueForUser includes the authenticated user's current
+// resolution vote in each expanded flag while preserving the same public
+// aggregate shape for anonymous callers.
+func BuildExpandedGameValueForUser(app core.App, stateID, userID string) (map[string]any, bool) {
+	return buildExpandedGameValue(app, stateID, userID)
+}
+
+func buildExpandedGameValue(app core.App, stateID, userID string) (map[string]any, bool) {
 	if strings.TrimSpace(stateID) == "" {
 		return nil, false
 	}
@@ -140,7 +152,7 @@ func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool)
 		flagRecs, _ := app.FindRecordsByFilter(CollectionArcadeFlag, "game_id={:entry} && solved=false", "created", 0, 0, dbx.Params{"entry": entryID})
 		flags := make([]map[string]any, 0, len(flagRecs))
 		for _, flagRec := range flagRecs {
-			flagObj, ok := expandFlag(app, flagRec.Id, flagRec)
+			flagObj, ok := expandFlag(app, flagRec.Id, flagRec, userID)
 			if !ok {
 				continue
 			}
@@ -179,7 +191,7 @@ func BuildExpandedGameValue(app core.App, stateID string) (map[string]any, bool)
 		}
 		// Unassigned legacy flags and flags attached to removed entries are
 		// intentionally surfaced as orphans; neither is auto-resolved.
-		flagObj, ok := expandFlag(app, flagRec.Id, flagRec)
+		flagObj, ok := expandFlag(app, flagRec.Id, flagRec, userID)
 		if !ok {
 			continue
 		}
@@ -236,7 +248,7 @@ func BuildExpandedGameValueForArcadeFlag(app core.App, arcadeID, flagID string) 
 	}, false
 }
 
-func expandFlag(app core.App, flagID string, flagRec *core.Record) (map[string]any, bool) {
+func expandFlag(app core.App, flagID string, flagRec *core.Record, userID string) (map[string]any, bool) {
 	if flagID == "" {
 		return nil, false
 	}
@@ -261,24 +273,32 @@ func expandFlag(app core.App, flagID string, flagRec *core.Record) (map[string]a
 	reactions := make([]map[string]any, 0, len(reactionRecs))
 	for _, rr := range reactionRecs {
 		reactions = append(reactions, map[string]any{
-			"id":        rr.Id,
-			"reaction":  rr.GetString("reaction"),
-			"createdBy": rr.GetString("createdBy"),
-			"created":   rr.Get("created"),
-			"updated":   rr.Get("updated"),
+			"id":                rr.Id,
+			"reaction":          rr.GetString("reaction"),
+			"createdBy":         rr.GetString("createdBy"),
+			"created":           rr.Get("created"),
+			"updated":           rr.Get("updated"),
+			"resolutionContext": rr.GetString("resolution_context"),
+			"voteRound":         rr.GetString("vote_round"),
+			"levelSnapshot":     rr.GetInt("level_snapshot"),
 		})
 	}
+	resolution, _ := BuildFlagResolutionValueForUser(app, flagRec, userID)
+	reportHistory, _ := BuildFlagReportHistoryValue(app, flagRec)
 	return map[string]any{
-		"id":         flagRec.Id,
-		"arcade":     flagRec.GetString("arcade"),
-		"disruption": flagRec.GetString("disruption"),
-		"solved":     flagRec.GetBool("solved"),
-		"message":    flagRec.GetString("message"),
-		"photos":     flagRec.GetStringSlice("photos"),
-		"createdBy":  flagRec.GetString("createdBy"),
-		"created":    flagRec.Get("created"),
-		"updated":    flagRec.Get("updated"),
-		"reactions":  reactions,
+		"id":            flagRec.Id,
+		"arcade":        flagRec.GetString("arcade"),
+		"disruption":    flagRec.GetString("disruption"),
+		"solved":        flagRec.GetBool("solved"),
+		"message":       flagRec.GetString("message"),
+		"photos":        flagRec.GetStringSlice("photos"),
+		"createdBy":     flagRec.GetString("createdBy"),
+		"created":       flagRec.Get("created"),
+		"updated":       flagRec.Get("updated"),
+		"reactions":     reactions,
+		"resolution":    resolution,
+		"reportHistory": reportHistory,
+		"canWithdraw":   CanWithdrawFlag(flagRec, userID, time.Now().UTC()),
 	}, true
 }
 

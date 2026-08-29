@@ -57,6 +57,9 @@ func DeleteArcadeFlag(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("flag not found: %w", err)
 		}
+		if flagRec.GetBool("solved") {
+			return fmt.Errorf("flag is already solved")
+		}
 		arcadeID = flagRec.GetString("arcade")
 		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {

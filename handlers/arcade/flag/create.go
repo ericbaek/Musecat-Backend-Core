@@ -151,6 +151,8 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 		flagRec.Set("disruption", body.Disruption)
 		flagRec.Set("message", body.Message)
 		flagRec.Set("solved", false)
+		flagRec.Set("resolution_vote_state", arcadeinternal.FlagResolutionStateIdle)
+		flagRec.Set("resolution_vote_mode", arcadeinternal.FlagResolutionModeStandard)
 		flagRec.Set("createdBy", re.Auth.Id)
 		if len(body.Photos) > 0 {
 			flagRec.Set("photos", body.Photos)

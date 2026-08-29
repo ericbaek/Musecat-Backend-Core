@@ -10,632 +10,283 @@ import (
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+
+	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
-func TestUpdateArcadeFlagReaction_AddAndSolve(t *testing.T) {
-	headers := map[string]string{}
-	var flagID string
+func TestUpdateArcadeFlagReaction_StartsResolutionAndReturnsSummary(t *testing.T) {
+	app := newArcadeTestApp(t)
+	t.Cleanup(app.Cleanup)
+	token, user := createAuthUser(t, app)
+	setUserLevel(t, app, user.Id, 5)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Resolution Arcade", Address: "Resolution Street", Nickname: []string{"Resolution"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	flagID := createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC(), nil)
 
-	scenario := tests.ApiScenario{
-		Name:           "POST /arcade/flag/reaction add returns solved state",
-		Method:         http.MethodPost,
-		URL:            "/arcade/flag/reaction",
-		Headers:        headers,
-		ExpectedStatus: http.StatusOK,
-		ExpectedContent: []string{
-			`"action":"add"`,
-			`"reaction":"fixed"`,
-			`"solved":true`,
-			`"game":{"id":"`,
-		},
-		TestAppFactory: func(tb testing.TB) *tests.TestApp {
-			return newArcadeTestApp(tb)
-		},
+	response := postFlagReaction(t, app, token, flagID, "fixed", "add")
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
 	}
 
-	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-		tb.Helper()
-		token, user := createAuthUser(tb, app)
-		headers["Authorization"] = "Bearer " + token
-
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-			Name:     "Reaction Solve Arcade",
-			Address:  "Reaction Solve Street",
-			Nickname: []string{"ReactionSolve"},
-			Location: location{Lat: 37.5665, Lon: 126.978},
-		})
-		seedGameAtomForFlag(tb, app, arcadeID)
-
-		flagID = createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC().Add(-40*24*time.Hour), nil)
-		scenario.Body = strings.NewReader(fmt.Sprintf(`{
-			"flag":"%s",
-			"reaction":"fixed",
-			"action":"add"
-		}`, flagID))
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
 	}
-
-	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
-		tb.Helper()
-		defer res.Body.Close()
-
-		var payload map[string]any
-		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-			tb.Fatalf("failed to decode response: %v", err)
-		}
-		if got, _ := payload["flag"].(string); got != flagID {
-			tb.Fatalf("expected flag %q, got %v", flagID, payload["flag"])
-		}
-		if got, _ := payload["solved"].(bool); !got {
-			tb.Fatalf("expected solved=true, got %v", payload["solved"])
-		}
-		if rid, _ := payload["reaction_id"].(string); rid == "" {
-			tb.Fatalf("expected reaction_id in response")
-		}
-		gameObj, ok := payload["game"].(map[string]any)
-		if !ok {
-			tb.Fatalf("expected expanded game object in response, got %T", payload["game"])
-		}
-		gameID, _ := gameObj["id"].(string)
-		if gameID == "" {
-			tb.Fatalf("expected game id in response")
-		}
-		items, ok := gameObj["items"].([]any)
-		if !ok || len(items) == 0 {
-			tb.Fatalf("expected non-empty game items, got %T %#v", gameObj["items"], gameObj["items"])
-		}
-
-		flagRec, err := app.FindRecordById("arcade_flag", flagID)
-		if err != nil {
-			tb.Fatalf("failed to load flag: %v", err)
-		}
-		if !flagRec.GetBool("solved") {
-			tb.Fatalf("expected flag solved=true after add")
-		}
+	if payload["solved"] != false {
+		t.Fatalf("expected unresolved flag, got %#v", payload["solved"])
 	}
-
-	scenario.Test(t)
-}
-
-func TestUpdateArcadeFlagReaction_PublicArcadeAwardsXP(t *testing.T) {
-	headers := map[string]string{}
-	var flagID string
-
-	scenario := tests.ApiScenario{
-		Name:           "POST /arcade/flag/reaction awards XP for public arcade",
-		Method:         http.MethodPost,
-		URL:            "/arcade/flag/reaction",
-		Headers:        headers,
-		ExpectedStatus: http.StatusOK,
-		ExpectedContent: []string{
-			`"action":"add"`,
-			`"diff_exp":3`,
-			`"xp_feedback":{`,
-		},
-		TestAppFactory: func(tb testing.TB) *tests.TestApp {
-			return newArcadeTestApp(tb)
-		},
+	resolution, ok := payload["resolution"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected resolution summary, got %T", payload["resolution"])
 	}
-
-	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-		tb.Helper()
-		token, user := createAuthUser(tb, app)
-		headers["Authorization"] = "Bearer " + token
-
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-			Name:     "Reaction XP Arcade",
-			Address:  "Reaction XP Street",
-			Nickname: []string{"ReactionXP"},
-			Location: location{Lat: 37.5665, Lon: 126.978},
-		})
-		setArcadeVisibility(tb, app, arcadeID, true, false)
-		seedGameAtomForFlag(tb, app, arcadeID)
-
-		flagID = createFlagWithReactions(tb, app, arcadeID, user.Id, time.Now().UTC(), nil)
-		scenario.Body = strings.NewReader(fmt.Sprintf(`{
-			"flag":"%s",
-			"reaction":"fixed",
-			"action":"add"
-		}`, flagID))
+	if resolution["state"] != "active" || resolution["score"] != float64(5) || resolution["fixedLevelTotal"] != float64(5) {
+		t.Fatalf("unexpected resolution summary: %#v", resolution)
 	}
-
-	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
-		tb.Helper()
-		defer res.Body.Close()
-
-		var payload map[string]any
-		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-			tb.Fatalf("failed to decode response: %v", err)
-		}
-		feedback, ok := payload["xp_feedback"].(map[string]any)
-		if !ok {
-			tb.Fatalf("expected xp_feedback object, got %T", payload["xp_feedback"])
-		}
-		if got := feedback["diff_exp"]; got != float64(3) {
-			tb.Fatalf("expected diff_exp=3, got %#v", got)
-		}
-
-		reactionID, _ := payload["reaction_id"].(string)
-		if reactionID == "" {
-			tb.Fatalf("expected reaction_id in response")
-		}
-		logs, err := app.FindRecordsByFilter("user_level_log", "kind={:kind}", "", 1, 0, map[string]any{
-			"kind": "xp:flag-reaction:" + reactionID,
-		})
-		if err != nil {
-			tb.Fatalf("failed to query user_level_log: %v", err)
-		}
-		if len(logs) != 1 {
-			tb.Fatalf("expected one flag reaction XP log, got %d", len(logs))
-		}
+	if resolution["delaySeconds"] != float64(48*60*60) {
+		t.Fatalf("expected 48 hour delay, got %#v", resolution["delaySeconds"])
 	}
-
-	scenario.Test(t)
-}
-
-func TestUpdateArcadeFlagReaction_TaggedUserFixedBypassesRules(t *testing.T) {
-	headers := map[string]string{}
-	var flagID string
-
-	scenario := tests.ApiScenario{
-		Name:           "POST /arcade/flag/reaction add fixed solves immediately for tagged users",
-		Method:         http.MethodPost,
-		URL:            "/arcade/flag/reaction",
-		Headers:        headers,
-		ExpectedStatus: http.StatusOK,
-		ExpectedContent: []string{
-			`"action":"add"`,
-			`"reaction":"fixed"`,
-			`"solved":true`,
-		},
-		TestAppFactory: func(tb testing.TB) *tests.TestApp {
-			return newArcadeTestApp(tb)
-		},
-	}
-
-	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-		tb.Helper()
-		token, user := createAuthUserWithTags(tb, app, []string{"supporter"})
-		headers["Authorization"] = "Bearer " + token
-
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-			Name:     "Reaction Tagged Bypass Arcade",
-			Address:  "Reaction Tagged Bypass Street",
-			Nickname: []string{"ReactionTaggedBypass"},
-			Location: location{Lat: 37.5665, Lon: 126.978},
-		})
-		seedGameAtomForFlag(tb, app, arcadeID)
-
-		flagID = createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC(), nil)
-		scenario.Body = strings.NewReader(fmt.Sprintf(`{
-			"flag":"%s",
-			"reaction":"fixed",
-			"action":"add"
-		}`, flagID))
-	}
-
-	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
-		tb.Helper()
-		defer res.Body.Close()
-
-		var payload map[string]any
-		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-			tb.Fatalf("failed to decode response: %v", err)
-		}
-		if got, _ := payload["flag"].(string); got != flagID {
-			tb.Fatalf("expected flag %q, got %v", flagID, payload["flag"])
-		}
-		if got, _ := payload["solved"].(bool); !got {
-			tb.Fatalf("expected solved=true, got %v", payload["solved"])
-		}
-
-		flagRec, err := app.FindRecordById("arcade_flag", flagID)
-		if err != nil {
-			tb.Fatalf("failed to load flag: %v", err)
-		}
-		if !flagRec.GetBool("solved") {
-			tb.Fatalf("expected flag solved=true after tagged fixed reaction")
-		}
-	}
-
-	scenario.Test(t)
-}
-
-func TestUpdateArcadeFlagReaction_TaggedUserWrongBypassesRules(t *testing.T) {
-	headers := map[string]string{}
-	var flagID string
-
-	scenario := tests.ApiScenario{
-		Name:           "POST /arcade/flag/reaction add wrong solves immediately for tagged users",
-		Method:         http.MethodPost,
-		URL:            "/arcade/flag/reaction",
-		Headers:        headers,
-		ExpectedStatus: http.StatusOK,
-		ExpectedContent: []string{
-			`"action":"add"`,
-			`"reaction":"wrong"`,
-			`"solved":true`,
-		},
-		TestAppFactory: func(tb testing.TB) *tests.TestApp {
-			return newArcadeTestApp(tb)
-		},
-	}
-
-	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-		tb.Helper()
-		token, user := createAuthUserWithTags(tb, app, []string{"supporter"})
-		headers["Authorization"] = "Bearer " + token
-
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-			Name:     "Reaction Tagged Wrong Bypass Arcade",
-			Address:  "Reaction Tagged Wrong Bypass Street",
-			Nickname: []string{"ReactionTaggedWrongBypass"},
-			Location: location{Lat: 37.5665, Lon: 126.978},
-		})
-		seedGameAtomForFlag(tb, app, arcadeID)
-
-		flagID = createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC(), nil)
-		scenario.Body = strings.NewReader(fmt.Sprintf(`{
-			"flag":"%s",
-			"reaction":"wrong",
-			"action":"add"
-		}`, flagID))
-	}
-
-	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
-		tb.Helper()
-		defer res.Body.Close()
-
-		var payload map[string]any
-		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-			tb.Fatalf("failed to decode response: %v", err)
-		}
-		if got, _ := payload["flag"].(string); got != flagID {
-			tb.Fatalf("expected flag %q, got %v", flagID, payload["flag"])
-		}
-		if got, _ := payload["solved"].(bool); !got {
-			tb.Fatalf("expected solved=true, got %v", payload["solved"])
-		}
-
-		flagRec, err := app.FindRecordById("arcade_flag", flagID)
-		if err != nil {
-			tb.Fatalf("failed to load flag: %v", err)
-		}
-		if !flagRec.GetBool("solved") {
-			tb.Fatalf("expected flag solved=true after tagged wrong reaction")
-		}
-	}
-
-	scenario.Test(t)
-}
-
-func TestUpdateArcadeFlagReaction_AddReturnsGameWhenUnsolved(t *testing.T) {
-	headers := map[string]string{}
-	var flagID string
-	var expectedGameID string
-
-	scenario := tests.ApiScenario{
-		Name:           "POST /arcade/flag/reaction add returns game even when unsolved",
-		Method:         http.MethodPost,
-		URL:            "/arcade/flag/reaction",
-		Headers:        headers,
-		ExpectedStatus: http.StatusOK,
-		ExpectedContent: []string{
-			`"action":"add"`,
-			`"reaction":"issue_persist"`,
-			`"solved":false`,
-			`"game":{"id":"`,
-		},
-		TestAppFactory: func(tb testing.TB) *tests.TestApp {
-			return newArcadeTestApp(tb)
-		},
-	}
-
-	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-		tb.Helper()
-		token, user := createAuthUser(tb, app)
-		headers["Authorization"] = "Bearer " + token
-
-		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-			Name:     "Reaction Unsolved Arcade",
-			Address:  "Reaction Unsolved Street",
-			Nickname: []string{"ReactionUnsolved"},
-			Location: location{Lat: 37.5665, Lon: 126.978},
-		})
-		seedGameAtomForFlag(tb, app, arcadeID)
-		arcadeRec, err := app.FindRecordById("arcade", arcadeID)
-		if err != nil {
-			tb.Fatalf("failed to load arcade: %v", err)
-		}
-		expectedGameID = arcadeRec.GetString("game_v2")
-
-		flagID = createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC(), nil)
-		scenario.Body = strings.NewReader(fmt.Sprintf(`{
-			"flag":"%s",
-			"reaction":"issue_persist",
-			"action":"add"
-		}`, flagID))
-	}
-
-	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
-		tb.Helper()
-		defer res.Body.Close()
-
-		var payload map[string]any
-		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-			tb.Fatalf("failed to decode response: %v", err)
-		}
-		if got, _ := payload["flag"].(string); got != flagID {
-			tb.Fatalf("expected flag %q, got %v", flagID, payload["flag"])
-		}
-		if got, _ := payload["solved"].(bool); got {
-			tb.Fatalf("expected solved=false, got %v", payload["solved"])
-		}
-		gameObj, ok := payload["game"].(map[string]any)
-		if !ok {
-			tb.Fatalf("expected game object in response, got %T", payload["game"])
-		}
-		actualGameID, _ := gameObj["id"].(string)
-		if actualGameID != expectedGameID {
-			tb.Fatalf("expected game id %q, got %q", expectedGameID, actualGameID)
-		}
-		items, ok := gameObj["items"].([]any)
-		if !ok || len(items) == 0 {
-			tb.Fatalf("expected non-empty game items, got %T %#v", gameObj["items"], gameObj["items"])
-		}
-	}
-
-	scenario.Test(t)
-}
-
-func TestUpdateArcadeFlagReaction_DuplicateFixedWrongBlocked(t *testing.T) {
-	for _, reaction := range []string{"fixed", "wrong"} {
-		reaction := reaction
-		t.Run(reaction, func(t *testing.T) {
-			headers := map[string]string{}
-			var flagID string
-
-			scenario := tests.ApiScenario{
-				Name:           "POST /arcade/flag/reaction duplicate " + reaction + " blocked",
-				Method:         http.MethodPost,
-				URL:            "/arcade/flag/reaction",
-				Headers:        headers,
-				ExpectedStatus: http.StatusBadRequest,
-				ExpectedContent: []string{
-					`"error":"reaction update failed"`,
-					fmt.Sprintf(`"details":"reaction %s already exists for this user"`, reaction),
-				},
-				TestAppFactory: func(tb testing.TB) *tests.TestApp {
-					return newArcadeTestApp(tb)
-				},
-			}
-
-			scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-				tb.Helper()
-				token, user := createAuthUser(tb, app)
-				headers["Authorization"] = "Bearer " + token
-
-				arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-					Name:     "Reaction Duplicate Arcade",
-					Address:  "Reaction Duplicate Street",
-					Nickname: []string{"ReactionDup"},
-					Location: location{Lat: 37.5665, Lon: 126.978},
-				})
-				flagID = createFlagWithReactions(tb, app, arcadeID, user.Id, time.Now().UTC(), nil)
-				addReaction(tb, app, flagID, user.Id, reaction)
-
-				scenario.Body = strings.NewReader(fmt.Sprintf(`{
-					"flag":"%s",
-					"reaction":"%s",
-					"action":"add"
-				}`, flagID, reaction))
-			}
-
-			scenario.Test(t)
-		})
+	if resolution["myVote"] != "fixed" {
+		t.Fatalf("expected myVote=fixed, got %#v", resolution["myVote"])
 	}
 }
 
-func TestUpdateArcadeFlagReaction_IssuePersistCooldown(t *testing.T) {
-	t.Run("blocked within 24h", func(t *testing.T) {
-		headers := map[string]string{}
-		var flagID string
-		var reactionID string
+func TestUpdateArcadeFlagReaction_NeverPostponesAnEarlierDeadline(t *testing.T) {
+	app := newArcadeTestApp(t)
+	t.Cleanup(app.Cleanup)
+	tokenA, userA := createAuthUser(t, app)
+	tokenB, userB := createAuthUser(t, app)
+	setUserLevel(t, app, userA.Id, 19)
+	setUserLevel(t, app, userB.Id, 2)
+	arcadeID, _ := seedArcade(t, app, userA.Id, arcadeSeed{Name: "Deadline Arcade", Address: "Deadline Street", Nickname: []string{"Deadline"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	flagID := createFlagWithReactions(t, app, arcadeID, userA.Id, time.Now().UTC(), nil)
 
-		scenario := tests.ApiScenario{
-			Name:           "POST /arcade/flag/reaction blocks issue_persist cooldown",
-			Method:         http.MethodPost,
-			URL:            "/arcade/flag/reaction",
-			Headers:        headers,
-			ExpectedStatus: http.StatusBadRequest,
-			ExpectedContent: []string{
-				`"error":"reaction update failed"`,
-				`"details":"issue_persist can be reported again only after 24 hours"`,
-			},
-			TestAppFactory: func(tb testing.TB) *tests.TestApp {
-				return newArcadeTestApp(tb)
-			},
-		}
+	response := postFlagReaction(t, app, tokenA, flagID, "fixed", "add")
+	assertStatus(t, response, http.StatusOK)
+	response.Body.Close()
 
-		scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-			tb.Helper()
-			token, user := createAuthUser(tb, app)
-			headers["Authorization"] = "Bearer " + token
+	flag, err := app.FindRecordById("arcade_flag", flagID)
+	if err != nil {
+		t.Fatalf("load flag: %v", err)
+	}
+	vote, err := app.FindFirstRecordByFilter("arcade_flag_reaction", "flag = {:flag} && createdBy = {:user}", map[string]any{"flag": flagID, "user": userA.Id})
+	if err != nil {
+		t.Fatalf("load fixed vote: %v", err)
+	}
+	vote.Set("level_snapshot", 19)
+	if err := app.Save(vote); err != nil {
+		t.Fatalf("save fixed vote snapshot: %v", err)
+	}
+	deadlineBeforeVote := time.Now().UTC().Add(time.Hour)
+	flag.Set("resolution_vote_resolve_at", deadlineBeforeVote)
+	if err := app.Save(flag); err != nil {
+		t.Fatalf("save existing deadline: %v", err)
+	}
 
-			arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-				Name:     "Issue Persist Cooldown Arcade",
-				Address:  "Cooldown Street",
-				Nickname: []string{"Cooldown"},
-				Location: location{Lat: 37.5665, Lon: 126.978},
-			})
-			flagID = createFlagWithReactions(tb, app, arcadeID, user.Id, time.Now().UTC(), nil)
-			reactionID = addReaction(tb, app, flagID, user.Id, "issue_persist")
+	voteAt := time.Now().UTC()
+	response = postFlagReaction(t, app, tokenB, flagID, "fixed", "add")
+	assertStatus(t, response, http.StatusOK)
+	response.Body.Close()
 
-			scenario.Body = strings.NewReader(fmt.Sprintf(`{
-				"flag":"%s",
-				"reaction":"issue_persist",
-				"action":"add"
-			}`, flagID))
-		}
+	flag, err = app.FindRecordById("arcade_flag", flagID)
+	if err != nil {
+		t.Fatalf("reload flag: %v", err)
+	}
+	resolveAt := flag.GetDateTime("resolution_vote_resolve_at").Time().UTC()
+	if !resolveAt.After(voteAt.Add(59*time.Minute)) || !resolveAt.Before(voteAt.Add(61*time.Minute)) {
+		t.Fatalf("expected earlier one-hour deadline to survive score increase, got %s", resolveAt)
+	}
+}
 
-		scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, _ *http.Response) {
-			tb.Helper()
-			if reactionID == "" {
-				tb.Fatalf("expected seeded reaction id")
-			}
-		}
+func TestUpdateArcadeFlagReaction_StillChangesContextAndSwitchesVote(t *testing.T) {
+	app := newArcadeTestApp(t)
+	t.Cleanup(app.Cleanup)
+	tokenA, userA := createAuthUser(t, app)
+	tokenB, userB := createAuthUser(t, app)
+	setUserLevel(t, app, userA.Id, 5)
+	setUserLevel(t, app, userB.Id, 5)
+	arcadeID, _ := seedArcade(t, app, userA.Id, arcadeSeed{Name: "Context Arcade", Address: "Context Street", Nickname: []string{"Context"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	flagID := createFlagWithReactions(t, app, arcadeID, userA.Id, time.Now().UTC(), nil)
+	flagBefore, err := app.FindRecordById("arcade_flag", flagID)
+	if err != nil {
+		t.Fatalf("load flag before persistence report: %v", err)
+	}
+	updatedBefore := flagBefore.GetDateTime("updated").Time().UTC()
 
-		scenario.Test(t)
-	})
+	response := postFlagReaction(t, app, tokenA, flagID, "issue_persist", "add")
+	assertStatus(t, response, http.StatusOK)
+	var reportPayload map[string]any
+	decodeResponse(t, response, &reportPayload)
+	reports, ok := reportPayload["reportHistory"].([]any)
+	if !ok || len(reports) != 2 {
+		t.Fatalf("expected initial report and one persistence report, got %#v", reportPayload["reportHistory"])
+	}
+	if reports[0].(map[string]any)["kind"] != "issue_persist" || reports[1].(map[string]any)["kind"] != "initial" {
+		t.Fatalf("expected newest-first report history, got %#v", reports)
+	}
+	flagAfter, err := app.FindRecordById("arcade_flag", flagID)
+	if err != nil {
+		t.Fatalf("load flag after persistence report: %v", err)
+	}
+	if !flagAfter.GetDateTime("updated").Time().UTC().After(updatedBefore) {
+		t.Fatalf("expected issue_persist to refresh flag.updated: before=%s after=%s", updatedBefore, flagAfter.GetDateTime("updated").Time().UTC())
+	}
 
-	t.Run("allowed after 24h", func(t *testing.T) {
-		headers := map[string]string{}
-		var flagID string
-		var seededReactionID string
+	response = postFlagReaction(t, app, tokenA, flagID, "fixed", "add")
+	assertStatus(t, response, http.StatusOK)
+	decodeResponse(t, response, &reportPayload)
+	setUserLevel(t, app, userA.Id, 30)
 
-		scenario := tests.ApiScenario{
-			Name:           "POST /arcade/flag/reaction allows issue_persist after cooldown",
-			Method:         http.MethodPost,
-			URL:            "/arcade/flag/reaction",
-			Headers:        headers,
-			ExpectedStatus: http.StatusOK,
-			ExpectedContent: []string{
-				`"action":"add"`,
-				`"reaction":"issue_persist"`,
-			},
-			TestAppFactory: func(tb testing.TB) *tests.TestApp {
-				return newArcadeTestApp(tb)
-			},
-		}
+	response = postFlagReaction(t, app, tokenB, flagID, "wrong", "add")
+	assertStatus(t, response, http.StatusOK)
+	var votePayload map[string]any
+	decodeResponse(t, response, &votePayload)
+	resolution := votePayload["resolution"].(map[string]any)
+	if resolution["wrongVoterCount"] != float64(1) || resolution["score"] != float64(0) || resolution["state"] != "active" {
+		t.Fatalf("expected active zero-score vote, got %#v", resolution)
+	}
 
-		scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-			tb.Helper()
-			token, user := createAuthUser(tb, app)
-			headers["Authorization"] = "Bearer " + token
+	response = postFlagReaction(t, app, tokenB, flagID, "fixed", "add")
+	assertStatus(t, response, http.StatusOK)
+	decodeResponse(t, response, &votePayload)
+	resolution = votePayload["resolution"].(map[string]any)
+	if resolution["fixedVoterCount"] != float64(2) || resolution["wrongVoterCount"] != float64(0) || resolution["score"] != float64(10) {
+		t.Fatalf("expected switched fixed vote, got %#v", resolution)
+	}
 
-			arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-				Name:     "Issue Persist Cooldown Passed Arcade",
-				Address:  "Cooldown Passed Street",
-				Nickname: []string{"CooldownPassed"},
-				Location: location{Lat: 37.5665, Lon: 126.978},
-			})
-			seedGameAtomForFlag(tb, app, arcadeID)
-			flagID = createFlagWithReactions(tb, app, arcadeID, user.Id, time.Now().UTC(), nil)
-			seededReactionID = addReaction(tb, app, flagID, user.Id, "issue_persist")
-			setRecordTimestamp(tb, app, "arcade_flag_reaction", seededReactionID, time.Now().UTC().Add(-25*time.Hour))
+	response = postFlagReaction(t, app, tokenA, flagID, "issue_persist", "add")
+	assertStatus(t, response, http.StatusBadRequest)
+	response.Body.Close()
+}
 
-			scenario.Body = strings.NewReader(fmt.Sprintf(`{
-				"flag":"%s",
-				"reaction":"issue_persist",
-				"action":"add"
-			}`, flagID))
-		}
+func TestUpdateArcadeFlagReaction_DeleteRecalculatesAndAwardsXP(t *testing.T) {
+	app := newArcadeTestApp(t)
+	t.Cleanup(app.Cleanup)
+	token, user := createAuthUser(t, app)
+	setUserLevel(t, app, user.Id, 5)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Delete Resolution Arcade", Address: "Delete Resolution Street", Nickname: []string{"DeleteResolution"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	setArcadeVisibility(t, app, arcadeID, true, false)
+	flagID := createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC(), nil)
 
-		scenario.Test(t)
+	response := postFlagReaction(t, app, token, flagID, "fixed", "add")
+	assertStatus(t, response, http.StatusOK)
+	var payload map[string]any
+	decodeResponse(t, response, &payload)
+	if payload["xp_feedback"].(map[string]any)["diff_exp"] != float64(3) {
+		t.Fatalf("expected +3 XP, got %#v", payload["xp_feedback"])
+	}
+
+	response = postFlagReaction(t, app, token, flagID, "fixed", "delete")
+	assertStatus(t, response, http.StatusOK)
+	decodeResponse(t, response, &payload)
+	resolution := payload["resolution"].(map[string]any)
+	if resolution["state"] != "idle" || resolution["fixedVoterCount"] != float64(0) {
+		t.Fatalf("expected idle resolution after delete, got %#v", resolution)
+	}
+	exp, err := userhandler.LoadCurrentExp(app, user.Id)
+	if err != nil {
+		t.Fatalf("load user exp after delete: %v", err)
+	}
+	if exp != userhandler.LevelBaseExp(5) {
+		t.Fatalf("expected reaction XP rollback to level-5 base, got %d", exp)
+	}
+}
+
+func TestUpdateArcadeFlagReaction_NegativeVoteClosesAndRefreshesActivity(t *testing.T) {
+	app := newArcadeTestApp(t)
+	t.Cleanup(app.Cleanup)
+	tokenA, userA := createAuthUser(t, app)
+	tokenB, userB := createAuthUser(t, app)
+	setUserLevel(t, app, userA.Id, 5)
+	setUserLevel(t, app, userB.Id, 30)
+	arcadeID, _ := seedArcade(t, app, userA.Id, arcadeSeed{Name: "Negative Resolution Arcade", Address: "Negative Resolution Street", Nickname: []string{"NegativeResolution"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	flagID := createFlagWithReactions(t, app, arcadeID, userA.Id, time.Now().UTC(), nil)
+
+	response := postFlagReaction(t, app, tokenA, flagID, "fixed", "add")
+	assertStatus(t, response, http.StatusOK)
+	response.Body.Close()
+	flag, err := app.FindRecordById("arcade_flag", flagID)
+	if err != nil {
+		t.Fatalf("load active flag: %v", err)
+	}
+	updatedBeforeClose := flag.GetDateTime("updated").Time().UTC()
+
+	response = postFlagReaction(t, app, tokenB, flagID, "wrong", "add")
+	assertStatus(t, response, http.StatusOK)
+	response.Body.Close()
+
+	flag, err = app.FindRecordById("arcade_flag", flagID)
+	if err != nil {
+		t.Fatalf("reload closed flag: %v", err)
+	}
+	if flag.GetString("resolution_vote_state") != "idle" || flag.GetBool("solved") {
+		t.Fatalf("expected unresolved round to close without solving, got state=%q solved=%v", flag.GetString("resolution_vote_state"), flag.GetBool("solved"))
+	}
+	if !flag.GetDateTime("updated").Time().UTC().After(updatedBeforeClose) {
+		t.Fatalf("expected round closure to refresh flag.updated: before=%s after=%s", updatedBeforeClose, flag.GetDateTime("updated").Time().UTC())
+	}
+	if !flag.GetDateTime("resolution_vote_resolve_at").Time().UTC().IsZero() {
+		t.Fatalf("expected closed round deadline to be cleared, got %s", flag.GetDateTime("resolution_vote_resolve_at").Time().UTC())
+	}
+}
+
+func TestUpdateArcadeFlagReaction_SameUserCannotVoteWrongBeforeResolution(t *testing.T) {
+	app := newArcadeTestApp(t)
+	t.Cleanup(app.Cleanup)
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Wrong Guard Arcade", Address: "Wrong Guard Street", Nickname: []string{"WrongGuard"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	flagID := createFlagWithReactions(t, app, arcadeID, user.Id, time.Now().UTC(), nil)
+
+	response := postFlagReaction(t, app, token, flagID, "wrong", "add")
+	assertStatus(t, response, http.StatusBadRequest)
+	defer response.Body.Close()
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(fmt.Sprint(payload["details"]), "only available after") {
+		t.Fatalf("unexpected error: %#v", payload)
+	}
+}
+
+func postFlagReaction(tb testing.TB, app *tests.TestApp, token, flagID, reaction, action string) *http.Response {
+	tb.Helper()
+	body := fmt.Sprintf(`{"flag":%q,"reaction":%q,"action":%q}`, flagID, reaction, action)
+	return executeJSONRequest(tb, app, http.MethodPost, "/arcade/flag/reaction", body, map[string]string{
+		"Authorization": "Bearer " + token,
 	})
 }
 
-func TestUpdateArcadeFlagReaction_DeleteWindow(t *testing.T) {
-	t.Run("delete within 15 minutes succeeds", func(t *testing.T) {
-		headers := map[string]string{}
-		var flagID string
-		var reactionID string
+func assertStatus(tb testing.TB, response *http.Response, expected int) {
+	tb.Helper()
+	if response.StatusCode != expected {
+		body := make([]byte, 4096)
+		_, _ = response.Body.Read(body)
+		tb.Fatalf("expected status %d, got %d: %s", expected, response.StatusCode, strings.TrimSpace(string(body)))
+	}
+}
 
-		scenario := tests.ApiScenario{
-			Name:           "POST /arcade/flag/reaction delete within 15 minutes",
-			Method:         http.MethodPost,
-			URL:            "/arcade/flag/reaction",
-			Headers:        headers,
-			ExpectedStatus: http.StatusOK,
-			ExpectedContent: []string{
-				`"action":"delete"`,
-			},
-			TestAppFactory: func(tb testing.TB) *tests.TestApp {
-				return newArcadeTestApp(tb)
-			},
-		}
+func decodeResponse(tb testing.TB, response *http.Response, target *map[string]any) {
+	tb.Helper()
+	defer response.Body.Close()
+	if err := json.NewDecoder(response.Body).Decode(target); err != nil {
+		tb.Fatalf("decode response: %v", err)
+	}
+}
 
-		scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-			tb.Helper()
-			token, user := createAuthUser(tb, app)
-			headers["Authorization"] = "Bearer " + token
-
-			arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-				Name:     "Delete Window Arcade",
-				Address:  "Delete Street",
-				Nickname: []string{"DeleteWin"},
-				Location: location{Lat: 37.5665, Lon: 126.978},
-			})
-			seedGameAtomForFlag(tb, app, arcadeID)
-			flagID = createFlagWithReactions(tb, app, arcadeID, user.Id, time.Now().UTC(), nil)
-			reactionID = addReaction(tb, app, flagID, user.Id, "wrong")
-
-			scenario.Body = strings.NewReader(fmt.Sprintf(`{
-				"flag":"%s",
-				"reaction":"wrong",
-				"action":"delete"
-			}`, flagID))
-		}
-
-		scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, _ *http.Response) {
-			tb.Helper()
-			if _, err := app.FindRecordById("arcade_flag_reaction", reactionID); err == nil {
-				tb.Fatalf("expected reaction %q to be deleted", reactionID)
-			}
-		}
-
-		scenario.Test(t)
-	})
-
-	t.Run("delete after 15 minutes blocked", func(t *testing.T) {
-		headers := map[string]string{}
-		var flagID string
-		var reactionID string
-
-		scenario := tests.ApiScenario{
-			Name:           "POST /arcade/flag/reaction delete after 15 minutes blocked",
-			Method:         http.MethodPost,
-			URL:            "/arcade/flag/reaction",
-			Headers:        headers,
-			ExpectedStatus: http.StatusBadRequest,
-			ExpectedContent: []string{
-				`"error":"reaction update failed"`,
-				`"details":"reaction can only be deleted within 15 minutes of creation"`,
-			},
-			TestAppFactory: func(tb testing.TB) *tests.TestApp {
-				return newArcadeTestApp(tb)
-			},
-		}
-
-		scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
-			tb.Helper()
-			token, user := createAuthUser(tb, app)
-			headers["Authorization"] = "Bearer " + token
-
-			arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
-				Name:     "Delete Expired Arcade",
-				Address:  "Delete Expired Street",
-				Nickname: []string{"DeleteExpired"},
-				Location: location{Lat: 37.5665, Lon: 126.978},
-			})
-			seedGameAtomForFlag(tb, app, arcadeID)
-			flagID = createFlagWithReactions(tb, app, arcadeID, user.Id, time.Now().UTC(), nil)
-			reactionID = addReaction(tb, app, flagID, user.Id, "wrong")
-			setRecordTimestamp(tb, app, "arcade_flag_reaction", reactionID, time.Now().UTC().Add(-16*time.Minute))
-
-			scenario.Body = strings.NewReader(fmt.Sprintf(`{
-				"flag":"%s",
-				"reaction":"wrong",
-				"action":"delete"
-			}`, flagID))
-		}
-
-		scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, _ *http.Response) {
-			tb.Helper()
-			if _, err := app.FindRecordById("arcade_flag_reaction", reactionID); err != nil {
-				tb.Fatalf("expected reaction %q to remain after blocked delete: %v", reactionID, err)
-			}
-		}
-
-		scenario.Test(t)
-	})
+func setUserLevel(tb testing.TB, app *tests.TestApp, userID string, level int) {
+	tb.Helper()
+	collection, err := app.FindCollectionByNameOrId(userhandler.CollectionUserLevel)
+	if err != nil {
+		tb.Fatalf("load user level collection: %v", err)
+	}
+	record, err := app.FindRecordById(userhandler.CollectionUserLevel, userID)
+	if err != nil {
+		record = core.NewRecord(collection)
+		record.Set("id", userID)
+		record.Set("user", userID)
+	}
+	record.Set("exp", userhandler.LevelBaseExp(level))
+	if err := app.Save(record); err != nil {
+		tb.Fatalf("save user level: %v", err)
+	}
 }
