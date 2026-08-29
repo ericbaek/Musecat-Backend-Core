@@ -70,6 +70,37 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	}
 }
 
+func TestRankings_PreservesTiedRanks(t *testing.T) {
+	app := newArcadeTestApp(t)
+
+	_, first := createAuthUser(t, app)
+	_, second := createAuthUser(t, app)
+	_, third := createAuthUser(t, app)
+	seedUserLevelExp(t, app, first.Id, 100)
+	seedUserLevelExp(t, app, second.Id, 100)
+	seedUserLevelExp(t, app, third.Id, 50)
+
+	res := executeJSONRequest(t, app, http.MethodGet, "/rankings?metric=level&period=all", "", nil)
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+	var payload struct {
+		Entries []struct {
+			Rank int `json:"rank"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode ranking response: %v", err)
+	}
+	if len(payload.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(payload.Entries))
+	}
+	if payload.Entries[0].Rank != 1 || payload.Entries[1].Rank != 1 || payload.Entries[2].Rank != 3 {
+		t.Fatalf("unexpected tied ranks: %#v", payload.Entries)
+	}
+}
+
 func assertArcadeRankingTop(t *testing.T, app *tests.TestApp, url, arcadeID string, score int64, visitCount int64) {
 	t.Helper()
 	res := executeJSONRequest(t, app, http.MethodGet, url, "", nil)

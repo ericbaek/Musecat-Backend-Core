@@ -97,6 +97,49 @@ func TestArcadeVisitAwardsAndDeduplicatesByArcadeDay(t *testing.T) {
 	}
 }
 
+func TestArcadeVisitWithoutUsernamePersistsWithoutXP(t *testing.T) {
+	app := newUserFetchTestApp(t)
+	token, userRec := createAuthUser(t, app, true)
+	userRec.Set("username", "")
+	if err := app.Save(userRec); err != nil {
+		t.Fatalf("failed to clear username: %v", err)
+	}
+	arcade := seedVisitArcade(t, app, "Asia/Seoul")
+	restore := userhandler.SetVisitNowForTest(func() time.Time {
+		return time.Date(2026, 7, 1, 14, 59, 0, 0, time.UTC)
+	})
+	t.Cleanup(restore)
+
+	res := doUserRequest(t, app, http.MethodPost, "/arcade/visit", map[string]string{
+		"Authorization": "Bearer " + token,
+	}, `{"arcade":"`+arcade.Id+`","lat":37.5665,"lon":126.9780,"accuracy":100}`)
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("expected visit success without XP, got status %d: %s", res.StatusCode, body)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode visit response: %v", err)
+	}
+	if payload["visited"] != true || payload["gained_exp"] != float64(0) || payload["exp"] != float64(0) {
+		t.Fatalf("unexpected username-less visit response: %#v", payload)
+	}
+
+	visits, err := app.FindRecordsByFilter(userhandler.CollectionArcadeVisit, "user={:user} && arcade={:arcade}", "", 0, 0, map[string]any{
+		"user":   userRec.Id,
+		"arcade": arcade.Id,
+	})
+	if err != nil {
+		t.Fatalf("failed to load visit record: %v", err)
+	}
+	if len(visits) != 1 || visits[0].GetInt("gained_exp") != 0 {
+		t.Fatalf("expected one visit with zero XP, got %#v", visits)
+	}
+	if _, err := app.FindRecordById(userhandler.CollectionUserLevel, userRec.Id); err == nil {
+		t.Fatal("expected visit without username not to create user_level")
+	}
+}
+
 func TestArcadeVisitRejectsOutOfRangeAndIneligible(t *testing.T) {
 	app := newUserFetchTestApp(t)
 	token, _ := createAuthUser(t, app, true)

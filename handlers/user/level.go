@@ -242,6 +242,21 @@ func LoadCurrentExp(app core.App, userID string) (int, error) {
 	return 0, nil
 }
 
+// IsExpEligible reports whether the user has completed the one-time username
+// setup required before XP can be awarded.
+func IsExpEligible(app core.App, userID string) (bool, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return false, fmt.Errorf("user id is required")
+	}
+
+	userRec, err := app.FindRecordById(CollectionUser, userID)
+	if err != nil {
+		return false, fmt.Errorf("load user for xp eligibility failed: %w", err)
+	}
+	return strings.TrimSpace(userRec.GetString("username")) != "", nil
+}
+
 func HasLevelLogKind(app core.App, userID, kind string) (bool, error) {
 	userID = strings.TrimSpace(userID)
 	kind = strings.TrimSpace(kind)
@@ -297,6 +312,14 @@ func AwardExpTx(txApp core.App, userID, kind string, diff int, baseExp int) (int
 		return baseExp, false, nil
 	}
 
+	eligible, err := IsExpEligible(txApp, userID)
+	if err != nil {
+		return 0, false, err
+	}
+	if !eligible {
+		return baseExp, false, nil
+	}
+
 	currentExp, err := ensureUserLevelBaseTx(txApp, userID, baseExp)
 	if err != nil {
 		return 0, false, err
@@ -342,6 +365,14 @@ func AwardArcadeEditExpTx(txApp core.App, userID, arcadeID, part string, diff in
 		return 0, false, fmt.Errorf("part is required")
 	}
 	if diff == 0 {
+		return baseExp, false, nil
+	}
+
+	eligible, err := IsExpEligible(txApp, userID)
+	if err != nil {
+		return 0, false, err
+	}
+	if !eligible {
 		return baseExp, false, nil
 	}
 
@@ -403,6 +434,14 @@ func AwardArcadeGameEditExpTx(txApp core.App, userID, arcadeID string, entryIDs 
 		return 0, false, fmt.Errorf("arcade id is required")
 	}
 	if len(entryIDs) == 0 {
+		return baseExp, false, nil
+	}
+
+	eligible, err := IsExpEligible(txApp, userID)
+	if err != nil {
+		return 0, false, err
+	}
+	if !eligible {
 		return baseExp, false, nil
 	}
 
@@ -486,6 +525,18 @@ func PreviewArcadePublicExp(app core.App, userID, arcadeID string) (ArcadePublic
 	if err != nil {
 		return ArcadePublicExpPreview{}, fmt.Errorf("failed to load current exp: %w", err)
 	}
+	eligible, err := IsExpEligible(app, userID)
+	if err != nil {
+		return ArcadePublicExpPreview{}, err
+	}
+	if !eligible {
+		return ArcadePublicExpPreview{
+			CurrentExp:   baseExp,
+			EstimatedExp: baseExp,
+			XPFeedback:   BuildExpFeedback(baseExp, baseExp),
+		}, nil
+	}
+
 	currentExp := baseExp
 	publicExp := 0
 	if awarded, err := HasLevelLogKind(app, userID, ArcadePublicKind(arcadeID)); err != nil {
@@ -530,6 +581,13 @@ func GrantArcadePublicBackfillTx(txApp core.App, userID, arcadeID string, baseEx
 	}
 	if arcadeID == "" {
 		return 0, fmt.Errorf("arcade id is required")
+	}
+	eligible, err := IsExpEligible(txApp, userID)
+	if err != nil {
+		return 0, err
+	}
+	if !eligible {
+		return baseExp, nil
 	}
 
 	currentExp := baseExp

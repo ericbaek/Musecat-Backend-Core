@@ -157,7 +157,18 @@ func VisitArcade(re *core.RequestEvent) error {
 			return err
 		}
 		if !granted {
-			return fmt.Errorf("visit xp was not granted")
+			eligible, err := IsExpEligible(tx, re.Auth.Id)
+			if err != nil {
+				return err
+			}
+			if eligible {
+				return fmt.Errorf("visit xp was not granted")
+			}
+			rec.Set("gained_exp", 0)
+			if err := tx.Save(rec); err != nil {
+				return err
+			}
+			granted = true
 		}
 		out = visitSummary(rec)
 		return nil

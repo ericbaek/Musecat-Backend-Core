@@ -1,6 +1,7 @@
 package ranking
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -88,7 +89,7 @@ func List(re *core.RequestEvent) error {
 	if re.Auth != nil && re.Auth.Collection().Name == "user" {
 		viewerID = re.Auth.Id
 	}
-	entries, viewer, err := load(re.App, m, p, time.Now().UTC(), viewerID)
+	entries, viewer, err := load(re.App, re.Request.Context(), m, p, time.Now().UTC(), viewerID)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load rankings", "details": err.Error()})
 	}
@@ -137,73 +138,72 @@ func rangeStart(p period, now time.Time) string {
 	return now.Add(-duration).Format("2006-01-02 15:04:05.000Z")
 }
 
-func load(app core.App, m metric, p period, now time.Time, viewerID string) ([]entry, *entry, error) {
+func load(app core.App, ctx context.Context, m metric, p period, now time.Time, viewerID string) ([]entry, *entry, error) {
 	if m == metricArcadeVisits {
-		return loadArcadeRankings(app, p, now)
+		return loadArcadeRankings(app, ctx, p, now)
 	}
 
 	query, params := metricQuery(app, m, rangeStart(p, now))
+	where := "WHERE leaderboard_position <= {:limit}"
+	if viewerID != "" {
+		params["viewer"] = viewerID
+		where += " OR id = {:viewer}"
+	}
 	rows, err := app.DB().NewQuery(query + `
-ORDER BY score DESC, nickname COLLATE NOCASE ASC, id ASC
-LIMIT {:limit}
-`).Bind(params).Rows()
+` + where + `
+ORDER BY leaderboard_position ASC
+`).Bind(params).WithContext(ctx).Rows()
 	if err != nil {
 		return nil, nil, err
 	}
 	defer rows.Close()
 
 	entries := make([]entry, 0)
+	var viewer *entry
+	var previousScore int64
+	var currentRank int
+	var hasPreviousScore bool
 	for rows.Next() {
-		item, err := scanUserEntry(rows, m)
+		item, leaderboardPosition, rankingScore, err := scanUserEntry(rows, m)
 		if err != nil {
 			return nil, nil, err
 		}
-		entries = append(entries, item)
+		if !hasPreviousScore || rankingScore != previousScore {
+			currentRank = leaderboardPosition
+			previousScore = rankingScore
+			hasPreviousScore = true
+		}
+		item.Rank = currentRank
+		if leaderboardPosition <= leaderboardLimit {
+			entries = append(entries, item)
+		}
+		if viewerID != "" && item.Profile != nil && item.Profile.ID == viewerID {
+			viewerCopy := item
+			viewer = &viewerCopy
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
-	if viewerID == "" {
-		if m == metricExplorer {
-			if err := attachExplorerDistances(app, entries, nil, rangeStart(p, now)); err != nil {
-				return nil, nil, err
-			}
-		}
-		return entries, nil, nil
-	}
-
-	params["viewer"] = viewerID
-	viewerRows, err := app.DB().NewQuery(query + `
-WHERE id = {:viewer}
-LIMIT 1
-`).Bind(params).Rows()
-	if err != nil {
-		return nil, nil, err
-	}
-	defer viewerRows.Close()
-	if !viewerRows.Next() {
-		return entries, nil, viewerRows.Err()
-	}
-	viewer, err := scanUserEntry(viewerRows, m)
-	if err != nil {
-		return nil, nil, err
-	}
 	if m == metricExplorer {
-		if err := attachExplorerDistances(app, entries, &viewer, rangeStart(p, now)); err != nil {
+		if err := attachExplorerDistances(app, ctx, entries, viewer, rangeStart(p, now)); err != nil {
 			return nil, nil, err
 		}
 	}
-	return entries, &viewer, viewerRows.Err()
+	return entries, viewer, nil
 }
 
-func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, error) {
+func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, int, int64, error) {
 	var item entry
+	var rankingScore int64
 	var exp int
 	var tags string
+	var leaderboardPosition int
 	item.Profile = &profile{}
-	if err := rows.Scan(&item.Score, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &exp, &tags, &item.Rank); err != nil {
-		return entry{}, err
+	if err := rows.Scan(&rankingScore, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &exp, &tags, &leaderboardPosition); err != nil {
+		return entry{}, 0, 0, err
 	}
+	item.Score = rankingScore
 	item.Profile.Level = userhandler.LevelFromExp(exp)
 	item.Profile.Tags = parseTags(tags)
 	if m == metricLevel {
@@ -212,10 +212,10 @@ func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, 
 	if m == metricExplorer {
 		item.Stats = &rankingStats{}
 	}
-	return item, nil
+	return item, leaderboardPosition, rankingScore, nil
 }
 
-func loadArcadeRankings(app core.App, p period, now time.Time) ([]entry, *entry, error) {
+func loadArcadeRankings(app core.App, ctx context.Context, p period, now time.Time) ([]entry, *entry, error) {
 	start := rangeStart(p, now)
 	params := dbx.Params{"limit": leaderboardLimit}
 	filter := ""
@@ -247,7 +247,7 @@ SELECT score, visit_count, id, name, country, rank
 FROM ranked
 ORDER BY score DESC, name COLLATE NOCASE ASC, id ASC
 LIMIT {:limit}
-`).Bind(params).Rows()
+`).Bind(params).WithContext(ctx).Rows()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -319,7 +319,11 @@ SELECT
   COALESCE(ui.avatar, '') AS avatar,
   COALESCE(ul.exp, 0) AS exp,
   %s AS tags,
-  RANK() OVER (ORDER BY scores.score DESC) AS rank
+  ROW_NUMBER() OVER (
+    ORDER BY scores.score DESC,
+      COALESCE(NULLIF(ui.nickname, ''), u.username) COLLATE NOCASE ASC,
+      u.id ASC
+  ) AS leaderboard_position
 FROM scores
 INNER JOIN "user" u ON u.id = scores.user
 LEFT JOIN user_info ui ON ui.id = u.id
@@ -327,12 +331,12 @@ LEFT JOIN user_level ul ON ul.user = u.id
 WHERE COALESCE(u.withdrawn, 0) = 0
   AND scores.score > 0%s
 )
-SELECT score, id, nickname, username, avatar, exp, tags, rank
+SELECT score, id, nickname, username, avatar, exp, tags, leaderboard_position
 FROM ranked
 `, source, userTags, visitVisibility), params
 }
 
-func attachExplorerDistances(app core.App, entries []entry, viewer *entry, start string) error {
+func attachExplorerDistances(app core.App, ctx context.Context, entries []entry, viewer *entry, start string) error {
 	ids := make([]string, 0, len(entries)+1)
 	seen := make(map[string]struct{}, len(entries)+1)
 	add := func(item *entry) {
@@ -374,7 +378,7 @@ INNER JOIN user_info ui ON ui.id = v.user
 WHERE v.user IN (` + strings.Join(placeholders, ", ") + `)
   AND COALESCE(NULLIF(ui.visit_visibility, ''), 'summary') IN ('summary', 'full')` + filter + `
 ORDER BY v.user ASC, v.visited_at ASC, v.id ASC
-`).Bind(params).Rows()
+`).Bind(params).WithContext(ctx).Rows()
 	if err != nil {
 		return err
 	}

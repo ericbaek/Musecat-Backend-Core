@@ -135,3 +135,67 @@ func TestCheckIn_KSTRolloverAndDedup(t *testing.T) {
 		t.Fatalf("expected user_level exp 4, got %d", rec.GetInt("exp"))
 	}
 }
+
+func TestCheckInWithoutUsernameDoesNotAwardXP(t *testing.T) {
+	app := newUserFetchTestApp(t)
+	token, userRec := createAuthUser(t, app, true)
+	userRec.Set("username", "")
+	if err := app.Save(userRec); err != nil {
+		t.Fatalf("failed to clear username: %v", err)
+	}
+
+	if _, granted, err := userhandler.AwardArcadeEditExpTx(app, userRec.Id, "arcade", "basic", 3, 0, time.Now()); err != nil {
+		t.Fatalf("edit XP eligibility check failed: %v", err)
+	} else if granted {
+		t.Fatal("expected edit XP to be withheld before username setup")
+	}
+	if _, granted, err := userhandler.AwardArcadeGameEditExpTx(app, userRec.Id, "arcade", []string{"entry"}, 0, time.Now()); err != nil {
+		t.Fatalf("game edit XP eligibility check failed: %v", err)
+	} else if granted {
+		t.Fatal("expected game edit XP to be withheld before username setup")
+	}
+	if next, err := userhandler.GrantArcadePublicBackfillTx(app, userRec.Id, "arcade", 0); err != nil {
+		t.Fatalf("backfill XP eligibility check failed: %v", err)
+	} else if next != 0 {
+		t.Fatalf("expected backfill XP to remain 0 before username setup, got %d", next)
+	}
+	preview, err := userhandler.PreviewArcadePublicExp(app, userRec.Id, "arcade")
+	if err != nil {
+		t.Fatalf("public XP preview failed: %v", err)
+	}
+	if preview.PublicExp != 0 || preview.BackfillExp != 0 || preview.EstimatedGain != 0 {
+		t.Fatalf("expected no eligible preview XP before username setup, got %#v", preview)
+	}
+
+	restore := userhandler.SetAttendanceNowForTest(func() time.Time {
+		return time.Date(2026, 6, 1, 14, 59, 0, 0, time.UTC)
+	})
+	t.Cleanup(restore)
+
+	res := doUserRequest(t, app, http.MethodPost, "/user/check-in", map[string]string{
+		"Authorization": "Bearer " + token,
+	}, `{}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected check-in success without XP, got status %d", res.StatusCode)
+	}
+	payload := decodeJSON(t, res)
+	if got := payload["gained_exp"]; got != float64(0) {
+		t.Fatalf("expected no XP before username setup, got %v", got)
+	}
+	if got := payload["exp"]; got != float64(0) {
+		t.Fatalf("expected exp 0 before username setup, got %v", got)
+	}
+
+	if _, err := app.FindRecordById(userhandler.CollectionUserLevel, userRec.Id); err == nil {
+		t.Fatal("expected check-in without username not to create user_level")
+	}
+	logs, err := app.FindRecordsByFilter(userhandler.CollectionUserLevelLog, "user={:user}", "", 0, 0, map[string]any{
+		"user": userRec.Id,
+	})
+	if err != nil {
+		t.Fatalf("failed to load XP logs: %v", err)
+	}
+	if len(logs) != 0 {
+		t.Fatalf("expected no XP logs before username setup, got %d", len(logs))
+	}
+}
