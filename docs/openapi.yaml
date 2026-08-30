@@ -336,6 +336,25 @@ components:
           nullable: true
           allOf:
             - $ref: '#/components/schemas/RankingEntry'
+    ArcadeVisitRankingEntry:
+      type: object
+      required: [rank, score, profile]
+      properties:
+        rank: {type: integer}
+        score:
+          type: integer
+          format: int64
+          description: XP earned from this arcade's completed visit verifications and arcade edit changelog grants.
+        profile: {$ref: '#/components/schemas/RankingProfile'}
+    ArcadeVisitRankingResponse:
+      type: object
+      required: [arcade, entries]
+      properties:
+        arcade: {type: string}
+        entries:
+          type: array
+          maxItems: 5
+          items: {$ref: '#/components/schemas/ArcadeVisitRankingEntry'}
     SearchUserItem:
       type: object
       required: [username, nickname, avatar]
@@ -5728,6 +5747,37 @@ paths:
                   arcade: {type: string}
                   total_visits: {type: integer}
                   distinct_visitors: {type: integer}
+  /arcade/ranking:
+    get:
+      tags: [Arcades]
+      summary: /arcade/ranking
+      description: Returns up to five users ranked by XP earned from this public arcade's completed visit verifications and arcade edit changelog grants. Public closed arcades remain eligible. Private arcades return 404, and visit XP with private visit visibility is omitted.
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Top five contributors for the arcade.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeVisitRankingResponse'}
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist or is private.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Ranking query failure.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /arcade/visit:
     post:
       tags: [Arcade Mutations]

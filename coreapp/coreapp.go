@@ -66,6 +66,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		se.Router.GET("/search", searchhandler.Search)
 		se.Router.GET("/stats", statshandler.GetStats)
 		se.Router.GET("/rankings", rankinghandler.List)
+		se.Router.GET("/arcade/ranking", rankinghandler.ArcadeVisitRanking)
 		se.Router.GET("/subway/map", subwayhandler.GetMap)
 		se.Router.GET("/subway/map/file", subwayhandler.DownloadMapFile)
 		se.Router.POST("/subway/map", subwayhandler.CreateMap).Bind(

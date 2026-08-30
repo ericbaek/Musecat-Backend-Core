@@ -138,6 +138,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		se.Router.GET("/search", searchhandler.Search)
 		se.Router.GET("/stats", statshandler.GetStats)
 		se.Router.GET("/rankings", rankinghandler.List)
+		se.Router.GET("/arcade/ranking", rankinghandler.ArcadeVisitRanking)
 		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
 		se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
 		se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)

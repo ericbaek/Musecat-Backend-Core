@@ -143,6 +143,14 @@ visibility predicates as the public list; otherwise `viewer` is `null`. In
 particular, `private` visit visibility excludes explorer and visit rankings,
 including the authenticated user's own entry.
 
+`GET /arcade/ranking` returns up to five users for one public arcade, ranked by
+the total XP earned from that arcade's completed visit verifications plus
+positive `xp:arcade-edit:<part>:<arcadeId>` changelog grants for all supported
+parts (`basic`, `game`, `hour`, `sns`, `gtk`, `photo`, and `memo`). Public closed
+arcades remain eligible. Private arcades return `404`; visit XP from users with
+`visit_visibility=private` is omitted, while their eligible arcade edit XP is
+still ranked. Withdrawn users are omitted.
+
 ## Arcade aggregate and history
 
 | Data | Source of truth | Mutation owner | Rules |
@@ -240,6 +248,7 @@ single-record operations do not write arcade changelog or XP rows.
 | delete own draft | `DELETE /arcade/draft?id=...` |
 | arcade memo | `GET /arcade/memo?arcade=...`, `PUT /arcade/memo` |
 | changelog timeline | `GET /arcade/changelog?arcade=...` (optional `changed=basic|game|hour|sns|gtk|photo|memo`) |
+| arcade contribution ranking | `GET /arcade/ranking?arcade=...` |
 | user-authored changelog timeline | `GET /user/changelog?user=...` (optional `changed=basic|game|hour|sns|gtk|photo|memo`) |
 | photo atom list | `GET /arcade/photo/atoms?arcade=...` |
 | photo bytes | `GET /arcade/photo/file?id=...` (the `file_url` returned for an atom) |
