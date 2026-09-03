@@ -209,6 +209,48 @@ func TestUpdateArcadeGTK_AllowsATM(t *testing.T) {
 	scenario.Test(t)
 }
 
+func TestUpdateArcadeGTK_AllowsFoodAndSeatingArea(t *testing.T) {
+	headers := map[string]string{}
+
+	scenario := tests.ApiScenario{
+		Name:           "PUT /arcade/gtk allows food and seating area",
+		Method:         http.MethodPut,
+		URL:            "/arcade/gtk",
+		Headers:        headers,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"type":"SellFood"`,
+			`"type":"SeatingArea"`,
+		},
+		TestAppFactory: func(tb testing.TB) *tests.TestApp {
+			return newArcadeTestApp(tb)
+		},
+	}
+
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		tb.Helper()
+
+		token, user := createAuthUser(tb, app)
+		headers["Authorization"] = "Bearer " + token
+
+		arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{
+			Name:     "Food and Seating Arcade",
+			Address:  "GTK Street",
+			Nickname: []string{"GTK"},
+			Location: location{Lat: 37.5665, Lon: 126.978},
+		})
+		scenario.Body = strings.NewReader(fmt.Sprintf(`{
+			"arcade":"%s",
+			"gtk":[
+				{"type":"SellFood","bool":true,"note":"snacks at the counter"},
+				{"type":"SeatingArea","bool":true,"note":"chairs behind the games"}
+			]
+		}`, arcadeID))
+	}
+
+	scenario.Test(t)
+}
+
 func TestUpdateArcadeGTK_ParkingMeta(t *testing.T) {
 	headers := map[string]string{}
 	var arcadeID string

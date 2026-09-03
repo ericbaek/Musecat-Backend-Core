@@ -169,10 +169,21 @@ still ranked. Withdrawn users are omitted.
 | `arcade_analytics_event` | append-only public interaction and mutation markers | analytics handler or the owning mutation transaction | No IP, user-agent, or user identity is stored. Multi-series events share one `event_group`; raw REST is locked. |
 
 GTK atom types are server-validated against the closed catalog used by the
-fresh bootstrap schema. `ATM` is a normal boolean facility atom and accepts
-only the shared `note` field; it does not use `Parking` metadata.
+fresh bootstrap schema. `SellFood` represents food available for purchase,
+and `SeatingArea` represents a place to sit within the arcade. These are normal
+boolean facility atoms and accept only the shared `note` field; they do not use
+`Parking` metadata.
 
 Rollback is a normal, immediate wiki action. When `report=true`, `POST /arcade/rollback` MUST atomically create the rollback changelog entry and a `rollback_report` linked to the cited prior changelog. A standalone `POST /arcade/edit_report` creates `edit_report`. Neither path bans a user nor performs an automatic rollback beyond the contributor's explicit rollback request.
+
+Both changelog read endpoints enrich immutable evidence with scoped memo
+snapshots and currently accessible `photo_assets` references. Snapshot lookup
+must verify the referenced record belongs to the changelog's arcade. Photo
+references use the same current authorization as `/arcade/photo/file`; gallery
+membership removal does not unpublish an immutable photo. Memo snapshot status
+distinguishes absent revisions from unavailable evidence. Read enrichment never
+rewrites logs. New rollback logs carry `source="rollback"` so clients do not
+render revision-pointer changes as ordinary content diffs.
 
 Game mutations require `base_state_id`; a stale value returns `409`. The public request is a delta with required `add`, `modify`, and `remove` arrays. `modify` is a complete replacement object, not a patch, and a single modify cannot delete other active entries. Same-series version changes retain the entry; a cross-series change is rejected. Removed entries remain durable for historical flags, which appear as `orphanFlags` while absent from the selected batch. Re-addition can reuse the newest inactive history match for the same canonical series and verified cabinet; empty/unverified cabinets never reuse an identity.
 

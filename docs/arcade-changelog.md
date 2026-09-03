@@ -97,6 +97,11 @@ An empty document is still a real revision and is never represented as a
 delete. A rollback points `arcade.memo` directly at the selected prior
 revision and writes another `memo_diff` row, preserving every earlier row.
 
+Both timeline endpoints return `memo.before_status` and `memo.after_status`:
+`available` includes an empty document, `absent` means no revision ID, and
+`unavailable` means a missing revision or a reference to a different arcade.
+An unavailable snapshot must not be displayed as a newly added/deleted memo.
+
 ### `PUT /arcade/basic`
 
 Request body may update any of these fields:
@@ -166,9 +171,11 @@ Field-level diffs are usually:
 - `bullets[]`
 - `diff[]`
 
-`gtk_type` is server-validated against the GTK catalog, including `ATM`.
-ATM uses the normal `bool` and optional `note` fields and has no special
-metadata.
+`gtk_type` is server-validated against the GTK catalog, including `ATM`,
+`SellFood`, and `SeatingArea`. These use the normal `bool` and optional `note`
+fields and have no special metadata. `SellFood` means food is available for
+purchase; `SeatingArea` means the arcade has a place to sit, such as chairs or
+sofas behind the games.
 
 Field-level diffs are usually:
 - `bool`
@@ -268,7 +275,27 @@ Photo items are mostly membership changes:
 - `unchanged` when the atom was already part of the same photo molecule
 - `deleted` when an old atom is removed from the molecule
 
+Removal means **removed from the arcade gallery**, not made private. Published
+atoms remain immutable and public independently of current gallery membership.
+Both timeline endpoints add `photo_assets: [{id, file_url}]` at read time, using
+the same authorization as the custom photo-file route. Only referenced atoms
+belonging to the row's arcade are eligible; missing atoms or file references, foreign atoms,
+and inaccessible atoms are omitted. An empty array is not evidence of deletion.
+The frontend uses its authenticated same-origin file proxy for these references.
+
+Presentation uses structured diffs/snapshots as the primary detail. Translation
+bullets are a legacy fallback, not an additional copy of each displayed diff.
+`unchanged` items may be summarized; an all-unchanged record is distinct from
+missing or unreadable historical detail. SNS/GTK deletions may embed the previous
+atom in `diff[].from` under `field="deleted"`; clients extract its known fields.
+
 ### `POST /arcade/rollback`
+
+New rollback envelopes include `source: "rollback"`. Older envelopes can be
+recognized by the `arcade.changelog.rollback.applied` bullet key. Their diff
+values are relation IDs, not user-facing field values or photo membership
+changes. Display a restore event (and memo snapshots when available). Earlier
+changelog rows remain valid immutable evidence; rollback does not invalidate them.
 
 Rollback logs use the same pattern as the target part, but the `items[]` payload is usually a single `rollback_diff` item with:
 - `change_type`: `updated`

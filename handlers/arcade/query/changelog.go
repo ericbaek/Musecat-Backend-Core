@@ -11,6 +11,7 @@ import (
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 	memoDiff "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo/diff"
+	photo "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo/read"
 )
 
 const (
@@ -83,9 +84,12 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 			"updated": record.Get("updated"),
 		}
 		if record.GetString("changed") == "memo" {
-			item["memo"] = memoDiff.Build(re.App, record.GetString("from"), record.GetString("to"))
+			item["memo"] = memoDiff.Build(re.App, arcadeID, record.GetString("from"), record.GetString("to"))
 		}
 		items = append(items, item)
+	}
+	if err := photo.ExpandChangelogAssets(re, items); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load changelog photos"})
 	}
 	lastPage := 0
 	if total > 0 {

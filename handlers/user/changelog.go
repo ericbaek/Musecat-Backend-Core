@@ -11,6 +11,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	memoDiff "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo/diff"
+	photo "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo/read"
 )
 
 const (
@@ -122,7 +123,7 @@ LIMIT {:limit} OFFSET {:offset}
 			"log":         decodeUserChangelogJSON(userChangelogString(raw, "log")),
 		}
 		if item["changed"] == "memo" {
-			item["memo"] = memoDiff.Build(re.App, userChangelogString(raw, "from"), userChangelogString(raw, "to"))
+			item["memo"] = memoDiff.Build(re.App, userChangelogString(raw, "arcade"), userChangelogString(raw, "from"), userChangelogString(raw, "to"))
 		}
 		items = append(items, item)
 	}
@@ -133,6 +134,9 @@ LIMIT {:limit} OFFSET {:offset}
 		})
 	}
 
+	if err := photo.ExpandChangelogAssets(re, items); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load changelog photos"})
+	}
 	lastPage := int64(0)
 	if total > 0 {
 		lastPage = (total + int64(perPage) - 1) / int64(perPage)
@@ -188,7 +192,7 @@ func userChangelogVisibility(re *core.RequestEvent, userID, changed string) (str
 		parts = append(parts, "c.changed = {:changed}")
 		params["changed"] = changed
 	} else {
-		parts = append(parts, "c.changed IN ('basic', 'game', 'hour', 'sns', 'gtk', 'photo')")
+		parts = append(parts, "c.changed IN ('basic', 'game', 'hour', 'sns', 'gtk', 'photo', 'memo')")
 	}
 
 	switch {

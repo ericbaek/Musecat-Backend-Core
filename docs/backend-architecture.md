@@ -61,7 +61,7 @@ other arcade handlers own mutation flows for their respective parts.
 | `arcade_basic` | Basic editable details such as name, address, country, location | basic updates, search, arcade summaries |
 | `arcade_hour` | Opening-hour data | hour updates and read expansion |
 | `arcade_sns` | SNS links | SNS updates and read expansion |
-| `arcade_gtk` | GTK-related arcade data, including structured parking meta on `Parking` atoms | GTK updates and read expansion |
+| `arcade_gtk` | GTK-related arcade data, including food availability, seating areas, and structured parking meta on `Parking` atoms | GTK updates and read expansion |
 | `arcade_game_id` | Durable installed-game identity referenced by `arcade_flag.game_id` | flags and game mutations |
 | `arcade_game_history_batch` | Immutable complete game-state snapshot selected by `arcade.game_v2` | game reads, rollback, and mutations |
 | `arcade_game_history` | Per-entry version, cabinet, quantity, price, and tag within a batch | game reads and mutations |

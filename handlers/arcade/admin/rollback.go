@@ -175,6 +175,7 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 		rollbackLog := arcadeinternal.BuildChangelogEnvelope(body.Part, []rollbackDiffLogItem{
 			buildRollbackDiffLogItem(body.Part, fromValue, toValue),
 		})
+		rollbackLog["source"] = "rollback"
 		if err := arcadeinternal.UpdateArcadeFieldsTxWithLogs(
 			txApp,
 			body.Arcade,

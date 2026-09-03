@@ -549,10 +549,12 @@ components:
         - SellBachi
         - SellSlipper
         - SellDrink
+        - SellFood
         - SellAmusementIC
         - SellAMPASS
         - Parking
         - ATM
+        - SeatingArea
     ArcadeGtkItem:
       type: object
       required: [type, bool]
@@ -2365,6 +2367,37 @@ components:
                   created: {type: string}
                   updated: {type: string}
         total: {type: integer}
+    ChangelogMemoSnapshots:
+      type: object
+      required: [before, after, before_status, after_status]
+      properties:
+        before:
+          anyOf:
+            - {$ref: '#/components/schemas/ArcadeMemoDocument'}
+            - {type: 'null'}
+          description: Immutable Tiptap document, or null when absent/unavailable.
+        after:
+          anyOf:
+            - {$ref: '#/components/schemas/ArcadeMemoDocument'}
+            - {type: 'null'}
+          description: Immutable Tiptap document, or null when absent/unavailable.
+        before_status:
+          type: string
+          enum: [available, absent, unavailable]
+        after_status:
+          type: string
+          enum: [available, absent, unavailable]
+      description: Empty documents are available revisions, not deletions. References to another arcade are unavailable.
+    ChangelogPhotoAsset:
+      type: object
+      required: [id, file_url]
+      properties:
+        id: {type: string}
+        file_url:
+          type: string
+          format: uri-reference
+          description: Custom /arcade/photo/file?id= URL; file delivery rechecks current access.
+      description: Read-time reference to an accessible photo in this row's arcade. Missing, foreign, and inaccessible atoms are omitted.
     ArcadeChangelogItem:
       type: object
       required: [id, arcade, changed, by, created, updated]
@@ -2378,6 +2411,10 @@ components:
         to: {}
         by: {type: string}
         log: {}
+        memo: {$ref: '#/components/schemas/ChangelogMemoSnapshots'}
+        photo_assets:
+          type: array
+          items: {$ref: '#/components/schemas/ChangelogPhotoAsset'}
         created: {type: string}
         updated: {type: string}
     ArcadeChangelogPage:
@@ -2407,6 +2444,10 @@ components:
         to: {}
         by: {type: string}
         log: {}
+        memo: {$ref: '#/components/schemas/ChangelogMemoSnapshots'}
+        photo_assets:
+          type: array
+          items: {$ref: '#/components/schemas/ChangelogPhotoAsset'}
         created: {type: string}
         updated:
           type: [string, 'null']

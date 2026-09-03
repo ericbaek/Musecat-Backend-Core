@@ -102,6 +102,9 @@ func TestRollbackArcadePart_Basic_Success(t *testing.T) {
 					tb.Fatalf("expected changelog.by=%q, got %q", userID, change.GetString("by"))
 				}
 				logObj := decodeLogObject(tb, change.Get("log"))
+				if logObj["source"] != "rollback" {
+					tb.Fatalf("expected explicit rollback source, got %#v", logObj)
+				}
 				items, ok := logObj["items"].([]any)
 				if !ok || len(items) == 0 {
 					tb.Fatalf("expected rollback changelog.log.items, got %v", logObj["items"])

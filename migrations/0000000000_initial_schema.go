@@ -1943,12 +1943,14 @@ func init() {
 							"SellBachi",
 							"SellSlipper",
 							"SellDrink",
+							"SellFood",
 							"FreeDrumStick",
 							"SellAmusementIC",
 							"SellAMPASS",
 							"Parking",
 							"SmokingRoom",
-							"ATM"
+							"ATM",
+							"SeatingArea"
 						]
 					},
 					{

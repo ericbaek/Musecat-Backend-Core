@@ -34,8 +34,46 @@ func NewTestApp(tb testing.TB) *tests.TestApp {
 	ensureVisitSchema(tb, app)
 	ensureNoticeAuthorSchema(tb, app)
 	ensureFlagResolutionSchema(tb, app)
+	ensureGTKTypeCatalog(tb, app)
 
 	return app
+}
+
+// Production Core's bootstrap schema and Backend Full's forward migration own
+// the GTK catalog. The checked-in test fixture predates new GTK values, so
+// isolated handler tests add them to their cloned database.
+func ensureGTKTypeCatalog(tb testing.TB, app *tests.TestApp) {
+	tb.Helper()
+	collection, err := app.FindCollectionByNameOrId("arcade_gtk_atoms")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_gtk_atoms: %v", err)
+	}
+	field, ok := collection.Fields.GetByName("type").(*core.SelectField)
+	if !ok {
+		tb.Fatalf("arcade_gtk_atoms.type must be a select field")
+	}
+	changed := false
+	for _, value := range []string{"SellFood", "SeatingArea"} {
+		if containsGTKType(field.Values, value) {
+			continue
+		}
+		field.Values = append(field.Values, value)
+		changed = true
+	}
+	if changed {
+		if err := app.Save(collection); err != nil {
+			tb.Fatalf("failed to update GTK type catalog: %v", err)
+		}
+	}
+}
+
+func containsGTKType(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Production Core's bootstrap schema and Backend Full's forward migration own

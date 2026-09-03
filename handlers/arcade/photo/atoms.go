@@ -3,13 +3,13 @@ package photo
 import (
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	photoread "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo/read"
 )
 
 var (
@@ -26,7 +26,7 @@ func ListArcadePhotoAtoms(re *core.RequestEvent) error {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "arcade is required"})
 	}
 	arcade, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, arcadeID)
-	if err != nil || !canAccessPhotoAtoms(re.Auth, arcade) {
+	if err != nil || !photoread.CanAccessAtoms(re.Auth, arcade) {
 		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
 	}
 
@@ -66,13 +66,13 @@ func DeleteArcadePhotoAtom(re *core.RequestEvent) error {
 		if err != nil {
 			return err
 		}
-		if !canAccessPhotoAtoms(re.Auth, arcade) {
+		if !photoread.CanAccessAtoms(re.Auth, arcade) {
 			return errPhotoAtomForbidden
 		}
 		if atom.GetBool("public") {
 			return errPhotoAtomPublished
 		}
-		if atom.GetString("createdBy") != re.Auth.Id && !hasStrictReviewerTag(re.Auth) {
+		if atom.GetString("createdBy") != re.Auth.Id && !photoread.HasStrictReviewerTag(re.Auth) {
 			return errPhotoAtomForbidden
 		}
 		return txApp.Delete(atom)
@@ -107,7 +107,7 @@ func DownloadArcadePhotoAtom(re *core.RequestEvent) error {
 	if err != nil {
 		return re.NotFoundError("photo atom not found", nil)
 	}
-	if !(arcade.GetBool("public") && atom.GetBool("public")) && !canAccessPhotoAtoms(re.Auth, arcade) {
+	if !photoread.CanReadAtom(re.Auth, arcade, atom) {
 		return re.NotFoundError("photo atom not found", nil)
 	}
 	filename := atom.GetString("photo")
@@ -131,36 +131,10 @@ func photoAtomPayload(atom *core.Record) map[string]any {
 		"id":        atom.Id,
 		"arcade":    atom.GetString("arcade"),
 		"photo":     atom.GetString("photo"),
-		"file_url":  photoAtomFileURL(atom.Id),
+		"file_url":  photoread.FileURL(atom.Id),
 		"public":    atom.GetBool("public"),
 		"createdBy": atom.GetString("createdBy"),
 		"created":   atom.Get("created"),
 		"updated":   atom.Get("updated"),
 	}
-}
-
-func photoAtomFileURL(id string) string {
-	return "/arcade/photo/file?id=" + url.QueryEscape(id)
-}
-
-func canAccessPhotoAtoms(auth, arcade *core.Record) bool {
-	if auth == nil || arcade == nil {
-		return false
-	}
-	if arcade.GetBool("public") {
-		return true
-	}
-	return arcade.GetString("createdBy") == auth.Id || hasStrictReviewerTag(auth)
-}
-
-func hasStrictReviewerTag(auth *core.Record) bool {
-	for _, tags := range [][]string{auth.GetStringSlice("tag"), auth.GetStringSlice("tags")} {
-		for _, tag := range tags {
-			switch strings.ToLower(strings.TrimSpace(tag)) {
-			case "developer", "moderator":
-				return true
-			}
-		}
-	}
-	return false
 }

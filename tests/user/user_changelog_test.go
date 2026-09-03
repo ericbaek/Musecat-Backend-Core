@@ -78,6 +78,23 @@ func TestGetUserChangelog_OwnerCanReadPrivateRows(t *testing.T) {
 	scenario.Test(t)
 }
 
+func TestGetUserChangelog_DefaultIncludesMemo(t *testing.T) {
+	scenario := tests.ApiScenario{
+		Name:            "default user history includes memo and its snapshot status",
+		Method:          http.MethodGet,
+		ExpectedStatus:  http.StatusOK,
+		ExpectedContent: []string{`"changed":"memo"`, `"before_status":"unavailable"`, `"after_status":"unavailable"`, `"total":1`},
+		TestAppFactory:  func(tb testing.TB) *tests.TestApp { return newUserFetchTestApp(tb) },
+	}
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		_, user := createAuthUser(tb, app, true)
+		arcade := seedUserChangelogArcade(tb, app, user.Id, true, "Memo Arcade")
+		seedUserChangelog(tb, app, arcade, "memo", user.Id)
+		scenario.URL = "/user/changelog?user=" + user.Id
+	}
+	scenario.Test(t)
+}
+
 func TestGetUserChangelog_ReviewerCanReadPrivateRows(t *testing.T) {
 	scenario := tests.ApiScenario{
 		Name:            "GET /user/changelog permits private rows for strict reviewers",
