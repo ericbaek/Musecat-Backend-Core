@@ -40,6 +40,8 @@ type Profile struct {
 	Username           string             `json:"username"`
 	Nickname           string             `json:"nickname"`
 	Level              int                `json:"level"`
+	Countries          []string           `json:"countries"`
+	PrimaryCountry     string             `json:"primary_country"`
 	Bio                string             `json:"bio"`
 	Avatar             string             `json:"avatar"`
 	Background         string             `json:"background"`
@@ -98,6 +100,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 		ID:        userRec.Id,
 		Created:   userRec.GetString("created"),
 		Tag:       []string{},
+		Countries: []string{},
 		SNS:       ProfileSNS{Items: []ProfileSNSItem{}},
 		Withdrawn: userRec.GetBool("withdrawn"),
 	}
@@ -140,6 +143,10 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 		out.SNS = parseProfileSNS(userInfoRec)
 		out.SeriesPublic = userInfoRec.GetBool("series_public")
 		out.VisitVisibility = visitVisibility(userInfoRec.GetString("visit_visibility"))
+		out.Countries = publicProfileCountries(app, userRec, userInfoRec, includePrivateSeries)
+		if len(out.Countries) > 0 {
+			out.PrimaryCountry = out.Countries[0]
+		}
 	}
 
 	out.Username = username

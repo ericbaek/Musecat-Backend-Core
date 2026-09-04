@@ -92,6 +92,7 @@ SELECT
   COALESCE(NULLIF(ui.nickname, ''), u.username) AS nickname,
   u.username,
   COALESCE(ui.avatar, '') AS avatar,
+	  COALESCE(ui.countries, '[]') AS countries,
   COALESCE(ul.exp, 0) AS exp,
   %s AS tags,
   RANK() OVER (ORDER BY scores.score DESC) AS rank,
@@ -106,7 +107,7 @@ LEFT JOIN user_info ui ON ui.id = u.id
 LEFT JOIN user_level ul ON ul.user = u.id
 WHERE COALESCE(u.withdrawn, 0) = 0
 )
-SELECT score, id, nickname, username, avatar, exp, tags, rank
+SELECT score, id, nickname, username, avatar, countries, exp, tags, rank
 FROM ranked
 WHERE leaderboard_position <= {:limit}
 ORDER BY leaderboard_position ASC
@@ -120,6 +121,7 @@ ORDER BY leaderboard_position ASC
 	for rows.Next() {
 		var item entry
 		var exp int
+		var countries string
 		var tags string
 		item.Profile = &profile{}
 		if err := rows.Scan(
@@ -128,6 +130,7 @@ ORDER BY leaderboard_position ASC
 			&item.Profile.Nickname,
 			&item.Profile.Username,
 			&item.Profile.Avatar,
+			&countries,
 			&exp,
 			&tags,
 			&item.Rank,
@@ -135,6 +138,7 @@ ORDER BY leaderboard_position ASC
 			return nil, err
 		}
 		item.Profile.Level = userhandler.LevelFromExp(exp)
+		item.Profile.PrimaryCountry = userhandler.PrimaryProfileCountryFromJSON(countries)
 		item.Profile.Tags = parseTags(tags)
 		entries = append(entries, item)
 	}

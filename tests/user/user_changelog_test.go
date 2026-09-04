@@ -51,6 +51,9 @@ func TestGetUserChangelog_PublicPrivateVisibilityAndCategoryFilter(t *testing.T)
 		if item["arcade_name"] != "Public Arcade" {
 			tb.Fatalf("expected arcade_name, got %#v", item["arcade_name"])
 		}
+		if _, exists := item["primary_country"]; exists {
+			tb.Fatalf("changelog item must not expose a country badge field: %#v", item)
+		}
 	}
 
 	scenario.Test(t)

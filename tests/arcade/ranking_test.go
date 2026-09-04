@@ -15,6 +15,11 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	app := newArcadeTestApp(t)
 
 	_, explorer := createAuthUser(t, app)
+	explorerInfo := ensureUserInfo(t, app, explorer.Id)
+	explorerInfo.Set("countries", []string{"KR"})
+	if err := app.Save(explorerInfo); err != nil {
+		t.Fatalf("failed to save ranking user countries: %v", err)
+	}
 	_, privateVisitor := createAuthUser(t, app)
 	_, photographer := createAuthUser(t, app)
 	_, withdrawn := createAuthUser(t, app)
@@ -62,12 +67,39 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	assertRankingTop(t, app, "/rankings?metric=photographer&period=week", photographer.Id, 1)
 	assertArcadeRankingTop(t, app, "/rankings?metric=arcade_visits&period=week", arcadeTwo, 20, 2)
 	assertExplorerDistance(t, app, "/rankings?metric=explorer&period=week", explorer.Id)
+	assertRankingPrimaryCountry(t, app, "/rankings?metric=explorer&period=week", explorer.Id, "KR")
 
 	res := executeJSONRequest(t, app, http.MethodGet, "/rankings?metric=level&period=week", "", nil)
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected invalid level period to return 400, got %d", res.StatusCode)
 	}
+}
+
+func assertRankingPrimaryCountry(t *testing.T, app *tests.TestApp, url, userID, want string) {
+	t.Helper()
+	res := executeJSONRequest(t, app, http.MethodGet, url, "", nil)
+	defer res.Body.Close()
+	var payload struct {
+		Entries []struct {
+			Profile struct {
+				ID             string `json:"id"`
+				PrimaryCountry string `json:"primary_country"`
+			} `json:"profile"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatalf("%s: decode response: %v", url, err)
+	}
+	for _, entry := range payload.Entries {
+		if entry.Profile.ID == userID {
+			if entry.Profile.PrimaryCountry != want {
+				t.Fatalf("%s: primary country=%q, want %q", url, entry.Profile.PrimaryCountry, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("%s: user %s not found", url, userID)
 }
 
 func TestRankings_PreservesTiedRanks(t *testing.T) {

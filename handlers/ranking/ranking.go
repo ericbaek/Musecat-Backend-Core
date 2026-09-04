@@ -41,12 +41,13 @@ const (
 )
 
 type profile struct {
-	ID       string   `json:"id"`
-	Nickname string   `json:"nickname"`
-	Username string   `json:"username"`
-	Avatar   string   `json:"avatar"`
-	Level    int      `json:"level"`
-	Tags     []string `json:"tags"`
+	ID             string   `json:"id"`
+	Nickname       string   `json:"nickname"`
+	Username       string   `json:"username"`
+	Avatar         string   `json:"avatar"`
+	PrimaryCountry string   `json:"primary_country"`
+	Level          int      `json:"level"`
+	Tags           []string `json:"tags"`
 }
 
 type rankingStats struct {
@@ -200,11 +201,13 @@ func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, 
 	var tags string
 	var leaderboardPosition int
 	item.Profile = &profile{}
-	if err := rows.Scan(&rankingScore, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &exp, &tags, &leaderboardPosition); err != nil {
+	var countries string
+	if err := rows.Scan(&rankingScore, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &countries, &exp, &tags, &leaderboardPosition); err != nil {
 		return entry{}, 0, 0, err
 	}
 	item.Score = rankingScore
 	item.Profile.Level = userhandler.LevelFromExp(exp)
+	item.Profile.PrimaryCountry = userhandler.PrimaryProfileCountryFromJSON(countries)
 	item.Profile.Tags = parseTags(tags)
 	if m == metricLevel {
 		item.Score = int64(item.Profile.Level)
@@ -317,6 +320,7 @@ SELECT
   COALESCE(NULLIF(ui.nickname, ''), u.username) AS nickname,
   u.username,
   COALESCE(ui.avatar, '') AS avatar,
+	  COALESCE(ui.countries, '[]') AS countries,
   COALESCE(ul.exp, 0) AS exp,
   %s AS tags,
   ROW_NUMBER() OVER (
@@ -331,7 +335,7 @@ LEFT JOIN user_level ul ON ul.user = u.id
 WHERE COALESCE(u.withdrawn, 0) = 0
   AND scores.score > 0%s
 )
-SELECT score, id, nickname, username, avatar, exp, tags, leaderboard_position
+SELECT score, id, nickname, username, avatar, countries, exp, tags, leaderboard_position
 FROM ranked
 `, source, userTags, visitVisibility), params
 }

@@ -32,11 +32,27 @@ func NewTestApp(tb testing.TB) *tests.TestApp {
 	// Core tests create multiple routers but don't exercise the bundled UI.
 	ui.DistDirFS = nil
 	ensureVisitSchema(tb, app)
+	ensureProfileCountriesSchema(tb, app)
 	ensureNoticeAuthorSchema(tb, app)
 	ensureFlagResolutionSchema(tb, app)
 	ensureGTKTypeCatalog(tb, app)
 
 	return app
+}
+
+func ensureProfileCountriesSchema(tb testing.TB, app *tests.TestApp) {
+	tb.Helper()
+	info, err := app.FindCollectionByNameOrId("user_info")
+	if err != nil {
+		tb.Fatalf("failed to load user_info: %v", err)
+	}
+	if info.Fields.GetByName("countries") != nil {
+		return
+	}
+	info.Fields.Add(&core.JSONField{Name: "countries", MaxSize: 128})
+	if err := app.Save(info); err != nil {
+		tb.Fatalf("failed to add user_info.countries: %v", err)
+	}
 }
 
 // Production Core's bootstrap schema and Backend Full's forward migration own

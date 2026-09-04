@@ -110,6 +110,7 @@ func SignUp(re *core.RequestEvent) error {
 		userInfoRec.Set("bio", bio)
 		userInfoRec.Set("series_public", true)
 		userInfoRec.Set("visit_visibility", "summary")
+		userInfoRec.Set("countries", []string{})
 		if input.Avatar == nil {
 			userInfoRec.Set("avatar", []string{})
 		} else {

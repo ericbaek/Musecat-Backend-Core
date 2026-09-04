@@ -13,11 +13,18 @@ export interface UserProfile {
   username: string;
   nickname: string;
   level: number;
+  countries: string[]; // ordered ISO 3166-1 alpha-2 codes
+  primary_country: string;
   bio: string;
   avatar: string; // filename only
   sns: UserProfileSNS;
   withdrawn: boolean;
   warp?: boolean;
+}
+
+export interface ProfileCountriesResponse {
+  countries: string[];
+  primary_country: string;
 }
 
 export interface UserActivityRange {
@@ -104,6 +111,26 @@ export async function fetchMyUserProfile(baseUrl: string, token: string): Promis
   }
 
   return (await res.json()) as UserProfile;
+}
+
+export async function updateProfileCountries(
+  baseUrl: string,
+  token: string,
+  countries: string[],
+): Promise<ProfileCountriesResponse> {
+  const url = new URL("/user/countries", baseUrl);
+  const res = await fetch(url.toString(), {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ countries }),
+  });
+  if (!res.ok) {
+    throw (await res.json()) as UserProfileError;
+  }
+  return (await res.json()) as ProfileCountriesResponse;
 }
 
 export async function fetchUserActivity(

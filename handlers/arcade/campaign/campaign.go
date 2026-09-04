@@ -904,7 +904,7 @@ func campaignUser(app core.App, userID string, cache map[string]map[string]any) 
 	if user, ok := cache[userID]; ok {
 		return user
 	}
-	user := map[string]any{"id": userID, "username": userID, "nickname": userID}
+	user := map[string]any{"id": userID, "username": userID, "nickname": userID, "primary_country": "", "level": 0}
 	if record, err := app.FindRecordById(userhandler.CollectionUser, userID); err == nil {
 		if record.GetBool("withdrawn") {
 			withdrawn := userhandler.WithdrawnDisplayName()
@@ -920,6 +920,10 @@ func campaignUser(app core.App, userID string, cache map[string]map[string]any) 
 				if nickname := strings.TrimSpace(info.GetString("nickname")); nickname != "" {
 					user["nickname"] = nickname
 				}
+				user["primary_country"] = userhandler.PrimaryProfileCountry(info)
+			}
+			if exp, err := userhandler.LoadCurrentExp(app, userID); err == nil {
+				user["level"] = userhandler.LevelFromExp(exp)
 			}
 		}
 	}

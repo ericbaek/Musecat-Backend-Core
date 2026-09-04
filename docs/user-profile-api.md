@@ -5,6 +5,7 @@ This document describes the newly added user profile APIs:
 - `GET /user` (public lookup by id or username)
 - `GET /user/me` (authenticated self profile)
 - `GET /user/activity` (public activity heatmap lookup)
+- `PUT /user/countries` (authenticated profile-country selection)
 - `GET /supporter/score` and `POST /supporter/request` are documented separately in `docs/supporter-api.md`
 
 Both endpoints return the same normalized profile shape that merges data from:
@@ -21,6 +22,8 @@ All successful responses return this JSON object:
   "username": "string",
   "nickname": "string",
   "level": 0,
+  "countries": ["KR"],
+  "primary_country": "KR",
   "bio": "string",
   "avatar": "string",
   "sns": {
@@ -56,6 +59,8 @@ All successful responses return this JSON object:
 - `username`: account username
 - `nickname`: display nickname
 - `level`: current level computed from `user_level.exp`
+- `countries`: ordered ISO 3166-1 alpha-2 profile countries; the first item is primary
+- `primary_country`: first item in `countries`, or `""` when no country is selected
 - `bio`: user bio text
 - `avatar`: single avatar filename (not a full URL)
 - `sns`: normalized SNS collection from `user_info.sns`
@@ -68,6 +73,51 @@ All successful responses return this JSON object:
 Endpoint-specific visibility:
 - `GET /user`: `series` is included only when `series_public = true`
 - `GET /user/me`: `series_public` value is still returned, `series` is included for the authenticated user even when `series_public = false`, and `warp` is always included
+
+## Profile countries
+
+Profile countries are optional. Active accounts below level 15 may store one
+country, while accounts at level 15 or above may store up to three. This limit
+is based only on level; supporter and staff tags do not change it. The list is
+ordered, and its first code is the representative country. Codes are normalized
+to ISO 3166-1 alpha-2 uppercase values.
+
+- Public profile reads expose the selected countries for accounts at level 15 or
+  above. If that access ends, public reads expose only the first stored country;
+  `GET /user/me` retains the full saved list.
+- Compact user results expose only `primary_country`. Clients use the existing
+  Dashboard `icon source country` renderer, never an emoji or backend image URL.
+- A country icon appears next to a nickname whenever `primary_country` is
+  present, including below level 15 and in changelog/timeline profile displays.
+  It is rendered before any supporter or staff badge.
+
+### Endpoint: PUT /user/countries
+
+Replaces the authenticated active user's full ordered selection.
+
+```json
+{"countries":["KR","JP"]}
+```
+
+An empty array clears the selection. Duplicate, invalid, or non-alpha-2 codes
+return `400`; a non-supporter attempting multiple values returns `403`. The
+successful response is `{ "countries": ["KR", "JP"], "primary_country": "KR" }`.
+
+## Country-picker recommendations
+
+The country picker requires no new recommendation endpoint. Build its groups
+in this order, removing duplicates after every group:
+
+1. `GET /user/me` `countries`, in stored order.
+2. `GET /user/visits` `stats.countries`, already ordered by verified distinct
+   arcade count descending and code ascending.
+3. When location permission is available, `GET /arcades/nearby?lat=&lon=`
+   `country_totals`, ordered by `nearest_arcade.distance_km`, then total
+   descending, then country code.
+4. The remaining localized country catalog entries.
+
+Search filters the complete catalog without changing selection semantics. If
+location is unavailable or no nearby venues exist, omit only group 3.
 
 ## Visit records
 
@@ -102,6 +152,7 @@ distance sequence.
   - `bio` and `avatar` are returned as empty strings
   - `series_public` is returned as `false`
   - `series` is omitted
+  - `countries` is `[]` and `primary_country` is `""`
   - `withdrawn` is `true`
 
 ## Data Merge Rules
@@ -116,6 +167,7 @@ distance sequence.
     - `sns = { "items": [] }`
     - `series_public = false`
     - `series` omitted
+    - `countries = []`, `primary_country = ""`
 
 ## Endpoint: GET /user
 Public profile lookup by user id or username.
@@ -338,6 +390,10 @@ Public user activity heatmap lookup.
 - If you need an image URL, build it with your PocketBase file URL rule on the client.
 - For UI consistency:
   - always read `nickname` from API response
+  - render `primary_country` with the existing Dashboard country icon source;
+    do not use a flag emoji or backend image URL
+  - render the compact country icon wherever `primary_country` is present, before
+    any supporter or staff badge
   - do not derive profile visibility from hidden backend fields
 - `GET /user` and `GET /user/me` are schema-compatible; one shared frontend model can be used.
 - `GET /user/activity` returns zero-filled daily buckets ordered from oldest to newest, so the client can render a GitHub-style grid directly.

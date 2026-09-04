@@ -279,12 +279,15 @@ components:
           format: int64
     RankingProfile:
       type: object
-      required: [id, nickname, username, avatar, level, tags]
+      required: [id, nickname, username, avatar, primary_country, level, tags]
       properties:
         id: {type: string}
         nickname: {type: string}
         username: {type: string}
         avatar: {type: string}
+        primary_country:
+          type: string
+          description: Primary profile country as an ISO 3166-1 alpha-2 code, or an empty string when unset.
         level: {type: integer}
         tags:
           type: array
@@ -357,7 +360,7 @@ components:
           items: {$ref: '#/components/schemas/ArcadeVisitRankingEntry'}
     SearchUserItem:
       type: object
-      required: [username, nickname, avatar]
+      required: [username, nickname, avatar, primary_country, level]
       properties:
         username:
           type: string
@@ -366,6 +369,10 @@ components:
         avatar:
           type: string
           description: Avatar filename only.
+        primary_country:
+          type: string
+          description: Primary profile country as an ISO 3166-1 alpha-2 code, or an empty string when unset.
+        level: {type: integer}
     SearchArcadeItem:
       type: object
       required: [id, country, name, address, nickname, closed]
@@ -1126,6 +1133,8 @@ components:
         - withdrawn
         - series_public
         - level
+        - countries
+        - primary_country
       properties:
         id:
           type: string
@@ -1176,6 +1185,16 @@ components:
             - 'null'
         level:
           type: integer
+        countries:
+          type: array
+          description: Ordered profile countries. The first item is primary. Public profiles expose only the first stored country after multi-country access is lost; GET /user/me retains all stored selections.
+          maxItems: 3
+          items:
+            type: string
+            pattern: '^[A-Z]{2}$'
+        primary_country:
+          type: string
+          description: First item in countries, or an empty string when no country is selected.
         series:
           type: array
           items:
@@ -1268,11 +1287,13 @@ components:
           $ref: '#/components/schemas/XpFeedback'
     CampaignReporter:
       type: object
-      required: [id, username, nickname]
+      required: [id, username, nickname, primary_country, level]
       properties:
         id: {type: string}
         username: {type: string}
         nickname: {type: string}
+        primary_country: {type: string}
+        level: {type: integer}
     CampaignReportSummary:
       type: object
       required: [id, reported_at, reaction, user]
@@ -1381,6 +1402,29 @@ components:
       required: [visit_visibility]
       properties:
         visit_visibility: {type: string, enum: [private, summary, full]}
+    ProfileCountriesRequest:
+      type: object
+      required: [countries]
+      properties:
+        countries:
+          type: array
+          maxItems: 3
+          description: Empty is allowed. Accounts below level 15 may select at most one; accounts at level 15 or above may select up to three.
+          items:
+            type: string
+            pattern: '^[A-Za-z]{2}$'
+    ProfileCountriesResponse:
+      type: object
+      required: [countries, primary_country]
+      properties:
+        countries:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            pattern: '^[A-Z]{2}$'
+        primary_country:
+          type: string
     UserActivityRange:
       type: object
       required: [start_date, end_date, tz, days]
@@ -3458,6 +3502,8 @@ paths:
                 created: "2026-03-30 10:15:00.000Z"
                 username: public_user_toq3to4ncbf5ubd
                 nickname: public_nick
+                countries: [KR]
+                primary_country: KR
                 bio: public bio
                 avatar: ""
                 background: ""
@@ -3502,6 +3548,8 @@ paths:
                 created: "2026-03-30 10:15:00.000Z"
                 username: me_user
                 nickname: me_nick
+                countries: [KR, JP]
+                primary_country: KR
                 bio: public bio
                 avatar: ""
                 background: ""
@@ -5969,6 +6017,33 @@ paths:
       responses:
         '200':
           description: Updated public visit visibility.
+  /user/countries:
+    put:
+      tags: [Users]
+      summary: /user/countries
+      description: Replaces the authenticated user's ordered profile country list. Empty is allowed. Accounts below level 15 may select zero or one country; accounts at level 15 or above may select up to three. Supporter and staff tags do not change this limit.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProfileCountriesRequest'}
+      responses:
+        '200':
+          description: Updated normalized profile countries.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProfileCountriesResponse'}
+        '400':
+          description: Invalid JSON, duplicate, invalid country code, or more than three countries.
+        '401':
+          description: Missing or invalid bearer token.
+        '403':
+          description: Multiple countries require level 15 or above, or the account is inactive.
+        '409':
+          description: The account has not initialized user_info.
+        '502':
+          description: Failed to save profile countries.
   /user/withdraw:
     post:
       tags: [Users]

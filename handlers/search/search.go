@@ -215,6 +215,7 @@ SELECT
 	u.username,
 	COALESCE(ui.nickname, '') AS nickname,
 	COALESCE(ui.avatar, '') AS avatar,
+	COALESCE(ui.countries, '[]') AS countries,
 	COALESCE(ul.exp, 0) AS exp,
 	CASE
 		WHEN COALESCE(u.withdrawn, 0) THEN '1'
@@ -257,10 +258,11 @@ WHERE
 		}
 
 		profiles[id] = map[string]any{
-			"username": username,
-			"nickname": nickname,
-			"avatar":   strings.TrimSpace(raw["avatar"].String),
-			"level":    userhandler.LevelFromExp(exp),
+			"username":        username,
+			"nickname":        nickname,
+			"avatar":          strings.TrimSpace(raw["avatar"].String),
+			"primary_country": userhandler.PrimaryProfileCountryFromJSON(raw["countries"].String),
+			"level":           userhandler.LevelFromExp(exp),
 		}
 	}
 

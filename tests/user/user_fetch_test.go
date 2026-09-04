@@ -32,6 +32,7 @@ func newUserFetchTestApp(tb testing.TB) *tests.TestApp {
 		authUser.POST("/signup", userhandler.SignUp)
 		authUser.POST("/check-in", userhandler.CheckIn).Bind(userhandler.RequireActiveUser())
 		authUser.GET("/visits", userhandler.GetMyVisits).Bind(userhandler.RequireActiveUser())
+		authUser.PUT("/countries", userhandler.UpdateCountries).Bind(userhandler.RequireActiveUser())
 		authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())
 		se.Router.Group("/arcade").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser()).POST("/visit", userhandler.VisitArcade)
 
@@ -180,7 +181,7 @@ func decodeJSON(tb testing.TB, res *http.Response) map[string]any {
 func assertProfileShape(tb testing.TB, payload map[string]any) {
 	tb.Helper()
 
-	keys := []string{"id", "created", "username", "nickname", "level", "bio", "avatar", "withdrawn", "series_public"}
+	keys := []string{"id", "created", "username", "nickname", "level", "countries", "primary_country", "bio", "avatar", "withdrawn", "series_public"}
 	for _, k := range keys {
 		if _, ok := payload[k]; !ok {
 			tb.Fatalf("expected key %q in payload: %#v", k, payload)

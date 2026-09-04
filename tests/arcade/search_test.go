@@ -20,6 +20,7 @@ func TestSearch_ReturnsUsersAndArcadesAcrossSupportedFields(t *testing.T) {
 	}
 	userByUsernameInfo := ensureUserInfo(t, app, userByUsername.Id)
 	userByUsernameInfo.Set("nickname", "Alpha Nick")
+	userByUsernameInfo.Set("countries", []string{"KR"})
 	if err := app.Save(userByUsernameInfo); err != nil {
 		t.Fatalf("failed to save username user info: %v", err)
 	}
@@ -71,6 +72,12 @@ func TestSearch_ReturnsUsersAndArcadesAcrossSupportedFields(t *testing.T) {
 	}
 	if got := usersByUsername[0]["avatar"]; got != "" {
 		t.Fatalf("expected empty avatar, got %v", got)
+	}
+	if got := usersByUsername[0]["primary_country"]; got != "KR" {
+		t.Fatalf("expected primary country KR, got %v", got)
+	}
+	if _, ok := usersByUsername[0]["level"]; !ok {
+		t.Fatalf("expected user search result level, got %#v", usersByUsername[0])
 	}
 
 	resByNickname := executeJSONRequest(t, app, http.MethodGet, "/search?q=captain", "", nil)

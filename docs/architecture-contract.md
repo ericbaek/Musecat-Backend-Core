@@ -128,6 +128,17 @@ distance is the straight-line sum between consecutive current arcade
 locations; a visit whose location is unavailable breaks the sequence rather
 than joining the surrounding visits.
 
+Profile countries are stored only through `PUT /user/countries` as an ordered
+`user_info.countries` list of ISO 3166-1 alpha-2 codes. The first code is the
+representative country. Active contributors below level 15 may save one code;
+contributors at level 15 or above may save up to three. This limit is based only
+on level and does not depend on supporter or staff tags. A loss of level-15
+access does not delete stored choices: public profile reads expose only the
+first code while `GET /user/me` retains all saved codes. Compact user DTOs
+expose only `primary_country`, and the client renders it with the Dashboard
+country icon source in every nickname profile surface whenever a country is
+present. The icon is ordered before any supporter or staff badge.
+
 `GET /rankings` always returns the public top 100. User metrics include explorer,
 visits, XP, level, and photographer. The `arcade_visits` metric returns public
 arcades ranked by the total XP awarded by their completed visit-verification
