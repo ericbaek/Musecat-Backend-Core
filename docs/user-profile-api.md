@@ -133,9 +133,9 @@ descending.
 - `visit_visibility=private` omits `visit_stats` from public profiles; the
   owner still receives it from `GET /user/me`.
 - `visit_visibility=summary` exposes the aggregate fields and arcade items,
-  but omits each item's `visit_days`.
+  but omits each item's `last_visit_day` and `visit_days`.
 - `visit_visibility=full` additionally exposes each arcade's complete
-  `visit_days` list, newest first.
+  `visit_days` list and last visit day, newest first.
 - Only currently public arcades are included. This prevents a venue that is
   later made private from being disclosed through a visitor profile.
 
@@ -401,11 +401,30 @@ Public user activity heatmap lookup.
 
 ## Passport
 
-`GET /user/passport?year=all|YYYY` and `GET /user/passport/stamps` are active-owner-only,
-no-store APIs. Both and public `visit_stats` use `LoadPassport`, selecting current
-public arcades including closed venues. Private venues disappear from every aggregate.
-The public payload adds only all-time city aggregates, never first visit dates or
-owner-only month/weekday/stamp details. Existing private/summary/full visibility applies.
+`GET /user/passport?year=all|YYYY` and `GET /user/passport/stamps` accept an optional
+`user` ID. Omit it for the authenticated active owner; an explicit ID also permits
+anonymous reading according to that user's visibility. Both APIs are no-store and
+use `LoadPassport`, as does legacy public `visit_stats`. Only current public arcades,
+including closed venues, are included. Private venues disappear from every aggregate.
+
+`private` returns 404 to other viewers. `summary` exposes totals, country/city maps,
+period statistics, filters and venue stamps, but omits first/latest visit dates and
+all per-venue date arrays from both APIs (including top venues) and legacy profile
+stats. `full` additionally exposes first/latest dates and every selected-period local
+visit date in `visit_dates`, newest first. Select `year=all` for all dates. The owner
+has the same complete fields regardless of public visibility. Raw GPS, accuracy,
+precise timestamps and visit-record IDs remain private in every scope. Existing
+summary/full settings take the new scope immediately; there is no versioned opt-in.
+`visibility` in the response tells the web which projection was applied.
+`city_catalog_available=false` distinguishes missing reference data from zero cities.
+
+Arcade country/timezone detection uses the vendored offline bundle (or an
+explicit `MUSECAT_GEO_DATA_DIR` override); see
+[`docs/offline-geo.md`](offline-geo.md). City detection then selects the nearest
+imported GeoNames city in the resolved country using a deterministic tie-break.
+This same rule is used by the one-time Full backfill, so ordinary creation and
+edits do not depend on a reverse-geocoding server. Full seeds an embedded
+`cities500` catalog when the Passport city collection is empty.
 
 Periods use stored local `visit_day`; active days deduplicate those date strings even
 across countries. New discoveries use lifetime first chronological verification.
@@ -417,8 +436,14 @@ Canonical `passport_city` records use GeoNames IDs as unique source identifiers;
 REST is locked. `arcade_basic.city_id` is optional and versioned with basic history.
 Current city metadata applies retrospectively. A missing or country-mismatched city is
 unclassified; those arcades remain in country and venue totals. Cities are matched by
-country, admin1 and locality aliases, never proximity. Ambiguity requires operator review.
-GeoNames import and candidate review are explicit Full operations, outside requests and
+country, admin1 and locality aliases, never proximity. Explicit GeoNames hierarchy
+links attach PPLX neighbourhood aliases to a unique parent city; standalone cities
+such as Petaling Jaya remain distinct. Absent or ambiguous parentage is not inferred.
+Rows missing admin1 are skipped during import. Address-based candidates require a
+named alias and use coordinates only to reject distant homonyms (50 km sanity limit,
+not a boundary). Every address candidate remains unapproved until operator review.
+The catalog can be populated from the global allCountries extract; cities500 is a
+smaller operational starting point and does not cover every settlement. GeoNames import and candidate review are explicit Full operations, outside requests and
 transactions. Core's schema migration bootstraps only a fresh test database.
 
 `POST /arcade/visit` additionally returns `first_visit_to_arcade`, true only for the newly

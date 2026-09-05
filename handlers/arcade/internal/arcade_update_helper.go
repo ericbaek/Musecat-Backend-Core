@@ -21,7 +21,11 @@ var arcadeChangelogTracked = map[string]struct{}{
 
 // writeArcadeChangelog creates a single changelog row.
 func writeArcadeChangelog(app core.App, arcadeID, field string, from, to any, by string, log any) error {
-	if by == "" {
+	return writeArcadeChangelogWithActor(app, arcadeID, field, from, to, by, log, false)
+}
+
+func writeArcadeChangelogWithActor(app core.App, arcadeID, field string, from, to any, by string, log any, allowSystem bool) error {
+	if by == "" && !allowSystem {
 		return fmt.Errorf("changelog 'by' is required")
 	}
 	coll, err := app.FindCollectionByNameOrId(CollectionArcadeChangelog)
@@ -33,7 +37,9 @@ func writeArcadeChangelog(app core.App, arcadeID, field string, from, to any, by
 	rec.Set("changed", field)
 	rec.Set("from", from)
 	rec.Set("to", to)
-	rec.Set("by", by)
+	if by != "" {
+		rec.Set("by", by)
+	}
 	if log != nil {
 		rec.Set("log", log)
 	}
@@ -47,6 +53,17 @@ func WriteArcadeChangelogTx(app core.App, arcadeID, field string, from, to any, 
 
 // UpdateArcadeFieldsTx applies updates to arcade and writes changelog entries using the provided app (which can be a tx-bound app).
 func UpdateArcadeFieldsTxWithLogs(app core.App, arcadeID string, updates, logs map[string]any, by string) error {
+	return updateArcadeFieldsTxWithLogs(app, arcadeID, updates, logs, by, false)
+}
+
+// UpdateArcadeFieldsTxWithLogsSystem is used only by guarded data migrations.
+// It permits an empty actor and leaves the optional changelog relation unset,
+// while retaining the same aggregate and transaction semantics.
+func UpdateArcadeFieldsTxWithLogsSystem(app core.App, arcadeID string, updates, logs map[string]any) error {
+	return updateArcadeFieldsTxWithLogs(app, arcadeID, updates, logs, "", true)
+}
+
+func updateArcadeFieldsTxWithLogs(app core.App, arcadeID string, updates, logs map[string]any, by string, allowSystem bool) error {
 	arcadeRec, err := app.FindRecordById(CollectionArcade, arcadeID)
 	if err != nil {
 		return fmt.Errorf("arcade not found: %w", err)
@@ -82,7 +99,7 @@ func UpdateArcadeFieldsTxWithLogs(app core.App, arcadeID string, updates, logs m
 		if k == "game_v2" {
 			changed = "game"
 		}
-		if err := writeArcadeChangelog(app, arcadeID, changed, oldV, newV, by, log); err != nil {
+		if err := writeArcadeChangelogWithActor(app, arcadeID, changed, oldV, newV, by, log, allowSystem); err != nil {
 			return err
 		}
 	}

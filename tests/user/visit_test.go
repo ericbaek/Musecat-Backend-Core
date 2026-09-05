@@ -71,7 +71,7 @@ func TestArcadeVisitAwardsAndDeduplicatesByArcadeDay(t *testing.T) {
 	if !ok || visit["arcade"] != arcade.Id || visit["visit_day"] != "2026-07-01" {
 		t.Fatalf("unexpected visit echo: %#v", got["visit"])
 	}
-	for _, sensitive := range []string{"id", "visited_at", "distance_meters", "accuracy_meters", "gained_exp"} {
+	for _, sensitive := range []string{"id", "visited_at", "distance_meters", "accuracy_meters", "gained_exp", "last_visit_day", "first_visit_day"} {
 		if _, ok := visit[sensitive]; ok {
 			t.Fatalf("visit echo leaked %q: %#v", sensitive, visit)
 		}
@@ -216,7 +216,7 @@ func TestVisitVisibilityControlsPublicProfileStats(t *testing.T) {
 		{arcadeB.Id, "Arcade B", 1, "2026-07-21"},
 	} {
 		item := arcades[index].(map[string]any)
-		if item["arcade"] != want.arcade || item["name"] != want.name || item["visit_count"] != want.count || item["last_visit_day"] != want.day {
+		if item["arcade"] != want.arcade || item["name"] != want.name || item["visit_count"] != want.count {
 			t.Fatalf("unexpected summary arcade at %d: %#v", index, item)
 		}
 		if _, ok := item["visit_days"]; ok {
@@ -229,7 +229,7 @@ func TestVisitVisibilityControlsPublicProfileStats(t *testing.T) {
 		} else if _, ok := item["photo_url"]; ok {
 			t.Fatalf("unexpected photo URL for arcade without photos: %#v", item)
 		}
-		for _, sensitive := range []string{"id", "visited_at", "distance_meters", "accuracy_meters", "gained_exp"} {
+		for _, sensitive := range []string{"id", "visited_at", "distance_meters", "accuracy_meters", "gained_exp", "last_visit_day", "first_visit_day"} {
 			if _, ok := item[sensitive]; ok {
 				t.Fatalf("summary leaked %q: %#v", sensitive, item)
 			}

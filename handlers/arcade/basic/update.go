@@ -22,6 +22,14 @@ var errStaleBasic = errors.New("basic information changed; reload before updatin
 
 var errInvalidCity = errors.New("city_id must identify a city in the arcade country")
 
+// ErrStaleBasic is returned by data-correction helpers when their reviewed
+// manifest was generated from an older basic revision.
+var ErrStaleBasic = errStaleBasic
+
+// ErrInvalidCity is returned when a reviewed city does not belong to the
+// arcade's current country.
+var ErrInvalidCity = errInvalidCity
+
 type UpdateArcadeBasicBody struct {
 	BaseBasicID *string                  `json:"base_basic_id,omitempty"`
 	CityID      *string                  `json:"city_id,omitempty"`
@@ -224,14 +232,10 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 	// 4) merge and diff
 	merged := mergeBasicFields(cur, body)
 	changed := computeChangedFields(cur, merged, body)
-	if len(changed) == 0 {
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error": "at least one changed field is required",
-		})
-	}
 
+	geographyChanged := body.Location != nil || (body.Address != nil && *body.Address != cur.Address)
 	var geoResult *geo.Result
-	if body.Location != nil {
+	if geographyChanged {
 		res, err := geo.LookupCountryAndTimezone(re.Request.Context(), merged.Lat, merged.Lon)
 		if err != nil {
 			return re.JSON(http.StatusServiceUnavailable, map[string]any{
@@ -240,6 +244,24 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 			})
 		}
 		geoResult = &res
+		if body.CityID == nil {
+			cityID, _, err := arcadeinternal.ResolveCityID(re.App, res, merged.Address, merged.Lat, merged.Lon)
+			if err != nil {
+				return re.JSON(http.StatusServiceUnavailable, map[string]any{
+					"error":   "city lookup failed",
+					"details": err.Error(),
+				})
+			}
+			merged.CityID = cityID
+		}
+	}
+	// ResolveCityID may add a city to an otherwise address/location-only edit.
+	// Compute the response/changelog field list after that resolution.
+	changed = computeChangedFields(cur, merged, body)
+	if len(changed) == 0 {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error": "at least one changed field is required",
+		})
 	}
 
 	var newBasicID string
@@ -258,7 +280,7 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 			if geoResult != nil {
 				country = geoResult.Country
 			}
-			if e != nil || city.GetString("country") != country {
+			if e != nil || !strings.EqualFold(city.GetString("country"), country) {
 				return errInvalidCity
 			}
 		}
@@ -323,8 +345,56 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 	return re.JSON(http.StatusOK, map[string]any{
 		"arcade":      body.Arcade,
 		"basic":       newBasicID,
+		"city_id":     merged.CityID,
 		"changed":     changed,
 		"xp_feedback": xpFeedback,
+	})
+}
+
+// ApplyCityAssignment applies a city-only correction without normal user edit
+// XP. It still creates a new immutable basic revision and changelog row, and it
+// rejects a stale base revision. Full uses this helper from its guarded offline
+// backfill command; request handlers continue to use UpdateArcadeBasic for
+// user-authored edits. An empty actor is reserved for that system migration
+// path and leaves the optional changelog relation unset.
+func ApplyCityAssignment(app core.App, arcadeID, baseBasicID, cityID, actorID string) error {
+	if strings.TrimSpace(arcadeID) == "" || strings.TrimSpace(baseBasicID) == "" || strings.TrimSpace(cityID) == "" {
+		return fmt.Errorf("arcade, base_basic_id and city_id are required")
+	}
+	return app.RunInTransaction(func(txApp core.App) error {
+		arcadeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, arcadeID)
+		if err != nil {
+			return fmt.Errorf("arcade not found: %w", err)
+		}
+		cur, err := getCurrentBasic(txApp, arcadeID)
+		if err != nil {
+			return err
+		}
+		if cur.CityID == cityID {
+			return nil
+		}
+		if arcadeRec.GetString("basic") != baseBasicID {
+			return errStaleBasic
+		}
+		city, err := txApp.FindRecordById("passport_city", cityID)
+		if err != nil || !strings.EqualFold(city.GetString("country"), arcadeRec.GetString("country")) {
+			return errInvalidCity
+		}
+		body := UpdateArcadeBasicBody{Arcade: arcadeID, CityID: &cityID, BaseBasicID: &baseBasicID}
+		merged := mergeBasicFields(cur, body)
+		newBasicID, err := createNewBasic(txApp, arcadeID, merged, actorID, body, cur)
+		if err != nil {
+			return err
+		}
+		basicChangeLog := arcadeinternal.BuildChangelogEnvelope("basic", []basicDiffLogItem{
+			buildBasicDiffLogItem(&cur, merged),
+		})
+		updates := map[string]any{"basic": newBasicID}
+		logs := map[string]any{"basic": basicChangeLog}
+		if strings.TrimSpace(actorID) == "" {
+			return arcadeinternal.UpdateArcadeFieldsTxWithLogsSystem(txApp, arcadeID, updates, logs)
+		}
+		return arcadeinternal.UpdateArcadeFieldsTxWithLogs(txApp, arcadeID, updates, logs, actorID)
 	})
 }
 

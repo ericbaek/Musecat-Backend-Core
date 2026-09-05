@@ -2,8 +2,8 @@ package user
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,17 +28,18 @@ type PassportCountry struct {
 	VisitCount  int    `json:"visit_count"`
 }
 type PassportStamp struct {
-	Arcade          string `json:"arcade"`
-	Name            string `json:"name"`
-	Country         string `json:"country"`
-	CityID          string `json:"city_id"`
-	CityName        string `json:"city_name"`
-	Closed          bool   `json:"closed"`
-	PhotoURL        string `json:"photo_url,omitempty"`
-	FirstVisitDay   string `json:"first_visit_day"`
-	LastVisitDay    string `json:"last_visit_day"`
-	VisitCount      int    `json:"visit_count"`
-	TotalVisitCount int    `json:"total_visit_count"`
+	Arcade          string   `json:"arcade"`
+	Name            string   `json:"name"`
+	Country         string   `json:"country"`
+	CityID          string   `json:"city_id"`
+	CityName        string   `json:"city_name"`
+	Closed          bool     `json:"closed"`
+	PhotoURL        string   `json:"photo_url,omitempty"`
+	FirstVisitDay   string   `json:"first_visit_day,omitempty"`
+	LastVisitDay    string   `json:"last_visit_day,omitempty"`
+	VisitDates      []string `json:"visit_dates,omitempty"`
+	VisitCount      int      `json:"visit_count"`
+	TotalVisitCount int      `json:"total_visit_count"`
 	lastAt          string
 	firstAt         string
 	photoID         string
@@ -54,23 +55,25 @@ type PassportDay struct {
 	Visits  int `json:"visits"`
 }
 type Passport struct {
-	Year                string            `json:"year"`
-	AvailableYears      []int             `json:"available_years"`
-	TotalVisits         int               `json:"total_visits"`
-	DistinctArcades     int               `json:"distinct_arcades"`
-	DistinctCities      int               `json:"distinct_cities"`
-	DistinctCountries   int               `json:"distinct_countries"`
-	NewArcades          int               `json:"new_arcades"`
-	VisitDays           int               `json:"visit_days"`
-	MaxArcadesInDay     int               `json:"max_arcades_in_day"`
-	TotalDistanceMeters float64           `json:"total_distance_meters"`
-	UnclassifiedArcades int               `json:"unclassified_arcades"`
-	Countries           []PassportCountry `json:"countries"`
-	Cities              []PassportCity    `json:"cities"`
-	Months              []PassportMonth   `json:"months"`
-	Weekdays            []PassportDay     `json:"weekdays"`
-	TopArcades          []PassportStamp   `json:"top_arcades"`
-	Stamps              []PassportStamp   `json:"-"`
+	Visibility           string            `json:"visibility"`
+	CityCatalogAvailable bool              `json:"city_catalog_available"`
+	Year                 string            `json:"year"`
+	AvailableYears       []int             `json:"available_years"`
+	TotalVisits          int               `json:"total_visits"`
+	DistinctArcades      int               `json:"distinct_arcades"`
+	DistinctCities       int               `json:"distinct_cities"`
+	DistinctCountries    int               `json:"distinct_countries"`
+	NewArcades           int               `json:"new_arcades"`
+	VisitDays            int               `json:"visit_days"`
+	MaxArcadesInDay      int               `json:"max_arcades_in_day"`
+	TotalDistanceMeters  float64           `json:"total_distance_meters"`
+	UnclassifiedArcades  int               `json:"unclassified_arcades"`
+	Countries            []PassportCountry `json:"countries"`
+	Cities               []PassportCity    `json:"cities"`
+	Months               []PassportMonth   `json:"months"`
+	Weekdays             []PassportDay     `json:"weekdays"`
+	TopArcades           []PassportStamp   `json:"top_arcades"`
+	Stamps               []PassportStamp   `json:"-"`
 }
 
 type passportRow struct {
@@ -82,7 +85,7 @@ type passportRow struct {
 // LoadPassport is the single aggregation source for private details and public summaries.
 // It never queries a geo provider and only includes currently public arcades.
 func LoadPassport(app core.App, userID, year string) (Passport, error) {
-	out := Passport{Year: year, AvailableYears: []int{}, Countries: []PassportCountry{}, Cities: []PassportCity{}, Months: []PassportMonth{}, Weekdays: []PassportDay{}, TopArcades: []PassportStamp{}, Stamps: []PassportStamp{}}
+	out := Passport{Visibility: "owner", Year: year, AvailableYears: []int{}, Countries: []PassportCountry{}, Cities: []PassportCity{}, Months: []PassportMonth{}, Weekdays: []PassportDay{}, TopArcades: []PassportStamp{}, Stamps: []PassportStamp{}}
 	rows, err := app.DB().NewQuery(`SELECT v.arcade, COALESCE(b.name,''), a.country, a.photo, a.closed,
  v.visit_day, v.visited_at, b.location, COALESCE(c.id,''), COALESCE(c.name,''), COALESCE(c.admin1,''), c.location
  FROM arcade_visit v JOIN arcade a ON a.id=v.arcade LEFT JOIN arcade_basic b ON b.id=a.basic
@@ -103,6 +106,9 @@ func LoadPassport(app core.App, userID, year string) (Passport, error) {
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
+		return out, err
+	}
+	if err := app.DB().NewQuery("SELECT EXISTS(SELECT 1 FROM passport_city)").Row(&out.CityCatalogAvailable); err != nil {
 		return out, err
 	}
 	stamps := map[string]*PassportStamp{}
@@ -280,24 +286,84 @@ func passportYear(re *core.RequestEvent) (string, error) {
 	}
 	return year, nil
 }
+
+// passportAudience resolves identity before aggregation. An explicit user permits public
+// reads; omitted user always means the authenticated owner, never a public fallback.
+func passportAudience(re *core.RequestEvent) (string, string, int, error) {
+	id := strings.TrimSpace(re.Request.URL.Query().Get("user"))
+	if id == "" {
+		if re.Auth == nil {
+			return "", "", 401, errors.New("authentication required")
+		}
+		id = re.Auth.Id
+	}
+	if re.Auth != nil && re.Auth.Id == id {
+		message, code, err := checkArcadeWriteRestriction(re.App, re.Auth, userBanNow())
+		if err != nil {
+			return "", "", 502, errors.New("failed to verify account")
+		}
+		if code != "" {
+			return "", "", 403, errors.New(message)
+		}
+		return id, "owner", 0, nil
+	}
+	user, err := re.App.FindRecordById("user", id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", 404, errors.New("passport not found")
+	}
+	if err != nil {
+		return "", "", 502, errors.New("failed to load passport")
+	}
+	if user.GetBool("withdrawn") {
+		return "", "", 404, errors.New("passport not found")
+	}
+	info, err := re.App.FindRecordById(CollectionUserInfo, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", 404, errors.New("passport not found")
+	}
+	if err != nil {
+		return "", "", 502, errors.New("failed to load passport")
+	}
+	visibility := visitVisibility(info.GetString("visit_visibility"))
+	if visibility == "private" {
+		return "", "", 404, errors.New("passport not found")
+	}
+	return id, visibility, 0, nil
+}
+func projectPassportStamp(stamp PassportStamp, visibility string) PassportStamp {
+	if visibility == "summary" {
+		stamp.FirstVisitDay = ""
+		stamp.LastVisitDay = ""
+		stamp.VisitDates = nil
+	} else {
+		stamp.VisitDates = append([]string(nil), stamp.days...)
+	}
+	return stamp
+}
 func GetMyPassport(re *core.RequestEvent) error {
-	if re.Auth == nil {
-		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+	id, visibility, status, err := passportAudience(re)
+	if err != nil {
+		return re.JSON(status, map[string]any{"error": err.Error()})
 	}
 	year, err := passportYear(re)
 	if err != nil {
 		return re.JSON(400, map[string]any{"error": err.Error()})
 	}
-	out, err := LoadPassport(re.App, re.Auth.Id, year)
+	out, err := LoadPassport(re.App, id, year)
 	if err != nil {
 		return re.JSON(502, map[string]any{"error": "failed to load passport"})
+	}
+	out.Visibility = visibility
+	for i, s := range out.TopArcades {
+		out.TopArcades[i] = projectPassportStamp(s, visibility)
 	}
 	re.Response.Header().Set("Cache-Control", "private, no-store")
 	return re.JSON(200, out)
 }
 func GetMyPassportStamps(re *core.RequestEvent) error {
-	if re.Auth == nil {
-		return re.JSON(401, map[string]any{"error": "authentication required"})
+	id, visibility, status, err := passportAudience(re)
+	if err != nil {
+		return re.JSON(status, map[string]any{"error": err.Error()})
 	}
 	year, err := passportYear(re)
 	if err != nil {
@@ -328,7 +394,7 @@ func GetMyPassportStamps(re *core.RequestEvent) error {
 	if country != "" && (len(country) != 2 || strings.Trim(country, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") != "") {
 		return re.JSON(400, map[string]any{"error": "invalid country"})
 	}
-	out, err := LoadPassport(re.App, re.Auth.Id, year)
+	out, err := LoadPassport(re.App, id, year)
 	if err != nil {
 		return re.JSON(502, map[string]any{"error": "failed to load stamps"})
 	}
@@ -347,5 +413,8 @@ func GetMyPassportStamps(re *core.RequestEvent) error {
 	start := min((page-1)*per, total)
 	end := min(start+per, total)
 	re.Response.Header().Set("Cache-Control", "private, no-store")
-	return re.JSON(200, map[string]any{"page": page, "per_page": per, "last_page": last, "total": total, "items": items[start:end]})
+	for i := start; i < end; i++ {
+		items[i] = projectPassportStamp(items[i], visibility)
+	}
+	return re.JSON(200, map[string]any{"visibility": visibility, "page": page, "per_page": per, "last_page": last, "total": total, "items": items[start:end]})
 }

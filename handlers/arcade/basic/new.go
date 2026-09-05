@@ -31,7 +31,7 @@ func parseRequestBody(re *core.RequestEvent) (NewArcadeBody, error) {
 	return body, nil
 }
 
-func saveArcadeRecord(re *core.RequestEvent, body NewArcadeBody, res geo.Result) (string, error) {
+func saveArcadeRecord(re *core.RequestEvent, body NewArcadeBody, res geo.Result, cityID string) (string, error) {
 	var arcadeID string
 	err := re.App.RunInTransaction(func(txApp core.App) error {
 		arcadeColl, err := txApp.FindCollectionByNameOrId(arcadeinternal.CollectionArcade)
@@ -61,6 +61,7 @@ func saveArcadeRecord(re *core.RequestEvent, body NewArcadeBody, res geo.Result)
 		basic.Set("direction", body.Direction)
 		basic.Set("nickname", body.Nickname)
 		basic.Set("subway_line", body.SubwayLine)
+		basic.Set("city_id", cityID)
 		basic.Set("createdBy", re.Auth.Id)
 		basic.Set("arcade", arcade.Id)
 
@@ -70,6 +71,7 @@ func saveArcadeRecord(re *core.RequestEvent, body NewArcadeBody, res geo.Result)
 
 		// 3) link back: set arcade.basic to the basic id (with changelog)
 		initialBasicFields := BasicFields{
+			CityID:     cityID,
 			Name:       body.Name,
 			Address:    body.Address,
 			Direction:  body.Direction,
@@ -134,9 +136,16 @@ func NewArcade(re *core.RequestEvent) error {
 			"details": err.Error(),
 		})
 	}
+	cityID, _, err := arcadeinternal.ResolveCityID(re.App, res, body.Address, body.Location.Lat, body.Location.Lon)
+	if err != nil {
+		return re.JSON(http.StatusServiceUnavailable, map[string]any{
+			"error":   "city lookup failed",
+			"details": err.Error(),
+		})
+	}
 
 	// 4. 오락실 데이터 생성
-	id, err := saveArcadeRecord(re, body, res)
+	id, err := saveArcadeRecord(re, body, res, cityID)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to generate arcade",
@@ -155,5 +164,6 @@ func NewArcade(re *core.RequestEvent) error {
 		"subway_line": body.SubwayLine,
 		"country":     res.Country,
 		"timezone":    res.Timezone,
+		"city_id":     cityID,
 	})
 }

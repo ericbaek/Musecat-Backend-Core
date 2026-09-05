@@ -18,8 +18,10 @@ import (
 
 // Result represents the lookup result for a coordinate.
 type Result struct {
-	Country  string `json:"country"`
-	Timezone string `json:"timezone"`
+	Country      string `json:"country"`
+	Timezone     string `json:"timezone"`
+	CitySourceID string `json:"-"`
+	CityStatus   string `json:"-"`
 }
 
 var (
@@ -77,12 +79,21 @@ func clearLookupCache() {
 
 // LookupCountryAndTimezone returns the ISO 3166-1 alpha-2 country code and IANA timezone name for the given coordinates.
 //
-// It uses public HTTP APIs without requiring API keys:
-// - Country ISO: BigDataCloud reverse-geocode-client (fallback: OpenStreetMap Nominatim)
-// - Timezone: timeapi.io by coordinates (fallback: open-meteo forecast)
+// The configured offline resolver is used first. Core configures the resolver
+// from the vendored GeoJSON bundle by default; the legacy HTTP providers remain
+// available only to callers that explicitly leave the resolver unconfigured.
 func LookupCountryAndTimezone(ctx context.Context, lat, lon float64) (Result, error) {
 	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
 		return Result{}, errors.New("invalid coordinates")
+	}
+	if resolver, required, configured := currentOfflineResolver(); configured {
+		resolved, err := resolver.Resolve(lat, lon)
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{Country: resolved.Country, Timezone: resolved.Timezone, CitySourceID: resolved.CitySourceID, CityStatus: resolved.CityStatus}, nil
+	} else if required {
+		return Result{}, errors.New("offline geo resolver is required but not configured")
 	}
 	key := lookupCacheKey(lat, lon)
 	if result, ok := loadLookupCache(key); ok {
@@ -190,6 +201,15 @@ func storeLookupCache(key string, result Result) {
 func LookupTimezone(ctx context.Context, lat, lon float64) (string, error) {
 	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
 		return "", errors.New("invalid coordinates")
+	}
+	if resolver, required, configured := currentOfflineResolver(); configured {
+		resolved, err := resolver.Resolve(lat, lon)
+		if err != nil {
+			return "", err
+		}
+		return resolved.Timezone, nil
+	} else if required {
+		return "", errors.New("offline geo resolver is required but not configured")
 	}
 
 	if ctx == nil {

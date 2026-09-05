@@ -11,6 +11,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 
+	"github.com/ericbaek/musecat-backend-core/geo"
 	"github.com/ericbaek/musecat-backend-core/handlers"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
@@ -43,6 +44,7 @@ const (
 )
 
 func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
+	configureOfflineGeo(app)
 	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
 		// enable auto creation of migration files when making collection changes in the Dashboard
 		// (production environment keeps this off unless explicitly overridden)
@@ -195,8 +197,8 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authUser.GET("/me", userhandler.GetMe)
 		authUser.POST("/signup", userhandler.SignUp)
 		authUser.POST("/check-in", userhandler.CheckIn).Bind(userhandler.RequireActiveUser())
-		authUser.GET("/passport", userhandler.GetMyPassport).Bind(userhandler.RequireActiveUser())
-		authUser.GET("/passport/stamps", userhandler.GetMyPassportStamps).Bind(userhandler.RequireActiveUser())
+		se.Router.GET("/user/passport", userhandler.GetMyPassport)
+		se.Router.GET("/user/passport/stamps", userhandler.GetMyPassportStamps)
 		authUser.GET("/visits", userhandler.GetMyVisits).Bind(userhandler.RequireActiveUser())
 		authUser.PUT("/countries", userhandler.UpdateCountries).Bind(userhandler.RequireActiveUser())
 		authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())
@@ -222,6 +224,31 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		return se.Next()
 	})
 
+}
+
+func configureOfflineGeo(app *pocketbase.PocketBase) {
+	dir := strings.TrimSpace(os.Getenv("MUSECAT_GEO_DATA_DIR"))
+	var (
+		resolver *geo.OfflineResolver
+		err      error
+		source   string
+	)
+	if dir == "" {
+		resolver, err = geo.LoadEmbeddedResolver()
+		source = "embedded"
+	} else {
+		resolver, err = geo.LoadOfflineResolver(dir)
+		source = dir
+	}
+	if err != nil {
+		// A malformed or incomplete bundle must fail closed; silently switching to
+		// a network provider would make a deployment non-reproducible.
+		geo.SetOfflineResolver(nil, true)
+		app.Logger().Error("offline geo data unavailable", "source", source, "error", err)
+		return
+	}
+	geo.SetOfflineResolver(resolver, true)
+	app.Logger().Info("offline geo data loaded", "source", source)
 }
 
 func RegisterDocumentationRoutes(se *core.ServeEvent) {

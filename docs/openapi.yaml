@@ -1226,7 +1226,7 @@ components:
         visit_count: {type: integer}
     PassportStamp:
       type: object
-      required: [arcade, name, country, city_id, city_name, closed, first_visit_day, last_visit_day, visit_count, total_visit_count]
+      required: [arcade, name, country, city_id, city_name, closed, visit_count, total_visit_count]
       properties:
         arcade: {type: string}
         name: {type: string}
@@ -1235,14 +1235,20 @@ components:
         city_name: {type: string}
         closed: {type: boolean}
         photo_url: {type: string}
-        first_visit_day: {type: string, format: date, description: Lifetime first visit in current visible history.}
-        last_visit_day: {type: string, format: date, description: Most recent visit in the selected period.}
+        first_visit_day: {type: string, format: date, description: Lifetime first visit. Omitted for summary viewers.}
+        last_visit_day: {type: string, format: date, description: Most recent visit in the selected period. Omitted for summary viewers.}
+        visit_dates:
+          type: array
+          description: Every selected-period local visit date newest first. Owner and full only; omitted for summary viewers.
+          items: {type: string, format: date}
         visit_count: {type: integer, description: Visits in selected period.}
         total_visit_count: {type: integer, description: Lifetime visits.}
     Passport:
       type: object
-      required: [year, available_years, total_visits, distinct_arcades, distinct_cities, distinct_countries, new_arcades, visit_days, max_arcades_in_day, total_distance_meters, unclassified_arcades, countries, cities, months, weekdays, top_arcades]
+      required: [visibility, city_catalog_available, year, available_years, total_visits, distinct_arcades, distinct_cities, distinct_countries, new_arcades, visit_days, max_arcades_in_day, total_distance_meters, unclassified_arcades, countries, cities, months, weekdays, top_arcades]
       properties:
+        visibility: {type: string, enum: [owner, summary, full]}
+        city_catalog_available: {type: boolean, description: False when city reference data has not been imported.}
         year: {type: string, description: all or a four-digit year.}
         available_years: {type: array, items: {type: integer}, description: Recorded local years descending.}
         total_visits: {type: integer}
@@ -1318,7 +1324,7 @@ components:
           description: Visited public arcades, ordered by visit count descending, then most recent visit descending.
           items:
             type: object
-            required: [arcade, name, country, visit_count, last_visit_day]
+            required: [arcade, name, country, visit_count]
             properties:
               arcade: {type: string}
               name: {type: string}
@@ -1328,7 +1334,7 @@ components:
                 format: uri-reference
                 description: First publicly readable photo in the current arcade photo molecule. Omitted when no published photo is available. Uses the custom `/arcade/photo/file` route.
               visit_count: {type: integer}
-              last_visit_day: {type: string, format: date}
+              last_visit_day: {type: string, format: date, description: Omitted for summary visibility.}
               visit_days:
                 type: array
                 description: All local visit dates for this arcade, newest first. Omitted for `summary` visibility.
@@ -6264,10 +6270,14 @@ paths:
   /user/passport:
     get:
       tags: [User]
-      summary: Authenticated owner passport
-      description: Currently public arcades only, including closed venues. Current geography; no raw verification metadata. Active owner only; no shared caching.
-      security: [{bearerAuth: []}]
+      summary: Owner or shared passport
+      description: Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; private or withdrawn profiles return 404. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
+      security: [{bearerAuth: []}, {}]
       parameters:
+        - in: query
+          name: user
+          description: Target profile ID. Omit for the authenticated owner.
+          schema: {type: string}
         - in: query
           name: year
           schema: {type: string, default: all, pattern: '^(all|[0-9]{4})$'}
@@ -6280,14 +6290,19 @@ paths:
         '400': {description: Invalid filter or pagination.}
         '401': {description: Missing or invalid authentication.}
         '403': {description: Inactive account.}
+        '404': {description: Private, missing or withdrawn target profile.}
         '502': {description: Failed to load passport.}
   /user/passport/stamps:
     get:
       tags: [User]
-      summary: Authenticated owner passport
-      description: Currently public arcades only, including closed venues. Current geography; no raw verification metadata. Active owner only; no shared caching.
-      security: [{bearerAuth: []}]
+      summary: Owner or shared passport
+      description: Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; private or withdrawn profiles return 404. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
+      security: [{bearerAuth: []}, {}]
       parameters:
+        - in: query
+          name: user
+          description: Target profile ID. Omit for the authenticated owner.
+          schema: {type: string}
         - in: query
           name: year
           schema: {type: string, default: all, pattern: '^(all|[0-9]{4})$'}
@@ -6315,4 +6330,5 @@ paths:
         '400': {description: Invalid filter or pagination.}
         '401': {description: Missing or invalid authentication.}
         '403': {description: Inactive account.}
+        '404': {description: Private, missing or withdrawn target profile.}
         '502': {description: Failed to load passport.}

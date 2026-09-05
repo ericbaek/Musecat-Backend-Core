@@ -103,3 +103,72 @@ func TestPassportPeriodsCitiesAndVisibility(t *testing.T) {
 		t.Fatalf("private: %+v %v", p, err)
 	}
 }
+
+func TestPublicPassportSummaryRedactsEveryDateAndPrivateIsNotFound(t *testing.T) {
+	app := newUserFetchTestApp(t)
+	token, u := createAuthUser(t, app, true)
+	a := seedVisitArcade(t, app, "Asia/Seoul")
+	c, _ := app.FindCollectionByNameOrId("arcade_visit")
+	v := core.NewRecord(c)
+	v.Set("user", u.Id)
+	v.Set("arcade", a.Id)
+	v.Set("visit_day", "2026-01-02")
+	v.Set("visited_at", "2026-01-02 10:00:00.000Z")
+	if err := app.Save(v); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := app.FindRecordById("user_info", u.Id)
+	info.Set("visit_visibility", "summary")
+	if err := app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/user/passport?user=", "/user/passport/stamps?user="} {
+		res := doUserRequest(t, app, http.MethodGet, path+u.Id, nil, "")
+		var out map[string]any
+		json.NewDecoder(res.Body).Decode(&out)
+		if res.StatusCode != 200 {
+			t.Fatalf("public status %d %#v", res.StatusCode, out)
+		}
+		raw, _ := json.Marshal(out)
+		for _, field := range []string{"first_visit_day", "last_visit_day", "visit_dates", "visited_at", "accuracy_meters"} {
+			if strings.Contains(string(raw), field) {
+				t.Fatalf("public summary leaked %s: %s", field, raw)
+			}
+		}
+	}
+	res := doUserRequest(t, app, http.MethodGet, "/user/passport/stamps?user="+u.Id, map[string]string{"Authorization": "Bearer " + token}, "")
+	var owner map[string]any
+	json.NewDecoder(res.Body).Decode(&owner)
+	raw, _ := json.Marshal(owner)
+	if !strings.Contains(string(raw), "first_visit_day") {
+		t.Fatal("owner dates removed")
+	}
+	info.Set("visit_visibility", "full")
+	if err := app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/user/passport?user=", "/user/passport/stamps?user="} {
+		res := doUserRequest(t, app, http.MethodGet, path+u.Id, nil, "")
+		var full map[string]any
+		json.NewDecoder(res.Body).Decode(&full)
+		raw, _ := json.Marshal(full)
+		if res.StatusCode != 200 || !strings.Contains(string(raw), `"visit_dates":["2026-01-02"]`) {
+			t.Fatalf("full dates missing: %d %s", res.StatusCode, raw)
+		}
+		for _, key := range []string{"visited_at", "accuracy_meters", "latitude", "longitude"} {
+			if strings.Contains(string(raw), key) {
+				t.Fatalf("full leaked %s", key)
+			}
+		}
+	}
+	info.Set("visit_visibility", "private")
+	if err := app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/user/passport?user=", "/user/passport/stamps?user="} {
+		res := doUserRequest(t, app, http.MethodGet, path+u.Id, nil, "")
+		if res.StatusCode != 404 {
+			t.Fatalf("private status %d", res.StatusCode)
+		}
+	}
+}

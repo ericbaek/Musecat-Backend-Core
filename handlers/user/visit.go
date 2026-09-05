@@ -52,7 +52,7 @@ type ArcadeVisitCount struct {
 	Country      string   `json:"country"`
 	PhotoURL     string   `json:"photo_url,omitempty"`
 	VisitCount   int      `json:"visit_count"`
-	LastVisitDay string   `json:"last_visit_day"`
+	LastVisitDay string   `json:"last_visit_day,omitempty"`
 	VisitDays    []string `json:"visit_days,omitempty"`
 
 	lastVisitedAt string
@@ -261,6 +261,9 @@ func LoadVisitStats(app core.App, userID string, includeVisitDays bool) (VisitSt
 	}
 	for _, s := range p.Stamps {
 		item := ArcadeVisitCount{Arcade: s.Arcade, Name: s.Name, Country: s.Country, PhotoURL: s.PhotoURL, VisitCount: s.VisitCount, LastVisitDay: s.LastVisitDay}
+		if !includeVisitDays {
+			item.LastVisitDay = ""
+		}
 		if includeVisitDays {
 			item.VisitDays = s.days
 		}
