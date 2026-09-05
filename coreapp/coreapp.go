@@ -195,6 +195,8 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authUser.GET("/me", userhandler.GetMe)
 		authUser.POST("/signup", userhandler.SignUp)
 		authUser.POST("/check-in", userhandler.CheckIn).Bind(userhandler.RequireActiveUser())
+		authUser.GET("/passport", userhandler.GetMyPassport).Bind(userhandler.RequireActiveUser())
+		authUser.GET("/passport/stamps", userhandler.GetMyPassportStamps).Bind(userhandler.RequireActiveUser())
 		authUser.GET("/visits", userhandler.GetMyVisits).Bind(userhandler.RequireActiveUser())
 		authUser.PUT("/countries", userhandler.UpdateCountries).Bind(userhandler.RequireActiveUser())
 		authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())

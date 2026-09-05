@@ -449,6 +449,7 @@ components:
       type: object
       required: [id, name, address, direction, nickname, subway_line, location]
       properties:
+        city_id: {type: string}
         id:
           type: string
         name:
@@ -1210,10 +1211,93 @@ components:
       properties:
         arcade: {type: string}
         visit_day: {type: string, format: date}
+    PassportCity:
+      type: object
+      required: [id, name, country, admin1, location, arcade_count, visit_count]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        country: {type: string}
+        admin1: {type: string}
+        location:
+          nullable: true
+          allOf: [{$ref: '#/components/schemas/Location'}]
+        arcade_count: {type: integer}
+        visit_count: {type: integer}
+    PassportStamp:
+      type: object
+      required: [arcade, name, country, city_id, city_name, closed, first_visit_day, last_visit_day, visit_count, total_visit_count]
+      properties:
+        arcade: {type: string}
+        name: {type: string}
+        country: {type: string}
+        city_id: {type: string}
+        city_name: {type: string}
+        closed: {type: boolean}
+        photo_url: {type: string}
+        first_visit_day: {type: string, format: date, description: Lifetime first visit in current visible history.}
+        last_visit_day: {type: string, format: date, description: Most recent visit in the selected period.}
+        visit_count: {type: integer, description: Visits in selected period.}
+        total_visit_count: {type: integer, description: Lifetime visits.}
+    Passport:
+      type: object
+      required: [year, available_years, total_visits, distinct_arcades, distinct_cities, distinct_countries, new_arcades, visit_days, max_arcades_in_day, total_distance_meters, unclassified_arcades, countries, cities, months, weekdays, top_arcades]
+      properties:
+        year: {type: string, description: all or a four-digit year.}
+        available_years: {type: array, items: {type: integer}, description: Recorded local years descending.}
+        total_visits: {type: integer}
+        distinct_arcades: {type: integer}
+        distinct_cities: {type: integer}
+        distinct_countries: {type: integer}
+        new_arcades: {type: integer, description: Arcades whose lifetime first verification occurred in the selected period.}
+        visit_days: {type: integer, description: Distinct local calendar date strings across all venues.}
+        max_arcades_in_day: {type: integer}
+        total_distance_meters: {type: number, description: Consecutive straight-line segments with both endpoints in the period. Missing coordinates break the sequence.}
+        unclassified_arcades: {type: integer}
+        cities: {type: array, items: {$ref: '#/components/schemas/PassportCity'}}
+        countries:
+          type: array
+          items:
+            type: object
+            required: [country, arcade_count, visit_count]
+            properties:
+              country: {type: string}
+              arcade_count: {type: integer}
+              visit_count: {type: integer}
+        months:
+          type: array
+          items:
+            type: object
+            required: [month, visits, new_arcades]
+            properties:
+              month: {type: string, description: YYYY-MM; includes empty months within recorded or selected years.}
+              visits: {type: integer}
+              new_arcades: {type: integer}
+        weekdays:
+          type: array
+          items:
+            type: object
+            required: [weekday, visits]
+            properties:
+              weekday: {type: integer, minimum: 1, maximum: 7, description: Monday is 1.}
+              visits: {type: integer}
+        top_arcades: {type: array, maxItems: 5, items: {$ref: '#/components/schemas/PassportStamp'}}
+    PassportStampPage:
+      type: object
+      required: [page, per_page, last_page, total, items]
+      properties:
+        page: {type: integer}
+        per_page: {type: integer}
+        last_page: {type: integer}
+        total: {type: integer}
+        items: {type: array, items: {$ref: '#/components/schemas/PassportStamp'}}
     VisitStats:
       type: object
-      required: [total_visits, distinct_arcades, total_distance_meters, countries, arcades]
+      required: [total_visits, distinct_arcades, total_distance_meters, countries, arcades, cities, distinct_cities, unclassified_arcades]
       properties:
+        cities: {type: array, items: {$ref: '#/components/schemas/PassportCity'}}
+        distinct_cities: {type: integer}
+        unclassified_arcades: {type: integer}
         total_visits: {type: integer}
         distinct_arcades: {type: integer}
         total_distance_meters:
@@ -1904,8 +1988,10 @@ components:
             type: string
     UpdateArcadeBasicRequest:
       type: object
-      required: [arcade, document]
+      required: [arcade]
       properties:
+        city_id: {type: string, description: Optional canonical city in the arcade country. Empty clears classification. Address or coordinate changes clear an omitted city.}
+        base_basic_id: {type: string, description: Optional optimistic concurrency token; stale values return 409.}
         arcade:
           type: string
         name:
@@ -5887,6 +5973,7 @@ paths:
                 properties:
                   visited: {type: boolean}
                   already_visited: {type: boolean}
+                  first_visit_to_arcade: {type: boolean, description: True only for a newly committed lifetime first visit; false for a duplicate.}
                   visit: {$ref: '#/components/schemas/Visit'}
                   gained_exp: {type: integer}
                   exp: {type: integer}
@@ -6174,3 +6261,58 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /user/passport:
+    get:
+      tags: [User]
+      summary: Authenticated owner passport
+      description: Currently public arcades only, including closed venues. Current geography; no raw verification metadata. Active owner only; no shared caching.
+      security: [{bearerAuth: []}]
+      parameters:
+        - in: query
+          name: year
+          schema: {type: string, default: all, pattern: '^(all|[0-9]{4})$'}
+      responses:
+        '200':
+          description: Passport result. Stable sort ties use arcade ID.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Passport'}
+        '400': {description: Invalid filter or pagination.}
+        '401': {description: Missing or invalid authentication.}
+        '403': {description: Inactive account.}
+        '502': {description: Failed to load passport.}
+  /user/passport/stamps:
+    get:
+      tags: [User]
+      summary: Authenticated owner passport
+      description: Currently public arcades only, including closed venues. Current geography; no raw verification metadata. Active owner only; no shared caching.
+      security: [{bearerAuth: []}]
+      parameters:
+        - in: query
+          name: year
+          schema: {type: string, default: all, pattern: '^(all|[0-9]{4})$'}
+        - in: query
+          name: country
+          schema: {type: string, pattern: "^[A-Z]{2}$"}
+        - in: query
+          name: city
+          schema: {type: string}
+        - in: query
+          name: sort
+          schema: {type: string, enum: [recent, first, visits], default: recent}
+        - in: query
+          name: page
+          schema: {type: integer, minimum: 1, maximum: 1000000, default: 1}
+        - in: query
+          name: per_page
+          schema: {type: integer, minimum: 1, maximum: 100, default: 24}
+      responses:
+        '200':
+          description: Passport result. Stable sort ties use arcade ID.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PassportStampPage'}
+        '400': {description: Invalid filter or pagination.}
+        '401': {description: Missing or invalid authentication.}
+        '403': {description: Inactive account.}
+        '502': {description: Failed to load passport.}

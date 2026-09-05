@@ -133,6 +133,7 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 				"direction":   basicRec.GetString("direction"),
 				"nickname":    basicRec.GetStringSlice("nickname"),
 				"subway_line": basicRec.GetStringSlice("subway_line"),
+				"city_id":     basicRec.GetString("city_id"),
 				"location":    map[string]any{"lat": lat, "lon": lon},
 			}
 		}

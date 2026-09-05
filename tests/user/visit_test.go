@@ -64,7 +64,7 @@ func TestArcadeVisitAwardsAndDeduplicatesByArcadeDay(t *testing.T) {
 	}
 	var got map[string]any
 	_ = json.NewDecoder(res.Body).Decode(&got)
-	if got["gained_exp"] != float64(6) || got["visited"] != true {
+	if got["gained_exp"] != float64(6) || got["visited"] != true || got["first_visit_to_arcade"] != true {
 		t.Fatalf("unexpected first visit: %#v", got)
 	}
 	visit, ok := got["visit"].(map[string]any)
@@ -78,7 +78,7 @@ func TestArcadeVisitAwardsAndDeduplicatesByArcadeDay(t *testing.T) {
 	}
 	res = doUserRequest(t, app, http.MethodPost, "/arcade/visit", headers, body)
 	_ = json.NewDecoder(res.Body).Decode(&got)
-	if got["gained_exp"] != float64(0) || got["already_visited"] != true {
+	if got["gained_exp"] != float64(0) || got["already_visited"] != true || got["first_visit_to_arcade"] != false {
 		t.Fatalf("unexpected duplicate visit: %#v", got)
 	}
 	restore = userhandler.SetVisitNowForTest(func() time.Time { return time.Date(2026, 7, 1, 15, 1, 0, 0, time.UTC) })

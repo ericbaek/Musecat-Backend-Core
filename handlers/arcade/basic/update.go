@@ -18,14 +18,20 @@ import (
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
+var errStaleBasic = errors.New("basic information changed; reload before updating")
+
+var errInvalidCity = errors.New("city_id must identify a city in the arcade country")
+
 type UpdateArcadeBasicBody struct {
-	Arcade     string                   `json:"arcade"`
-	Name       *string                  `json:"name,omitempty"`
-	Location   *arcadeinternal.Location `json:"location,omitempty"`
-	Address    *string                  `json:"address,omitempty"`
-	Direction  *string                  `json:"direction,omitempty"`
-	Nickname   *[]string                `json:"nickname,omitempty"`
-	SubwayLine *[]string                `json:"subway_line,omitempty"`
+	BaseBasicID *string                  `json:"base_basic_id,omitempty"`
+	CityID      *string                  `json:"city_id,omitempty"`
+	Arcade      string                   `json:"arcade"`
+	Name        *string                  `json:"name,omitempty"`
+	Location    *arcadeinternal.Location `json:"location,omitempty"`
+	Address     *string                  `json:"address,omitempty"`
+	Direction   *string                  `json:"direction,omitempty"`
+	Nickname    *[]string                `json:"nickname,omitempty"`
+	SubwayLine  *[]string                `json:"subway_line,omitempty"`
 }
 
 func parseUpdateBasicBody(re *core.RequestEvent) (UpdateArcadeBasicBody, error) {
@@ -36,6 +42,7 @@ func parseUpdateBasicBody(re *core.RequestEvent) (UpdateArcadeBasicBody, error) 
 
 // BasicFields captures the relevant snapshot of arcade_basic fields we care about.
 type BasicFields struct {
+	CityID      string
 	Name        string
 	Address     string
 	Direction   string
@@ -79,7 +86,7 @@ func getCurrentBasic(app core.App, arcadeID string) (BasicFields, error) {
 	}
 
 	// snapshot current values
-	cur := BasicFields{}
+	cur := BasicFields{CityID: current.GetString("city_id")}
 	cur.Name, _ = arcadeinternal.AsString(current.Get("name"))
 	cur.Address, _ = arcadeinternal.AsString(current.Get("address"))
 	cur.Direction, _ = arcadeinternal.AsString(current.Get("direction"))
@@ -99,6 +106,12 @@ func getCurrentBasic(app core.App, arcadeID string) (BasicFields, error) {
 
 func mergeBasicFields(cur BasicFields, body UpdateArcadeBasicBody) BasicFields {
 	out := cur
+	if body.Address != nil && *body.Address != cur.Address || body.Location != nil && (!floatsEqual(body.Location.Lat, cur.Lat) || !floatsEqual(body.Location.Lon, cur.Lon)) {
+		out.CityID = ""
+	}
+	if body.CityID != nil {
+		out.CityID = strings.TrimSpace(*body.CityID)
+	}
 	if body.Name != nil {
 		out.Name = *body.Name
 	}
@@ -122,6 +135,9 @@ func mergeBasicFields(cur BasicFields, body UpdateArcadeBasicBody) BasicFields {
 
 func computeChangedFields(cur, merged BasicFields, body UpdateArcadeBasicBody) []string {
 	changed := []string{}
+	if cur.CityID != merged.CityID {
+		changed = append(changed, "city_id")
+	}
 	if body.Name != nil && merged.Name != cur.Name {
 		changed = append(changed, "name")
 	}
@@ -154,6 +170,7 @@ func createNewBasic(app core.App, arcadeID string, merged BasicFields, createdBy
 	}
 	rec := core.NewRecord(basicColl)
 	rec.Set("arcade", arcadeID)
+	rec.Set("city_id", merged.CityID)
 	rec.Set("name", merged.Name)
 	rec.Set("address", merged.Address)
 	rec.Set("direction", merged.Direction)
@@ -232,6 +249,19 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
+		if body.BaseBasicID != nil && arcadeRec.GetString("basic") != *body.BaseBasicID {
+			return errStaleBasic
+		}
+		if merged.CityID != "" {
+			city, e := txApp.FindRecordById("passport_city", merged.CityID)
+			country := arcadeRec.GetString("country")
+			if geoResult != nil {
+				country = geoResult.Country
+			}
+			if e != nil || city.GetString("country") != country {
+				return errInvalidCity
+			}
+		}
 		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
@@ -243,7 +273,8 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 			}
 		}
 
-		newBasicID, createErr := createNewBasic(txApp, body.Arcade, merged, re.Auth.Id, body, cur)
+		var createErr error
+		newBasicID, createErr = createNewBasic(txApp, body.Arcade, merged, re.Auth.Id, body, cur)
 		if createErr != nil {
 			return createErr
 		}
@@ -271,6 +302,12 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
+		if errors.Is(err, errStaleBasic) {
+			return re.JSON(409, map[string]any{"error": err.Error()})
+		}
+		if errors.Is(err, errInvalidCity) {
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
+		}
 		if errors.Is(err, arcadeinternal.ErrArcadeCountryConflict) {
 			return re.JSON(http.StatusBadRequest, map[string]any{
 				"error": err.Error(),

@@ -342,3 +342,14 @@ If you change a mutation handler, check two questions:
 2. If yes, is the log shape stable enough for supporter score, audit views, and the frontend?
 
 If the answer is yes, add the endpoint here when you implement it.
+
+
+### Passport city classification
+
+`PUT /arcade/basic` accepts `city_id` (empty clears it), validates the city's country,
+and records its before/after value in the existing immutable `basic_diff` revision.
+Address/location changes clear an omitted city reference. Generic basic rollback restores
+the selected revision's city reference. `base_basic_id` optionally rejects a stale write
+with 409 before changing any row. Full's reviewed assignment command uses these normal
+mutations and authenticated editor attribution, including the existing basic-edit XP
+cooldown. GeoNames catalog import is reference-data maintenance and grants no XP.

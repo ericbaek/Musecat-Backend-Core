@@ -23,6 +23,7 @@ func buildBasicLocationValue(fields BasicFields) any {
 
 func buildBasicSnapshot(fields BasicFields) map[string]any {
 	return map[string]any{
+		"city_id":     fields.CityID,
 		"name":        fields.Name,
 		"address":     fields.Address,
 		"direction":   fields.Direction,
@@ -45,9 +46,9 @@ func buildBasicDiffLogItem(prev *BasicFields, next BasicFields) basicDiffLogItem
 			"name": next.Name,
 		}))
 		nextSnapshot := buildBasicSnapshot(next)
-		for _, field := range []string{"name", "address", "direction", "nickname", "location", "subway_line"} {
+		for _, field := range []string{"name", "address", "direction", "nickname", "location", "subway_line", "city_id"} {
 			value := nextSnapshot[field]
-			if value == nil {
+			if value == nil || field == "city_id" && next.CityID == "" {
 				continue
 			}
 			if field == "direction" && strings.TrimSpace(next.Direction) == "" {
@@ -63,7 +64,7 @@ func buildBasicDiffLogItem(prev *BasicFields, next BasicFields) basicDiffLogItem
 
 	prevSnapshot := buildBasicSnapshot(*prev)
 	nextSnapshot := buildBasicSnapshot(next)
-	for _, field := range []string{"name", "address", "direction", "nickname", "location", "subway_line"} {
+	for _, field := range []string{"name", "address", "direction", "nickname", "location", "subway_line", "city_id"} {
 		from := prevSnapshot[field]
 		to := nextSnapshot[field]
 		if arcadeinternal.JSONValueEqual(from, to) {

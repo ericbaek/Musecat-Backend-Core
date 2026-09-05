@@ -369,3 +369,30 @@ Before changing code, an AI agent MUST classify the change and complete every ap
 | frontend migration | link only custom endpoints and remove raw collection/rule/filter references |
 
 Do not implement an ambiguous policy from inference. Record the decision in this document and OpenAPI before relying on it.
+
+
+## Passport
+
+`GET /user/passport?year=all|YYYY` and `GET /user/passport/stamps` are active-owner-only,
+no-store APIs. Both and public `visit_stats` use `LoadPassport`, selecting current
+public arcades including closed venues. Private venues disappear from every aggregate.
+The public payload adds only all-time city aggregates, never first visit dates or
+owner-only month/weekday/stamp details. Existing private/summary/full visibility applies.
+
+Periods use stored local `visit_day`; active days deduplicate those date strings even
+across countries. New discoveries use lifetime first chronological verification.
+Distances use current locations, with both consecutive endpoints inside the selected
+period; missing locations and excluded period records break a segment. Totals are
+straight-line distances, not actual travel or play time. Month series include zero months.
+
+Canonical `passport_city` records use GeoNames IDs as unique source identifiers; raw
+REST is locked. `arcade_basic.city_id` is optional and versioned with basic history.
+Current city metadata applies retrospectively. A missing or country-mismatched city is
+unclassified; those arcades remain in country and venue totals. Cities are matched by
+country, admin1 and locality aliases, never proximity. Ambiguity requires operator review.
+GeoNames import and candidate review are explicit Full operations, outside requests and
+transactions. Core's schema migration bootstraps only a fresh test database.
+
+`POST /arcade/visit` additionally returns `first_visit_to_arcade`, true only for the newly
+committed first visit; duplicate same-day requests return false and never award another
+stamp or XP. Existing 6/3 XP remains unchanged. Passport is GPS visit evidence, not play evidence.
