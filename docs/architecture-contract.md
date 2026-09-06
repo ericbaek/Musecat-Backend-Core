@@ -90,18 +90,30 @@ may confirm whether a public/open campaign target is still old or updated. A
 `still_old` result awards 1 XP once per user and campaign target; an updated
 result awards the campaign XP atomically with the game-state mutation. The
 default path requires a same-day verified arcade visit. The
-optional `bypass_location=true` path is restricted to users tagged
-`supporter`, `founding_supporter`, `developer`, or `moderator`; it skips only
-the visit-location check and does not relax campaign, arcade, or target
-validation. An updated result through the bypass path awards 1 XP instead of
-the campaign's configured reward. Clients must show a two-step warning
-confirmation before sending the bypass flag. `GET /campaign?id=...` returns
-the remaining old-version targets, current `to_version` targets, newest-first
-report logs, and the latest `still_old` reporter/time. The updated target view
-is derived from the current public game state at the campaign's `to_version`,
-not only from campaign `result=updated` checks, so machines already on the
-target version are included. The report view includes only currently
-public/open arcades.
+optional `bypass_location=true` path is restricted to users at level 10 or
+above; it skips only the visit-location check and does not relax campaign,
+arcade, or target validation. An updated result through the bypass path awards
+1 XP instead of the campaign's configured reward. Clients must show a two-step
+warning confirmation before sending the bypass flag. Campaign checks are
+append-only reports with a per-report location-verification flag. A
+`still_old` report can revert the latest update for seven days after the
+update, subject to the same campaign and visit/bypass validation. `GET
+/campaign?id=...` returns the remaining old-version targets, current
+`to_version` targets, newest-first report logs, per-target report history, and
+the latest `still_old` reporter/time. The updated target view is derived from
+the current public game state at the campaign's `to_version`, not only from
+campaign `result=updated` checks, so machines already on the target version
+are included. The report view includes only currently public/open arcades.
+
+`GET /campaign/photo` is the automatic photo-update campaign discovery route.
+It returns only public/open arcades whose current `arcade.photo` molecule has
+no public atom (`photo_status=missing`) or whose newest public atom is at least
+six months old (`photo_status=stale`). The newest timestamp is read from an
+atom's `updated` value when available and otherwise its immutable `created`
+value. Photo atoms removed from the current gallery do not keep an arcade
+fresh. The response uses the standard `page`, `per_page`, `last_page`, `total`,
+and `items` envelope; missing targets sort before stale targets, and stale
+targets sort oldest first.
 
 `GET /arcades/nearby` is the home-page campaign discovery aggregate. Its
 response includes `campaigns` for active campaigns with pending targets in
@@ -317,11 +329,12 @@ immutable in-memory bundle on every request.
 - Nearby remains an operating-discovery route: private and public/closed arcades, historical unselected batches, and unverified cabinet revisions for a cabinet-qualified pair MUST NOT affect results, pagination, country totals, or nearest-arcade summaries.
 - Candidate invalidation follows changes to arcade/basic data, `arcade.game_v2`, current game entries/revisions, versions, cabinets, and version/cabinet compatibility records.
 - `/arcades` is paginated `{page, per_page, last_page, total, items}` and includes only public/open candidates. Search intentionally includes public/closed candidates.
-- `GET /arcade/public?arcade=...` is a creator-only, read-only XP estimate. It uses the same idempotent public and draft-backfill grant keys as `PUT /arcade/public`, writes no visibility or ledger state, and the successful PUT response is authoritative if the draft changes afterward. Draft backfill is independent of the seven-day arcade-edit cooldown: each changed area earns its backfill once per arcade, regardless of how recently that area received normal edit XP.
+- `GET /arcade/public?arcade=...` is a creator-only, read-only XP estimate. It uses the same idempotent public and draft-backfill grant keys as `PUT /arcade/public`, writes no visibility or ledger state, and the successful PUT response is authoritative if the draft changes afterward. Public conversion grants 5 XP. Draft backfill is independent of the seven-day arcade-edit cooldown: each changed eligible area earns 2 XP once per arcade, regardless of how recently that area received normal edit XP.
 - Public conversion remains creator-only. A creator tagged `supporter`, `founding_supporter`, `developer`, or `moderator` may set `bypass_requirements=true` on `PUT /arcade/public` to skip only the game, contact-or-hours, and Korea facility-photo publication requirements. Stored country/timezone validation, private/open state validation, and all other public-conversion checks remain mandatory. Clients must show a two-step warning confirmation before sending this flag.
 - XP ledger changes and aggregate mutations belong to the same transaction. No XP grant may survive a failed aggregate mutation.
 - XP is available only after the authenticated user has a non-empty `username`. Before one-time username setup, XP-producing actions retain their normal mutation semantics where applicable but award `0`; they must not create `user_level` or `user_level_log` state, and public-conversion XP previews must report no eligible XP.
-- Normal edit XP remains scoped by user, arcade, and part. Basic/hour/sns/gtk/photo edits continue to grant 3 XP with their existing seven-day cooldown. Game edits use a rolling seven-day window of distinct durable `arcade_game_id` values: the target is `min(10, 2*n + 1)` and each request receives only the increase over XP already granted in that window. Revisiting an entry already counted in the window grants 0; entries become eligible again after they leave the window. Administrative bulk game-version updates and public-conversion backfill do not use this scale.
+- Normal edit XP remains scoped by user, arcade, and part. Basic/hour/sns/gtk edits grant 2 XP with their existing seven-day cooldown. Photo atoms grant 2 XP each only when first published, with a rolling seven-day cap of 10 XP for a photo-campaign target and 4 XP for another public arcade; upload-only, reorder, removal, and reuse of a published atom grant 0. Game edits use a rolling seven-day window of distinct durable `arcade_game_id` values: the target is `min(10, 2*n)` and each request receives only the increase over XP already granted in that window. Revisiting an entry already counted in the window grants 0; entries become eligible again after they leave the window. Administrative bulk game-version updates and public-conversion backfill do not use this scale.
+- Passport visits grant 5 XP for a lifetime first visit to an arcade and 2 XP for a revisit. Attendance check-in grants 1 XP. Flag creation grants 5 XP; `issue_persist` reactions grant 2 XP, `fixed` reactions grant 3 XP, and `wrong` votes grant 0 XP. Deleting a rewarded reaction reverses the exact original ledger amount.
 - Notification delivery is after persistence and best-effort. A Telegram/Discord failure MUST NOT roll back a completed user request.
 - Review processing has no automated ban and no automated rollback.
 - Public `GET /arcade` detail loads record one `page_view` event best-effort. The direction-click event route is anonymous and accepts only `direction_click`.
@@ -424,4 +437,4 @@ transactions. Core's schema migration bootstraps only a fresh test database.
 
 `POST /arcade/visit` additionally returns `first_visit_to_arcade`, true only for the newly
 committed first visit; duplicate same-day requests return false and never award another
-stamp or XP. Existing 6/3 XP remains unchanged. Passport is GPS visit evidence, not play evidence.
+stamp or XP. The first visit awards 5 XP and a revisit awards 2 XP. Passport is GPS visit evidence, not play evidence.

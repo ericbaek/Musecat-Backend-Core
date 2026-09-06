@@ -150,6 +150,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)
 		se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
 		se.Router.GET("/campaign", arcadecampaign.GetCampaign)
+		se.Router.GET("/campaign/photo", arcadecampaign.ListPhotoCampaign)
 		se.Router.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(
 			apis.RequireAuth("user"),
 			user.RequireActiveUser(),

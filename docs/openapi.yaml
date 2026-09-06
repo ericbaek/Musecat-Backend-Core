@@ -1360,7 +1360,7 @@ components:
         bypass_location:
           type: boolean
           default: false
-          description: Skips same-day verified-visit validation. Requires supporter, founding_supporter, developer, or moderator access. A still_old result awards 1 XP once per user and target; an updated result through this path awards 1 XP.
+          description: Skips same-day verified-visit validation. Requires level 10 or above. A still_old result awards 1 XP per report; an updated result through this path awards 1 XP.
     CampaignCheckResponse:
       type: object
       required: [result, updated, gained_exp, exp, level, state_id, xp_feedback]
@@ -1373,6 +1373,7 @@ components:
         state_id: {type: string}
         arcade: {type: string}
         game_id: {type: string}
+        rolled_back: {type: boolean, description: True when a still_old report reverted a recent campaign update.}
         xp_feedback:
           $ref: '#/components/schemas/XpFeedback'
     CampaignReporter:
@@ -1386,17 +1387,23 @@ components:
         level: {type: integer}
     CampaignReportSummary:
       type: object
-      required: [id, reported_at, reaction, user]
+      required: [id, reported_at, reaction, location_verified, user]
       properties:
         id: {type: string}
         reported_at: {type: string, format: date-time}
         reaction: {type: string, enum: [still_old, updated]}
+        location_verified: {type: boolean}
         user: {$ref: '#/components/schemas/CampaignReporter'}
     CampaignTarget:
       type: object
       required: [arcade, game, status]
       properties:
         status: {type: string, enum: [pending, still_old, updated]}
+        can_revert: {type: boolean, description: Whether the latest updated report can be reverted within seven days.}
+        reports:
+          type: array
+          description: Reports for this arcade and game, newest first, including reporter and location-verification status.
+          items: {$ref: '#/components/schemas/CampaignReportSummary'}
         arcade:
           type: object
           required: [id, country, name, address, location]
@@ -1421,7 +1428,7 @@ components:
         updated_report: {$ref: '#/components/schemas/CampaignReportSummary'}
     CampaignReport:
       type: object
-      required: [id, created, updated, reported_at, reaction, result, user, arcade, game]
+      required: [id, created, updated, reported_at, reaction, result, location_verified, user, arcade, game]
       properties:
         id: {type: string}
         created: {type: string, format: date-time}
@@ -1429,6 +1436,7 @@ components:
         reported_at: {type: string, format: date-time}
         reaction: {type: string, enum: [still_old, updated]}
         result: {type: string, enum: [still_old, updated]}
+        location_verified: {type: boolean}
         user: {$ref: '#/components/schemas/CampaignReporter'}
         arcade: {type: object}
         game: {type: object}
@@ -1487,6 +1495,49 @@ components:
           allOf:
             - $ref: '#/components/schemas/CampaignReport'
           nullable: true
+    PhotoCampaignArcade:
+      type: object
+      required: [id, country, name, address, nickname, closed]
+      properties:
+        id: {type: string}
+        country: {type: string}
+        name: {type: string}
+        address: {type: string}
+        nickname: {type: array, items: {type: string}}
+        closed: {type: boolean, const: false}
+        location:
+          oneOf:
+            - {$ref: '#/components/schemas/Location'}
+            - {type: 'null'}
+        game_series: {type: array, items: {type: string}}
+    PhotoCampaignItem:
+      type: object
+      required: [arcade, photo_status, photo_url, last_public_photo_at]
+      properties:
+        arcade: {$ref: '#/components/schemas/PhotoCampaignArcade'}
+        photo_status:
+          type: string
+          enum: [missing, stale]
+          description: Missing means the current gallery has no public photo; stale means its newest public photo is at least six months old.
+        photo_url:
+          type: string
+          format: uri-reference
+          description: Representative photo URL. Empty when photo_status is missing.
+        last_public_photo_at:
+          oneOf:
+            - {type: string, format: date-time}
+            - {type: 'null'}
+    PhotoCampaignListResponse:
+      type: object
+      required: [page, per_page, last_page, total, items]
+      properties:
+        page: {type: integer, minimum: 1}
+        per_page: {type: integer, minimum: 1, maximum: 100}
+        last_page: {type: integer, minimum: 0}
+        total: {type: integer, minimum: 0}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/PhotoCampaignItem'}
     VisitVisibilityRequest:
       type: object
       required: [visit_visibility]
@@ -4175,6 +4226,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: /arcade/photo
+      description: Pending atoms receive 2 XP each when first published, up to 10 XP per campaign target or 4 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP.
       security:
         - bearerAuth: []
       requestBody:
@@ -4188,7 +4240,7 @@ paths:
               photos: [atom_1, atom_2]
       responses:
         '200':
-          description: Photo relation updated.
+          description: Photo relation updated. XP is awarded only when pending atoms are first published: 2 XP per atom, up to 10 XP per campaign target or 4 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a published atom awards no XP.
           content:
             application/json:
               schema:
@@ -4199,15 +4251,15 @@ paths:
                 count: 2
                 xp_feedback:
                   previous_exp: 0
-                  new_exp: 3
-                  diff_exp: 3
+                  new_exp: 2
+                  diff_exp: 2
                   previous_percent_to_next_level: 0
-                  new_percent_to_next_level: 75
+                  new_percent_to_next_level: 50
                   previous_level: 0
                   new_level: 0
                   level_diff: 0
-                  remaining_exp_to_next_level: 1
-                  remaining_percent_to_next_level: 25
+                  remaining_exp_to_next_level: 2
+                  remaining_percent_to_next_level: 50
         '400':
           description: Invalid JSON or validation failure.
           content:
@@ -5355,7 +5407,7 @@ paths:
     get:
       tags: [Arcade Mutations]
       summary: Preview public-conversion XP
-      description: Reads the creator's currently eligible public-conversion and draft-backfill XP without changing visibility or the XP ledger. Only the private arcade creator may call this endpoint. The PUT response remains authoritative if the draft changes afterward.
+      description: Reads the creator's currently eligible public-conversion (5 XP) and draft-backfill (2 XP per eligible changed area) without changing visibility or the XP ledger. Only the private arcade creator may call this endpoint. The PUT response remains authoritative if the draft changes afterward.
       security:
         - bearerAuth: []
       parameters:
@@ -5422,7 +5474,7 @@ paths:
               $ref: '#/components/schemas/ArcadeOnlyRequest'
       responses:
         '200':
-          description: Arcade is now public.
+          description: Arcade is now public. The creator receives 5 XP for the conversion plus 2 XP for each eligible draft information area that has not already received its backfill.
           content:
             application/json:
               schema:
@@ -5563,7 +5615,7 @@ paths:
         are durable entries; a deleted entry may be reused when the same arcade,
         series, and verified cabinet match historical state. Cabinet ids must be
         supported by the submitted version. Public game edits use a rolling
-        seven-day distinct-entry XP window with target `min(10, 2*n + 1)`;
+        seven-day distinct-entry XP window with target `min(10, 2*n)`;
         private edits do not award normal edit XP, and administrative bulk
         updates do not award it either.
       security:
@@ -5997,9 +6049,11 @@ paths:
         separates current old-version targets from current to-version targets,
         so the updated list includes machines already on the target version
         even when they were not updated through this campaign. It includes
-        newest-first report logs with the user, arcade, game, reaction, and
-        report time, plus the latest still_old report. Only currently
-        public/open arcades are included.
+        newest-first report logs with the user, arcade, game, reaction,
+        location-verification status, and report time, plus the latest
+        still_old report. Updated targets can be reverted by a new still_old
+        report for seven days after the update. Only currently public/open
+        arcades are included.
       parameters:
         - name: id
           in: query
@@ -6026,6 +6080,42 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /campaign/photo:
+    get:
+      tags: [Arcades]
+      summary: Photo update campaign targets
+      description: |
+        Returns public/open arcades whose current photo gallery has no public
+        photo or whose newest public photo is at least six months old. The
+        result is computed from the current `arcade.photo` molecule and is
+        paginated like the public arcade list. Missing-photo targets are listed
+        first, followed by stale targets from oldest to newest.
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: Current automatic photo campaign targets.
+          headers:
+            Cache-Control:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PhotoCampaignListResponse'}
+        '400':
+          description: Invalid pagination.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Photo campaign targets could not be loaded.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /campaign/check:
     post:
       tags: [Arcade Mutations]
@@ -6035,9 +6125,8 @@ paths:
         version or has been updated. A `still_old` result awards 1 XP once per
         user and target. The default request requires a same-day
         verified visit at the public/open arcade. `bypass_location=true` skips
-        only that visit check and requires `supporter`, `founding_supporter`,
-        `developer`, or `moderator` access; an updated result through this path
-        awards 1 XP; clients must obtain two warning
+        only that visit check and requires level 10 or above; an updated result
+        through this path awards 1 XP; clients must obtain two warning
         confirmations before sending it.
       security:
         - bearerAuth: []
@@ -6063,7 +6152,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '403':
-          description: Active user is missing the required visit or supporter access for a location bypass.
+          description: Active user is missing the required visit or level 10 access for a location bypass.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

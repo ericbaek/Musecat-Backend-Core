@@ -43,7 +43,7 @@ Each row uses these common columns:
 | `PUT /arcade/gtk` | `gtk` | one row per request | `gtk_diff` | Replaces the current `arcade_gtk` relation. |
 | `PUT /arcade/game` | `game` | one row per request | `game_diff` | Accepts required `add`/`modify`/`remove` arrays, materializes the current immutable state, validates `base_state_id`, creates a new immutable history batch, then moves `arcade.game_v2` to it. Item IDs are persistent `arcade_game_id` IDs. |
 | `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Administrative version swap for developer/moderator or level-30 supporter accounts. It uses the normal immutable game-state batch flow. |
-| `POST /campaign/check` | `game` when an old target is updated | one row | `game_diff` | A successful `result=updated` campaign check uses the normal immutable game-state batch flow. `result=still_old` persists the check and awards 1 XP once per user and target; it does not create a game changelog row. A location-bypassed update awards 1 XP. |
+| `POST /campaign/check` | `game` when an old target is updated or reverted | one row | `game_diff` | Campaign checks append a report event with location-verification status. `result=updated` uses the normal immutable game-state batch flow; level-10+ location bypass awards 1 XP. A `still_old` report awards 1 XP and can revert the latest campaign update for seven days. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `PUT /arcade/memo` | `memo` | one row per changed request | `memo_diff` | Creates an immutable Tiptap JSON revision and moves `arcade.memo` for an authenticated user with arcade write access. |
 | `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, `photo`, or `memo`; memo rollback requires authenticated arcade write access. |
@@ -261,6 +261,14 @@ accounts and supporters who have reached level 30; it does not award XP.
 ### `PUT /arcade/photo`
 
 `items[]` contains one object per photo atom.
+
+The mutation promotes pending atoms and awards XP only for atoms whose
+`public` flag was false before the transaction. Each newly published atom is
+worth 2 XP, capped over a rolling seven-day window at 10 XP for an automatic
+photo-campaign target and 4 XP for another public arcade. Uploading a pending
+atom, changing order, removing a gallery member, or re-adding an already
+published atom does not award XP. Aggregate pointer, atom promotion, changelog,
+and XP ledger updates commit atomically.
 
 Each item includes:
 - `atom_id`

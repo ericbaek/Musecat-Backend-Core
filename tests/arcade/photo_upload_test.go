@@ -102,8 +102,8 @@ func TestUploadArcadePhotos_Success(t *testing.T) {
 				tb.Fatalf("uploaded[%d].atomId is empty", i)
 			}
 		}
-		if payload.XPFeedback.DiffExp != 5 {
-			tb.Fatalf("expected xp diff 5, got %d", payload.XPFeedback.DiffExp)
+		if payload.XPFeedback.DiffExp != 0 {
+			tb.Fatalf("expected upload-only xp diff 0, got %d", payload.XPFeedback.DiffExp)
 		}
 
 		afterCount := countPhotoAtomsForArcade(tb, app, arcadeID)
@@ -171,8 +171,8 @@ func TestUploadArcadePhotos_PartialSuccess(t *testing.T) {
 		if payload.Failed[0].Reason == "" {
 			tb.Fatalf("expected failed reason")
 		}
-		if payload.XPFeedback.DiffExp != 5 {
-			tb.Fatalf("expected xp diff 5, got %d", payload.XPFeedback.DiffExp)
+		if payload.XPFeedback.DiffExp != 0 {
+			tb.Fatalf("expected upload-only xp diff 0, got %d", payload.XPFeedback.DiffExp)
 		}
 
 		afterCount := countPhotoAtomsForArcade(tb, app, arcadeID)

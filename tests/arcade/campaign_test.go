@@ -53,7 +53,54 @@ func TestCampaignLocationBypass(t *testing.T) {
 	}
 }
 
-func TestCampaignLocationBypassRequiresSupporterAccess(t *testing.T) {
+func TestPhotoCampaignListsOnlyPublicOpenArcadesWithoutPhotos(t *testing.T) {
+	app := newArcadeTestApp(t)
+	t.Cleanup(app.Cleanup)
+	_, user := createAuthUser(t, app)
+
+	missingID, _ := seedPublicArcade(t, app, user.Id, arcadeSeed{
+		Name:     "Photo Campaign Missing",
+		Address:  "Missing Photo Street",
+		Location: location{Lat: 37.5665, Lon: 126.978},
+	})
+	closedID, _ := seedPublicArcade(t, app, user.Id, arcadeSeed{
+		Name:     "Photo Campaign Closed",
+		Address:  "Closed Photo Street",
+		Location: location{Lat: 37.5666, Lon: 126.978},
+	})
+	setArcadeVisibility(t, app, closedID, true, true)
+
+	response := executeJSONRequest(t, app, http.MethodGet, "/campaign/photo?page=1&per_page=1", "", nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected photo campaign list to succeed, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Page     int `json:"page"`
+		PerPage  int `json:"per_page"`
+		LastPage int `json:"last_page"`
+		Total    int `json:"total"`
+		Items    []struct {
+			Arcade struct {
+				ID string `json:"id"`
+			} `json:"arcade"`
+			PhotoStatus     string  `json:"photo_status"`
+			LastPublicPhoto *string `json:"last_public_photo_at"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode photo campaign response: %v", err)
+	}
+	if payload.Page != 1 || payload.PerPage != 1 || payload.Total != 1 || payload.LastPage != 1 || len(payload.Items) != 1 {
+		t.Fatalf("unexpected photo campaign pagination: %#v", payload)
+	}
+	item := payload.Items[0]
+	if item.Arcade.ID != missingID || item.PhotoStatus != "missing" || item.LastPublicPhoto != nil {
+		t.Fatalf("unexpected photo campaign item: %#v", item)
+	}
+}
+
+func TestCampaignLocationBypassRequiresLevel10(t *testing.T) {
 	app := newArcadeTestApp(t)
 	token, arcadeID, campaignID, gameID, initialStateID := seedCampaignCheckFixture(t, app, nil)
 
@@ -62,7 +109,7 @@ func TestCampaignLocationBypassRequiresSupporterAccess(t *testing.T) {
 	})
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected non-supporter bypass to be rejected, got %d", response.StatusCode)
+		t.Fatalf("expected below-level-10 bypass to be rejected, got %d", response.StatusCode)
 	}
 
 	arcade, err := app.FindRecordById("arcade", arcadeID)
@@ -99,10 +146,115 @@ func TestCampaignStillOldAwardsOneXPOnlyOnce(t *testing.T) {
 	}
 }
 
+func TestCampaignStillOldRevertsRecentUpdateAndKeepsReportHistory(t *testing.T) {
+	app := newArcadeTestApp(t)
+	firstToken, arcadeID, campaignID, gameID, initialStateID := seedCampaignCheckFixture(t, app, []string{"supporter"})
+	secondToken, secondUser := createAuthUserWithTags(t, app, []string{"supporter"})
+	setCampaignUserExp(t, app, secondUser.Id, 59)
+
+	updatedBody := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"updated","bypass_location":true}`, campaignID, arcadeID, gameID)
+	response := executeJSONRequest(t, app, http.MethodPost, "/campaign/check", updatedBody, map[string]string{
+		"Authorization": "Bearer " + firstToken,
+	})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected update report to succeed, got %d", response.StatusCode)
+	}
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatalf("failed to load updated arcade: %v", err)
+	}
+	updatedStateID := arcade.GetString("game_v2")
+	if updatedStateID == initialStateID {
+		t.Fatal("expected update report to move the game state")
+	}
+
+	stillOldBody := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"still_old","bypass_location":true}`, campaignID, arcadeID, gameID)
+	response = executeJSONRequest(t, app, http.MethodPost, "/campaign/check", stillOldBody, map[string]string{
+		"Authorization": "Bearer " + secondToken,
+	})
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected rollback report to succeed, got %d", response.StatusCode)
+	}
+	var responseBody struct {
+		RolledBack bool `json:"rolled_back"`
+		GainedExp  int  `json:"gained_exp"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&responseBody); err != nil {
+		t.Fatalf("failed to decode rollback response: %v", err)
+	}
+	if !responseBody.RolledBack || responseBody.GainedExp != 1 {
+		t.Fatalf("expected rollback and 1 XP, got %#v", responseBody)
+	}
+
+	arcade, err = app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatalf("failed to load rolled-back arcade: %v", err)
+	}
+	rolledBackStateID := arcade.GetString("game_v2")
+	if rolledBackStateID == updatedStateID {
+		t.Fatal("expected rollback to create a new game state")
+	}
+	rows, err := app.FindRecordsByFilter("arcade_game_history", "batch={:batch} && entry={:entry}", "", 1, 0, map[string]any{
+		"batch": rolledBackStateID,
+		"entry": gameID,
+	})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("expected one rolled-back game row, err=%v rows=%d", err, len(rows))
+	}
+	campaign, err := app.FindRecordById("arcade_campaign", campaignID)
+	if err != nil {
+		t.Fatalf("failed to load campaign: %v", err)
+	}
+	if rows[0].GetString("version") != campaign.GetString("from_version") {
+		t.Fatalf("expected rollback version %q, got %q", campaign.GetString("from_version"), rows[0].GetString("version"))
+	}
+
+	checks, err := app.FindRecordsByFilter("arcade_campaign_check", "campaign={:campaign} && arcade={:arcade} && game_id={:game_id}", "-created", 0, 0, map[string]any{
+		"campaign": campaignID,
+		"arcade":   arcadeID,
+		"game_id":  gameID,
+	})
+	if err != nil || len(checks) != 2 {
+		t.Fatalf("expected two campaign report events, err=%v checks=%d", err, len(checks))
+	}
+	if checks[0].GetString("result") != "still_old" || checks[0].GetBool("location_verified") || checks[1].GetString("result") != "updated" || checks[1].GetBool("location_verified") {
+		t.Fatalf("expected newest-first unverified report history, got %#v", checks)
+	}
+}
+
+func TestCampaignCheckStoresVerifiedLocation(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, arcadeID, campaignID, gameID, _ := seedCampaignCheckFixture(t, app, nil)
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatalf("failed to load arcade: %v", err)
+	}
+	seedArcadeVisit(t, app, arcade.GetString("createdBy"), arcadeID, time.Now().UTC())
+
+	body := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"updated"}`, campaignID, arcadeID, gameID)
+	response := executeJSONRequest(t, app, http.MethodPost, "/campaign/check", body, map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected verified report to succeed, got %d", response.StatusCode)
+	}
+	checks, err := app.FindRecordsByFilter("arcade_campaign_check", "campaign={:campaign} && game_id={:game_id}", "", 0, 0, map[string]any{
+		"campaign": campaignID,
+		"game_id":  gameID,
+	})
+	if err != nil || len(checks) != 1 || !checks[0].GetBool("location_verified") {
+		t.Fatalf("expected verified campaign report, err=%v checks=%d", err, len(checks))
+	}
+}
+
 func TestGetCampaignIncludesUpdatedItemsAndReportLog(t *testing.T) {
 	app := newArcadeTestApp(t)
 	firstToken, arcadeID, campaignID, gameID, _ := seedCampaignCheckFixture(t, app, []string{"supporter"})
-	secondToken, _ := createAuthUserWithTags(t, app, []string{"supporter"})
+	secondToken, secondUser := createAuthUserWithTags(t, app, []string{"supporter"})
+	setCampaignUserExp(t, app, secondUser.Id, 59)
 	campaign, err := app.FindRecordById("arcade_campaign", campaignID)
 	if err != nil {
 		t.Fatalf("failed to load campaign: %v", err)
@@ -180,6 +332,13 @@ func TestGetCampaignIncludesUpdatedItemsAndReportLog(t *testing.T) {
 	}
 	if reportedTarget["last_still_old_report"] == nil {
 		t.Fatal("expected updated target to retain the latest still_old reporter")
+	}
+	reports, ok := reportedTarget["reports"].([]any)
+	if !ok || len(reports) != 2 {
+		t.Fatalf("expected updated target report history, got %#v", reportedTarget["reports"])
+	}
+	if report, ok := reports[0].(map[string]any); !ok || report["location_verified"] != false {
+		t.Fatalf("expected report location status in target history, got %#v", reports[0])
 	}
 	if len(payload.Logs) != 2 {
 		t.Fatalf("expected two campaign reports, got %d", len(payload.Logs))
@@ -280,6 +439,9 @@ func seedCampaignCheckFixture(tb testing.TB, app *tests.TestApp, tags []string) 
 	ensureCampaignCollectionsForTest(tb, app)
 
 	token, user := createAuthUserWithTags(tb, app, tags)
+	if len(tags) > 0 {
+		setCampaignUserExp(tb, app, user.Id, 59)
+	}
 	arcadeID, _ = seedPublicArcade(tb, app, user.Id, arcadeSeed{
 		Name:     "Campaign Arcade",
 		Address:  "Campaign Street",
@@ -315,6 +477,24 @@ func seedCampaignCheckFixture(tb testing.TB, app *tests.TestApp, tags []string) 
 	campaignID = campaign.Id
 
 	return token, arcadeID, campaignID, gameID, stateID
+}
+
+func setCampaignUserExp(tb testing.TB, app *tests.TestApp, userID string, exp int) {
+	tb.Helper()
+	collection, err := app.FindCollectionByNameOrId("user_level")
+	if err != nil {
+		tb.Fatalf("failed to load user level collection: %v", err)
+	}
+	record, err := app.FindRecordById("user_level", userID)
+	if err != nil {
+		record = core.NewRecord(collection)
+		record.Set("id", userID)
+		record.Set("user", userID)
+	}
+	record.Set("exp", exp)
+	if err := app.Save(record); err != nil {
+		tb.Fatalf("failed to set campaign user exp: %v", err)
+	}
 }
 
 func ensureCampaignCollectionsForTest(tb testing.TB, app core.App) {
@@ -377,6 +557,7 @@ func ensureCampaignCollectionsForTest(tb testing.TB, app core.App) {
 			&core.RelationField{Name: "game_id", CollectionId: entries.Id, Required: true, MaxSelect: 1},
 			&core.RelationField{Name: "user", CollectionId: users.Id, Required: true, MaxSelect: 1},
 			&core.SelectField{Name: "result", Values: []string{"still_old", "updated"}, Required: true, MaxSelect: 1},
+			&core.BoolField{Name: "location_verified"},
 			&core.TextField{Name: "state_id", Max: 15},
 			&core.AutodateField{Name: "created", OnCreate: true},
 			&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},

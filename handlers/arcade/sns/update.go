@@ -184,7 +184,7 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 			return fmt.Errorf("failed to update arcade.sns: %w", err)
 		}
 		if arcadeRec.GetBool("public") {
-			nextExp, _, err := userhandler.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "sns", 3, baseExp, time.Now().UTC())
+			nextExp, _, err := userhandler.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "sns", 2, baseExp, time.Now().UTC())
 			if err != nil {
 				return err
 			}

@@ -194,7 +194,7 @@ func ArcadeGameEditExp(changedEntries int) int {
 	if changedEntries <= 0 {
 		return 0
 	}
-	if exp := 2*changedEntries + 1; exp < 10 {
+	if exp := 2 * changedEntries; exp < 10 {
 		return exp
 	}
 	return 10
@@ -202,6 +202,13 @@ func ArcadeGameEditExp(changedEntries int) int {
 
 func ArcadePhotoSubmissionKind(arcadeID string) string {
 	return "xp:arcade-photo-submission:" + strings.TrimSpace(arcadeID)
+}
+
+// ArcadePhotoGrantKind identifies the one-time publication of a photo atom.
+// Photo atoms are immutable once published, so the atom id is a stable
+// idempotency key even when a later photo molecule reorders or removes it.
+func ArcadePhotoGrantKind(arcadeID, atomID string) string {
+	return "xp:arcade-photo:" + strings.TrimSpace(arcadeID) + ":" + strings.TrimSpace(atomID)
 }
 
 func ArcadeVisitKind(visitID string) string {
@@ -506,6 +513,102 @@ ORDER BY created ASC, id ASC
 	return AwardExpTx(txApp, userID, kind, diffExp, baseExp)
 }
 
+// AwardArcadePhotoExpTx awards two XP for each atom that is being published
+// for the first time. The rolling seven-day cap is scoped to one user and
+// arcade: campaign targets have a 10 XP cap and other public arcades have a
+// 4 XP cap. Callers must pass only atoms whose public flag was false before
+// this transaction; AwardExpTx provides the final per-atom idempotency guard.
+func AwardArcadePhotoExpTx(txApp core.App, userID, arcadeID string, atomIDs []string, campaignTarget bool, baseExp int, now time.Time) (int, bool, error) {
+	userID = strings.TrimSpace(userID)
+	arcadeID = strings.TrimSpace(arcadeID)
+	atomIDs = uniqueGameEntryIDs(atomIDs)
+	if userID == "" {
+		return 0, false, fmt.Errorf("user id is required")
+	}
+	if arcadeID == "" {
+		return 0, false, fmt.Errorf("arcade id is required")
+	}
+	if len(atomIDs) == 0 {
+		return baseExp, false, nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	} else {
+		now = now.UTC()
+	}
+
+	eligible, err := IsExpEligible(txApp, userID)
+	if err != nil {
+		return 0, false, err
+	}
+	if !eligible {
+		return baseExp, false, nil
+	}
+
+	currentExp, err := ensureUserLevelBaseTx(txApp, userID, baseExp)
+	if err != nil {
+		return 0, false, err
+	}
+
+	capExp := 4
+	if campaignTarget {
+		capExp = 10
+	}
+	cutoff := now.Add(-7 * 24 * time.Hour)
+	prefix := "xp:arcade-photo:" + arcadeID + ":%"
+	rows, err := txApp.DB().NewQuery(`
+SELECT COALESCE(diff_exp, 0) AS diff_exp, COALESCE(created, '') AS created
+FROM user_level_log
+WHERE "user" = {:user} AND kind LIKE {:kind}
+ORDER BY created ASC, id ASC
+`).Bind(dbx.Params{"user": userID, "kind": prefix}).Rows()
+	if err != nil {
+		return 0, false, fmt.Errorf("query arcade photo edit window failed: %w", err)
+	}
+	defer rows.Close()
+	awardedExp := 0
+	for rows.Next() {
+		var diffExp int
+		var created string
+		if err := rows.Scan(&diffExp, &created); err != nil {
+			return 0, false, fmt.Errorf("scan arcade photo edit window failed: %w", err)
+		}
+		lastCreated, parseErr := parseLevelLogCreated(created)
+		if parseErr != nil || !lastCreated.After(cutoff) || diffExp <= 0 {
+			continue
+		}
+		awardedExp += diffExp
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, fmt.Errorf("iterate arcade photo edit window failed: %w", err)
+	}
+
+	remaining := capExp - awardedExp
+	if remaining <= 0 {
+		return currentExp, false, nil
+	}
+	granted := false
+	for _, atomID := range atomIDs {
+		if remaining <= 0 {
+			break
+		}
+		grant := 2
+		if grant > remaining {
+			grant = remaining
+		}
+		nextExp, didGrant, err := AwardExpTx(txApp, userID, ArcadePhotoGrantKind(arcadeID, atomID), grant, currentExp)
+		if err != nil {
+			return 0, false, err
+		}
+		if didGrant {
+			currentExp = nextExp
+			remaining -= grant
+			granted = true
+		}
+	}
+	return currentExp, granted, nil
+}
+
 type arcadePublicBackfillGrant struct {
 	kind string
 	diff int
@@ -542,7 +645,7 @@ func PreviewArcadePublicExp(app core.App, userID, arcadeID string) (ArcadePublic
 	if awarded, err := HasLevelLogKind(app, userID, ArcadePublicKind(arcadeID)); err != nil {
 		return ArcadePublicExpPreview{}, err
 	} else if !awarded {
-		publicExp = 10
+		publicExp = 5
 		currentExp += publicExp
 	}
 
@@ -645,7 +748,12 @@ ORDER BY c.created ASC, c.id ASC
 			continue
 		}
 		seenChange[changed] = struct{}{}
-		grants = append(grants, arcadePublicBackfillGrant{kind: ArcadePublicBackfillKind(arcadeID, changed), diff: 3})
+		// Public-conversion backfill follows the current edit policy. Photo
+		// history is handled by per-atom publication grants below (and is not a
+		// blanket one-time grant).
+		if changed != "photo" {
+			grants = append(grants, arcadePublicBackfillGrant{kind: ArcadePublicBackfillKind(arcadeID, changed), diff: 2})
+		}
 	}
 	if err := changeRows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate arcade backfill changelog failed: %w", err)
@@ -677,7 +785,7 @@ ORDER BY f.created ASC, f.id ASC
 	}
 
 	reactionRows, err := app.DB().NewQuery(`
-SELECT r.id AS id, COALESCE(r.created, '') AS created
+SELECT r.id AS id, r.reaction AS reaction, COALESCE(r.created, '') AS created
 FROM arcade_flag_reaction r
 INNER JOIN arcade_flag f ON f.id = r.flag
 INNER JOIN arcade a ON a.id = f.arcade
@@ -692,41 +800,23 @@ ORDER BY r.created ASC, r.id ASC
 	defer reactionRows.Close()
 
 	for reactionRows.Next() {
-		var rowID, created string
-		if err := reactionRows.Scan(&rowID, &created); err != nil {
+		var rowID, reaction, created string
+		if err := reactionRows.Scan(&rowID, &reaction, &created); err != nil {
 			return nil, fmt.Errorf("scan arcade backfill reaction failed: %w", err)
 		}
-		grants = append(grants, arcadePublicBackfillGrant{kind: FlagReactionKind(rowID), diff: 3})
+		diff := 0
+		switch strings.TrimSpace(reaction) {
+		case "issue_persist":
+			diff = 2
+		case "fixed":
+			diff = 3
+		}
+		if diff > 0 {
+			grants = append(grants, arcadePublicBackfillGrant{kind: FlagReactionKind(rowID), diff: diff})
+		}
 	}
 	if err := reactionRows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate arcade backfill reactions failed: %w", err)
-	}
-
-	photoRows, err := app.DB().NewQuery(`
-SELECT p.arcade AS arcade_id
-FROM arcade_photo_atoms p
-INNER JOIN arcade a ON a.id = p.arcade
-WHERE p.createdBy = {:user}
-  AND p.arcade = {:arcade}
-  AND p.public = 1
-` + publicFilter + `
-ORDER BY p.created ASC, p.id ASC
-LIMIT 1
-`).Bind(dbx.Params{"user": userID, "arcade": arcadeID}).Rows()
-	if err != nil {
-		return nil, fmt.Errorf("query arcade backfill photo submission failed: %w", err)
-	}
-	defer photoRows.Close()
-
-	if photoRows.Next() {
-		var rowArcade string
-		if err := photoRows.Scan(&rowArcade); err != nil {
-			return nil, fmt.Errorf("scan arcade backfill photo submission failed: %w", err)
-		}
-		grants = append(grants, arcadePublicBackfillGrant{kind: ArcadePhotoSubmissionKind(arcadeID), diff: 5})
-	}
-	if err := photoRows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate arcade backfill photo submission failed: %w", err)
 	}
 
 	return grants, nil

@@ -80,11 +80,8 @@ func buildGameDiffLogItem(newAtomID string, g GameAtomInput, prevAtom *core.Reco
 		item.Diff = arcadeinternal.AppendDiffEntry(item.Diff, "quantity", prevQuantity, g.Quantity)
 	}
 
-	nextPrice := any(g.RawPrice)
-	if nextPrice == nil {
-		nextPrice = NormalizePriceForStorage(g.Price)
-	}
-	prevPrice := prevAtom.Get("price")
+	nextPrice := gamePriceForComparison(g)
+	prevPrice := normalizePriceForComparison(prevAtom.Get("price"))
 	if !arcadeinternal.JSONValueEqual(prevPrice, nextPrice) {
 		item.Bullets = append(item.Bullets, arcadeinternal.BuildI18nBullet("arcade.changelog.game.price.changed", nil))
 		item.Diff = arcadeinternal.AppendDiffEntry(item.Diff, "price", prevPrice, nextPrice)

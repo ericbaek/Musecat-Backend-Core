@@ -448,4 +448,4 @@ transactions. Core's schema migration bootstraps only a fresh test database.
 
 `POST /arcade/visit` additionally returns `first_visit_to_arcade`, true only for the newly
 committed first visit; duplicate same-day requests return false and never award another
-stamp or XP. Existing 6/3 XP remains unchanged. Passport is GPS visit evidence, not play evidence.
+stamp or XP. The first visit awards 5 XP and a revisit awards 2 XP. Passport is GPS visit evidence, not play evidence.

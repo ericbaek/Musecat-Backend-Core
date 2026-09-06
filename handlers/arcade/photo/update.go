@@ -9,6 +9,7 @@ import (
 
 	"github.com/pocketbase/pocketbase/core"
 
+	arcadecampaign "github.com/ericbaek/musecat-backend-core/handlers/arcade/campaign"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
@@ -72,9 +73,17 @@ func UpdateArcadePhoto(re *core.RequestEvent) error {
 	var xpFeedback userhandler.ExpFeedback
 
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
+		now := time.Now().UTC()
 		arcadeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
+		}
+		campaignTarget := false
+		if arcadeRec.GetBool("public") {
+			campaignTarget, err = arcadecampaign.IsPhotoCampaignTarget(txApp, body.Arcade, now)
+			if err != nil {
+				return fmt.Errorf("failed to determine photo campaign target: %w", err)
+			}
 		}
 		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
@@ -96,6 +105,7 @@ func UpdateArcadePhoto(re *core.RequestEvent) error {
 			prevPhotoSet[strings.TrimSpace(photoID)] = struct{}{}
 		}
 
+		newlyPublicAtomIDs := make([]string, 0, len(body.Photos))
 		for i, atomID := range body.Photos {
 			atom, err := txApp.FindRecordById(arcadeinternal.CollectionArcadePhotoAtoms, atomID)
 			if err != nil {
@@ -105,6 +115,7 @@ func UpdateArcadePhoto(re *core.RequestEvent) error {
 				return fmt.Errorf("photos[%d] does not belong to arcade", i)
 			}
 			if !atom.GetBool("public") {
+				newlyPublicAtomIDs = append(newlyPublicAtomIDs, atom.Id)
 				atom.Set("public", true)
 				if err := txApp.Save(atom); err != nil {
 					return fmt.Errorf("failed to promote photos[%d] to public: %w", i, err)
@@ -157,8 +168,8 @@ func UpdateArcadePhoto(re *core.RequestEvent) error {
 		); err != nil {
 			return fmt.Errorf("failed to update arcade.photo: %w", err)
 		}
-		if arcadeRec.GetBool("public") {
-			nextExp, _, err := userhandler.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "photo", 3, baseExp, time.Now().UTC())
+		if arcadeRec.GetBool("public") && len(newlyPublicAtomIDs) > 0 {
+			nextExp, _, err := userhandler.AwardArcadePhotoExpTx(txApp, re.Auth.Id, body.Arcade, newlyPublicAtomIDs, campaignTarget, baseExp, now)
 			if err != nil {
 				return err
 			}

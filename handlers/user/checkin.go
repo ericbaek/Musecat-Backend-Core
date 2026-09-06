@@ -7,7 +7,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-const checkInExp = 2
+const checkInExp = 1
 
 func CheckIn(re *core.RequestEvent) error {
 	if re.Auth == nil || strings.TrimSpace(re.Auth.Id) == "" {

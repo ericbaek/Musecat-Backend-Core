@@ -229,8 +229,8 @@ func TestUpdateArcadeGameDelta_AwardsCumulativeDistinctEntryXP(t *testing.T) {
 		testGameObject(versionA, entryA, "3F", 550, ""),
 		testGameObject(versionB, entryB, "4F", 650, ""),
 	}, nil))
-	if got := xpDiff(t, first); got != 5 {
-		t.Fatalf("two changed entries should award 5 XP, got %d", got)
+	if got := xpDiff(t, first); got != 4 {
+		t.Fatalf("two changed entries should award 4 XP, got %d", got)
 	}
 
 	second := postGameDelta(t, app, headers, gameDeltaRequest(t, arcadeID, gameStateID(t, first), []map[string]any{
@@ -262,7 +262,7 @@ func TestUpdateArcadeGameDelta_AwardsCumulativeDistinctEntryXP(t *testing.T) {
 	}
 
 	fourth := postGameDelta(t, app, headers, gameDeltaRequest(t, arcadeID, gameStateID(t, third), nil, []map[string]any{testGameObject(versionB, entryB, "7F", 750, "")}, nil))
-	if got := xpDiff(t, fourth); got != 3 {
+	if got := xpDiff(t, fourth); got != 2 {
 		t.Fatalf("an entry should be eligible again after the seven-day window, got %d", got)
 	}
 }

@@ -18,8 +18,8 @@ import (
 const (
 	visitRadiusMeters      = 100.0
 	maxVisitAccuracyMeters = 100.0
-	firstVisitExp          = 6
-	revisitExp             = 3
+	firstVisitExp          = 5
+	revisitExp             = 2
 )
 
 var visitNow = func() time.Time { return time.Now().UTC() }

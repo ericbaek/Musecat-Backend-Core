@@ -95,8 +95,8 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 		if !ok {
 			tb.Fatalf("expected xp_feedback object, got %T", payload["xp_feedback"])
 		}
-		if got := feedback["diff_exp"]; got != float64(24) {
-			tb.Fatalf("expected total public conversion XP diff=24, got %#v", got)
+		if got := feedback["diff_exp"]; got != float64(11) {
+			tb.Fatalf("expected total public conversion XP diff=11, got %#v", got)
 		}
 
 		logs, err := app.FindRecordsByFilter("user_level_log", "user={:user}", "created", 0, 0, map[string]any{"user": userID})
@@ -104,11 +104,10 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 			tb.Fatalf("failed to load XP ledger: %v", err)
 		}
 		expectedLogs := map[string]int{
-			userhandler.ArcadePublicKind(arcadeID):                  10,
-			userhandler.ArcadePublicBackfillKind(arcadeID, "basic"): 3,
-			userhandler.ArcadePublicBackfillKind(arcadeID, "game"):  3,
-			userhandler.ArcadePublicBackfillKind(arcadeID, "hour"):  3,
-			userhandler.ArcadePhotoSubmissionKind(arcadeID):         5,
+			userhandler.ArcadePublicKind(arcadeID):                  5,
+			userhandler.ArcadePublicBackfillKind(arcadeID, "basic"): 2,
+			userhandler.ArcadePublicBackfillKind(arcadeID, "game"):  2,
+			userhandler.ArcadePublicBackfillKind(arcadeID, "hour"):  2,
 		}
 		if len(logs) != len(expectedLogs) {
 			tb.Fatalf("expected %d XP ledger rows, got %d", len(expectedLogs), len(logs))
@@ -131,8 +130,8 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load user level: %v", err)
 		}
-		if got := level.GetInt("exp"); got != 24 {
-			tb.Fatalf("expected user level exp=24, got %d", got)
+		if got := level.GetInt("exp"); got != 11 {
+			tb.Fatalf("expected user level exp=11, got %d", got)
 		}
 
 		arcadeRec, err := app.FindRecordById("arcade", arcadeID)
@@ -253,10 +252,10 @@ func TestPreviewPublicArcadeXP(t *testing.T) {
 	}
 	for key, want := range map[string]float64{
 		"current_exp":    0,
-		"public_exp":     10,
-		"backfill_exp":   9,
-		"estimated_exp":  19,
-		"estimated_gain": 19,
+		"public_exp":     5,
+		"backfill_exp":   6,
+		"estimated_exp":  11,
+		"estimated_gain": 11,
 	} {
 		if got := preview[key]; got != want {
 			t.Fatalf("preview %s=%v, want %v", key, got, want)
@@ -292,7 +291,7 @@ func TestArcadePublicBackfillIgnoresEditCooldownAndDeduplicatesArea(t *testing.T
 	// A recent normal game edit grant must not suppress the draft game's
 	// one-time public-conversion backfill.
 	if err := app.RunInTransaction(func(txApp core.App) error {
-		_, granted, err := userhandler.AwardArcadeEditExpTx(txApp, user.Id, arcadeID, "game", 3, 0, now)
+		_, granted, err := userhandler.AwardArcadeEditExpTx(txApp, user.Id, arcadeID, "game", 2, 0, now)
 		if err != nil {
 			return err
 		}
@@ -327,11 +326,11 @@ func TestArcadePublicBackfillIgnoresEditCooldownAndDeduplicatesArea(t *testing.T
 		t.Fatalf("expected xp_preview object, got %T", payload["xp_preview"])
 	}
 	for key, want := range map[string]float64{
-		"current_exp":    3,
-		"public_exp":     10,
-		"backfill_exp":   6,
-		"estimated_exp":  19,
-		"estimated_gain": 16,
+		"current_exp":    2,
+		"public_exp":     5,
+		"backfill_exp":   4,
+		"estimated_exp":  11,
+		"estimated_gain": 9,
 	} {
 		if got := preview[key]; got != want {
 			t.Fatalf("preview %s=%v, want %v", key, got, want)
@@ -356,16 +355,16 @@ func TestArcadePublicBackfillIgnoresEditCooldownAndDeduplicatesArea(t *testing.T
 		if err != nil {
 			return err
 		}
-		if next != 9 {
-			return fmt.Errorf("expected current exp 9 after backfill, got %d", next)
+		if next != 6 {
+			return fmt.Errorf("expected current exp 6 after backfill, got %d", next)
 		}
 
 		// The backfill must not consume the normal edit cooldown for another area.
-		next, granted, err := userhandler.AwardArcadeEditExpTx(txApp, user.Id, arcadeID, "basic", 3, next, now)
+		next, granted, err := userhandler.AwardArcadeEditExpTx(txApp, user.Id, arcadeID, "basic", 2, next, now)
 		if err != nil {
 			return err
 		}
-		if !granted || next != 12 {
+		if !granted || next != 8 {
 			return fmt.Errorf("expected immediate normal basic edit grant after backfill, granted=%t exp=%d", granted, next)
 		}
 
@@ -374,8 +373,8 @@ func TestArcadePublicBackfillIgnoresEditCooldownAndDeduplicatesArea(t *testing.T
 		if err != nil {
 			return err
 		}
-		if next != 12 {
-			return fmt.Errorf("expected repeated backfill to leave exp at 12, got %d", next)
+		if next != 8 {
+			return fmt.Errorf("expected repeated backfill to leave exp at 8, got %d", next)
 		}
 		return nil
 	}); err != nil {

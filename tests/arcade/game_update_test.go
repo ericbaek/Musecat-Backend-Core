@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -985,6 +986,130 @@ func TestUpdateArcadeGame_LogsUnchangedWhenNoDiff(t *testing.T) {
 		}
 		if got, _ := itemObj["change_type"].(string); got != "unchanged" {
 			tb.Fatalf("expected log.change_type=unchanged, got %v", itemObj["change_type"])
+		}
+	}
+
+	scenario.Test(t)
+}
+
+func TestUpdateArcadeGame_LocationOnlyDoesNotLogEquivalentPriceChange(t *testing.T) {
+	headers := map[string]string{}
+	var arcadeID string
+	var prevAtomID string
+
+	scenario := tests.ApiScenario{
+		Name:           "PUT /arcade/game does not log equivalent price change",
+		Method:         http.MethodPut,
+		URL:            "/arcade/game",
+		Headers:        headers,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"count":1`,
+		},
+		TestAppFactory: func(tb testing.TB) *tests.TestApp {
+			return newArcadeTestApp(tb)
+		},
+	}
+
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		tb.Helper()
+
+		token, user := createAuthUser(tb, app)
+		headers["Authorization"] = "Bearer " + token
+
+		arcadeID, _ = seedArcade(tb, app, user.Id, arcadeSeed{
+			Name:     "Equivalent Price Arcade",
+			Address:  "Equivalent Price Street",
+			Nickname: []string{"EquivalentPrice"},
+			Location: location{Lat: 37.5665, Lon: 126.978},
+		})
+
+		versionID := seedGameSeriesVersion(tb, app)
+		seedGameAtom(tb, app, arcadeID, versionID, map[string]any{
+			"currency": "KRW",
+			"type":     "custom",
+			"list":     []map[string]any{{"value": 1000}},
+			"accept":   []string{"Cash"},
+		})
+
+		arcadeRec, err := app.FindRecordById("arcade", arcadeID)
+		if err != nil {
+			tb.Fatalf("failed to load arcade: %v", err)
+		}
+		prevMoleculeID := arcadeRec.GetString("game_v2")
+		if prevMoleculeID == "" {
+			tb.Fatalf("expected previous game molecule id")
+		}
+		prevAtoms, err := app.FindRecordsByFilter("arcade_game_history", "batch={:id}", "", 0, 0, dbx.Params{"id": prevMoleculeID})
+		if err != nil {
+			tb.Fatalf("failed to load previous game atoms: %v", err)
+		}
+		if len(prevAtoms) != 1 {
+			tb.Fatalf("expected 1 previous game atom, got %d", len(prevAtoms))
+		}
+		prevAtomID = prevAtoms[0].GetString("entry")
+
+		scenario.Body = strings.NewReader(fmt.Sprintf(`{
+			"arcade":"%s",
+			"base_state_id":"%s",
+			"add":[],
+			"modify":[
+				{
+					"game":"%s",
+					"id":"%s",
+					"location":"위치를 변경합니다.",
+					"quantity":1,
+					"price":{
+						"currency":"KRW",
+						"type":"custom",
+						"list":[{"value":1000,"represent":false}],
+						"accept":["Cash"]
+					},
+					"tag":[{"category":"기타","quantity":1,"note":"ok"}]
+				}
+			],
+			"remove":[]
+		}`, arcadeID, prevMoleculeID, versionID, prevAtomID))
+	}
+
+	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
+		tb.Helper()
+		defer res.Body.Close()
+
+		changes, err := app.FindRecordsByFilter("arcade_changelog", "arcade={:id} && changed='game'", "-created", 0, 0, dbx.Params{"id": arcadeID})
+		if err != nil {
+			tb.Fatalf("failed to load arcade_changelog: %v", err)
+		}
+		if len(changes) != 1 {
+			tb.Fatalf("expected 1 game changelog row, got %d", len(changes))
+		}
+
+		logObj := decodeLogObject(tb, changes[0].Get("log"))
+		items, ok := logObj["items"].([]any)
+		if !ok || len(items) != 1 {
+			tb.Fatalf("expected changelog.log.items size 1, got %T %#v", logObj["items"], logObj["items"])
+		}
+		itemObj, ok := items[0].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected log item object, got %T", items[0])
+		}
+		if got, _ := itemObj["entry_id"].(string); got != prevAtomID {
+			tb.Fatalf("expected log.entry_id=%q, got %v", prevAtomID, itemObj["entry_id"])
+		}
+		if got, _ := itemObj["change_type"].(string); got != "updated" {
+			tb.Fatalf("expected log.change_type=updated, got %v", itemObj["change_type"])
+		}
+
+		before, ok := itemObj["before"].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected log.before object, got %T", itemObj["before"])
+		}
+		after, ok := itemObj["after"].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected log.after object, got %T", itemObj["after"])
+		}
+		if !reflect.DeepEqual(before["price"], after["price"]) {
+			tb.Fatalf("expected equivalent before/after prices, got before=%#v after=%#v", before["price"], after["price"])
 		}
 	}
 

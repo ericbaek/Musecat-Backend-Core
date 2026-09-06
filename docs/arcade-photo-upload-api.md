@@ -95,3 +95,10 @@ After upload completes, call the existing `PUT /arcade/photo`:
 ```
 
 This creates/updates the molecule and sets `arcade.photo`.
+
+Uploading creates pending atoms and awards no XP. The confirm request awards
+2 XP per atom only when it publishes that atom for the first time, capped over
+the rolling seven-day window at 10 XP for a photo-campaign target and 4 XP for
+another public arcade. Reordering, removal, and reuse of a previously
+published atom award no XP. The authoritative amount is returned in the
+confirm response's `xp_feedback` object.

@@ -392,13 +392,13 @@ flag는 `arcade_flag.game_id`에 durable `arcade_game_id`를 저장한다.
 | rolling 7일 window의 누적 고유 entry 수 | 목표 XP |
 |---:|---:|
 | 0 | 0 |
-| 1 | 3 |
-| 2 | 5 |
-| 3 | 7 |
-| 4 | 9 |
+| 1 | 2 |
+| 2 | 4 |
+| 3 | 6 |
+| 4 | 8 |
 | 5 이상 | 10 |
 
-공식은 `n >= 1`일 때 `min(10, 2*n + 1)`이다.
+공식은 `min(10, 2*n)`이다.
 
 새로 계산되는 entry에 포함되는 것:
 
@@ -414,21 +414,21 @@ flag는 `arcade_flag.game_id`에 durable `arcade_game_id`를 저장한다.
 게임 영역은 마지막 grant 기준 hard cooldown을 사용하지 않는다. 같은 user +
 arcade + `game` part에 대해 rolling 7일 window를 만들고, 그 안에서 실제로
 변경된 고유 `arcade_game_id`를 deduplicate한다. 누적 고유 entry 수를 `n`이라
-하면 목표 XP는 `min(10, 2*n + 1)`이고, 이번 요청에는 이미 지급된 XP를 뺀
+하면 목표 XP는 `min(10, 2*n)`이고, 이번 요청에는 이미 지급된 XP를 뺀
 차액만 지급한다.
 
-예를 들어 첫 요청에서 A/B 두 entry를 수정하면 5 XP를 받고, 다음 요청에서
-새 entry C를 수정하면 누적 목표가 7 XP가 되어 추가로 2 XP를 받는다. 다음
+예를 들어 첫 요청에서 A/B 두 entry를 수정하면 4 XP를 받고, 다음 요청에서
+새 entry C를 수정하면 누적 목표가 6 XP가 되어 추가로 2 XP를 받는다. 다음
 요청에서 A를 다시 수정하면 이미 계산된 entry이므로 0 XP다. 7일이 지나 A가
 window에서 빠지면 다시 새 변경으로 계산된다. 다른 user, arcade, part는
 별도 window다.
 
-`xp_feedback.diff_exp`와 `user_level_log.diff_exp`에는 실제 지급된 3~10 XP가
+`xp_feedback.diff_exp`와 `user_level_log.diff_exp`에는 실제 지급된 2~10 XP가
 기록된다. 실제 변경이 없거나 window 안에서 이미 계산된 entry만 수정하면 0이다.
 
 다른 영역은 기존 정책을 유지한다.
 
-- basic/hour/sns/gtk/photo: eligible할 때 3 XP
+- basic/hour/sns/gtk/photo: eligible할 때 2 XP
 - admin bulk version: XP 없음
 - campaign reward: 기존 별도 정책
 - public-conversion reward와 historical backfill: 기존 별도 정책
@@ -528,7 +528,7 @@ release에서 한다.
 - 재사용 identity의 미해결 flag가 active item에 다시 연결된다.
 - changelog에 added/updated/unchanged/deleted와 before/after가 기록된다.
 - rolling 7일 window의 누적 고유 entry 수가 0/1/2/3/4/5+일 때 목표 XP가
-  0/3/5/7/9/10으로 계산된다.
+  0/2/4/6/8/10으로 계산된다.
 - 같은 user + arcade + game part에서 이미 계산된 entry를 다시 수정하면 0 XP다.
 - 새 entry는 7일 누적 목표와 이미 지급된 XP의 차액만큼 추가 지급된다.
 - entry가 7일 window에서 빠지면 다시 계산되며, 다른 arcade/part/user의 window는 서로 격리된다.

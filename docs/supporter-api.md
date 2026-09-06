@@ -8,8 +8,8 @@ This document covers the supporter verification flow:
 The score endpoint is ledger-based. It reads `user_level_log` and exposes the XP timeline directly instead of aggregating by arcade.
 
 ## XP Rules
-- `public` arcade creation: `10` XP
-- Arcade edit bonus: basic/hour/sns/gtk/photo edits grant `3` XP when eligible. Game edits use the rolling seven-day distinct-entry target `0 → 0`, `1 → 3`, `2 → 5`, `3 → 7`, `4 → 9`, and `5+ → 10` XP; each request receives only the incremental difference from that target already awarded in the window.
+- `public` arcade creation or conversion: `5` XP
+- Arcade edit bonus: basic/hour/sns/gtk edits grant `2` XP when eligible. Game edits use the rolling seven-day distinct-entry target `0 → 0`, `1 → 2`, `2 → 4`, `3 → 6`, `4 → 8`, and `5+ → 10` XP; each request receives only the incremental difference from that target already awarded in the window.
 - `photo_submission`: `5` XP
 - `flag`: `5` XP
 - `flag_reaction`: `3` XP
@@ -22,7 +22,7 @@ previews likewise report no eligible XP during this period.
 
 Basic/hour/sns/gtk/photo grants use the existing seven-day cooldown per user +
 arcade + part. Game edits instead use a rolling seven-day set of distinct
-`arcade_game_id` values. The target is `min(10, 2*n + 1)` and each request gets
+`arcade_game_id` values. The target is `min(10, 2*n)` and each request gets
 only the incremental difference from XP already granted in that window. A
 second edit to an entry already counted in the window gets `0`; once the entry
 falls out of the seven-day window it can count again. Different users, arcades,

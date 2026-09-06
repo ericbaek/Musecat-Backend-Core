@@ -11,6 +11,7 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	pbtypes "github.com/pocketbase/pocketbase/tools/types"
 
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
@@ -26,6 +27,8 @@ const (
 	resultUpdated           = "updated"
 	campaignBypassRewardExp = 1
 	campaignReportLimit     = 500
+	campaignRollbackWindow  = 7 * 24 * time.Hour
+	campaignBypassLevel     = 10
 )
 
 type campaignMutationBody struct {
@@ -83,11 +86,12 @@ type candidateRow struct {
 }
 
 type campaignCheckRow struct {
-	CheckID string
-	UserID  string
-	Result  string
-	Created string
-	Updated string
+	CheckID          string
+	UserID           string
+	Result           string
+	LocationVerified bool
+	Created          string
+	Updated          string
 	candidateRow
 }
 
@@ -169,6 +173,7 @@ func GetCampaign(re *core.RequestEvent) error {
 	latestUpdatedByTarget := latestCampaignCheckByTarget(checkRows, resultUpdated)
 	for index, row := range rows {
 		items[index]["status"] = "pending"
+		items[index]["reports"] = campaignReportSummaries(re.App, checkRows, row, userCache)
 		if report, ok := latestStillOldByTarget[campaignTargetKey(row.ArcadeID, row.GameID)]; ok {
 			items[index]["status"] = resultStillOld
 			items[index]["last_still_old_report"] = campaignReportSummary(re.App, report, userCache)
@@ -176,8 +181,10 @@ func GetCampaign(re *core.RequestEvent) error {
 	}
 	for index, row := range updatedRows {
 		updatedItems[index]["status"] = resultUpdated
+		updatedItems[index]["reports"] = campaignReportSummaries(re.App, checkRows, row, userCache)
 		if report, ok := latestUpdatedByTarget[campaignTargetKey(row.ArcadeID, row.GameID)]; ok {
 			updatedItems[index]["updated_report"] = campaignReportSummary(re.App, report, userCache)
+			updatedItems[index]["can_revert"] = campaignReportWithinRollbackWindow(report, time.Now().UTC())
 		}
 		if report, ok := latestStillOldByTarget[campaignTargetKey(row.ArcadeID, row.GameID)]; ok {
 			updatedItems[index]["last_still_old_report"] = campaignReportSummary(re.App, report, userCache)
@@ -235,16 +242,42 @@ func ListArcadeCampaigns(re *core.RequestEvent) error {
 		if err != nil {
 			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load campaign targets", "details": err.Error()})
 		}
+		updatedRows, err := loadUpdatedCampaignRowsForArcade(re.App, config, arcadeID)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load updated campaign targets", "details": err.Error()})
+		}
+		checkRows, err := loadCampaignCheckRows(re.App, config)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load campaign reports", "details": err.Error()})
+		}
 		summary, err := buildCampaignSummary(re.App, config, len(rows))
 		if err != nil {
 			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build campaign", "details": err.Error()})
 		}
-		for _, row := range rows {
+		userCache := map[string]map[string]any{}
+		latestStillOldByTarget := latestCampaignCheckByTarget(checkRows, resultStillOld)
+		latestUpdatedByTarget := latestCampaignCheckByTarget(checkRows, resultUpdated)
+		for _, row := range append(rows, updatedRows...) {
 			targets, err := buildCampaignItems(re.App, []candidateRow{row})
 			if err != nil {
 				return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build campaign target", "details": err.Error()})
 			}
-			items = append(items, map[string]any{"campaign": summary, "target": targets[0]})
+			target := targets[0]
+			key := campaignTargetKey(row.ArcadeID, row.GameID)
+			if row.VersionID == config.ToVersion {
+				target["status"] = resultUpdated
+				if report, ok := latestUpdatedByTarget[key]; ok {
+					target["updated_report"] = campaignReportSummary(re.App, report, userCache)
+					target["can_revert"] = campaignReportWithinRollbackWindow(report, time.Now().UTC())
+				}
+			} else if report, ok := latestStillOldByTarget[key]; ok {
+				target["status"] = resultStillOld
+				target["last_still_old_report"] = campaignReportSummary(re.App, report, userCache)
+			} else {
+				target["status"] = "pending"
+			}
+			target["reports"] = campaignReportSummaries(re.App, checkRows, row, userCache)
+			items = append(items, map[string]any{"campaign": summary, "target": target})
 		}
 	}
 	return re.JSON(http.StatusOK, map[string]any{"items": items})
@@ -353,8 +386,14 @@ func CheckCampaign(re *core.RequestEvent) error {
 	if body.Result != resultStillOld && body.Result != resultUpdated {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "result must be still_old or updated"})
 	}
-	if body.BypassLocation && !hasCampaignLocationBypassAccess(re.Auth) {
-		return re.JSON(http.StatusForbidden, map[string]any{"error": "supporter access is required to bypass location verification"})
+	if body.BypassLocation {
+		allowed, err := hasCampaignLocationBypassAccess(re.App, re.Auth.Id)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to verify campaign bypass access", "details": err.Error()})
+		}
+		if !allowed {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": "level 10 is required to bypass location verification"})
+		}
 	}
 
 	var response map[string]any
@@ -405,17 +444,53 @@ func CheckCampaign(re *core.RequestEvent) error {
 			return checkErr
 		}
 		if body.Result == resultStillOld {
-			if revision.GetString("version") != config.FromVersion {
-				return httpError{status: http.StatusConflict, message: "game is already updated"}
+			if revision.GetString("version") == config.ToVersion {
+				updatedReport, err := findLatestCampaignCheckByTarget(tx, config.ID, body.Arcade, body.GameID, resultUpdated)
+				if err != nil {
+					return err
+				}
+				if updatedReport == nil || !campaignRecordWithinRollbackWindow(updatedReport, time.Now().UTC()) {
+					return httpError{status: http.StatusConflict, message: "the update report can only be reverted within 7 days"}
+				}
+				update, err := arcadegame.BuildUpdateBodyFromCurrentState(tx, body.Arcade)
+				if err != nil {
+					return err
+				}
+				found := false
+				for i := range update.Games {
+					if update.Games[i].ID != body.GameID {
+						continue
+					}
+					update.Games[i].Game = config.FromVersion
+					found = true
+					break
+				}
+				if !found {
+					return httpError{status: http.StatusConflict, message: "game is no longer a campaign target"}
+				}
+				stateID, err = arcadegame.UpdateArcadeGameTxFromExistingAtoms(tx, update, re.Auth.Id, "campaign_update_rollback")
+				if err != nil {
+					return err
+				}
+				currentExp, granted, err := userhandler.AwardExpTx(tx, re.Auth.Id, campaignStillOldXPKind(config.ID, body.GameID), 1, baseExp)
+				if err != nil {
+					return err
+				}
+				if err := saveCampaignCheck(tx, nil, config.ID, body.Arcade, body.GameID, re.Auth.Id, resultStillOld, stateID, !body.BypassLocation); err != nil {
+					return err
+				}
+				response = campaignCheckResponse(baseExp, currentExp, granted, resultStillOld, stateID, map[string]any{"arcade": body.Arcade, "game_id": body.GameID, "rolled_back": true})
+				return nil
 			}
-			if check != nil && check.GetString("result") == resultUpdated {
-				return httpError{status: http.StatusConflict, message: "campaign check is already completed"}
+			if check != nil && check.GetString("result") == resultStillOld {
+				response = campaignCheckResponse(baseExp, baseExp, false, resultStillOld, stateID, nil)
+				return nil
 			}
 			currentExp, granted, err := userhandler.AwardExpTx(tx, re.Auth.Id, campaignStillOldXPKind(config.ID, body.GameID), 1, baseExp)
 			if err != nil {
 				return err
 			}
-			if err := saveCampaignCheck(tx, check, config.ID, body.Arcade, body.GameID, re.Auth.Id, resultStillOld, stateID); err != nil {
+			if err := saveCampaignCheck(tx, nil, config.ID, body.Arcade, body.GameID, re.Auth.Id, resultStillOld, stateID, !body.BypassLocation); err != nil {
 				return err
 			}
 			response = campaignCheckResponse(baseExp, currentExp, granted, resultStillOld, stateID, nil)
@@ -458,7 +533,11 @@ func CheckCampaign(re *core.RequestEvent) error {
 				return err
 			}
 		}
-		if err := saveCampaignCheck(tx, check, config.ID, body.Arcade, body.GameID, re.Auth.Id, resultUpdated, currentStateID); err != nil {
+		if check != nil && check.GetString("result") == resultUpdated && revision.GetString("version") == config.ToVersion {
+			response = campaignCheckResponse(baseExp, baseExp, false, resultUpdated, currentStateID, map[string]any{"arcade": body.Arcade, "game_id": body.GameID})
+			return nil
+		}
+		if err := saveCampaignCheck(tx, nil, config.ID, body.Arcade, body.GameID, re.Auth.Id, resultUpdated, currentStateID, !body.BypassLocation); err != nil {
 			return err
 		}
 		response = campaignCheckResponse(baseExp, currentExp, granted, resultUpdated, currentStateID, map[string]any{"arcade": body.Arcade, "game_id": body.GameID})
@@ -680,6 +759,10 @@ func loadUpdatedCampaignRows(app core.App, config campaignConfig) ([]candidateRo
 	return loadCampaignRowsByVersion(app, config, config.ToVersion, false, "")
 }
 
+func loadUpdatedCampaignRowsForArcade(app core.App, config campaignConfig, arcadeID string) ([]candidateRow, error) {
+	return loadCampaignRowsByVersion(app, config, config.ToVersion, false, arcadeID)
+}
+
 func loadCampaignRowsByVersion(app core.App, config campaignConfig, versionID string, requireTargetCompatibility bool, arcadeID string) ([]candidateRow, error) {
 	clauses := []string{
 		"a.public = 1", "a.closed = 0", "a.game_v2 <> ''",
@@ -783,7 +866,7 @@ func loadCampaignCheckRows(app core.App, config campaignConfig) ([]campaignCheck
 		clauses = append(clauses, "UPPER(TRIM(a.country)) "+operator+" ("+strings.Join(placeholders, ",")+")")
 	}
 	query := `
-SELECT c.id AS check_id, c.user AS user_id, c.result, c.created, c.updated,
+SELECT c.id AS check_id, c.user AS user_id, c.result, c.location_verified, c.created, c.updated,
        c.state_id, c.arcade AS arcade_id, a.country,
        b.name, b.address, b.location AS arcade_location,
        c.game_id, r.version AS version_id, r.cabinet AS cabinet_id,
@@ -808,11 +891,12 @@ LIMIT {:limit}`
 			return nil, err
 		}
 		result = append(result, campaignCheckRow{
-			CheckID: nullString(raw, "check_id"),
-			UserID:  nullString(raw, "user_id"),
-			Result:  nullString(raw, "result"),
-			Created: nullString(raw, "created"),
-			Updated: nullString(raw, "updated"),
+			CheckID:          nullString(raw, "check_id"),
+			UserID:           nullString(raw, "user_id"),
+			Result:           nullString(raw, "result"),
+			LocationVerified: nullBool(raw, "location_verified"),
+			Created:          nullString(raw, "created"),
+			Updated:          nullString(raw, "updated"),
 			candidateRow: candidateRow{
 				ArcadeID:       nullString(raw, "arcade_id"),
 				Country:        nullString(raw, "country"),
@@ -866,15 +950,16 @@ func buildCampaignReportLogs(app core.App, rows []campaignCheckRow, userCache ma
 	var latestStillOld map[string]any
 	for index, row := range rows {
 		log := map[string]any{
-			"id":          row.CheckID,
-			"created":     row.Created,
-			"updated":     row.Updated,
-			"reported_at": campaignReportTime(row),
-			"reaction":    row.Result,
-			"result":      row.Result,
-			"user":        campaignUser(app, row.UserID, userCache),
-			"arcade":      targets[index]["arcade"],
-			"game":        targets[index]["game"],
+			"id":                row.CheckID,
+			"created":           row.Created,
+			"updated":           row.Updated,
+			"reported_at":       campaignReportTime(row),
+			"reaction":          row.Result,
+			"result":            row.Result,
+			"location_verified": row.LocationVerified,
+			"user":              campaignUser(app, row.UserID, userCache),
+			"arcade":            targets[index]["arcade"],
+			"game":              targets[index]["game"],
 		}
 		logs = append(logs, log)
 		if row.Result == resultStillOld && latestStillOld == nil {
@@ -886,11 +971,23 @@ func buildCampaignReportLogs(app core.App, rows []campaignCheckRow, userCache ma
 
 func campaignReportSummary(app core.App, row campaignCheckRow, userCache map[string]map[string]any) map[string]any {
 	return map[string]any{
-		"id":          row.CheckID,
-		"reported_at": campaignReportTime(row),
-		"reaction":    row.Result,
-		"user":        campaignUser(app, row.UserID, userCache),
+		"id":                row.CheckID,
+		"reported_at":       campaignReportTime(row),
+		"reaction":          row.Result,
+		"location_verified": row.LocationVerified,
+		"user":              campaignUser(app, row.UserID, userCache),
 	}
+}
+
+func campaignReportSummaries(app core.App, rows []campaignCheckRow, target candidateRow, userCache map[string]map[string]any) []map[string]any {
+	result := make([]map[string]any, 0)
+	for _, row := range rows {
+		if row.ArcadeID != target.ArcadeID || row.GameID != target.GameID {
+			continue
+		}
+		result = append(result, campaignReportSummary(app, row, userCache))
+	}
+	return result
 }
 
 func campaignReportTime(row campaignCheckRow) string {
@@ -898,6 +995,48 @@ func campaignReportTime(row campaignCheckRow) string {
 		return row.Updated
 	}
 	return row.Created
+}
+
+func campaignReportWithinRollbackWindow(row campaignCheckRow, now time.Time) bool {
+	created := parseCampaignReportTime(row.Created)
+	if created.IsZero() {
+		created = parseCampaignReportTime(row.Updated)
+	}
+	if created.IsZero() {
+		return false
+	}
+	return !created.Before(now.Add(-campaignRollbackWindow)) && !created.After(now)
+}
+
+func campaignRecordWithinRollbackWindow(record *core.Record, now time.Time) bool {
+	if record == nil {
+		return false
+	}
+	created := record.GetDateTime("created").Time().UTC()
+	if created.IsZero() {
+		created = record.GetDateTime("updated").Time().UTC()
+	}
+	return !created.IsZero() && !created.Before(now.Add(-campaignRollbackWindow)) && !created.After(now)
+}
+
+func parseCampaignReportTime(raw string) time.Time {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err == nil {
+		return parsed.UTC()
+	}
+	parsed, err = time.Parse(time.RFC3339, value)
+	if err == nil {
+		return parsed.UTC()
+	}
+	parsed, err = time.Parse(pbtypes.DefaultDateLayout, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
 }
 
 func campaignUser(app core.App, userID string, cache map[string]map[string]any) map[string]any {
@@ -965,23 +1104,16 @@ func requireSameDayVisit(app core.App, userID string, arcade *core.Record) error
 	return nil
 }
 
-func hasCampaignLocationBypassAccess(auth *core.Record) bool {
-	if auth == nil {
-		return false
+func hasCampaignLocationBypassAccess(app core.App, userID string) (bool, error) {
+	exp, err := userhandler.LoadCurrentExp(app, userID)
+	if err != nil {
+		return false, err
 	}
-	for _, tags := range [][]string{auth.GetStringSlice("tag"), auth.GetStringSlice("tags")} {
-		for _, tag := range tags {
-			switch strings.ToLower(strings.TrimSpace(tag)) {
-			case "supporter", "founding_supporter", "developer", "moderator":
-				return true
-			}
-		}
-	}
-	return false
+	return userhandler.LevelFromExp(exp) >= campaignBypassLevel, nil
 }
 
 func findCampaignCheck(app core.App, campaignID, userID, gameID string) (*core.Record, error) {
-	checks, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeCampaignCheck, "campaign={:campaign} && user={:user} && game_id={:game_id}", "", 1, 0, dbx.Params{"campaign": campaignID, "user": userID, "game_id": gameID})
+	checks, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeCampaignCheck, "campaign={:campaign} && user={:user} && game_id={:game_id}", "-created", 1, 0, dbx.Params{"campaign": campaignID, "user": userID, "game_id": gameID})
 	if err != nil {
 		return nil, err
 	}
@@ -991,20 +1123,37 @@ func findCampaignCheck(app core.App, campaignID, userID, gameID string) (*core.R
 	return checks[0], nil
 }
 
-func saveCampaignCheck(app core.App, check *core.Record, campaignID, arcadeID, gameID, userID, result, stateID string) error {
-	if check == nil {
-		collection, err := app.FindCollectionByNameOrId(arcadeinternal.CollectionArcadeCampaignCheck)
-		if err != nil {
-			return err
-		}
-		check = core.NewRecord(collection)
-		check.Set("campaign", campaignID)
-		check.Set("arcade", arcadeID)
-		check.Set("game_id", gameID)
-		check.Set("user", userID)
+func findLatestCampaignCheckByTarget(app core.App, campaignID, arcadeID, gameID, result string) (*core.Record, error) {
+	checks, err := app.FindRecordsByFilter(
+		arcadeinternal.CollectionArcadeCampaignCheck,
+		"campaign={:campaign} && arcade={:arcade} && game_id={:game_id} && result={:result}",
+		"-created",
+		1,
+		0,
+		dbx.Params{"campaign": campaignID, "arcade": arcadeID, "game_id": gameID, "result": result},
+	)
+	if err != nil {
+		return nil, err
 	}
+	if len(checks) == 0 {
+		return nil, nil
+	}
+	return checks[0], nil
+}
+
+func saveCampaignCheck(app core.App, _ *core.Record, campaignID, arcadeID, gameID, userID, result, stateID string, locationVerified bool) error {
+	collection, err := app.FindCollectionByNameOrId(arcadeinternal.CollectionArcadeCampaignCheck)
+	if err != nil {
+		return err
+	}
+	check := core.NewRecord(collection)
+	check.Set("campaign", campaignID)
+	check.Set("arcade", arcadeID)
+	check.Set("game_id", gameID)
+	check.Set("user", userID)
 	check.Set("result", result)
 	check.Set("state_id", stateID)
+	check.Set("location_verified", locationVerified)
 	return app.Save(check)
 }
 
@@ -1125,6 +1274,11 @@ func nullInt(raw dbx.NullStringMap, key string) int {
 	value := nullString(raw, key)
 	parsed, _ := strconv.Atoi(value)
 	return parsed
+}
+
+func nullBool(raw dbx.NullStringMap, key string) bool {
+	value := nullString(raw, key)
+	return value == "1" || strings.EqualFold(value, "true")
 }
 
 func contains(values []string, target string) bool {

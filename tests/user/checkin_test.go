@@ -91,11 +91,11 @@ func TestCheckIn_KSTRolloverAndDedup(t *testing.T) {
 	if got := payload["checked_in"]; got != true {
 		t.Fatalf("expected first check-in to succeed, got %v", got)
 	}
-	if got := payload["gained_exp"]; got != float64(2) {
-		t.Fatalf("expected gained_exp 2, got %v", got)
+	if got := payload["gained_exp"]; got != float64(1) {
+		t.Fatalf("expected gained_exp 1, got %v", got)
 	}
-	if got := payload["exp"]; got != float64(2) {
-		t.Fatalf("expected exp 2, got %v", got)
+	if got := payload["exp"]; got != float64(1) {
+		t.Fatalf("expected exp 1, got %v", got)
 	}
 	if got := payload["level"]; got != float64(0) {
 		t.Fatalf("expected level 0, got %v", got)
@@ -109,8 +109,8 @@ func TestCheckIn_KSTRolloverAndDedup(t *testing.T) {
 	if got := payload["gained_exp"]; got != float64(0) {
 		t.Fatalf("expected duplicate gained_exp 0, got %v", got)
 	}
-	if got := payload["exp"]; got != float64(2) {
-		t.Fatalf("expected duplicate exp 2, got %v", got)
+	if got := payload["exp"]; got != float64(1) {
+		t.Fatalf("expected duplicate exp 1, got %v", got)
 	}
 
 	restore = userhandler.SetAttendanceNowForTest(func() time.Time {
@@ -131,8 +131,8 @@ func TestCheckIn_KSTRolloverAndDedup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to load user_level record: %v", err)
 	}
-	if rec.GetInt("exp") != 4 {
-		t.Fatalf("expected user_level exp 4, got %d", rec.GetInt("exp"))
+	if rec.GetInt("exp") != 2 {
+		t.Fatalf("expected user_level exp 2, got %d", rec.GetInt("exp"))
 	}
 }
 

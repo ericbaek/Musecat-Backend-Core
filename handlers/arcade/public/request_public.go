@@ -249,7 +249,7 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 			return err
 		}
 
-		if nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.ArcadePublicKind(body.Arcade), 10, currentExp); err != nil {
+		if nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.ArcadePublicKind(body.Arcade), 5, currentExp); err != nil {
 			return err
 		} else {
 			currentExp = nextExp

@@ -136,6 +136,51 @@ func NormalizePriceForStorage(p Price) Price {
 	}
 	return p
 }
+
+// normalizePriceForComparison collapses equivalent wire/storage shapes before
+// comparing prices or writing them into a changelog snapshot. In particular,
+// the frontend sends represent:false while older revisions may omit it.
+func normalizePriceForComparison(raw any) any {
+	if raw == nil {
+		return nil
+	}
+
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return raw
+	}
+	var price Price
+	if err := json.Unmarshal(encoded, &price); err != nil {
+		return raw
+	}
+
+	price = NormalizePriceForStorage(price)
+	if price.List == nil {
+		price.List = []PriceItem{}
+	}
+	for i := range price.List {
+		if price.List[i].Title != nil && strings.TrimSpace(*price.List[i].Title) == "" {
+			price.List[i].Title = nil
+		}
+		if price.List[i].ModeKey != nil && strings.TrimSpace(*price.List[i].ModeKey) == "" {
+			price.List[i].ModeKey = nil
+		}
+		if price.List[i].Represent == nil {
+			represent := false
+			price.List[i].Represent = &represent
+		}
+	}
+	return price
+}
+
+func gamePriceForComparison(g GameAtomInput) any {
+	price := any(g.RawPrice)
+	if price == nil {
+		price = g.Price
+	}
+	return normalizePriceForComparison(price)
+}
+
 func NormalizeTagForStorage(tags any) any { return arcadeinternal.NormalizeGameTagPayload(tags) }
 
 func validatePrice(p Price) error {
@@ -428,14 +473,11 @@ func revisionChanged(previous *core.Record, g GameAtomInput) bool {
 	if previous == nil || previous.GetString("version") != g.Game || previous.GetString("cabinet") != g.Cabinet || previous.GetString("location") != g.Location || previous.GetInt("quantity") != g.Quantity {
 		return true
 	}
-	price, tag := any(g.RawPrice), any(g.RawTag)
-	if price == nil {
-		price = NormalizePriceForStorage(g.Price)
-	}
+	price, tag := gamePriceForComparison(g), any(g.RawTag)
 	if tag == nil {
 		tag = NormalizeTagForStorage(g.Tag)
 	}
-	return !arcadeinternal.JSONValueEqual(previous.Get("price"), price) || !arcadeinternal.JSONValueEqual(arcadeinternal.NormalizeGameTagPayload(previous.Get("tag")), NormalizeTagForStorage(tag))
+	return !arcadeinternal.JSONValueEqual(normalizePriceForComparison(previous.Get("price")), price) || !arcadeinternal.JSONValueEqual(arcadeinternal.NormalizeGameTagPayload(previous.Get("tag")), NormalizeTagForStorage(tag))
 }
 
 // gameRevisionSnapshot is intentionally self-contained: the timeline can show
@@ -450,7 +492,7 @@ func gameRevisionSnapshot(revision *core.Record) map[string]any {
 		"cabinet":  revision.GetString("cabinet"),
 		"location": revision.GetString("location"),
 		"quantity": revision.GetInt("quantity"),
-		"price":    revision.Get("price"),
+		"price":    normalizePriceForComparison(revision.Get("price")),
 		"tag":      arcadeinternal.DecodeGameTagPayload(revision.Get("tag")),
 	}
 }

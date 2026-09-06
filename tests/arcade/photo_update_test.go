@@ -187,7 +187,7 @@ func TestUpdateArcadePhoto_PromotesPublicAndWritesChangelog(t *testing.T) {
 	scenario.Test(t)
 }
 
-func TestUpdateArcadePhoto_PublicArcadeAwardsEditOnly(t *testing.T) {
+func TestUpdateArcadePhoto_PublicArcadeAwardsNewPublicationXP(t *testing.T) {
 	headers := map[string]string{}
 	var arcadeID string
 	var userID string
@@ -200,7 +200,7 @@ func TestUpdateArcadePhoto_PublicArcadeAwardsEditOnly(t *testing.T) {
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
 			`"xp_feedback":{`,
-			`"diff_exp":3`,
+			`"diff_exp":2`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {
 			return newArcadeTestApp(tb)
@@ -244,8 +244,8 @@ func TestUpdateArcadePhoto_PublicArcadeAwardsEditOnly(t *testing.T) {
 		if !ok {
 			tb.Fatalf("expected xp_feedback object, got %T", payload["xp_feedback"])
 		}
-		if got := feedback["diff_exp"]; got != float64(3) {
-			tb.Fatalf("expected diff_exp=3, got %#v", got)
+		if got := feedback["diff_exp"]; got != float64(2) {
+			tb.Fatalf("expected diff_exp=2, got %#v", got)
 		}
 
 		editRows, err := app.DB().NewQuery(`
@@ -255,7 +255,7 @@ WHERE "user" = {:user}
   AND kind LIKE {:kind}
 `).Bind(dbx.Params{
 			"user": userID,
-			"kind": "xp:arcade-edit:photo:" + arcadeID + ":%",
+			"kind": "xp:arcade-photo:" + arcadeID + ":%",
 		}).Rows()
 		if err != nil {
 			tb.Fatalf("failed to query photo edit logs: %v", err)
@@ -270,7 +270,7 @@ WHERE "user" = {:user}
 			tb.Fatalf("failed to scan photo edit log count: %v", err)
 		}
 		if editCount != 1 {
-			tb.Fatalf("expected exactly 1 photo edit log, got %d", editCount)
+			tb.Fatalf("expected exactly 1 photo publication log, got %d", editCount)
 		}
 
 		submissionRows, err := app.DB().NewQuery(`

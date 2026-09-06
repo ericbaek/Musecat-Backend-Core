@@ -23,6 +23,18 @@ var validReactionTypes = map[string]struct{}{
 	"fixed": {}, "issue_persist": {}, "wrong": {},
 }
 
+func reactionExp(reaction string) int {
+	switch strings.TrimSpace(reaction) {
+	case "issue_persist":
+		return 2
+	case "fixed":
+		return 3
+	default:
+		// A wrong vote is useful moderation input but is not an XP action.
+		return 0
+	}
+}
+
 type UpdateArcadeFlagReactionBody struct {
 	Flag     string `json:"flag"`
 	Reaction string `json:"reaction"`
@@ -141,7 +153,7 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 				}
 			}
 			if arcadeRec.GetBool("public") {
-				nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.FlagReactionKind(reactionID), 3, currentExp)
+				nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.FlagReactionKind(reactionID), reactionExp(body.Reaction), currentExp)
 				if err != nil {
 					return err
 				}
@@ -311,7 +323,25 @@ func removeReactionRecordTx(app core.App, target *core.Record, userID string, ba
 	if !wasAwarded {
 		return nil
 	}
-	nextExp, _, err := userhandler.AwardExpTx(app, userID, "xp:flag-reaction-delete:"+reactionID, -3, baseExp)
+	// Read the original grant so deleting a reaction also remains correct for
+	// rows awarded under an earlier policy. New wrong votes have no positive
+	// ledger row and therefore reach the !wasAwarded branch above.
+	positiveRows, err := app.FindRecordsByFilter(
+		userhandler.CollectionUserLevelLog,
+		"user={:user} && kind={:kind}",
+		"",
+		1,
+		0,
+		dbx.Params{"user": userID, "kind": userhandler.FlagReactionKind(reactionID)},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to load reaction xp grant: %w", err)
+	}
+	if len(positiveRows) == 0 || positiveRows[0].GetInt("diff_exp") <= 0 {
+		return nil
+	}
+	grant := positiveRows[0].GetInt("diff_exp")
+	nextExp, _, err := userhandler.AwardExpTx(app, userID, "xp:flag-reaction-delete:"+reactionID, -grant, baseExp)
 	if err != nil {
 		return err
 	}

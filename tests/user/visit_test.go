@@ -64,7 +64,7 @@ func TestArcadeVisitAwardsAndDeduplicatesByArcadeDay(t *testing.T) {
 	}
 	var got map[string]any
 	_ = json.NewDecoder(res.Body).Decode(&got)
-	if got["gained_exp"] != float64(6) || got["visited"] != true || got["first_visit_to_arcade"] != true {
+	if got["gained_exp"] != float64(5) || got["visited"] != true || got["first_visit_to_arcade"] != true {
 		t.Fatalf("unexpected first visit: %#v", got)
 	}
 	visit, ok := got["visit"].(map[string]any)
@@ -85,15 +85,15 @@ func TestArcadeVisitAwardsAndDeduplicatesByArcadeDay(t *testing.T) {
 	t.Cleanup(restore)
 	res = doUserRequest(t, app, http.MethodPost, "/arcade/visit", headers, body)
 	_ = json.NewDecoder(res.Body).Decode(&got)
-	if got["gained_exp"] != float64(3) {
+	if got["gained_exp"] != float64(2) {
 		t.Fatalf("unexpected revisit: %#v", got)
 	}
 	level, err := app.FindRecordById(userhandler.CollectionUserLevel, userRec.Id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if level.GetInt("exp") != 9 {
-		t.Fatalf("exp=%d, want 9", level.GetInt("exp"))
+	if level.GetInt("exp") != 7 {
+		t.Fatalf("exp=%d, want 7", level.GetInt("exp"))
 	}
 }
 

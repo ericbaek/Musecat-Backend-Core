@@ -62,10 +62,10 @@ func TestArcadeGameEditExpScalesByChangedEntryCount(t *testing.T) {
 		want    int
 	}{
 		{changed: 0, want: 0},
-		{changed: 1, want: 3},
-		{changed: 2, want: 5},
-		{changed: 3, want: 7},
-		{changed: 4, want: 9},
+		{changed: 1, want: 2},
+		{changed: 2, want: 4},
+		{changed: 3, want: 6},
+		{changed: 4, want: 8},
 		{changed: 5, want: 10},
 		{changed: 20, want: 10},
 	}

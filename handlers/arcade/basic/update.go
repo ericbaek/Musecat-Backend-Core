@@ -315,7 +315,7 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		}
 
 		if arcadeRec.GetBool("public") {
-			nextExp, _, err := userhandler.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "basic", 3, baseExp, time.Now().UTC())
+			nextExp, _, err := userhandler.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "basic", 2, baseExp, time.Now().UTC())
 			if err != nil {
 				return err
 			}

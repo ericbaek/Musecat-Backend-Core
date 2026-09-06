@@ -150,24 +150,9 @@ func UploadArcadePhotos(re *core.RequestEvent) error {
 		Failed:  len(failed),
 	}
 
+	// Uploading creates a pending atom only. XP is awarded atomically by
+	// PUT /arcade/photo when a pending atom is first published in the gallery.
 	var xpFeedback userhandler.ExpFeedback
-	if summary.Success > 0 {
-		baseExp, err := userhandler.LoadCurrentExp(re.App, re.Auth.Id)
-		if err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{
-				"error":   "failed to load current exp",
-				"details": err.Error(),
-			})
-		}
-		currentExp, _, err := userhandler.AwardExpTx(re.App, re.Auth.Id, userhandler.ArcadePhotoSubmissionKind(arcadeID), 5, baseExp)
-		if err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{
-				"error":   "failed to award xp",
-				"details": err.Error(),
-			})
-		}
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
-	}
 
 	status := http.StatusOK
 	if summary.Success == 0 {
