@@ -2266,10 +2266,36 @@ components:
       properties:
         arcade:
           type: string
-        bypass_requirements:
+    ArcadePublicRequirement:
+      type: object
+      required: [kind, satisfied]
+      properties:
+        kind:
+          type: string
+          enum: [game, channelOrHour, photoOrLocation]
+        satisfied:
           type: boolean
-          default: false
-          description: Skips the game, contact-hours, and KR facility-photo publication requirements. Only the creator with supporter, founding_supporter, developer, or moderator access may set this flag; stored geo, visibility, and ownership validation still apply.
+    VerifyArcadeLocationRequest:
+      type: object
+      required: [arcade, lat, lon, accuracy]
+      properties:
+        arcade: {type: string}
+        lat: {type: number, format: double}
+        lon: {type: number, format: double}
+        accuracy:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+    VerifyArcadeLocationResponse:
+      type: object
+      required: [arcade, verified, basic, distance_meters, accuracy_meters]
+      properties:
+        arcade: {type: string}
+        verified: {type: boolean}
+        basic: {type: string}
+        distance_meters: {type: number, format: double}
+        accuracy_meters: {type: number, format: double}
     GTKAtomInput:
       type: object
       required: [type, bool]
@@ -5074,8 +5100,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Requires `developer`, `moderator`, `arcade_owner`, `supporter`, or `founding_supporter` in `tag` or `tags`.
-        Developers and moderators may create on any arcade. Official accounts may create only on their own `owns` arcades. Supporters may create unless another official account manages the target through `owns`.
+        Requires `developer`, `moderator`, or `arcade_owner` in `tag` or `tags`, or a `supporter`/`founding_supporter` at level 30 or above. Developers and moderators may create on any arcade. Official accounts may create only on their own `owns` arcades. Level-30+ supporters may create unless another official account manages the target through `owns`.
       security:
         - bearerAuth: []
       requestBody:
@@ -5111,7 +5136,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Notice role is missing, official ownership is missing, or a supporter attempted to post on an officially managed arcade.
+          description: Notice role or supporter level-30 access is missing, official ownership is missing, or a supporter attempted to post on an officially managed arcade.
           content:
             application/json:
               schema:
@@ -5132,7 +5157,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Developers and moderators may update every notice. Every other authenticated user may update only notices they authored.
+        Developers and moderators may update every notice. Official account authors may update their own notices. Level-30+ supporter authors may update their own notices.
       security:
         - bearerAuth: []
       requestBody:
@@ -5168,7 +5193,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: The caller is neither the notice author nor a developer or moderator.
+          description: The caller lacks the required notice author role and level, or is neither the notice author nor a developer or moderator.
           content:
             application/json:
               schema:
@@ -5189,7 +5214,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Developers and moderators may delete every notice. Every other authenticated user may delete only notices they authored.
+        Developers and moderators may delete every notice. Official account authors may delete their own notices. Level-30+ supporter authors may delete their own notices.
       security:
         - bearerAuth: []
       requestBody:
@@ -5224,7 +5249,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: The caller is neither the notice author nor a developer or moderator.
+          description: The caller lacks the required notice author role and level, or is neither the notice author nor a developer or moderator.
           content:
             application/json:
               schema:
@@ -5406,8 +5431,8 @@ paths:
   /arcade/public:
     get:
       tags: [Arcade Mutations]
-      summary: Preview public-conversion XP
-      description: Reads the creator's currently eligible public-conversion (5 XP) and draft-backfill (2 XP per eligible changed area) without changing visibility or the XP ledger. Only the private arcade creator may call this endpoint. The PUT response remains authoritative if the draft changes afterward.
+      summary: Preview public-conversion XP and requirements
+      description: Reads the creator's current level-based public-conversion requirements and currently eligible public-conversion (5 XP) and draft-backfill (2 XP per eligible changed area) without changing visibility or the XP ledger. Levels 0-4 require game, contact-or-hours, and facility-photo-or-location-verification; levels 5-9 require game and facility-photo-or-location-verification; levels 10+ require game only. Only the private arcade creator may call this endpoint.
       security:
         - bearerAuth: []
       parameters:
@@ -5422,13 +5447,21 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [arcade, public, xp_preview]
+                required: [arcade, public, level, requirements, location_verified, xp_preview]
                 properties:
                   arcade:
                     type: string
                   public:
                     type: boolean
                     const: false
+                  level:
+                    type: integer
+                  requirements:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ArcadePublicRequirement'
+                  location_verified:
+                    type: boolean
                   xp_preview:
                     $ref: '#/components/schemas/ArcadePublicExpPreview'
         '400':
@@ -5500,13 +5533,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Creator restriction or an account attempted to set bypass_requirements without supporter, founding_supporter, developer, or moderator access.
+          description: Only the private arcade creator may request public conversion.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '502':
           description: Validation or update failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /arcade/location-verification:
+    post:
+      tags: [Arcade Mutations]
+      summary: Verify the creator's current location for publication
+      description: Stores a one-time location proof tied to the arcade's current basic-information revision. Editing basic information changes that revision and invalidates the proof. This endpoint does not create a Passport visit or award XP.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyArcadeLocationRequest'
+      responses:
+        '200':
+          description: Current location was verified.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyArcadeLocationResponse'
+        '400':
+          description: Invalid coordinates, accuracy, or arcade state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Only the creator may verify the private arcade, or the current position is outside the 100-meter radius.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The arcade has no usable basic-information location.
           content:
             application/json:
               schema:

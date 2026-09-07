@@ -32,12 +32,58 @@ func NewTestApp(tb testing.TB) *tests.TestApp {
 	// Core tests create multiple routers but don't exercise the bundled UI.
 	ui.DistDirFS = nil
 	ensureVisitSchema(tb, app)
+	ensureArcadeLocationVerificationSchema(tb, app)
 	ensureProfileCountriesSchema(tb, app)
 	ensureNoticeAuthorSchema(tb, app)
 	ensureFlagResolutionSchema(tb, app)
 	ensureGTKTypeCatalog(tb, app)
 
 	return app
+}
+
+// Production Core and Backend Full own these optional arcade fields. Test
+// fixtures are intentionally older than the current schema, so add them to
+// each cloned fixture used by isolated handler tests.
+func ensureArcadeLocationVerificationSchema(tb testing.TB, app *tests.TestApp) {
+	tb.Helper()
+	arcades, err := app.FindCollectionByNameOrId("arcade")
+	if err != nil {
+		tb.Fatalf("failed to load arcade: %v", err)
+	}
+	basics, err := app.FindCollectionByNameOrId("arcade_basic")
+	if err != nil {
+		tb.Fatalf("failed to load arcade_basic: %v", err)
+	}
+	users, err := app.FindCollectionByNameOrId("user")
+	if err != nil {
+		tb.Fatalf("failed to load user collection: %v", err)
+	}
+	changed := false
+	if arcades.Fields.GetByName("location_verification_basic") == nil {
+		arcades.Fields.Add(&core.RelationField{Name: "location_verification_basic", CollectionId: basics.Id, MaxSelect: 1})
+		changed = true
+	}
+	if arcades.Fields.GetByName("location_verification_by") == nil {
+		arcades.Fields.Add(&core.RelationField{Name: "location_verification_by", CollectionId: users.Id, MaxSelect: 1})
+		changed = true
+	}
+	for _, name := range []string{"location_verification_at", "location_verification_distance_meters", "location_verification_accuracy_meters"} {
+		if arcades.Fields.GetByName(name) != nil {
+			continue
+		}
+		if name == "location_verification_at" {
+			arcades.Fields.Add(&core.DateField{Name: name})
+		} else {
+			zero := 0.0
+			arcades.Fields.Add(&core.NumberField{Name: name, Min: &zero})
+		}
+		changed = true
+	}
+	if changed {
+		if err := app.Save(arcades); err != nil {
+			tb.Fatalf("failed to add arcade location verification fields: %v", err)
+		}
+	}
 }
 
 func ensureProfileCountriesSchema(tb testing.TB, app *tests.TestApp) {

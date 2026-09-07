@@ -18,13 +18,11 @@ import (
 var (
 	ErrArcadeBasicEmpty           = errors.New("arcade.basic is empty")
 	ErrArcadeBasicLocationMissing = errors.New("missing arcade basic location")
-	ErrFacilityPhotoRegistration  = errors.New("at least one facility photo must be registered before making arcade public")
 	ErrArcadeGeoUnavailable       = errors.New("arcade country and timezone must be valid before making arcade public")
 )
 
 type RequestPublicArcadeBody struct {
-	Arcade             string `json:"arcade"`
-	BypassRequirements bool   `json:"bypass_requirements"`
+	Arcade string `json:"arcade"`
 }
 
 func parseRequestPublicArcadeBody(re *core.RequestEvent) (RequestPublicArcadeBody, error) {
@@ -113,10 +111,6 @@ func hasPhotoRegistration(app core.App, moleculeID string) (bool, error) {
 	return len(arcadeinternal.TrimmedStringSlice(rec.GetStringSlice("photos"))) > 0, nil
 }
 
-func requiresFacilityPhoto(country string) bool {
-	return strings.EqualFold(strings.TrimSpace(country), "KR")
-}
-
 func RequestPublicArcade(re *core.RequestEvent) error {
 	// 1) parse
 	body, err := parseRequestPublicArcadeBody(re)
@@ -150,11 +144,6 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 			"error": "only the creator can request public conversion",
 		})
 	}
-	if body.BypassRequirements && !hasPublicConversionRequirementBypassAccess(re.Auth) {
-		return re.JSON(http.StatusForbidden, map[string]any{
-			"error": "supporter access is required to bypass public conversion requirements",
-		})
-	}
 	if arcade.GetBool("closed") {
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error": "cannot request public conversion for closed arcade",
@@ -166,41 +155,26 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		})
 	}
 
-	if !body.BypassRequirements {
-		hasGame, err := hasGameRegistration(re.App, arcade.GetString("game_v2"))
-		if err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{
-				"error":   "failed to validate game registration",
-				"details": err.Error(),
-			})
-		}
-		if !hasGame {
-			return re.JSON(http.StatusBadRequest, map[string]any{
-				"error":   "validation failed",
-				"details": "at least one game must be registered before making arcade public",
-			})
-		}
-
-		hasSNS, err := hasSNSRegistration(re.App, arcade.GetString("sns"))
-		if err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{
-				"error":   "failed to validate sns registration",
-				"details": err.Error(),
-			})
-		}
-		hasHour, err := hasHourRegistration(re.App, arcade.GetString("hour"))
-		if err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{
-				"error":   "failed to validate hour registration",
-				"details": err.Error(),
-			})
-		}
-		if !hasSNS && !hasHour {
-			return re.JSON(http.StatusBadRequest, map[string]any{
-				"error":   "validation failed",
-				"details": "either sns or hour must be registered before making arcade public",
-			})
-		}
+	baseExp, err := userhandler.LoadCurrentExp(re.App, re.Auth.Id)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to load current exp",
+			"details": err.Error(),
+		})
+	}
+	levelSnapshot := userhandler.LevelFromExp(baseExp)
+	requirements, err := publicConversionRequirements(re.App, arcade, re.Auth.Id, levelSnapshot)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to validate public conversion requirements",
+			"details": err.Error(),
+		})
+	}
+	if err := validatePublicConversionRequirements(requirements); err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "validation failed",
+			"details": err.Error(),
+		})
 	}
 
 	// 5) make arcade public immediately.
@@ -210,19 +184,30 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
-		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		txBaseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
 		}
-		currentExp := baseExp
+		currentExp := txBaseExp
 
 		basicID := strings.TrimSpace(txArcade.GetString("basic"))
 		if basicID == "" {
 			return ErrArcadeBasicEmpty
 		}
 
-		if _, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeBasic, basicID); err != nil {
+		basic, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeBasic, basicID)
+		if err != nil {
 			return fmt.Errorf("failed to load arcade basic: %w", err)
+		}
+		if _, _, ok := arcadeinternal.ReadLocation(basic.Get("location")); !ok {
+			return ErrArcadeBasicLocationMissing
+		}
+		currentRequirements, err := publicConversionRequirements(txApp, txArcade, re.Auth.Id, levelSnapshot)
+		if err != nil {
+			return err
+		}
+		if err := validatePublicConversionRequirements(currentRequirements); err != nil {
+			return err
 		}
 		country := strings.ToUpper(strings.TrimSpace(txArcade.GetString("country")))
 		timezone := strings.TrimSpace(txArcade.GetString("timezone"))
@@ -231,16 +216,6 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		}
 		if _, err := time.LoadLocation(timezone); err != nil {
 			return ErrArcadeGeoUnavailable
-		}
-
-		if !body.BypassRequirements && requiresFacilityPhoto(country) {
-			hasPhoto, err := hasPhotoRegistration(txApp, txArcade.GetString("photo"))
-			if err != nil {
-				return fmt.Errorf("failed to validate photo registration: %w", err)
-			}
-			if !hasPhoto {
-				return ErrFacilityPhotoRegistration
-			}
 		}
 
 		if err := arcadeinternal.UpdateArcadeFieldsTx(txApp, body.Arcade, map[string]any{
@@ -259,7 +234,7 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		} else {
 			currentExp = nextExp
 		}
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+		xpFeedback = userhandler.BuildExpFeedback(txBaseExp, currentExp)
 		return nil
 	}); err != nil {
 		if errors.Is(err, arcadeinternal.ErrArcadeCountryConflict) {
@@ -267,10 +242,10 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 				"error": err.Error(),
 			})
 		}
-		if errors.Is(err, ErrFacilityPhotoRegistration) {
+		if isPublicRequirementError(err) {
 			return re.JSON(http.StatusBadRequest, map[string]any{
 				"error":   "validation failed",
-				"details": ErrFacilityPhotoRegistration.Error(),
+				"details": err.Error(),
 			})
 		}
 		if errors.Is(err, ErrArcadeGeoUnavailable) {
@@ -296,19 +271,4 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		"public":      true,
 		"xp_feedback": xpFeedback,
 	})
-}
-
-func hasPublicConversionRequirementBypassAccess(auth *core.Record) bool {
-	if auth == nil {
-		return false
-	}
-	for _, tags := range [][]string{auth.GetStringSlice("tag"), auth.GetStringSlice("tags")} {
-		for _, tag := range tags {
-			switch strings.ToLower(strings.TrimSpace(tag)) {
-			case "supporter", "founding_supporter", "developer", "moderator":
-				return true
-			}
-		}
-	}
-	return false
 }

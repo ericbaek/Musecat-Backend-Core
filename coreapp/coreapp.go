@@ -170,6 +170,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireGameToolsAccess())
 		authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic)
 		authArcade.PUT("/public", arcadepublic.RequestPublicArcade)
+		authArcade.POST("/location-verification", arcadepublic.VerifyArcadeLocation)
 		authArcade.PUT("/gtk", arcadegtk.UpdateArcadeGTK)
 		authArcade.PUT("/sns", arcadesns.UpdateArcadeSNS)
 		authArcade.PUT("/hour", arcadehour.UpdateArcadeHour)

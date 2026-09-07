@@ -16,7 +16,10 @@ import (
 	"github.com/pocketbase/pocketbase/tools/types"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
+
+const noticeSupporterMinimumLevel = 30
 
 var noticeAccessTags = map[string]struct{}{
 	"arcade_owner":       {},
@@ -166,6 +169,15 @@ func isSupporter(auth *core.Record) bool {
 	return hasNoticeTag(auth, "supporter") || hasNoticeTag(auth, "founding_supporter")
 }
 
+func hasSupporterNoticeAccess(app core.App, auth *core.Record) bool {
+	if !isSupporter(auth) {
+		return false
+	}
+
+	level, err := userhandler.LoadUserLevelState(app, auth.Id)
+	return err == nil && level.Level >= noticeSupporterMinimumLevel
+}
+
 func ownsArcade(auth *core.Record, arcadeID string) bool {
 	if auth == nil {
 		return false
@@ -220,8 +232,15 @@ func rejectNoticeCreateAccess(re *core.RequestEvent, arcadeID string) error {
 	if hasNoticeTag(re.Auth, "arcade_owner") && ownsArcade(re.Auth, arcadeID) {
 		return nil
 	}
-	if isSupporter(re.Auth) && !hasOtherOfficialArcadeManager(re.App, re.Auth, arcadeID) {
-		return nil
+	if isSupporter(re.Auth) {
+		if !hasSupporterNoticeAccess(re.App, re.Auth) {
+			return re.JSON(http.StatusForbidden, map[string]any{
+				"error": "supporter level 30 or staff access required",
+			})
+		}
+		if !hasOtherOfficialArcadeManager(re.App, re.Auth, arcadeID) {
+			return nil
+		}
 	}
 	return re.JSON(http.StatusForbidden, map[string]any{"error": "notice creation is not allowed for this arcade"})
 }
@@ -235,6 +254,14 @@ func rejectNoticeMutationAccess(re *core.RequestEvent, rec *core.Record) error {
 	}
 	if rec.GetString("createdBy") != re.Auth.Id {
 		return re.JSON(http.StatusForbidden, map[string]any{"error": "only the notice author can modify this notice"})
+	}
+	if hasNoticeTag(re.Auth, "arcade_owner") && ownsArcade(re.Auth, rec.GetString("arcade")) {
+		return nil
+	}
+	if isSupporter(re.Auth) && !hasSupporterNoticeAccess(re.App, re.Auth) {
+		return re.JSON(http.StatusForbidden, map[string]any{
+			"error": "supporter level 30 or staff access required",
+		})
 	}
 
 	return nil

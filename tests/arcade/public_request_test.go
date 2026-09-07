@@ -167,7 +167,7 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 	scenario.Test(t)
 }
 
-func TestRequestPublicArcade_SupporterCanBypassPublishRequirements(t *testing.T) {
+func TestRequestPublicArcade_SupporterCannotBypassPublishRequirements(t *testing.T) {
 	app := newArcadeTestApp(t)
 	token, user := createAuthUserWithTags(t, app, []string{"supporter"})
 	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
@@ -179,9 +179,9 @@ func TestRequestPublicArcade_SupporterCanBypassPublishRequirements(t *testing.T)
 	res := executeJSONRequest(t, app, http.MethodPut, "/arcade/public", fmt.Sprintf(`{"arcade":%q,"bypass_requirements":true}`, arcadeID), map[string]string{
 		"Authorization": "Bearer " + token,
 	})
-	if res.StatusCode != http.StatusOK {
+	if res.StatusCode != http.StatusBadRequest {
 		res.Body.Close()
-		t.Fatalf("expected supporter bypass status 200, got %d", res.StatusCode)
+		t.Fatalf("expected supporter bypass status 400, got %d", res.StatusCode)
 	}
 	res.Body.Close()
 
@@ -189,12 +189,12 @@ func TestRequestPublicArcade_SupporterCanBypassPublishRequirements(t *testing.T)
 	if err != nil {
 		t.Fatalf("failed to load supporter draft: %v", err)
 	}
-	if !arcade.GetBool("public") {
-		t.Fatalf("expected supporter-owned draft to become public")
+	if arcade.GetBool("public") {
+		t.Fatalf("expected supporter-owned draft to remain private")
 	}
 }
 
-func TestRequestPublicArcade_BypassRequirementsRequiresSupporterAccess(t *testing.T) {
+func TestRequestPublicArcade_IgnoresRemovedBypassFlag(t *testing.T) {
 	app := newArcadeTestApp(t)
 	token, user := createAuthUser(t, app)
 	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
@@ -206,9 +206,9 @@ func TestRequestPublicArcade_BypassRequirementsRequiresSupporterAccess(t *testin
 	res := executeJSONRequest(t, app, http.MethodPut, "/arcade/public", fmt.Sprintf(`{"arcade":%q,"bypass_requirements":true}`, arcadeID), map[string]string{
 		"Authorization": "Bearer " + token,
 	})
-	if res.StatusCode != http.StatusForbidden {
+	if res.StatusCode != http.StatusBadRequest {
 		res.Body.Close()
-		t.Fatalf("expected non-supporter bypass status 403, got %d", res.StatusCode)
+		t.Fatalf("expected removed bypass flag to follow normal validation, got %d", res.StatusCode)
 	}
 	res.Body.Close()
 
@@ -437,7 +437,7 @@ func TestRequestPublicArcade_RequiresPhoto(t *testing.T) {
 	testRequestPublicArcadeRequirement(
 		t,
 		"missing photo",
-		"at least one facility photo must be registered before making arcade public",
+		"at least one facility photo or a location verification must be completed before making arcade public",
 		func(tb testing.TB, app *tests.TestApp, arcadeID, userID string) {
 			tb.Helper()
 
@@ -451,12 +451,12 @@ func TestRequestPublicArcade_RequiresPhoto(t *testing.T) {
 	)
 }
 
-func TestRequestPublicArcade_DoesNotRequirePhotoOutsideKR(t *testing.T) {
+func TestRequestPublicArcade_LevelTenRequiresOnlyGame(t *testing.T) {
 	headers := map[string]string{}
 	var arcadeID string
 
 	scenario := tests.ApiScenario{
-		Name:           "PUT /arcade/public allows missing photo outside KR",
+		Name:           "PUT /arcade/public level 10 requires only game",
 		Method:         http.MethodPut,
 		URL:            "/arcade/public",
 		Headers:        headers,
@@ -475,6 +475,7 @@ func TestRequestPublicArcade_DoesNotRequirePhotoOutsideKR(t *testing.T) {
 
 		token, user := createAuthUser(tb, app)
 		headers["Authorization"] = "Bearer " + token
+		setUserLevelExp(tb, app, user.Id, userhandler.LevelBaseExp(10))
 
 		arcadeID, _ = seedArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Global Arcade",
@@ -488,10 +489,6 @@ func TestRequestPublicArcade_DoesNotRequirePhotoOutsideKR(t *testing.T) {
 		versionID := seedGameSeriesVersion(tb, app)
 		gameID := seedArcadeGameMolecule(tb, app, arcadeID)
 		seedArcadeGameAtom(tb, app, gameID, versionID, "1F")
-		seedHourMolecule(tb, app, arcadeID, user.Id, map[string]any{
-			"Monday": map[string]int{"start": 1000, "end": 2200},
-		})
-
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{"arcade":"%s"}`, arcadeID))
 	}
 
@@ -503,11 +500,78 @@ func TestRequestPublicArcade_DoesNotRequirePhotoOutsideKR(t *testing.T) {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
 		if !arcadeRec.GetBool("public") {
-			tb.Fatalf("expected arcade.public=true for non-KR without photo")
+			tb.Fatalf("expected level-10 arcade.public=true without photo or hours")
 		}
 	}
 
 	scenario.Test(t)
+}
+
+func TestRequestPublicArcade_LevelFiveDoesNotRequireSNSOrHour(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	setUserLevelExp(t, app, user.Id, userhandler.LevelBaseExp(5))
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name:     "Level Five Arcade",
+		Address:  "Level Five Street",
+		Location: location{Lat: 37.5665, Lon: 126.978},
+	})
+	versionID := seedGameSeriesVersion(t, app)
+	gameID := seedArcadeGameMolecule(t, app, arcadeID)
+	seedArcadeGameAtom(t, app, gameID, versionID, "1F")
+	seedPhotoMolecule(t, app, arcadeID, user.Id, []string{seedExistingPhotoAtomID(t, app, arcadeID, user.Id)})
+
+	res := executeJSONRequest(t, app, http.MethodPut, "/arcade/public", fmt.Sprintf(`{"arcade":%q}`, arcadeID), map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
+		t.Fatalf("expected level-5 public conversion status 200, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+}
+
+func TestRequestPublicArcade_LocationVerificationInvalidatedByBasicEdit(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+		Name:     "Location Verified Arcade",
+		Address:  "Verification Street",
+		Location: location{Lat: 37.5665, Lon: 126.978},
+	})
+	versionID := seedGameSeriesVersion(t, app)
+	gameID := seedArcadeGameMolecule(t, app, arcadeID)
+	seedArcadeGameAtom(t, app, gameID, versionID, "1F")
+	seedHourMolecule(t, app, arcadeID, user.Id, map[string]any{
+		"Monday": map[string]int{"start": 1000, "end": 2200},
+	})
+
+	res := executeJSONRequest(t, app, http.MethodPost, "/arcade/location-verification", fmt.Sprintf(`{"arcade":%q,"lat":37.5665,"lon":126.978,"accuracy":20}`, arcadeID), map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
+		t.Fatalf("expected location verification status 200, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	res = executeJSONRequest(t, app, http.MethodPut, "/arcade/basic", fmt.Sprintf(`{"arcade":%q,"name":"Updated Arcade"}`, arcadeID), map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if res.StatusCode != http.StatusOK {
+		res.Body.Close()
+		t.Fatalf("expected basic update status 200, got %d", res.StatusCode)
+	}
+	res.Body.Close()
+
+	res = executeJSONRequest(t, app, http.MethodPut, "/arcade/public", fmt.Sprintf(`{"arcade":%q}`, arcadeID), map[string]string{
+		"Authorization": "Bearer " + token,
+	})
+	if res.StatusCode != http.StatusBadRequest {
+		res.Body.Close()
+		t.Fatalf("expected invalidated location verification status 400, got %d", res.StatusCode)
+	}
+	res.Body.Close()
 }
 
 func TestRequestPublicArcade_UsesStoredGeoWithoutLookup(t *testing.T) {
@@ -655,4 +719,22 @@ func testRequestPublicArcadeRequirement(
 func seedExistingPhotoAtomID(tb testing.TB, app *tests.TestApp, arcadeID, createdBy string) string {
 	tb.Helper()
 	return seedPhotoAtom(tb, app, arcadeID, createdBy, true)
+}
+
+func setUserLevelExp(tb testing.TB, app *tests.TestApp, userID string, exp int) {
+	tb.Helper()
+	coll, err := app.FindCollectionByNameOrId(userhandler.CollectionUserLevel)
+	if err != nil {
+		tb.Fatalf("failed to load user level collection: %v", err)
+	}
+	record, err := app.FindRecordById(userhandler.CollectionUserLevel, userID)
+	if err != nil {
+		record = core.NewRecord(coll)
+		record.Set("id", userID)
+		record.Set("user", userID)
+	}
+	record.Set("exp", exp)
+	if err := app.Save(record); err != nil {
+		tb.Fatalf("failed to save user level: %v", err)
+	}
 }

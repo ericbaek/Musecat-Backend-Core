@@ -29,6 +29,14 @@ type ProfileSNS struct {
 	Items []ProfileSNSItem `json:"items"`
 }
 
+type OwnedArcade struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Country string `json:"country"`
+	Closed  bool   `json:"closed"`
+}
+
 type BackgroundPosition struct {
 	X float64 `json:"x"`
 	Y float64 `json:"y"`
@@ -48,6 +56,7 @@ type Profile struct {
 	BackgroundPosition BackgroundPosition `json:"background_position"`
 	Tag                []string           `json:"tag"`
 	Owns               *[]string          `json:"owns,omitempty"`
+	OwnedArcades       *[]OwnedArcade     `json:"owned_arcades,omitempty"`
 	SNS                ProfileSNS         `json:"sns"`
 	Withdrawn          bool               `json:"withdrawn"`
 	SeriesPublic       bool               `json:"series_public"`
@@ -159,6 +168,10 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	if includePrivateSeries {
 		owns := userRec.GetStringSlice("owns")
 		out.Owns = &owns
+	}
+	if hasProfileTag(tag, "arcade_owner") {
+		ownedArcades := loadPublicOwnedArcades(app, userRec)
+		out.OwnedArcades = &ownedArcades
 	}
 	if userInfoRec != nil && (userInfoRec.GetBool("series_public") || includePrivateSeries) {
 		out.Series = loadProfileSeries(app, userInfoRec)
@@ -280,6 +293,60 @@ func parseUserTag(userRec *core.Record) []string {
 	}
 
 	return parseCSVList(userRec.GetString("tags"))
+}
+
+func hasProfileTag(tags []string, target string) bool {
+	normalizedTarget := strings.TrimSpace(target)
+	for _, tag := range tags {
+		if strings.EqualFold(strings.TrimSpace(tag), normalizedTarget) {
+			return true
+		}
+	}
+	return false
+}
+
+func loadPublicOwnedArcades(app core.App, userRec *core.Record) []OwnedArcade {
+	if app == nil || userRec == nil {
+		return []OwnedArcade{}
+	}
+
+	ownedIDs := relationIDs(userRec, "owns")
+	if len(ownedIDs) == 0 {
+		return []OwnedArcade{}
+	}
+
+	out := make([]OwnedArcade, 0, len(ownedIDs))
+	seen := make(map[string]struct{}, len(ownedIDs))
+	for _, ownedID := range ownedIDs {
+		id := strings.TrimSpace(ownedID)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+
+		arcade, err := app.FindRecordById("arcade", id)
+		if err != nil || arcade == nil || !arcade.GetBool("public") {
+			continue
+		}
+
+		owned := OwnedArcade{
+			ID:      arcade.Id,
+			Country: strings.TrimSpace(arcade.GetString("country")),
+			Closed:  arcade.GetBool("closed"),
+		}
+		if basicID := strings.TrimSpace(arcade.GetString("basic")); basicID != "" {
+			if basic, basicErr := app.FindRecordById("arcade_basic", basicID); basicErr == nil && basic != nil {
+				owned.Name = strings.TrimSpace(basic.GetString("name"))
+				owned.Address = strings.TrimSpace(basic.GetString("address"))
+			}
+		}
+		out = append(out, owned)
+	}
+
+	return out
 }
 
 func trimmedStringSlice(values []string) []string {

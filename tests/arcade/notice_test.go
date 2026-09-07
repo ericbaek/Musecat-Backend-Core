@@ -177,7 +177,8 @@ func TestArcadeNotice_SupporterCreateAndAuthorOnlyMutation(t *testing.T) {
 		Location: location{Lat: 37.91, Lon: 127.41},
 	})
 
-	token, _ := createAuthUserWithTags(t, app, []string{"supporter"})
+	token, user := createAuthUserWithTags(t, app, []string{"supporter"})
+	setUserLevel(t, app, user.Id, 30)
 	headers := map[string]string{"Authorization": "Bearer " + token}
 	createResp := executeJSONRequest(t, app, http.MethodPost, "/arcade/notice", string(createNoticeBody(arcadeID)), headers)
 	if createResp.StatusCode != http.StatusOK {
@@ -188,7 +189,8 @@ func TestArcadeNotice_SupporterCreateAndAuthorOnlyMutation(t *testing.T) {
 		t.Fatal("expected supporter notice id")
 	}
 
-	otherToken, _ := createAuthUserWithTags(t, app, []string{"supporter"})
+	otherToken, otherUser := createAuthUserWithTags(t, app, []string{"supporter"})
+	setUserLevel(t, app, otherUser.Id, 30)
 	otherHeaders := map[string]string{"Authorization": "Bearer " + otherToken}
 	updateBody, _ := json.Marshal(map[string]any{"id": noticeID, "document": noticeDocument("**blocked**")})
 	if res := executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), otherHeaders); res.StatusCode != http.StatusForbidden {
@@ -212,6 +214,51 @@ func TestArcadeNotice_SupporterCreateAndAuthorOnlyMutation(t *testing.T) {
 		t.Fatalf("expected author delete to succeed, got %d", res.StatusCode)
 	} else {
 		res.Body.Close()
+	}
+}
+
+func TestArcadeNotice_SupporterRequiresLevel30ForMutations(t *testing.T) {
+	for _, role := range []string{"supporter", "founding_supporter"} {
+		t.Run(role, func(t *testing.T) {
+			app := newArcadeTestApp(t)
+			arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{
+				Name:     "Level-Gated Arcade",
+				Address:  "6 Level St",
+				Location: location{Lat: 37.91, Lon: 127.41},
+			})
+
+			token, user := createAuthUserWithTags(t, app, []string{role})
+			headers := map[string]string{"Authorization": "Bearer " + token}
+
+			setUserLevel(t, app, user.Id, 29)
+			res := executeJSONRequest(t, app, http.MethodPost, "/arcade/notice", string(createNoticeBody(arcadeID)), headers)
+			if res.StatusCode != http.StatusForbidden {
+				t.Fatalf("expected level 29 %s to receive 403, got %d", role, res.StatusCode)
+			}
+			res.Body.Close()
+
+			setUserLevel(t, app, user.Id, 30)
+			res = executeJSONRequest(t, app, http.MethodPost, "/arcade/notice", string(createNoticeBody(arcadeID)), headers)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("expected level 30 %s to create notice, got %d", role, res.StatusCode)
+			}
+			noticeID, _ := decodeJSONMap(t, res)["id"].(string)
+
+			setUserLevel(t, app, user.Id, 29)
+			updateBody, _ := json.Marshal(map[string]any{"id": noticeID, "document": noticeDocument("**blocked**")})
+			res = executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), headers)
+			if res.StatusCode != http.StatusForbidden {
+				t.Fatalf("expected level 29 %s update to receive 403, got %d", role, res.StatusCode)
+			}
+			res.Body.Close()
+
+			deleteBody, _ := json.Marshal(map[string]any{"id": noticeID})
+			res = executeJSONRequest(t, app, http.MethodDelete, "/arcade/notice", string(deleteBody), headers)
+			if res.StatusCode != http.StatusForbidden {
+				t.Fatalf("expected level 29 %s delete to receive 403, got %d", role, res.StatusCode)
+			}
+			res.Body.Close()
+		})
 	}
 }
 
@@ -240,7 +287,8 @@ func TestArcadeNotice_ModeratorCanMutateAnotherAuthorNotice(t *testing.T) {
 		Address:  "8 Moderator St",
 		Location: location{Lat: 37.93, Lon: 127.43},
 	})
-	token, _ := createAuthUserWithTags(t, app, []string{"supporter"})
+	token, user := createAuthUserWithTags(t, app, []string{"supporter"})
+	setUserLevel(t, app, user.Id, 30)
 	headers := map[string]string{"Authorization": "Bearer " + token}
 	created := executeJSONRequest(t, app, http.MethodPost, "/arcade/notice", string(createNoticeBody(arcadeID)), headers)
 	if created.StatusCode != http.StatusOK {

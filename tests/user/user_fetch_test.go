@@ -565,6 +565,76 @@ func TestGetUserByID_Success(t *testing.T) {
 		if _, exists := payload["warp"]; exists {
 			tb.Fatalf("expected warp to be omitted in public profile: %#v", payload)
 		}
+		if _, exists := payload["owned_arcades"]; exists {
+			tb.Fatalf("expected owned_arcades to be omitted for a non-owner: %#v", payload)
+		}
+	}
+
+	scenario.Test(t)
+}
+
+func TestGetUserByID_IncludesPublicOwnedArcadesForOwner(t *testing.T) {
+	scenario := tests.ApiScenario{
+		Name:           "GET /user includes public arcades for official arcade accounts",
+		Method:         http.MethodGet,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"id":"`,
+		},
+		TestAppFactory: func(tb testing.TB) *tests.TestApp {
+			return newUserFetchTestApp(tb)
+		},
+	}
+
+	var userID string
+
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		tb.Helper()
+		ensureWithdrawFields(tb, app)
+
+		_, userRec := createAuthUser(tb, app, true)
+		userID = userRec.Id
+		publicArcade := seedVisitArcade(tb, app, "Asia/Seoul")
+		privateArcade := seedVisitArcade(tb, app, "Asia/Tokyo")
+		privateArcade.Set("public", false)
+		if err := app.Save(privateArcade); err != nil {
+			tb.Fatalf("failed to make owned arcade private: %v", err)
+		}
+
+		userRec.Set("tags", []string{"arcade_owner"})
+		userRec.Set("owns", []string{publicArcade.Id, privateArcade.Id, "missing-arcade"})
+		if err := app.Save(userRec); err != nil {
+			tb.Fatalf("failed to save arcade owner: %v", err)
+		}
+
+		scenario.URL = "/user?id=" + userID
+	}
+
+	scenario.AfterTestFunc = func(tb testing.TB, _ *tests.TestApp, res *http.Response) {
+		tb.Helper()
+		payload := decodeJSON(tb, res)
+		assertProfileShape(tb, payload)
+
+		rawArcades, ok := payload["owned_arcades"].([]any)
+		if !ok || len(rawArcades) != 1 {
+			tb.Fatalf("expected one public owned arcade, got %#v", payload["owned_arcades"])
+		}
+		arcade, ok := rawArcades[0].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected owned arcade object, got %#v", rawArcades[0])
+		}
+		if got := arcade["name"]; got != "Visit Arcade" {
+			tb.Fatalf("expected owned arcade name, got %v", got)
+		}
+		if got := arcade["address"]; got != "Visit Address" {
+			tb.Fatalf("expected owned arcade address, got %v", got)
+		}
+		if got := arcade["country"]; got != "KR" {
+			tb.Fatalf("expected owned arcade country, got %v", got)
+		}
+		if got := arcade["closed"]; got != false {
+			tb.Fatalf("expected owned arcade to be open, got %v", got)
+		}
 	}
 
 	scenario.Test(t)

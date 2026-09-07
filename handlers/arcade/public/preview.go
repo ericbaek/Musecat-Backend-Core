@@ -49,10 +49,20 @@ func PreviewPublicArcade(re *core.RequestEvent) error {
 			"details": err.Error(),
 		})
 	}
+	state, err := loadPublicConversionState(re.App, arcade, re.Auth.Id)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to load public conversion requirements",
+			"details": err.Error(),
+		})
+	}
 
 	return re.JSON(http.StatusOK, map[string]any{
-		"arcade":     arcadeID,
-		"public":     false,
-		"xp_preview": preview,
+		"arcade":            arcadeID,
+		"public":            false,
+		"level":             state.Level,
+		"requirements":      state.Requirements,
+		"location_verified": state.LocationVerified,
+		"xp_preview":        preview,
 	})
 }

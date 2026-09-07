@@ -195,6 +195,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		group.PUT("/game", arcadegame.UpdateArcadeGame)
 		group.PUT("/hour", arcadehour.UpdateArcadeHour)
 		group.PUT("/public", arcadepublic.RequestPublicArcade)
+		group.POST("/location-verification", arcadepublic.VerifyArcadeLocation)
 		group.PUT("/photo", arcadephoto.UpdateArcadePhoto)
 		group.PUT("/memo", arcadememo.UpdateArcadeMemo)
 		group.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)

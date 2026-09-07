@@ -317,7 +317,8 @@ The `field` inside the diff is the rolled-back part, such as `basic`, `hour`, `s
 
 These mutation endpoints currently do not write `arcade_changelog` rows:
 
-- `PUT /arcade/public` (a supporter-tagged creator may bypass only the game, contact/hours, and Korea facility-photo requirements with explicit confirmation)
+- `PUT /arcade/public` (level-based public-conversion requirements; no supporter bypass)
+- `POST /arcade/location-verification` (one-time creator location proof tied to the current basic-information revision)
 - `POST /arcade/flag`
 - `POST /arcade/flag/delete`
 - `POST /arcade/flag/reaction`
