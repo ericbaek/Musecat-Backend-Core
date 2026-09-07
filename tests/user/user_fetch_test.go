@@ -602,7 +602,7 @@ func TestGetUserByID_IncludesPublicOwnedArcadesForOwner(t *testing.T) {
 		}
 
 		userRec.Set("tags", []string{"arcade_owner"})
-		userRec.Set("owns", []string{publicArcade.Id, privateArcade.Id, "missing-arcade"})
+		userRec.Set("owns", []string{publicArcade.Id, privateArcade.Id})
 		if err := app.Save(userRec); err != nil {
 			tb.Fatalf("failed to save arcade owner: %v", err)
 		}

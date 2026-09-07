@@ -49,6 +49,15 @@ All successful responses return this JSON object:
       "jp_short": "string",
       "manufacturer": "string"
     }
+  ],
+  "owned_arcades": [
+    {
+      "id": "string",
+      "name": "string",
+      "address": "string",
+      "country": "KR",
+      "closed": false
+    }
   ]
 }
 ```
@@ -69,9 +78,14 @@ All successful responses return this JSON object:
 - `series_public`: whether the user chose to expose preferred series
 - `warp`: user warp preference (included for `GET /user/me`)
 - `series`: optional `game_series` array, included only when `series_public = true`
+- `owned_arcades`: public arcade summaries for users tagged `arcade_owner`; public
+  arcades include both operating and closed venues, while private or missing venues
+  are omitted
 
 Endpoint-specific visibility:
 - `GET /user`: `series` is included only when `series_public = true`
+- `GET /user`: `owned_arcades` is included only for users tagged `arcade_owner` and
+  contains only public arcades
 - `GET /user/me`: `series_public` value is still returned, `series` is included for the authenticated user even when `series_public = false`, and `warp` is always included
 
 ## Profile countries
@@ -243,6 +257,8 @@ Authenticated self profile lookup.
 - Body: Profile DTO
 - `series` is always included for the authenticated user when stored in `user_info.series`, even if `series_public = false`
 - `owns` is included only for the authenticated user and lists arcade IDs they may manage.
+- `owned_arcades` contains the public arcade summaries for an authenticated official
+  arcade account as well.
 
 ### Error Responses
 - `401 Unauthorized` when token is missing/invalid (PocketBase auth middleware shape):

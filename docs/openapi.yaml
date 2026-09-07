@@ -1174,6 +1174,23 @@ components:
           description: Authenticated user's managed arcade IDs. Included only by GET /user/me.
           items:
             type: string
+        owned_arcades:
+          type: array
+          description: Public arcade summaries for users tagged arcade_owner. Includes public closed arcades but omits private or missing arcades.
+          items:
+            type: object
+            required: [id, name, address, country, closed]
+            properties:
+              id:
+                type: string
+              name:
+                type: string
+              address:
+                type: string
+              country:
+                type: string
+              closed:
+                type: boolean
         sns:
           $ref: '#/components/schemas/UserProfileSns'
         withdrawn:
@@ -4266,7 +4283,7 @@ paths:
               photos: [atom_1, atom_2]
       responses:
         '200':
-          description: Photo relation updated. XP is awarded only when pending atoms are first published: 2 XP per atom, up to 10 XP per campaign target or 4 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a published atom awards no XP.
+          description: "Photo relation updated. XP is awarded only when pending atoms are first published: 2 XP per atom, up to 10 XP per campaign target or 4 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a published atom awards no XP."
           content:
             application/json:
               schema:
