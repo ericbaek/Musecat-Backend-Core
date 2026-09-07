@@ -166,7 +166,11 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 			apis.RequireAuth("user"),
 			arcadequery.RequireModeratorAccess(),
 		)
-		se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback)
+		se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback).Bind(
+			apis.RequireAuth("user"),
+			user.RequireActiveUser(),
+			arcadequery.RequireStrictReviewerAccess(),
+		)
 		se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback)
 		se.Router.GET("/arcade/notice", arcadenotice.ListArcadeNotice)
 		group := se.Router.Group("/arcade").Bind(

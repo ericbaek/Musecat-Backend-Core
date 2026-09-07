@@ -986,6 +986,8 @@ components:
           enum: [direct, search, nearby, other]
         game_series:
           type: array
+          maxItems: 10
+          description: At most ten distinct canonical game-series IDs. Comma-separated values count individually.
           items:
             type: string
     ArcadeUpdateChange:
@@ -1393,6 +1395,51 @@ components:
         rolled_back: {type: boolean, description: True when a still_old report reverted a recent campaign update.}
         xp_feedback:
           $ref: '#/components/schemas/XpFeedback'
+    CampaignListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/CampaignSummary'}
+    ArcadeCampaignListItem:
+      type: object
+      required: [campaign, target]
+      properties:
+        campaign: {$ref: '#/components/schemas/CampaignSummary'}
+        target: {$ref: '#/components/schemas/CampaignTarget'}
+    ArcadeCampaignListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ArcadeCampaignListItem'}
+    CampaignEndRequest:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string}
+    CampaignMutationRequest:
+      type: object
+      required: [from_version, to_version, cabinet_scope, cabinets, country_scope, countries, reward_exp, status, start_at, end_at]
+      properties:
+        id: {type: string, description: Required for PUT; omitted for POST.}
+        from_version: {type: string}
+        to_version: {type: string}
+        cabinet_scope: {type: string, enum: [all, include]}
+        cabinets: {type: array, items: {type: string}}
+        country_scope: {type: string, enum: [all, include, exclude]}
+        countries: {type: array, items: {type: string}}
+        reward_exp: {type: integer, minimum: 0}
+        status: {type: string, enum: [draft, active, ended]}
+        start_at: {type: string, format: date-time}
+        end_at: {type: string, format: date-time}
+    CampaignMutationResponse:
+      type: object
+      required: [campaign]
+      properties:
+        campaign: {$ref: '#/components/schemas/CampaignSummary'}
     CampaignReporter:
       type: object
       required: [id, username, nickname, primary_country, level]
@@ -1512,6 +1559,34 @@ components:
           allOf:
             - $ref: '#/components/schemas/CampaignReport'
           nullable: true
+    SubwayMapFile:
+      type: object
+      required: [name, file_url]
+      properties:
+        name: {type: string}
+        file_url: {type: string, format: uri-reference}
+    SubwayMap:
+      type: object
+      required: [id, region, release_date, changelog, created, updated]
+      properties:
+        id: {type: string}
+        region: {type: string, enum: [center, busan]}
+        release_date: {type: string, format: date}
+        changelog:
+          type: array
+          items: {type: string}
+        light_svg: {$ref: '#/components/schemas/SubwayMapFile', nullable: true}
+        dark_svg: {$ref: '#/components/schemas/SubwayMapFile', nullable: true}
+        image: {$ref: '#/components/schemas/SubwayMapFile', nullable: true}
+        document: {$ref: '#/components/schemas/SubwayMapFile', nullable: true}
+        created: {type: string, format: date-time}
+        updated: {type: string, format: date-time}
+    SubwayMapDeleteResponse:
+      type: object
+      required: [id, deleted]
+      properties:
+        id: {type: string}
+        deleted: {type: boolean, const: true}
     PhotoCampaignArcade:
       type: object
       required: [id, country, name, address, nickname, closed]
@@ -3001,7 +3076,14 @@ paths:
     post:
       tags: [Arcade Mutations]
       summary: /arcade/analytics/event
-      description: Records an anonymous direction-click analytics event.
+      description: |
+        Records an anonymous direction-click analytics event. The request body is limited to
+        2 KiB and accepts at most ten distinct game-series IDs. To limit anonymous metric
+        manipulation, each client IP may record at most 20 events per rolling 10 minutes and
+        may record an event for the same arcade only once every 30 seconds. Once the arcade is
+        validated, rejected series IDs also consume this quota before their database lookup. The server does
+        not persist the client IP, user agent, or identity; limits are process-local and retain
+        no more than 4,096 active clients.
       requestBody:
         required: true
         content:
@@ -3019,6 +3101,20 @@ paths:
                   recorded: {type: boolean, const: true}
         '400':
           description: Invalid event body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '413':
+          description: Analytics event body exceeds 2 KiB.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: Anonymous client exceeded the per-arcade cooldown or rolling event limit. The `Retry-After` header is included.
+          headers:
+            Retry-After:
+              schema: {type: integer, minimum: 1}
+              description: Seconds until this anonymous client may retry.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -4775,6 +4871,9 @@ paths:
     get:
       tags: [Support]
       summary: /support_feedback
+      description: Strict support review queue. Requires an active `developer` or `moderator`; supporter tags are insufficient.
+      security:
+        - bearerAuth: []
       parameters:
         - name: createdBy
           in: query
@@ -4791,6 +4890,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListEnvelope'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Active developer or moderator access required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '502':
           description: List failure.
           content:
@@ -6134,6 +6245,111 @@ paths:
         '400': {description: Invalid coordinates or GPS accuracy.}
         '403': {description: Inactive user, ineligible arcade, or outside the 100m radius.}
         '409': {description: Missing arcade coordinates or timezone.}
+  /subway/map:
+    get:
+      tags: [Meta]
+      summary: Get the newest subway map for a region
+      parameters:
+        - name: region
+          in: query
+          required: true
+          schema: {type: string, enum: [center, busan]}
+      responses:
+        '200':
+          description: Latest map metadata and custom file URLs.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SubwayMap'}
+        '400': {description: Unsupported or missing region.}
+        '404': {description: No map exists for the region.}
+        '502': {description: Map lookup failed.}
+    post:
+      tags: [Moderator]
+      summary: Create a subway map version
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [region, releaseDate]
+              properties:
+                region: {type: string, enum: [center, busan]}
+                releaseDate: {type: string, format: date}
+                changelog: {type: string, description: JSON string array, maxLength: 2000000}
+                lightSVG: {type: string, format: binary}
+                darkSVG: {type: string, format: binary}
+                image: {type: string, format: binary}
+                file: {type: string, format: binary}
+      responses:
+        '201': {description: Map version created.}
+        '400': {description: Invalid multipart input or no display asset.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+    put:
+      tags: [Moderator]
+      summary: Update a subway map version
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: {type: string}
+                region: {type: string, enum: [center, busan]}
+                releaseDate: {type: string, format: date}
+                changelog: {type: string, description: JSON string array, maxLength: 2000000}
+                lightSVG: {type: string, format: binary}
+                darkSVG: {type: string, format: binary}
+                image: {type: string, format: binary}
+                file: {type: string, format: binary}
+      responses:
+        '200': {description: Map version updated.}
+        '400': {description: Invalid multipart input or no display asset.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '404': {description: Map version was not found.}
+    delete:
+      tags: [Moderator]
+      summary: Delete a subway map version
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Map version deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SubwayMapDeleteResponse'}
+        '400': {description: Missing map id.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '404': {description: Map version was not found.}
+        '502': {description: Map deletion failed.}
+  /subway/map/file:
+    get:
+      tags: [Meta]
+      summary: Download a subway map asset
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: field
+          in: query
+          required: true
+          schema: {type: string, enum: [lightSVG, darkSVG, image, file]}
+      responses:
+        '200': {description: The requested SVG, image, or PDF bytes.}
+        '400': {description: Missing id or unsupported field.}
+        '404': {description: Map or requested file was not found.}
   /campaign:
     get:
       tags: [Arcade Mutations]
@@ -6171,6 +6387,128 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '502':
           description: Campaign detail could not be loaded.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    post:
+      tags: [Moderator]
+      summary: Create an update campaign
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignMutationRequest'}
+      responses:
+        '201':
+          description: Campaign created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignMutationResponse'}
+        '400': {description: Invalid campaign input.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '502': {description: Campaign could not be created.}
+    put:
+      tags: [Moderator]
+      summary: Update an update campaign
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignMutationRequest'}
+      responses:
+        '200':
+          description: Campaign updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignMutationResponse'}
+        '400': {description: Invalid campaign input or missing id.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '404': {description: Campaign was not found.}
+        '502': {description: Campaign could not be updated.}
+  /campaigns:
+    get:
+      tags: [Arcades]
+      summary: List active update campaigns
+      description: Returns at most 20 campaigns that are active at request time, newest start first. Target counts include pending and already-updated public/open targets.
+      responses:
+        '200':
+          description: Active campaign summaries.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignListResponse'}
+        '502':
+          description: Campaigns could not be loaded.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /arcade/campaigns:
+    get:
+      tags: [Arcades]
+      summary: List active campaign prompts for an arcade
+      description: Returns campaign targets for the requested public/open arcade. Each item includes current target status and report history.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Current campaign prompts for the arcade.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeCampaignListResponse'}
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Campaign targets could not be loaded.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /campaign/end:
+    post:
+      tags: [Moderator]
+      summary: End an update campaign
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignEndRequest'}
+      responses:
+        '200':
+          description: Campaign marked ended.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignMutationResponse'}
+        '400':
+          description: Invalid request body or missing id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Active user lacks administrator access.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Campaign was not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Campaign could not be ended.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

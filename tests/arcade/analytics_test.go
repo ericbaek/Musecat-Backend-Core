@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func TestArcadeAnalyticsProtectedFieldsByRole(t *testing.T) {
 	if res := executeJSONRequest(t, app, http.MethodGet, "/arcade?id="+arcadeID+"&source=search&game_series="+seriesA, "", nil); res.StatusCode != http.StatusOK {
 		t.Fatalf("second detail status=%d", res.StatusCode)
 	}
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 1; i++ {
 		body := fmt.Sprintf(`{"arcade":%q,"event_type":"direction_click","source":"nearby"}`, arcadeID)
 		res := executeJSONRequest(t, app, http.MethodPost, "/arcade/analytics/event", body, nil)
 		if res.StatusCode != http.StatusOK {
@@ -95,7 +96,7 @@ func TestArcadeAnalyticsProtectedFieldsByRole(t *testing.T) {
 		if !protected {
 			return
 		}
-		if payload["direction_clicks"] != float64(2) || payload["visit_verifications"] != float64(3) || payload["distinct_visitors"] != float64(2) {
+		if payload["direction_clicks"] != float64(1) || payload["visit_verifications"] != float64(3) || payload["distinct_visitors"] != float64(2) {
 			t.Fatalf("unexpected protected analytics: %#v", payload)
 		}
 		sources := payload["page_views_by_source"].([]any)
@@ -151,6 +152,64 @@ func TestArcadeAnalyticsProtectedFieldsByRole(t *testing.T) {
 			assertAnalyticsShape(t, map[string]string{"Authorization": "Bearer " + token}, true)
 		})
 	}
+}
+
+func TestArcadeAnalyticsEventRejectsAnonymousAbuse(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	arcadeID, _ := seedPublicArcade(t, app, user.Id, arcadeSeed{
+		Name:     "Rate Limit Arcade",
+		Address:  "1 Rate Limit Street",
+		Location: location{Lat: 37.5665, Lon: 126.9780},
+	})
+
+	t.Run("limits request body before decoding", func(t *testing.T) {
+		res := executeJSONRequest(t, app, http.MethodPost, "/arcade/analytics/event", strings.Repeat("x", 2049), nil)
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status=%d, want %d", res.StatusCode, http.StatusRequestEntityTooLarge)
+		}
+	})
+
+	t.Run("caps submitted game series", func(t *testing.T) {
+		capArcadeID, _ := seedPublicArcade(t, app, user.Id, arcadeSeed{
+			Name:     "Series Cap Arcade",
+			Address:  "2 Rate Limit Street",
+			Location: location{Lat: 37.5666, Lon: 126.9781},
+		})
+		series := make([]string, 0, 11)
+		for i := 0; i < 11; i++ {
+			series = append(series, seedAnalyticsSeries(t, app, fmt.Sprintf("Series %d", i)))
+		}
+		body, err := json.Marshal(map[string]any{"arcade": capArcadeID, "event_type": "direction_click", "game_series": series})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res := executeJSONRequest(t, app, http.MethodPost, "/arcade/analytics/event", string(body), nil)
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("status=%d, want %d", res.StatusCode, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("deduplicates rapid events from the same anonymous client", func(t *testing.T) {
+		body := fmt.Sprintf(`{"arcade":%q,"event_type":"direction_click"}`, arcadeID)
+		first := executeJSONRequest(t, app, http.MethodPost, "/arcade/analytics/event", body, nil)
+		if first.StatusCode != http.StatusOK {
+			first.Body.Close()
+			t.Fatalf("first status=%d, want %d", first.StatusCode, http.StatusOK)
+		}
+		first.Body.Close()
+
+		second := executeJSONRequest(t, app, http.MethodPost, "/arcade/analytics/event", body, nil)
+		defer second.Body.Close()
+		if second.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("second status=%d, want %d", second.StatusCode, http.StatusTooManyRequests)
+		}
+		if second.Header.Get("Retry-After") == "" {
+			t.Fatal("rate limited response must provide Retry-After")
+		}
+	})
 }
 
 func TestArcadeAnalyticsRejectsPrivateAndClosedArcades(t *testing.T) {

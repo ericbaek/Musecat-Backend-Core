@@ -11,6 +11,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 
+	"github.com/ericbaek/musecat-backend-core/docs"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	"github.com/ericbaek/musecat-backend-core/handlers"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
@@ -38,7 +39,6 @@ import (
 )
 
 const (
-	documentationSpecPath    = "docs/openapi.yaml"
 	documentationSpecPathEnv = "MUSECAT_OPENAPI_SPEC_PATH"
 	documentationSiteDir     = "docs-site"
 )
@@ -150,7 +150,11 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		// Public user-scoped changelog read endpoint; private arcade rows are
 		// returned only to their owner or strict reviewers.
 		se.Router.GET("/user/changelog", userhandler.GetUserChangelog)
-		se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback)
+		se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback).Bind(
+			apis.RequireAuth("user"),
+			userhandler.RequireActiveUser(),
+			arcadequery.RequireStrictReviewerAccess(),
+		)
 		se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback)
 		communityhandler.RegisterRoutes(se)
 
@@ -261,7 +265,7 @@ func RegisterDocumentationRoutes(se *core.ServeEvent) {
 			return err
 		}
 
-		spec, err := os.ReadFile(resolveDocumentationSpecPath())
+		spec, err := loadDocumentationSpec()
 		if err != nil {
 			return re.JSON(http.StatusInternalServerError, map[string]any{
 				"error":   "failed to load OpenAPI spec",
@@ -289,12 +293,14 @@ func RegisterDocumentationRoutes(se *core.ServeEvent) {
 	})
 }
 
-func resolveDocumentationSpecPath() string {
+func loadDocumentationSpec() ([]byte, error) {
 	if path := strings.TrimSpace(os.Getenv(documentationSpecPathEnv)); path != "" {
-		return path
+		return os.ReadFile(path)
 	}
 
-	return documentationSpecPath
+	// Core's packaged contract is the default for every binary that imports it.
+	// A file can be selected only through the explicit path override above.
+	return apidocs.OpenAPISpec(), nil
 }
 
 type docsBasicAuthConfig struct {

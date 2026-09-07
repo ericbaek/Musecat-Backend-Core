@@ -171,11 +171,13 @@ func TestCreateSupportFeedback_MultipartWithPhotos(t *testing.T) {
 
 func TestListSupportFeedback_All(t *testing.T) {
 	var baselineTotal int
+	headers := map[string]string{}
 
 	scenario := tests.ApiScenario{
 		Name:           "GET /support_feedback returns all feedback",
 		Method:         http.MethodGet,
 		URL:            "/support_feedback",
+		Headers:        headers,
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
 			`"items":`,
@@ -187,6 +189,8 @@ func TestListSupportFeedback_All(t *testing.T) {
 
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
 		tb.Helper()
+		token, _ := createAuthUserWithTags(tb, app, []string{"moderator"})
+		headers["Authorization"] = "Bearer " + token
 		_, userA := createAuthUser(tb, app)
 		_, userB := createAuthUser(tb, app)
 
@@ -222,10 +226,12 @@ func TestListSupportFeedback_All(t *testing.T) {
 
 func TestListSupportFeedback_FilterByCreatedByAndStatus(t *testing.T) {
 	var targetUserID string
+	headers := map[string]string{}
 
 	scenario := tests.ApiScenario{
 		Name:           "GET /support_feedback filters by createdBy and status",
 		Method:         http.MethodGet,
+		Headers:        headers,
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
 			`"items":`,
@@ -238,6 +244,8 @@ func TestListSupportFeedback_FilterByCreatedByAndStatus(t *testing.T) {
 
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
 		tb.Helper()
+		token, _ := createAuthUserWithTags(tb, app, []string{"developer"})
+		headers["Authorization"] = "Bearer " + token
 		_, userA := createAuthUser(tb, app)
 		_, userB := createAuthUser(tb, app)
 		targetUserID = userA.Id
@@ -275,6 +283,48 @@ func TestListSupportFeedback_FilterByCreatedByAndStatus(t *testing.T) {
 	}
 
 	scenario.Test(t)
+}
+
+func TestListSupportFeedback_RequiresStrictReviewer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tags            []string
+		expectedStatus  int
+		expectedContent []string
+	}{
+		"anonymous": {
+			expectedStatus:  http.StatusUnauthorized,
+			expectedContent: []string{`"status":401`},
+		},
+		"contributor": {
+			tags:            []string{"supporter"},
+			expectedStatus:  http.StatusForbidden,
+			expectedContent: []string{`"error":"developer or moderator access required"`},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			headers := map[string]string{}
+			scenario := tests.ApiScenario{
+				Name:            "GET /support_feedback restricts feedback to strict reviewers",
+				Method:          http.MethodGet,
+				URL:             "/support_feedback",
+				Headers:         headers,
+				ExpectedStatus:  tc.expectedStatus,
+				ExpectedContent: tc.expectedContent,
+				TestAppFactory: func(tb testing.TB) *tests.TestApp {
+					return newArcadeTestApp(tb)
+				},
+			}
+
+			if tc.tags != nil {
+				scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+					token, _ := createAuthUserWithTags(tb, app, tc.tags)
+					headers["Authorization"] = "Bearer " + token
+				}
+			}
+
+			scenario.Test(t)
+		})
+	}
 }
 
 func seedSupportFeedback(

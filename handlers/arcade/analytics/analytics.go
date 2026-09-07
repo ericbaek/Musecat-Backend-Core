@@ -3,9 +3,12 @@ package analytics
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -17,6 +20,13 @@ const (
 	EventPageView       = "page_view"
 	EventDirectionClick = "direction_click"
 	EventFaultReport    = "fault_report"
+
+	maxAnalyticsEventBodyBytes = 2 * 1024
+	maxAnalyticsEventSeries    = 10
+	analyticsClientWindow      = 10 * time.Minute
+	maxAnalyticsEventsWindow   = 20
+	analyticsArcadeCooldown    = 30 * time.Second
+	maxAnalyticsClients        = 4096
 )
 
 var analyticsSources = map[string]struct{}{
@@ -38,6 +48,19 @@ type analyticsCount struct {
 	Series string `json:"game_series,omitempty"`
 	Count  int64  `json:"count"`
 }
+
+type analyticsClientEvents struct {
+	events       []time.Time
+	arcadeEvents map[string]time.Time
+}
+
+// anonymousAnalyticsEvents deliberately remains process-local. The event
+// contract does not retain IP addresses, user agents, or user identity, so a
+// persistent limiter key would violate that data-minimization boundary.
+var anonymousAnalyticsEvents = struct {
+	sync.Mutex
+	byClient map[string]analyticsClientEvents
+}{byClient: map[string]analyticsClientEvents{}}
 
 // GetArcadeAnalytics returns public aggregate metrics. Detailed acquisition,
 // direction, and visit metrics are included only for an official arcade owner
@@ -84,7 +107,10 @@ func GetArcadeAnalytics(re *core.RequestEvent) error {
 // event type for now so callers cannot inject arbitrary analytics categories.
 func RecordDirectionClick(re *core.RequestEvent) error {
 	var body directionClickRequest
-	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
+	if err := decodeDirectionClickRequest(re, &body); err != nil {
+		if err == errAnalyticsEventBodyTooLarge {
+			return re.JSON(http.StatusRequestEntityTooLarge, map[string]any{"error": "analytics event body is too large"})
+		}
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
 	}
 	body.Arcade = strings.TrimSpace(body.Arcade)
@@ -99,9 +125,16 @@ func RecordDirectionClick(re *core.RequestEvent) error {
 	if err != nil || !arcade.GetBool("public") {
 		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
 	}
+	if retryAfter, allowed := allowAnonymousAnalyticsEvent(re.App, re.RealIP(), body.Arcade, time.Now()); !allowed {
+		re.Response.Header().Set("Retry-After", fmt.Sprintf("%d", int((retryAfter+time.Second-1)/time.Second)))
+		return re.JSON(http.StatusTooManyRequests, map[string]any{"error": "analytics event rate limit exceeded"})
+	}
 
 	seriesIDs, err := existingSeriesIDs(re.App, body.Series)
 	if err != nil {
+		if err == errTooManyAnalyticsSeries {
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "game_series must contain at most 10 series"})
+		}
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to validate game series", "details": err.Error()})
 	}
 	if err := recordEventGroup(re.App, body.Arcade, EventDirectionClick, normalizeSource(body.Source), seriesIDs, ""); err != nil {
@@ -109,6 +142,85 @@ func RecordDirectionClick(re *core.RequestEvent) error {
 	}
 
 	return re.JSON(http.StatusOK, map[string]any{"recorded": true})
+}
+
+var (
+	errAnalyticsEventBodyTooLarge = fmt.Errorf("analytics event body too large")
+	errTooManyAnalyticsSeries     = fmt.Errorf("too many analytics game series")
+)
+
+func decodeDirectionClickRequest(re *core.RequestEvent, body *directionClickRequest) error {
+	raw, err := io.ReadAll(io.LimitReader(re.Request.Body, maxAnalyticsEventBodyBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(raw) > maxAnalyticsEventBodyBytes {
+		return errAnalyticsEventBodyTooLarge
+	}
+	return json.Unmarshal(raw, body)
+}
+
+func allowAnonymousAnalyticsEvent(app core.App, clientIP, arcadeID string, now time.Time) (time.Duration, bool) {
+	if clientIP == "" {
+		clientIP = "unknown"
+	}
+	clientKey := fmt.Sprintf("%p:%s", app, clientIP)
+
+	anonymousAnalyticsEvents.Lock()
+	defer anonymousAnalyticsEvents.Unlock()
+
+	state, exists := anonymousAnalyticsEvents.byClient[clientKey]
+	if !exists && len(anonymousAnalyticsEvents.byClient) >= maxAnalyticsClients {
+		evictOldestAnonymousAnalyticsClient()
+	}
+	windowStart := now.Add(-analyticsClientWindow)
+	kept := state.events[:0]
+	for _, eventAt := range state.events {
+		if eventAt.After(windowStart) {
+			kept = append(kept, eventAt)
+		}
+	}
+	state.events = kept
+	if state.arcadeEvents == nil {
+		state.arcadeEvents = map[string]time.Time{}
+	}
+	cooldownStart := now.Add(-analyticsArcadeCooldown)
+	for id, eventAt := range state.arcadeEvents {
+		if !eventAt.After(cooldownStart) {
+			delete(state.arcadeEvents, id)
+		}
+	}
+	if previous, ok := state.arcadeEvents[arcadeID]; ok {
+		if elapsed := now.Sub(previous); elapsed < analyticsArcadeCooldown {
+			return analyticsArcadeCooldown - elapsed, false
+		}
+	}
+	if len(state.events) >= maxAnalyticsEventsWindow {
+		return state.events[0].Add(analyticsClientWindow).Sub(now), false
+	}
+
+	state.events = append(state.events, now)
+	state.arcadeEvents[arcadeID] = now
+	anonymousAnalyticsEvents.byClient[clientKey] = state
+	return 0, true
+}
+
+func evictOldestAnonymousAnalyticsClient() {
+	var oldestKey string
+	var oldestAt time.Time
+	for clientKey, state := range anonymousAnalyticsEvents.byClient {
+		lastEventAt := time.Time{}
+		if len(state.events) > 0 {
+			lastEventAt = state.events[len(state.events)-1]
+		}
+		if oldestKey == "" || lastEventAt.Before(oldestAt) {
+			oldestKey = clientKey
+			oldestAt = lastEventAt
+		}
+	}
+	if oldestKey != "" {
+		delete(anonymousAnalyticsEvents.byClient, oldestKey)
+	}
 }
 
 // RecordPageView is intentionally best effort: analytics persistence must not
@@ -163,15 +275,20 @@ func recordEventGroupTx(app core.App, arcadeID, eventType, source string, series
 func existingSeriesIDs(app core.App, raw []string) ([]string, error) {
 	ids := make([]string, 0, len(raw))
 	seen := map[string]struct{}{}
+	submitted := map[string]struct{}{}
 	for _, value := range raw {
 		for _, part := range strings.Split(value, ",") {
 			id := strings.TrimSpace(part)
 			if id == "" {
 				continue
 			}
-			if _, ok := seen[id]; ok {
+			if _, ok := submitted[id]; ok {
 				continue
 			}
+			if len(submitted) >= maxAnalyticsEventSeries {
+				return nil, errTooManyAnalyticsSeries
+			}
+			submitted[id] = struct{}{}
 			if _, err := app.FindRecordById(arcadeinternal.CollectionGameSeries, id); err != nil {
 				continue
 			}
