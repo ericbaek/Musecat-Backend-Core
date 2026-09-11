@@ -87,6 +87,11 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 			"error": err.Error(),
 		})
 	}
+	if hasNearbyCabinetFilter(gameFilters) && re.Auth == nil {
+		return re.JSON(http.StatusUnauthorized, map[string]any{
+			"error": "authentication required",
+		})
+	}
 	addressFilter := normalizeAddressKeyword(q.Get("address"))
 	countryFilter := strings.ToUpper(strings.TrimSpace(q.Get("country")))
 	expandGame, err := strconv.ParseBool(strings.TrimSpace(q.Get("expand")))
@@ -276,6 +281,15 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 
 	// 8. 페이지 정보와 함께 응답한다.
 	return re.JSON(http.StatusOK, response)
+}
+
+func hasNearbyCabinetFilter(filters []nearbyGameFilter) bool {
+	for _, filter := range filters {
+		if strings.TrimSpace(filter.CabinetID) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func summarizeCountryTotals(results []arcadeDistance) map[string]countryTotal {

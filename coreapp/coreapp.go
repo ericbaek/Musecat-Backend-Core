@@ -102,7 +102,10 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		se.Router.GET("/campaigns", arcadecampaign.ListCampaigns)
 		se.Router.GET("/campaign", arcadecampaign.GetCampaign)
 		se.Router.GET("/campaign/photo", arcadecampaign.ListPhotoCampaign)
-		se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns)
+		se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns).Bind(
+			apis.RequireAuth("user"),
+			userhandler.RequireActiveUser(),
+		)
 		se.Router.POST("/campaign", arcadecampaign.CreateCampaign).Bind(
 			apis.RequireAuth("user"),
 			userhandler.RequireActiveUser(),
@@ -171,7 +174,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
 		authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
 		authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart)
-		authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireGameToolsAccess())
+		authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
 		authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic)
 		authArcade.PUT("/public", arcadepublic.RequestPublicArcade)
 		authArcade.POST("/location-verification", arcadepublic.VerifyArcadeLocation)

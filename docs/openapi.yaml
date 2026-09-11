@@ -5444,7 +5444,7 @@ paths:
       tags: [Moderator]
       summary: /arcade/game/bulk_version
       description: |
-        Requires an authenticated user with `developer` or `moderator` access, or a `supporter` or `founding_supporter` role at level 30 or above. The selected stable game entries may span multiple arcades. Each affected arcade receives an immutable game-state batch and its own `changed=game` changelog row. This administrative version swap records only the resulting game-state change.
+        Requires an authenticated user with `developer` or `moderator` access. The selected stable game entries may span multiple arcades. Each affected arcade receives an immutable game-state batch and its own `changed=game` changelog row. This administrative version swap records only the resulting game-state change.
       security:
         - bearerAuth: []
       requestBody:
@@ -6449,7 +6449,8 @@ paths:
     get:
       tags: [Arcades]
       summary: List active campaign prompts for an arcade
-      description: Returns campaign targets for the requested public/open arcade. Each item includes current target status and report history.
+      description: Returns campaign targets for the requested public/open arcade to an authenticated active user. Each item includes current target status and report history.
+      security: [{bearerAuth: []}]
       parameters:
         - name: id
           in: query
@@ -6463,6 +6464,11 @@ paths:
               schema: {$ref: '#/components/schemas/ArcadeCampaignListResponse'}
         '400':
           description: Missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token, or inactive user.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

@@ -86,7 +86,7 @@ func RequireAdminAccess() *hook.Handler[*core.RequestEvent] {
 }
 
 // RequireGameToolsAccess allows staff or supporters who have reached level 30
-// to manage the game catalog and perform bulk version updates.
+// to manage the game catalog.
 func RequireGameToolsAccess() *hook.Handler[*core.RequestEvent] {
 	return &hook.Handler[*core.RequestEvent]{
 		Id: "requireGameToolsAccess",

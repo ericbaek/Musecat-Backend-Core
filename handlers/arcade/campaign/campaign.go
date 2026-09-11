@@ -212,8 +212,9 @@ func GetCampaign(re *core.RequestEvent) error {
 }
 
 // ListArcadeCampaigns returns active campaign prompts for the public/open
-// arcade identified by id. Keeping this as a dedicated aggregate endpoint lets
-// the arcade detail render its prompts without exposing raw campaign records.
+// arcade identified by id to an authenticated active user. Keeping this as a
+// dedicated aggregate endpoint lets the arcade detail render its prompts
+// without exposing raw campaign records.
 func ListArcadeCampaigns(re *core.RequestEvent) error {
 	arcadeID := strings.TrimSpace(re.Request.URL.Query().Get("id"))
 	if arcadeID == "" {

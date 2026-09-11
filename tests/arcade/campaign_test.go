@@ -53,6 +53,17 @@ func TestCampaignLocationBypass(t *testing.T) {
 	}
 }
 
+func TestListArcadeCampaignsRequiresAuthentication(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, arcadeID, _, _, _ := seedCampaignCheckFixture(t, app, nil)
+
+	response := executeJSONRequest(t, app, http.MethodGet, "/arcade/campaigns?id="+arcadeID, "", nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected unauthenticated campaign list to be rejected, got %d", response.StatusCode)
+	}
+}
+
 func TestPhotoCampaignListsOnlyPublicOpenArcadesWithoutPhotos(t *testing.T) {
 	app := newArcadeTestApp(t)
 	t.Cleanup(app.Cleanup)

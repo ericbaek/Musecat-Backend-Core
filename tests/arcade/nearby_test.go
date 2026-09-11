@@ -157,7 +157,7 @@ func TestNearby_CountryFilterAndCountryTotalsIncludeNearestArcade(t *testing.T) 
 
 func TestNearby_CabinetFilterMatchesSameSeriesRevision(t *testing.T) {
 	app := newArcadeTestApp(t)
-	_, user := createAuthUser(t, app)
+	token, user := createAuthUser(t, app)
 	chunithmID := seedNearbyGameSeries(t, app, "CHUNITHM")
 	otherSeriesID := seedNearbyGameSeries(t, app, "Other Series")
 	chunithmVersionID := seedNearbyGameSeriesVersion(t, app, chunithmID, "CHUNITHM Version")
@@ -192,7 +192,7 @@ func TestNearby_CabinetFilterMatchesSameSeriesRevision(t *testing.T) {
 		t.Fatalf("expected series-only filter to include all cabinets and unknown, got %#v", seriesOnly)
 	}
 
-	paired := decodeNearbyItems(t, app, "/arcades/nearby?game_series="+chunithmID+"&game_cabinet="+goldID+"&lat=37.5665&lon=126.9780")
+	paired := decodeNearbyItemsWithToken(t, app, "/arcades/nearby?game_series="+chunithmID+"&game_cabinet="+goldID+"&lat=37.5665&lon=126.9780", token)
 	if len(paired) != 1 || paired[0]["id"] != goldArcadeID {
 		t.Fatalf("expected only same-revision CHUNITHM Gold arcade %q, got %#v", goldArcadeID, paired)
 	}
@@ -200,7 +200,7 @@ func TestNearby_CabinetFilterMatchesSameSeriesRevision(t *testing.T) {
 
 func TestNearby_GroupedCabinetFiltersSupportWildcardAndSingleCabinet(t *testing.T) {
 	app := newArcadeTestApp(t)
-	_, user := createAuthUser(t, app)
+	token, user := createAuthUser(t, app)
 	maimaiID := seedNearbyGameSeries(t, app, "maimai")
 	sdvxID := seedNearbyGameSeries(t, app, "SDVX")
 	maimaiVersionID := seedNearbyGameSeriesVersion(t, app, maimaiID, "maimai Version")
@@ -234,7 +234,7 @@ func TestNearby_GroupedCabinetFiltersSupportWildcardAndSingleCabinet(t *testing.
 
 	maimaiFilter := url.QueryEscape(`{"series":"` + maimaiID + `"}`)
 	sdvxFilter := url.QueryEscape(`{"series":"` + sdvxID + `","cabinet":"` + valkyrieID + `"}`)
-	items := decodeNearbyItems(t, app, "/arcades/nearby?game_filter="+maimaiFilter+"&game_filter="+sdvxFilter+"&lat=37.5665&lon=126.9780")
+	items := decodeNearbyItemsWithToken(t, app, "/arcades/nearby?game_filter="+maimaiFilter+"&game_filter="+sdvxFilter+"&lat=37.5665&lon=126.9780", token)
 	if len(items) != 1 || items[0]["id"] != matchingID {
 		t.Fatalf("expected wildcard maimai AND Valkyrie SDVX to match only %q, got %#v", matchingID, items)
 	}
@@ -242,7 +242,7 @@ func TestNearby_GroupedCabinetFiltersSupportWildcardAndSingleCabinet(t *testing.
 
 func TestNearby_PairedCabinetFiltersAreOrderedAndAllRequired(t *testing.T) {
 	app := newArcadeTestApp(t)
-	_, user := createAuthUser(t, app)
+	token, user := createAuthUser(t, app)
 	seriesA := seedNearbyGameSeries(t, app, "Series A")
 	seriesB := seedNearbyGameSeries(t, app, "Series B")
 	versionA := seedNearbyGameSeriesVersion(t, app, seriesA, "Version A")
@@ -266,7 +266,7 @@ func TestNearby_PairedCabinetFiltersAreOrderedAndAllRequired(t *testing.T) {
 	seedNearbyGameAtomWithCabinet(t, app, partialBatch, versionA, cabinetA)
 	seedNearbyGameAtomWithCabinet(t, app, partialBatch, versionB, cabinetA)
 
-	items := decodeNearbyItems(t, app, "/arcades/nearby?game_series="+seriesA+","+seriesB+"&game_cabinet="+cabinetA+","+cabinetB+"&lat=37.5665&lon=126.9780")
+	items := decodeNearbyItemsWithToken(t, app, "/arcades/nearby?game_series="+seriesA+","+seriesB+"&game_cabinet="+cabinetA+","+cabinetB+"&lat=37.5665&lon=126.9780", token)
 	if len(items) != 1 || items[0]["id"] != completeID {
 		t.Fatalf("expected every ordered series/cabinet pair to match, got %#v", items)
 	}
@@ -285,6 +285,22 @@ func TestNearby_RejectsUnpairedCabinetFilters(t *testing.T) {
 			t.Fatalf("expected 400 for unpaired filters %q, got %d", url, res.StatusCode)
 		}
 		res.Body.Close()
+	}
+}
+
+func TestNearby_RejectsCabinetFiltersWithoutAuthentication(t *testing.T) {
+	app := newArcadeTestApp(t)
+	response := executeJSONRequest(
+		t,
+		app,
+		http.MethodGet,
+		"/arcades/nearby?game_series=series_a&game_cabinet=cabinet_a&lat=37.5665&lon=126.9780",
+		"",
+		nil,
+	)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for an unauthenticated cabinet filter, got %d", response.StatusCode)
 	}
 }
 
@@ -482,7 +498,7 @@ func TestNearby_ExpandBoostsMachineCountRanking(t *testing.T) {
 
 func TestNearby_ExpandFiltersAndBoostsOnlyPairedCabinetItems(t *testing.T) {
 	app := newArcadeTestApp(t)
-	_, user := createAuthUser(t, app)
+	token, user := createAuthUser(t, app)
 	seriesID := seedNearbyGameSeries(t, app, "Cabinet Ranking")
 	versionID := seedNearbyGameSeriesVersion(t, app, seriesID, "Cabinet Ranking Version")
 	goldID := seedNearbyGameCabinet(t, app, "Gold")
@@ -506,7 +522,7 @@ func TestNearby_ExpandFiltersAndBoostsOnlyPairedCabinetItems(t *testing.T) {
 	farGold := seedNearbyGameAtomWithCabinet(t, app, farBatch, versionID, goldID)
 	setNearbyAtomQuantity(t, app, farGold, 2)
 
-	items := decodeNearbyItems(t, app, "/arcades/nearby?game_series="+seriesID+"&game_cabinet="+goldID+"&lat=37.5665&lon=126.9780&expand=true")
+	items := decodeNearbyItemsWithToken(t, app, "/arcades/nearby?game_series="+seriesID+"&game_cabinet="+goldID+"&lat=37.5665&lon=126.9780&expand=true", token)
 	if len(items) != 2 || items[0]["id"] != farID || items[1]["id"] != nearID {
 		t.Fatalf("expected ranking to use only Gold quantities, got %#v", items)
 	}
@@ -528,8 +544,16 @@ func TestNearby_ExpandFiltersAndBoostsOnlyPairedCabinetItems(t *testing.T) {
 }
 
 func decodeNearbyItems(tb testing.TB, app *tests.TestApp, url string) []map[string]any {
+	return decodeNearbyItemsWithToken(tb, app, url, "")
+}
+
+func decodeNearbyItemsWithToken(tb testing.TB, app *tests.TestApp, url, token string) []map[string]any {
 	tb.Helper()
-	res := executeJSONRequest(tb, app, http.MethodGet, url, "", nil)
+	headers := map[string]string(nil)
+	if token != "" {
+		headers = map[string]string{"Authorization": "Bearer " + token}
+	}
+	res := executeJSONRequest(tb, app, http.MethodGet, url, "", headers)
 	if res.StatusCode != http.StatusOK {
 		res.Body.Close()
 		tb.Fatalf("expected 200 for %q, got %d", url, res.StatusCode)

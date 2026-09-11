@@ -151,6 +151,10 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
 		se.Router.GET("/campaign", arcadecampaign.GetCampaign)
 		se.Router.GET("/campaign/photo", arcadecampaign.ListPhotoCampaign)
+		se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns).Bind(
+			apis.RequireAuth("user"),
+			user.RequireActiveUser(),
+		)
 		se.Router.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(
 			apis.RequireAuth("user"),
 			user.RequireActiveUser(),
@@ -186,7 +190,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		group.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
 		group.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
 		group.POST("/rollback", arcadeadmin.RollbackArcadePart)
-		group.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireGameToolsAccess())
+		group.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
 		group.PUT("/basic", arcadebasic.UpdateArcadeBasic)
 		group.PUT("/gtk", arcadegtk.UpdateArcadeGTK)
 		group.PUT("/sns", arcadesns.UpdateArcadeSNS)

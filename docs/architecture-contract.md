@@ -82,7 +82,7 @@ Definitions:
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
 | Support feedback queue (`GET /support_feedback`) | deny | deny | deny | active developer or moderator only |
-| Bulk game version update (`POST /arcade/game/bulk_version`) | deny | allow only for level-30 supporter | deny | allow |
+| Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |
 | Latest subway map metadata and file bytes | allow | allow | allow | allow |
 | Subway map create/update/delete | deny | deny | deny | allow |
 
@@ -248,7 +248,7 @@ authenticated actor and tags, reason, before/after snapshots, and revisions.
 it does not erase history. Full owns notifications for those log records.
 
 The `POST /arcade/game/bulk_version` operation is an administrative version
-swap for developer/moderator accounts and level-30 supporters. It applies the
+swap for developer/moderator accounts. It applies the
 same immutable batch and `changed="game"` changelog semantics per affected
 arcade as a regular game mutation, does not award XP, and does not maintain any
 separate review-state metadata.
