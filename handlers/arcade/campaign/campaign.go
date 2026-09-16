@@ -284,6 +284,57 @@ func ListArcadeCampaigns(re *core.RequestEvent) error {
 	return re.JSON(http.StatusOK, map[string]any{"items": items})
 }
 
+// ListArcadeCampaignPresence returns only the active campaign target game ids
+// for a public/open arcade. It is intentionally safe for anonymous detail
+// pages: campaign configuration, rewards, locations, and reports stay hidden.
+func ListArcadeCampaignPresence(re *core.RequestEvent) error {
+	arcadeID := strings.TrimSpace(re.Request.URL.Query().Get("id"))
+	if arcadeID == "" {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "arcade id is required"})
+	}
+	now := time.Now().UTC()
+	records, err := re.App.FindRecordsByFilter(
+		arcadeinternal.CollectionArcadeCampaign,
+		"status={:status} && start_at <= {:now} && end_at >= {:now}",
+		"-start_at",
+		20,
+		0,
+		dbx.Params{"status": statusActive, "now": now},
+	)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load arcade campaigns", "details": err.Error()})
+	}
+
+	seen := map[string]struct{}{}
+	items := make([]map[string]string, 0)
+	for _, record := range records {
+		config, err := loadCampaignConfig(record)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to decode campaign", "details": err.Error()})
+		}
+		rows, err := loadCandidateRowsForArcade(re.App, config, arcadeID)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load campaign targets", "details": err.Error()})
+		}
+		updatedRows, err := loadUpdatedCampaignRowsForArcade(re.App, config, arcadeID)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load updated campaign targets", "details": err.Error()})
+		}
+		for _, row := range append(rows, updatedRows...) {
+			gameID := strings.TrimSpace(row.GameID)
+			if gameID == "" {
+				continue
+			}
+			if _, exists := seen[gameID]; exists {
+				continue
+			}
+			seen[gameID] = struct{}{}
+			items = append(items, map[string]string{"game_id": gameID})
+		}
+	}
+	return re.JSON(http.StatusOK, map[string]any{"items": items})
+}
+
 func CreateCampaign(re *core.RequestEvent) error {
 	var body campaignMutationBody
 	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {

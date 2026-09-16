@@ -64,6 +64,29 @@ func TestListArcadeCampaignsRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestListArcadeCampaignPresenceIsPublicAndRedacted(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, arcadeID, campaignID, gameID, _ := seedCampaignCheckFixture(t, app, nil)
+
+	response := executeJSONRequest(t, app, http.MethodGet, "/arcade/campaigns/presence?id="+arcadeID, "", nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected public campaign presence to succeed, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode campaign presence response: %v", err)
+	}
+	if len(payload.Items) != 1 || payload.Items[0]["game_id"] != gameID {
+		t.Fatalf("expected campaign %s to expose only game %s, got %#v", campaignID, gameID, payload.Items)
+	}
+	if _, ok := payload.Items[0]["campaign"]; ok {
+		t.Fatal("campaign presence must not expose campaign details")
+	}
+}
+
 func TestPhotoCampaignListsOnlyPublicOpenArcadesWithoutPhotos(t *testing.T) {
 	app := newArcadeTestApp(t)
 	t.Cleanup(app.Cleanup)

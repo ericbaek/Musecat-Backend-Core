@@ -1415,6 +1415,18 @@ components:
         items:
           type: array
           items: {$ref: '#/components/schemas/ArcadeCampaignListItem'}
+    ArcadeCampaignPresenceItem:
+      type: object
+      required: [game_id]
+      properties:
+        game_id: {type: string}
+    ArcadeCampaignPresenceResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ArcadeCampaignPresenceItem'}
     CampaignEndRequest:
       type: object
       required: [id]
@@ -6469,6 +6481,32 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
         '401':
           description: Missing or invalid bearer token, or inactive user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Campaign targets could not be loaded.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /arcade/campaigns/presence:
+    get:
+      tags: [Arcades]
+      summary: List campaign-target game ids for an arcade
+      description: Returns only the game ids targeted by active campaigns for a public/open arcade. Campaign configuration, rewards, locations, and reports are omitted so anonymous detail pages can show campaign presence safely.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Campaign-target game ids for the arcade.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeCampaignPresenceResponse'}
+        '400':
+          description: Missing arcade id.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

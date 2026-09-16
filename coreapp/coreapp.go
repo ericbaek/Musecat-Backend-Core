@@ -102,6 +102,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		se.Router.GET("/campaigns", arcadecampaign.ListCampaigns)
 		se.Router.GET("/campaign", arcadecampaign.GetCampaign)
 		se.Router.GET("/campaign/photo", arcadecampaign.ListPhotoCampaign)
+		se.Router.GET("/arcade/campaigns/presence", arcadecampaign.ListArcadeCampaignPresence)
 		se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns).Bind(
 			apis.RequireAuth("user"),
 			userhandler.RequireActiveUser(),
