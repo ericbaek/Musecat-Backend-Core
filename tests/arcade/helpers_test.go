@@ -34,6 +34,7 @@ import (
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
 	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
+	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
@@ -163,6 +164,12 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 		)
 		se.Router.GET("/game_series_version", arcadequery.GetGameSeriesVersion)
 		se.Router.GET("/game/catalog", arcadequery.GetGameCatalog)
+		catalogManagement := se.Router.Group("/moderation/game").Bind(
+			apis.RequireAuth("user"),
+			user.RequireActiveUser(),
+			arcadequery.RequireGameToolsAccess(),
+		)
+		catalogManagement.POST("/catalog/compatibilities", gamecataloghandler.ReplaceCompatibilities)
 		se.Router.POST("/game_series_version", arcadequery.CreateGameSeriesVersion).Bind(
 			apis.RequireAuth("user"),
 			arcadequery.RequireModeratorAccess(),

@@ -48,6 +48,24 @@ type mutationBody struct {
 	ChangeID         string         `json:"change_id"`
 }
 
+// compatibilityMutationBody replaces one version's active cabinet set as one
+// atomic operation. expected_compatibilities is the active set the operator
+// reviewed before making their selection, so a stale checklist cannot silently
+// overwrite another operator's change.
+type compatibilityMutationBody struct {
+	OperationID             string                          `json:"operation_id"`
+	Reason                  string                          `json:"reason"`
+	VersionID               string                          `json:"version_id"`
+	CabinetIDs              []string                        `json:"cabinet_ids"`
+	ExpectedCompatibilities []compatibilityExpectedRevision `json:"expected_compatibilities"`
+}
+
+type compatibilityExpectedRevision struct {
+	ID       string `json:"id"`
+	Cabinet  string `json:"cabinet"`
+	Revision int    `json:"revision"`
+}
+
 type apiError struct {
 	status  int
 	message string
@@ -151,6 +169,155 @@ func Update(re *core.RequestEvent) error  { return mutate(re, "update") }
 func Archive(re *core.RequestEvent) error { return mutate(re, "archive") }
 func Restore(re *core.RequestEvent) error { return mutate(re, "restore") }
 func Revert(re *core.RequestEvent) error  { return mutate(re, "revert") }
+
+// ReplaceCompatibilities atomically reconciles a version's compatible cabinet
+// set. A single request either creates/restores and archives every required
+// link, or leaves the catalog unchanged.
+func ReplaceCompatibilities(re *core.RequestEvent) error {
+	body, payloadHash, err := parseCompatibilityMutationBody(re)
+	if err != nil {
+		return writeError(re, err)
+	}
+
+	var items []map[string]any
+	var changes []map[string]any
+	replayed := false
+	stage := "load version"
+	err = re.App.RunInTransaction(func(tx core.App) error {
+		stage = "load version"
+		version, findErr := tx.FindRecordById(collectionGameSeriesVersion, body.VersionID)
+		if findErr != nil || version.GetBool("archived") {
+			return &apiError{status: http.StatusConflict, message: "version must be active"}
+		}
+		stage = "validate cabinets"
+		if err := validateCompatibilityCabinets(tx, version, body.CabinetIDs); err != nil {
+			return err
+		}
+
+		stage = "load compatibilities"
+		records, err := tx.FindRecordsByFilter(
+			collectionGameSeriesVersionCabinet,
+			"version={:version}",
+			"",
+			0,
+			0,
+			dbx.Params{"version": body.VersionID},
+		)
+		if err != nil {
+			return fmt.Errorf("load version compatibilities: %w", err)
+		}
+		stage = "check replay"
+		if replay, replayErr := compatibilityReplay(tx, body, payloadHash, re.Auth.Id); replayErr != nil {
+			return replayErr
+		} else if replay {
+			items = compatibilitySnapshots(records)
+			replayed = true
+			return nil
+		}
+		stage = "check expected compatibilities"
+		if err := ensureExpectedCompatibilities(records, body.ExpectedCompatibilities); err != nil {
+			return err
+		}
+
+		byCabinet := make(map[string]*core.Record, len(records))
+		for _, record := range records {
+			byCabinet[record.GetString("cabinet")] = record
+		}
+		desired := make(map[string]struct{}, len(body.CabinetIDs))
+		for _, cabinetID := range body.CabinetIDs {
+			desired[cabinetID] = struct{}{}
+			record := byCabinet[cabinetID]
+			if record != nil {
+				if !record.GetBool("archived") {
+					continue
+				}
+				before := snapshot("compatibility", record)
+				record.Set("archived", false)
+				record.Set("archived_at", nil)
+				record.Set("archived_by", "")
+				record.Set("revision", revision(record)+1)
+				stage = "restore compatibility"
+				if err := tx.Save(record); err != nil {
+					return fmt.Errorf("restore compatibility: %w", err)
+				}
+				stage = "audit restored compatibility"
+				change, err := saveChange(tx, re.Auth, compatibilityChangeBody(body, "activate", cabinetID), payloadHash, "restore", "compatibility", record.Id, before, snapshot("compatibility", record), "")
+				if err != nil {
+					return err
+				}
+				changes = append(changes, changeSnapshot(change))
+				continue
+			}
+
+			stage = "load compatibility collection"
+			collection, err := tx.FindCollectionByNameOrId(collectionGameSeriesVersionCabinet)
+			if err != nil {
+				return err
+			}
+			record = core.NewRecord(collection)
+			record.Set("revision", 1)
+			record.Set("version", body.VersionID)
+			record.Set("cabinet", cabinetID)
+			stage = "create compatibility"
+			if err := tx.Save(record); err != nil {
+				return fmt.Errorf("create compatibility: %w", err)
+			}
+			byCabinet[cabinetID] = record
+			records = append(records, record)
+			stage = "audit created compatibility"
+			change, err := saveChange(tx, re.Auth, compatibilityChangeBody(body, "activate", cabinetID), payloadHash, "create", "compatibility", record.Id, nil, snapshot("compatibility", record), "")
+			if err != nil {
+				return err
+			}
+			changes = append(changes, changeSnapshot(change))
+		}
+
+		for _, record := range records {
+			if record.GetBool("archived") {
+				continue
+			}
+			if _, keep := desired[record.GetString("cabinet")]; keep {
+				continue
+			}
+			stage = "check compatibility blockers"
+			blockers, blockerErr := blockingReferences(tx, "compatibility", record.Id)
+			if blockerErr != nil {
+				return blockerErr
+			}
+			if len(blockers) > 0 {
+				return &apiError{status: http.StatusConflict, message: "catalog item is still in use", details: map[string]any{"blocking_references": blockers}}
+			}
+			before := snapshot("compatibility", record)
+			record.Set("archived", true)
+			record.Set("archived_at", time.Now().UTC())
+			record.Set("archived_by", re.Auth.Id)
+			record.Set("revision", revision(record)+1)
+			stage = "archive compatibility"
+			if err := tx.Save(record); err != nil {
+				return fmt.Errorf("archive compatibility: %w", err)
+			}
+			stage = "audit archived compatibility"
+			change, err := saveChange(tx, re.Auth, compatibilityChangeBody(body, "archive", record.GetString("cabinet")), payloadHash, "archive", "compatibility", record.Id, before, snapshot("compatibility", record), "")
+			if err != nil {
+				return err
+			}
+			changes = append(changes, changeSnapshot(change))
+		}
+		items = compatibilitySnapshots(records)
+		return nil
+	})
+	if err != nil {
+		if _, known := err.(*apiError); !known {
+			err = fmt.Errorf("replace compatibilities %s: %w", stage, err)
+		}
+		return writeError(re, err)
+	}
+	return re.JSON(http.StatusOK, map[string]any{
+		"compatibilities": items,
+		"changes":         changes,
+		"replayed":        replayed,
+	})
+}
 
 func mutate(re *core.RequestEvent, action string) error {
 	body, payloadHash, err := parseMutationBody(re)
@@ -350,6 +517,158 @@ func parseMutationBody(re *core.RequestEvent) (mutationBody, string, error) {
 	canonical, _ := json.Marshal(body)
 	hash := sha256.Sum256(canonical)
 	return body, hex.EncodeToString(hash[:]), nil
+}
+
+func parseCompatibilityMutationBody(re *core.RequestEvent) (compatibilityMutationBody, string, error) {
+	var body compatibilityMutationBody
+	decoder := json.NewDecoder(io.LimitReader(re.Request.Body, 128<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		return body, "", &apiError{status: http.StatusBadRequest, message: "invalid JSON body", details: err.Error()}
+	}
+	body.OperationID = strings.TrimSpace(body.OperationID)
+	body.Reason = strings.TrimSpace(body.Reason)
+	body.VersionID = strings.TrimSpace(body.VersionID)
+	if _, err := uuid.Parse(body.OperationID); err != nil {
+		return body, "", &apiError{status: http.StatusBadRequest, message: "operation_id must be a UUID"}
+	}
+	reasonLength := utf8.RuneCountInString(body.Reason)
+	if reasonLength < minReasonRunes || reasonLength > maxReasonRunes {
+		return body, "", &apiError{status: http.StatusBadRequest, message: "reason must be between 10 and 500 characters"}
+	}
+	if len(body.VersionID) != 15 {
+		return body, "", &apiError{status: http.StatusBadRequest, message: "version_id must be a valid record id"}
+	}
+	if err := normalizeCompatibilityMutation(&body); err != nil {
+		return body, "", err
+	}
+	canonical, _ := json.Marshal(body)
+	hash := sha256.Sum256(canonical)
+	return body, hex.EncodeToString(hash[:]), nil
+}
+
+func normalizeCompatibilityMutation(body *compatibilityMutationBody) error {
+	cabinets := make(map[string]struct{}, len(body.CabinetIDs))
+	for index, cabinetID := range body.CabinetIDs {
+		cabinetID = strings.TrimSpace(cabinetID)
+		if len(cabinetID) != 15 {
+			return &apiError{status: http.StatusBadRequest, message: "cabinet_ids must contain valid record ids"}
+		}
+		if _, exists := cabinets[cabinetID]; exists {
+			return &apiError{status: http.StatusBadRequest, message: "cabinet_ids must not contain duplicates"}
+		}
+		cabinets[cabinetID] = struct{}{}
+		body.CabinetIDs[index] = cabinetID
+	}
+	expectedIDs := make(map[string]struct{}, len(body.ExpectedCompatibilities))
+	expectedCabinets := make(map[string]struct{}, len(body.ExpectedCompatibilities))
+	for index, expected := range body.ExpectedCompatibilities {
+		expected.ID = strings.TrimSpace(expected.ID)
+		expected.Cabinet = strings.TrimSpace(expected.Cabinet)
+		if len(expected.ID) != 15 || len(expected.Cabinet) != 15 || expected.Revision < 1 {
+			return &apiError{status: http.StatusBadRequest, message: "expected_compatibilities must contain id, cabinet, and revision"}
+		}
+		if _, exists := expectedIDs[expected.ID]; exists {
+			return &apiError{status: http.StatusBadRequest, message: "expected_compatibilities must not contain duplicate ids"}
+		}
+		if _, exists := expectedCabinets[expected.Cabinet]; exists {
+			return &apiError{status: http.StatusBadRequest, message: "expected_compatibilities must not contain duplicate cabinets"}
+		}
+		expectedIDs[expected.ID] = struct{}{}
+		expectedCabinets[expected.Cabinet] = struct{}{}
+		body.ExpectedCompatibilities[index] = expected
+	}
+	return nil
+}
+
+func validateCompatibilityCabinets(app core.App, version *core.Record, cabinetIDs []string) error {
+	for _, cabinetID := range cabinetIDs {
+		cabinet, err := app.FindRecordById(collectionGameCabinet, cabinetID)
+		if err != nil || cabinet.GetBool("archived") {
+			return &apiError{status: http.StatusConflict, message: "cabinet must be active"}
+		}
+		if cabinet.GetString("series") != version.GetString("series") {
+			return &apiError{status: http.StatusConflict, message: "cabinet must belong to the version series"}
+		}
+	}
+	return nil
+}
+
+func ensureExpectedCompatibilities(records []*core.Record, expected []compatibilityExpectedRevision) error {
+	active := make(map[string]*core.Record, len(records))
+	for _, record := range records {
+		if !record.GetBool("archived") {
+			active[record.Id] = record
+		}
+	}
+	if len(active) != len(expected) {
+		return &apiError{status: http.StatusConflict, message: "catalog revision conflict"}
+	}
+	for _, item := range expected {
+		record := active[item.ID]
+		if record == nil || record.GetString("cabinet") != item.Cabinet || revision(record) != item.Revision {
+			return &apiError{status: http.StatusConflict, message: "catalog revision conflict"}
+		}
+	}
+	return nil
+}
+
+func compatibilityReplay(app core.App, body compatibilityMutationBody, payloadHash, actorID string) (bool, error) {
+	expected := make(map[string]struct{}, len(body.ExpectedCompatibilities))
+	for _, item := range body.ExpectedCompatibilities {
+		expected[item.Cabinet] = struct{}{}
+	}
+	desired := make(map[string]struct{}, len(body.CabinetIDs))
+	for _, cabinetID := range body.CabinetIDs {
+		desired[cabinetID] = struct{}{}
+	}
+	intents := 0
+	for cabinetID := range desired {
+		if _, exists := expected[cabinetID]; exists {
+			continue
+		}
+		intents++
+		replay, err := findReplay(app, compatibilityOperationID(body.OperationID, "activate", cabinetID), payloadHash, actorID)
+		if err != nil {
+			return false, fmt.Errorf("find compatibility activation replay: %w", err)
+		}
+		if replay == nil {
+			return false, nil
+		}
+	}
+	for cabinetID := range expected {
+		if _, keep := desired[cabinetID]; keep {
+			continue
+		}
+		intents++
+		replay, err := findReplay(app, compatibilityOperationID(body.OperationID, "archive", cabinetID), payloadHash, actorID)
+		if err != nil {
+			return false, fmt.Errorf("find compatibility archive replay: %w", err)
+		}
+		if replay == nil {
+			return false, nil
+		}
+	}
+	return intents > 0, nil
+}
+
+func compatibilityChangeBody(body compatibilityMutationBody, action, cabinetID string) mutationBody {
+	return mutationBody{
+		OperationID: compatibilityOperationID(body.OperationID, action, cabinetID),
+		Reason:      body.Reason,
+	}
+}
+
+func compatibilityOperationID(operationID, action, cabinetID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(operationID+":"+action+":"+cabinetID)).String()
+}
+
+func compatibilitySnapshots(records []*core.Record) []map[string]any {
+	items := make([]map[string]any, 0, len(records))
+	for _, record := range records {
+		items = append(items, snapshot("compatibility", record))
+	}
+	return items
 }
 
 func applyValues(app core.App, entity string, record *core.Record, values map[string]any, creating bool) error {
@@ -601,6 +920,9 @@ func blockingReferences(app core.App, entity, id string) ([]map[string]any, erro
 func currentGameRevisions(app core.App) ([]*core.Record, error) {
 	arcades, err := app.FindRecordsByFilter(collectionArcade, "game_v2 != ''", "", 0, 0, nil)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return []*core.Record{}, nil
+		}
 		return nil, err
 	}
 	batches := map[string]struct{}{}
@@ -611,6 +933,9 @@ func currentGameRevisions(app core.App) ([]*core.Record, error) {
 	}
 	revisions, err := app.FindRecordsByFilter(collectionArcadeGameRevision, "", "", 0, 0, nil)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return []*core.Record{}, nil
+		}
 		return nil, err
 	}
 	current := make([]*core.Record, 0)
@@ -630,6 +955,9 @@ func revisionMatchesCompatibility(app core.App, versionID, cabinetID, compatibil
 func activeCampaignReferences(app core.App, entity, id string) (int, error) {
 	campaigns, err := app.FindRecordsByFilter(collectionArcadeCampaign, "status != 'ended'", "", 0, 0, nil)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
 		return 0, err
 	}
 	count := 0

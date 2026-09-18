@@ -37,6 +37,14 @@ type OwnedArcade struct {
 	Closed  bool   `json:"closed"`
 }
 
+type FavoriteArcade struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Address string `json:"address"`
+	Country string `json:"country"`
+	Closed  bool   `json:"closed"`
+}
+
 type BackgroundPosition struct {
 	X float64 `json:"x"`
 	Y float64 `json:"y"`
@@ -57,12 +65,14 @@ type Profile struct {
 	Tag                []string           `json:"tag"`
 	Owns               *[]string          `json:"owns,omitempty"`
 	OwnedArcades       *[]OwnedArcade     `json:"owned_arcades,omitempty"`
+	FavoriteArcades    *[]FavoriteArcade  `json:"favorite_arcades,omitempty"`
 	SNS                ProfileSNS         `json:"sns"`
 	Withdrawn          bool               `json:"withdrawn"`
 	SeriesPublic       bool               `json:"series_public"`
 	Warp               *bool              `json:"warp,omitempty"`
 	Series             []ProfileSeries    `json:"series,omitempty"`
 	VisitVisibility    string             `json:"visit_visibility,omitempty"`
+	FavoriteVisibility string             `json:"favorite_visibility,omitempty"`
 	VisitStats         *VisitStats        `json:"visit_stats,omitempty"`
 }
 
@@ -152,6 +162,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 		out.SNS = parseProfileSNS(userInfoRec)
 		out.SeriesPublic = userInfoRec.GetBool("series_public")
 		out.VisitVisibility = visitVisibility(userInfoRec.GetString("visit_visibility"))
+		out.FavoriteVisibility = favoriteVisibility(userInfoRec.GetString("favorite_visibility"))
 		out.Countries = publicProfileCountries(app, userRec, userInfoRec, includePrivateSeries)
 		if len(out.Countries) > 0 {
 			out.PrimaryCountry = out.Countries[0]
@@ -172,6 +183,10 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	if hasProfileTag(tag, "arcade_owner") {
 		ownedArcades := loadPublicOwnedArcades(app, userRec)
 		out.OwnedArcades = &ownedArcades
+	}
+	if includePrivateSeries || out.FavoriteVisibility == "public" {
+		favoriteArcades := loadFavoriteArcades(app, userRec.Id)
+		out.FavoriteArcades = &favoriteArcades
 	}
 	if userInfoRec != nil && (userInfoRec.GetBool("series_public") || includePrivateSeries) {
 		out.Series = loadProfileSeries(app, userInfoRec)
@@ -346,6 +361,45 @@ func loadPublicOwnedArcades(app core.App, userRec *core.Record) []OwnedArcade {
 		out = append(out, owned)
 	}
 
+	return out
+}
+
+func loadFavoriteArcades(app core.App, userID string) []FavoriteArcade {
+	favorites, err := app.FindRecordsByFilter(
+		CollectionArcadeFavorite,
+		"user={:user}",
+		"-created",
+		100,
+		0,
+		map[string]any{"user": userID},
+	)
+	if err != nil {
+		return []FavoriteArcade{}
+	}
+
+	out := make([]FavoriteArcade, 0, len(favorites))
+	for _, favorite := range favorites {
+		arcadeID := strings.TrimSpace(favorite.GetString("arcade"))
+		if arcadeID == "" {
+			continue
+		}
+		arcade, err := app.FindRecordById("arcade", arcadeID)
+		if err != nil || arcade == nil || !arcade.GetBool("public") {
+			continue
+		}
+		item := FavoriteArcade{
+			ID:      arcade.Id,
+			Country: strings.TrimSpace(arcade.GetString("country")),
+			Closed:  arcade.GetBool("closed"),
+		}
+		if basicID := strings.TrimSpace(arcade.GetString("basic")); basicID != "" {
+			if basic, basicErr := app.FindRecordById("arcade_basic", basicID); basicErr == nil && basic != nil {
+				item.Name = strings.TrimSpace(basic.GetString("name"))
+				item.Address = strings.TrimSpace(basic.GetString("address"))
+			}
+		}
+		out = append(out, item)
+	}
 	return out
 }
 

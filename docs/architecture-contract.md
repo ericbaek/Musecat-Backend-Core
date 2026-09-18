@@ -285,6 +285,7 @@ single-record operations do not write arcade changelog or XP rows.
 | changelog timeline | `GET /arcade/changelog?arcade=...` (optional `changed=basic|game|hour|sns|gtk|photo|memo`) |
 | arcade contribution ranking | `GET /arcade/ranking?arcade=...` |
 | user-authored changelog timeline | `GET /user/changelog?user=...` (optional `changed=basic|game|hour|sns|gtk|photo|memo`) |
+| arcade favorites | `PUT /arcade/favorite`; owner profile reads include `favorite_arcades`, while public profile reads include it only when `favorite_visibility=public`; owners control this with `PUT /user/favorite-visibility` |
 | photo atom list | `GET /arcade/photo/atoms?arcade=...` |
 | photo bytes | `GET /arcade/photo/file?id=...` (the `file_url` returned for an atom) |
 | delete pending own photo atom | `DELETE /arcade/photo/atom?id=...` |
@@ -293,7 +294,7 @@ single-record operations do not write arcade changelog or XP rows.
 | reviewer decision | `PUT /moderation/arcade/edit-report` |
 | arcade analytics | `GET /arcade/analytics?arcade=...` and `POST /arcade/analytics/event` |
 | localized game/version/cabinet catalog | `GET /game/catalog?locale=en-US|ko-KR|ja-JP` |
-| protected game catalog management | `GET|POST|PUT|DELETE /moderation/game/catalog`, `POST /moderation/game/catalog/restore`, `GET /moderation/game/catalog/changes`, `POST /moderation/game/catalog/changes/revert` |
+| protected game catalog management | `GET|POST|PUT|DELETE /moderation/game/catalog`, `POST /moderation/game/catalog/restore`, `POST /moderation/game/catalog/compatibilities`, `GET /moderation/game/catalog/changes`, `POST /moderation/game/catalog/changes/revert`. Compatibility replacement validates the reviewed active revisions and atomically creates, restores, or archives its links. |
 | campaign progress and report log | `GET /campaign?id=...` |
 | latest regional subway map | `GET /subway/map?region=center|busan` |
 | subway map file bytes | `GET /subway/map/file?id=...&field=lightSVG|darkSVG|image|file` (the `file_url` returned by the map response) |

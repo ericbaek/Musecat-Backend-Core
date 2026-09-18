@@ -239,12 +239,46 @@ func UpdateVisitVisibility(re *core.RequestEvent) error {
 	}
 	return re.JSON(http.StatusOK, map[string]any{"visit_visibility": v})
 }
+
+func UpdateFavoriteVisibility(re *core.RequestEvent) error {
+	if re.Auth == nil {
+		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+	}
+	var body struct {
+		Visibility string `json:"favorite_visibility"`
+	}
+	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
+	}
+	v := favoriteVisibility(body.Visibility)
+	if strings.TrimSpace(body.Visibility) != v {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid favorite_visibility"})
+	}
+	rec, err := re.App.FindRecordById(CollectionUserInfo, re.Auth.Id)
+	if err != nil {
+		return re.JSON(http.StatusConflict, map[string]any{"error": "user_info is required"})
+	}
+	rec.Set("favorite_visibility", v)
+	if err := re.App.Save(rec); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to update favorite visibility"})
+	}
+	return re.JSON(http.StatusOK, map[string]any{"favorite_visibility": v})
+}
 func visitVisibility(v string) string {
 	switch strings.TrimSpace(v) {
 	case "private", "summary", "full":
 		return strings.TrimSpace(v)
 	default:
 		return "summary"
+	}
+}
+
+func favoriteVisibility(v string) string {
+	switch strings.TrimSpace(v) {
+	case "private", "public":
+		return strings.TrimSpace(v)
+	default:
+		return "private"
 	}
 }
 func visitSummary(r *core.Record) VisitSummary {

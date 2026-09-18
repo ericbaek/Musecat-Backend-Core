@@ -1222,6 +1222,22 @@ components:
         visit_visibility:
           type: string
           enum: [private, summary, full]
+        favorite_visibility:
+          type: string
+          enum: [private, public]
+          description: Defaults to private. Indicates whether favorite_arcades is exposed on public profile reads.
+        favorite_arcades:
+          type: array
+          description: Saved public arcade summaries. Included on GET /user/me, or on public profile reads only when favorite_visibility is public.
+          items:
+            type: object
+            required: [id, name, address, country, closed]
+            properties:
+              id: {type: string}
+              name: {type: string}
+              address: {type: string}
+              country: {type: string}
+              closed: {type: boolean}
         visit_stats:
           $ref: '#/components/schemas/VisitStats'
     Visit:
@@ -2043,6 +2059,55 @@ components:
         change:
           type: object
           additionalProperties: true
+    GameCatalogCompatibilityMutationRequest:
+      type: object
+      required: [operation_id, reason, version_id, cabinet_ids, expected_compatibilities]
+      properties:
+        operation_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 500
+        version_id:
+          type: string
+        cabinet_ids:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        expected_compatibilities:
+          type: array
+          items:
+            type: object
+            required: [id, cabinet, revision]
+            properties:
+              id:
+                type: string
+              cabinet:
+                type: string
+              revision:
+                type: integer
+                minimum: 1
+    GameCatalogCompatibilityMutationResponse:
+      type: object
+      required: [compatibilities, changes, replayed]
+      properties:
+        compatibilities:
+          type: array
+          description: Complete compatibility set for the requested version, including archived links.
+          items:
+            type: object
+            additionalProperties: true
+        changes:
+          type: array
+          description: Immutable audit rows created by the reconciliation.
+          items:
+            type: object
+            additionalProperties: true
+        replayed:
+          type: boolean
     GameSeriesVersionPriceDefaultMode:
       type: object
       required: [mode_key, represent]
@@ -4845,6 +4910,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GameCatalogMutationResponse'
+  /moderation/game/catalog/compatibilities:
+    post:
+      tags: [Moderator]
+      summary: Atomically replace a version's compatible cabinet set
+      description: Reconciles creates, restores, and archives in one transaction. The expected active revisions reject stale checklist submissions.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogCompatibilityMutationRequest'
+      responses:
+        '200':
+          description: The complete resulting compatibility set and immutable audit rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameCatalogCompatibilityMutationResponse'
+        '409': { description: Stale checklist, incompatible cabinet, or a link referenced by active data. }
   /moderation/game/catalog/changes:
     get:
       tags: [Moderator]
@@ -6675,6 +6761,43 @@ paths:
       responses:
         '200':
           description: Updated public visit visibility.
+  /user/favorite-visibility:
+    put:
+      tags: [Users]
+      summary: /user/favorite-visibility
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [favorite_visibility]
+              properties:
+                favorite_visibility: {type: string, enum: [private, public]}
+      responses:
+        '200':
+          description: Updated favorite arcade visibility.
+  /arcade/favorite:
+    put:
+      tags: [Arcades]
+      summary: /arcade/favorite
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, favorited]
+              properties:
+                arcade: {type: string}
+                favorited: {type: boolean}
+      responses:
+        '200':
+          description: Updated favorite state for the arcade.
+        '404':
+          description: Arcade does not exist or is not public.
   /user/countries:
     put:
       tags: [Users]

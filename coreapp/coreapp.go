@@ -146,6 +146,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		catalogManagement.PUT("/catalog", gamecataloghandler.Update)
 		catalogManagement.DELETE("/catalog", gamecataloghandler.Archive)
 		catalogManagement.POST("/catalog/restore", gamecataloghandler.Restore)
+		catalogManagement.POST("/catalog/compatibilities", gamecataloghandler.ReplaceCompatibilities)
 		catalogManagement.GET("/catalog/changes", gamecataloghandler.ListChanges)
 		catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
 		// Public user profile read endpoint
@@ -198,6 +199,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
 		authArcade.POST("/nearby", nil)
 		authArcade.POST("/visit", userhandler.VisitArcade)
+		authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite)
 		se.Router.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
 			apis.RequireAuth("user"),
 			userhandler.RequireActiveUser(),
@@ -212,6 +214,7 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 		authUser.GET("/visits", userhandler.GetMyVisits).Bind(userhandler.RequireActiveUser())
 		authUser.PUT("/countries", userhandler.UpdateCountries).Bind(userhandler.RequireActiveUser())
 		authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())
+		authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(userhandler.RequireActiveUser())
 		authUser.POST("/withdraw", userhandler.Withdraw)
 		authUser.GET("/report", arcadeadmin.ListUserReport).Bind(userhandler.RequireActiveUser())
 		authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(userhandler.RequireActiveUser())

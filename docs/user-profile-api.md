@@ -88,6 +88,14 @@ Endpoint-specific visibility:
   contains only public arcades
 - `GET /user/me`: `series_public` value is still returned, `series` is included for the authenticated user even when `series_public = false`, and `warp` is always included
 
+## Favorite arcades
+
+Authenticated users can add or remove a public arcade with PUT /arcade/favorite
+and a body containing arcade and favorited. The list is returned on GET /user/me.
+Other profile reads include favorite_arcades only when favorite_visibility is
+public; existing accounts default to private. PUT /user/favorite-visibility
+changes the setting. Private and deleted arcade records are omitted.
+
 ## Profile countries
 
 Profile countries are optional. Active accounts below level 15 may store one

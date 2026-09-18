@@ -103,6 +103,19 @@ func TestArcadeAnalyticsProtectedFieldsByRole(t *testing.T) {
 		if len(sources) != 2 {
 			t.Fatalf("expected two source counts: %#v", sources)
 		}
+		sourceCounts := map[string]float64{}
+		for _, value := range sources {
+			item, ok := value.(map[string]any)
+			if !ok {
+				t.Fatalf("invalid source count: %#v", value)
+			}
+			source, _ := item["source"].(string)
+			count, _ := item["count"].(float64)
+			sourceCounts[source] = count
+		}
+		if sourceCounts["nearby"] != 1 || sourceCounts["search"] != 1 {
+			t.Fatalf("expected one nearby and one search page view, got %#v", sourceCounts)
+		}
 		series := payload["series_filter_entries"].([]any)
 		if len(series) != 2 {
 			t.Fatalf("expected two series counts: %#v", series)
