@@ -7,9 +7,114 @@ import (
 	"strings"
 	"testing"
 
+	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 )
+
+func TestUpdateArcadeBasic_EnforcesLocationMovePolicy(t *testing.T) {
+	t.Run("level 9 is limited to 1 km", func(t *testing.T) {
+		app := newArcadeTestApp(t)
+		stubGeoLookup(t)
+		token, user := createAuthUser(t, app)
+		seedUserLevelExp(t, app, user.Id, userhandler.LevelBaseExp(9))
+		arcadeID, basicID := seedArcade(t, app, user.Id, arcadeSeed{
+			Name: "Low Level Arcade", Address: "Seoul", Location: location{Lat: 37.5665, Lon: 126.978},
+		})
+
+		res := executeJSONRequest(t, app, http.MethodPut, "/arcade/basic", fmt.Sprintf(
+			`{"arcade":%q,"location":{"lat":37.58,"lon":126.978}}`, arcadeID,
+		), map[string]string{"Authorization": "Bearer " + token})
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", res.StatusCode)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if payload["code"] != "location_move_distance_exceeded" {
+			t.Fatalf("expected distance policy code, got %#v", payload)
+		}
+		arcade, err := app.FindRecordById("arcade", arcadeID)
+		if err != nil {
+			t.Fatalf("failed to reload arcade: %v", err)
+		}
+		if got := arcade.GetString("basic"); got != basicID {
+			t.Fatalf("denied movement changed basic pointer to %q; want %q", got, basicID)
+		}
+	})
+
+	t.Run("level 10 may move beyond 1 km", func(t *testing.T) {
+		app := newArcadeTestApp(t)
+		stubGeoLookup(t)
+		token, user := createAuthUser(t, app)
+		seedUserLevelExp(t, app, user.Id, userhandler.LevelBaseExp(10))
+		arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+			Name: "Level 10 Arcade", Address: "Seoul", Location: location{Lat: 37.5665, Lon: 126.978},
+		})
+
+		res := executeJSONRequest(t, app, http.MethodPut, "/arcade/basic", fmt.Sprintf(
+			`{"arcade":%q,"location":{"lat":37.58,"lon":126.978}}`, arcadeID,
+		), map[string]string{"Authorization": "Bearer " + token})
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", res.StatusCode)
+		}
+	})
+
+	t.Run("level 30 may move far within the same country", func(t *testing.T) {
+		app := newArcadeTestApp(t)
+		stubGeoLookup(t)
+		token, user := createAuthUser(t, app)
+		seedUserLevelExp(t, app, user.Id, userhandler.LevelBaseExp(30))
+		arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{
+			Name: "Level 30 Arcade", Address: "Seoul", Location: location{Lat: 37.5665, Lon: 126.978},
+		})
+
+		res := executeJSONRequest(t, app, http.MethodPut, "/arcade/basic", fmt.Sprintf(
+			`{"arcade":%q,"location":{"lat":37.75,"lon":126.978}}`, arcadeID,
+		), map[string]string{"Authorization": "Bearer " + token})
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200, got %d", res.StatusCode)
+		}
+	})
+
+	t.Run("level 30 cannot move to another country", func(t *testing.T) {
+		app := newArcadeTestApp(t)
+		stubGeoLookupByLocation(t, func(_, _ float64) (string, string) {
+			return "JP", "Asia/Tokyo"
+		})
+		token, user := createAuthUser(t, app)
+		seedUserLevelExp(t, app, user.Id, userhandler.LevelBaseExp(30))
+		arcadeID, basicID := seedArcade(t, app, user.Id, arcadeSeed{
+			Name: "Level 30 Arcade", Address: "Seoul", Location: location{Lat: 37.5665, Lon: 126.978},
+		})
+
+		res := executeJSONRequest(t, app, http.MethodPut, "/arcade/basic", fmt.Sprintf(
+			`{"arcade":%q,"location":{"lat":37.58,"lon":126.978}}`, arcadeID,
+		), map[string]string{"Authorization": "Bearer " + token})
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d", res.StatusCode)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if payload["code"] != "location_move_country_changed" {
+			t.Fatalf("expected country policy code, got %#v", payload)
+		}
+		arcade, err := app.FindRecordById("arcade", arcadeID)
+		if err != nil {
+			t.Fatalf("failed to reload arcade: %v", err)
+		}
+		if got := arcade.GetString("basic"); got != basicID {
+			t.Fatalf("denied country change changed basic pointer to %q; want %q", got, basicID)
+		}
+	})
+}
 
 func TestUpdateArcadeBasic_PrivateWritesStructuredChangelog(t *testing.T) {
 	headers := map[string]string{}
@@ -49,7 +154,7 @@ func TestUpdateArcadeBasic_PrivateWritesStructuredChangelog(t *testing.T) {
 		scenario.Body = strings.NewReader(fmt.Sprintf(`{
 			"arcade":"%s",
 			"name":"New Basic Arcade",
-			"location":{"lat":37.57,"lon":126.99}
+			"location":{"lat":37.57,"lon":126.98}
 		}`, arcadeID))
 	}
 
@@ -251,19 +356,18 @@ func TestUpdateArcadeBasic_PublicWritesStructuredChangelog(t *testing.T) {
 	scenario.Test(t)
 }
 
-func TestUpdateArcadeBasic_PrivateLocationChangeUpdatesCountry(t *testing.T) {
+func TestUpdateArcadeBasic_PrivateLocationChangeRejectsCountryChange(t *testing.T) {
 	headers := map[string]string{}
 	var arcadeID string
 
 	scenario := tests.ApiScenario{
-		Name:           "PUT /arcade/basic private location change updates country",
+		Name:           "PUT /arcade/basic private location change rejects country change",
 		Method:         http.MethodPut,
 		URL:            "/arcade/basic",
 		Headers:        headers,
-		ExpectedStatus: http.StatusOK,
+		ExpectedStatus: http.StatusForbidden,
 		ExpectedContent: []string{
-			`"arcade":"`,
-			`"basic":"`,
+			`"code":"location_move_distance_exceeded"`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {
 			return newArcadeTestApp(tb)
@@ -304,11 +408,11 @@ func TestUpdateArcadeBasic_PrivateLocationChangeUpdatesCountry(t *testing.T) {
 		if err != nil {
 			tb.Fatalf("failed to load arcade: %v", err)
 		}
-		if got := arcadeRec.GetString("country"); got != "JP" {
-			tb.Fatalf("expected country JP, got %q", got)
+		if got := arcadeRec.GetString("country"); got != "KR" {
+			tb.Fatalf("expected country to remain KR, got %q", got)
 		}
-		if got := arcadeRec.GetString("timezone"); got != "Asia/Tokyo" {
-			tb.Fatalf("expected timezone Asia/Tokyo, got %q", got)
+		if got := arcadeRec.GetString("timezone"); got != "Asia/Seoul" {
+			tb.Fatalf("expected timezone to remain Asia/Seoul, got %q", got)
 		}
 	}
 
@@ -346,6 +450,7 @@ func TestUpdateArcadeBasic_PrivateLocationChangeUpdatesTimezoneWithinSameCountry
 
 		token, user := createAuthUser(tb, app)
 		headers["Authorization"] = "Bearer " + token
+		seedUserLevelExp(tb, app, user.Id, userhandler.LevelBaseExp(30))
 
 		arcadeID, _ = seedArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Timezone Arcade",

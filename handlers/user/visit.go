@@ -17,7 +17,7 @@ import (
 
 const (
 	visitRadiusMeters      = 100.0
-	maxVisitAccuracyMeters = 100.0
+	maxVisitAccuracyMeters = 150.0
 	firstVisitExp          = 5
 	revisitExp             = 2
 )

@@ -113,6 +113,11 @@ Request body may update any of these fields:
 - `subway_line`
 - `location`
 
+Location changes are checked against the authenticated editor's current level:
+below level 10 allows 1 km, levels 10-14 allow 5 km, levels 15-29 allow 10 km,
+and level 30 or above allows any distance within the arcade's current country.
+Rejected moves return `403` with a location-policy `code`.
+
 `items[]` contains one object with:
 - `change_type`: `added`, `updated`, or `unchanged`
 - `bullets[]`: translated bullet keys for each changed field

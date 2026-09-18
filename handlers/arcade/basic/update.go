@@ -58,6 +58,7 @@ type BasicFields struct {
 	SubwayLine  []string
 	Lat         float64
 	Lon         float64
+	HasLocation bool
 	RawLocation any
 }
 
@@ -105,7 +106,7 @@ func getCurrentBasic(app core.App, arcadeID string) (BasicFields, error) {
 	cur.SubwayLine = current.GetStringSlice("subway_line")
 
 	// log.Printf("[update_basic] nickname raw =%#v parsed=%#v", rawNick, cur.Nickname)
-	cur.Lat, cur.Lon, _ = arcadeinternal.ReadLocation(current.Get("location"))
+	cur.Lat, cur.Lon, cur.HasLocation = arcadeinternal.ReadLocation(current.Get("location"))
 	cur.RawLocation = current.Get("location")
 	// log.Printf("[update_basic] current RawLocation: %#v | parsed: %f, %f", cur.RawLocation, cur.Lat, cur.Lon)
 
@@ -233,6 +234,7 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 	merged := mergeBasicFields(cur, body)
 	changed := computeChangedFields(cur, merged, body)
 
+	locationChanged := body.Location != nil && (!floatsEqual(body.Location.Lat, cur.Lat) || !floatsEqual(body.Location.Lon, cur.Lon))
 	geographyChanged := body.Location != nil || (body.Address != nil && *body.Address != cur.Address)
 	var geoResult *geo.Result
 	if geographyChanged {
@@ -294,6 +296,24 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 				return err
 			}
 		}
+		if locationChanged {
+			level := userhandler.LevelFromExp(baseExp)
+			if level < 30 && (!cur.HasLocation || !isUsableBasicLocation(cur.Lat, cur.Lon)) {
+				return &locationMovePolicyError{code: locationMoveOriginMissingCode}
+			}
+			nextCountry := ""
+			if geoResult != nil {
+				nextCountry = geoResult.Country
+			}
+			if err := validateLocationMove(
+				level,
+				arcadeinternal.DistanceKm(cur.Lat, cur.Lon, merged.Lat, merged.Lon),
+				arcadeRec.GetString("country"),
+				nextCountry,
+			); err != nil {
+				return err
+			}
+		}
 
 		var createErr error
 		newBasicID, createErr = createNewBasic(txApp, body.Arcade, merged, re.Auth.Id, body, cur)
@@ -327,6 +347,12 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		if errors.Is(err, errStaleBasic) {
 			return re.JSON(409, map[string]any{"error": err.Error()})
 		}
+		if code := locationMovePolicyCode(err); code != "" {
+			return re.JSON(http.StatusForbidden, map[string]any{
+				"error": err.Error(),
+				"code":  code,
+			})
+		}
 		if errors.Is(err, errInvalidCity) {
 			return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
 		}
@@ -349,6 +375,11 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		"changed":     changed,
 		"xp_feedback": xpFeedback,
 	})
+}
+
+func isUsableBasicLocation(lat, lon float64) bool {
+	return !math.IsNaN(lat) && !math.IsNaN(lon) && !math.IsInf(lat, 0) && !math.IsInf(lon, 0) &&
+		lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && lat != 0 && lon != 0
 }
 
 // ApplyCityAssignment applies a city-only correction without normal user edit

@@ -265,7 +265,24 @@ func TestCampaignCheckStoresVerifiedLocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to load arcade: %v", err)
 	}
-	seedArcadeVisit(t, app, arcade.GetString("createdBy"), arcadeID, time.Now().UTC())
+	visitAt := time.Now().UTC()
+	userID := arcade.GetString("createdBy")
+	seedArcadeVisit(t, app, userID, arcadeID, visitAt)
+	location, err := time.LoadLocation(arcade.GetString("timezone"))
+	if err != nil {
+		t.Fatalf("failed to load arcade timezone: %v", err)
+	}
+	visits, err := app.FindRecordsByFilter("arcade_visit", "user={:user} && arcade={:arcade}", "", 1, 0, map[string]any{
+		"user":   userID,
+		"arcade": arcadeID,
+	})
+	if err != nil || len(visits) != 1 {
+		t.Fatalf("failed to load seeded arcade visit: err=%v visits=%d", err, len(visits))
+	}
+	visits[0].Set("visit_day", visitAt.In(location).Format("2006-01-02"))
+	if err := app.Save(visits[0]); err != nil {
+		t.Fatalf("failed to set seeded visit day in arcade timezone: %v", err)
+	}
 
 	body := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"updated"}`, campaignID, arcadeID, gameID)
 	response := executeJSONRequest(t, app, http.MethodPost, "/campaign/check", body, map[string]string{

@@ -1381,7 +1381,11 @@ components:
         arcade: {type: string}
         lat: {type: number}
         lon: {type: number}
-        accuracy: {type: number, description: GPS accuracy in meters; must be at most 100.}
+        accuracy:
+          type: number
+          minimum: 0
+          maximum: 150
+          description: GPS accuracy in meters; must be at most 150. The measured point must be within 100 m of the arcade.
     CampaignCheckRequest:
       type: object
       required: [campaign, arcade, game_id, result]
@@ -5597,6 +5601,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: /arcade/basic
+      description: Location changes are limited by the authenticated editor's level: below 10, at most 1 km; 10-14, at most 5 km; 15-29, at most 10 km; 30 or above, any distance within the arcade's current country. Policy denials return a machine-readable code.
       security:
         - bearerAuth: []
       requestBody:
@@ -5637,7 +5642,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Withdrawn or banned user.
+          description: Withdrawn or banned user, or a location move denied by the level policy. Location policy codes are location_move_distance_exceeded, location_move_country_changed, and location_move_origin_missing.
           content:
             application/json:
               schema:
@@ -6340,7 +6345,7 @@ paths:
                   exp: {type: integer}
                   level: {type: integer}
                   xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
-        '400': {description: Invalid coordinates or GPS accuracy.}
+        '400': {description: Invalid coordinates or GPS accuracy greater than 150 m.}
         '403': {description: Inactive user, ineligible arcade, or outside the 100m radius.}
         '409': {description: Missing arcade coordinates or timezone.}
   /subway/map:

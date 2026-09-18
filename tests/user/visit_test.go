@@ -56,7 +56,7 @@ func TestArcadeVisitAwardsAndDeduplicatesByArcadeDay(t *testing.T) {
 	restore := userhandler.SetVisitNowForTest(func() time.Time { return time.Date(2026, 7, 1, 14, 59, 0, 0, time.UTC) })
 	t.Cleanup(restore)
 	headers := map[string]string{"Authorization": "Bearer " + token}
-	body := `{"arcade":"` + arcade.Id + `","lat":37.5665,"lon":126.9780,"accuracy":100}`
+	body := `{"arcade":"` + arcade.Id + `","lat":37.5665,"lon":126.9780,"accuracy":150}`
 	res := doUserRequest(t, app, http.MethodPost, "/arcade/visit", headers, body)
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
@@ -145,7 +145,7 @@ func TestArcadeVisitRejectsOutOfRangeAndIneligible(t *testing.T) {
 	token, _ := createAuthUser(t, app, true)
 	arcade := seedVisitArcade(t, app, "Asia/Seoul")
 	headers := map[string]string{"Authorization": "Bearer " + token}
-	for _, body := range []string{`{"arcade":"` + arcade.Id + `","lat":37.5665,"lon":126.9780,"accuracy":101}`, `{"arcade":"` + arcade.Id + `","lat":37.5700,"lon":126.9780,"accuracy":10}`} {
+	for _, body := range []string{`{"arcade":"` + arcade.Id + `","lat":37.5665,"lon":126.9780,"accuracy":151}`, `{"arcade":"` + arcade.Id + `","lat":37.5700,"lon":126.9780,"accuracy":10}`} {
 		if res := doUserRequest(t, app, http.MethodPost, "/arcade/visit", headers, body); res.StatusCode != http.StatusBadRequest && res.StatusCode != http.StatusForbidden {
 			t.Fatalf("status=%d", res.StatusCode)
 		}

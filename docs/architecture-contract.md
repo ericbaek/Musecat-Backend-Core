@@ -86,6 +86,15 @@ Definitions:
 | Latest subway map metadata and file bytes | allow | allow | allow | allow |
 | Subway map create/update/delete | deny | deny | deny | allow |
 
+`PUT /arcade/basic` location changes use the authenticated editor's current
+level, regardless of supporter or staff tags. Levels below 10 may move the
+stored location by at most 1 km; levels 10-14 by at most 5 km; and levels
+15-29 by at most 10 km. Level 30 and above may move it any distance only when
+the destination resolves to the arcade's current country. The server enforces
+these limits using the saved coordinates and its own country lookup; denied
+moves return `403` with `location_move_distance_exceeded`,
+`location_move_country_changed`, or `location_move_origin_missing`.
+
 Update campaign checks use `POST /campaign/check`. An active authenticated user
 may confirm whether a public/open campaign target is still old or updated. A
 `still_old` result awards 1 XP once per user and campaign target; an updated
@@ -332,7 +341,7 @@ immutable in-memory bundle on every request.
 - Candidate invalidation follows changes to arcade/basic data, `arcade.game_v2`, current game entries/revisions, versions, cabinets, and version/cabinet compatibility records.
 - `/arcades` is paginated `{page, per_page, last_page, total, items}` and includes only public/open candidates. Search intentionally includes public/closed candidates.
 - `GET /arcade/public?arcade=...` is a creator-only, read-only XP estimate. It uses the same idempotent public and draft-backfill grant keys as `PUT /arcade/public`, writes no visibility or ledger state, and the successful PUT response is authoritative if the draft changes afterward. Public conversion grants 5 XP. Draft backfill is independent of the seven-day arcade-edit cooldown: each changed eligible area earns 2 XP once per arcade, regardless of how recently that area received normal edit XP.
-- Public conversion remains creator-only and uses the creator's level snapshot at request time: levels 0-4 require game information, contact-or-hours, and facility-photo-or-location-verification; levels 5-9 require game information and facility-photo-or-location-verification; levels 10+ require game information only. Supporter and staff tags never bypass these requirements. The one-time publication location verification uses the same 100-meter / 100-meter accuracy rule as Passport visits, is tied to the current `arcade.basic` revision, and is invalidated automatically when basic information changes. It does not create a Passport visit or award XP.
+- Public conversion remains creator-only and uses the creator's level snapshot at request time: levels 0-4 require game information, contact-or-hours, and facility-photo-or-location-verification; levels 5-9 require game information and facility-photo-or-location-verification; levels 10+ require game information only. Supporter and staff tags never bypass these requirements. The one-time publication location verification keeps its stricter 100-meter distance / 100-meter GPS-accuracy rule, is tied to the current `arcade.basic` revision, and is invalidated automatically when basic information changes. It does not create a Passport visit or award XP.
 - XP ledger changes and aggregate mutations belong to the same transaction. No XP grant may survive a failed aggregate mutation.
 - XP is available only after the authenticated user has a non-empty `username`. Before one-time username setup, XP-producing actions retain their normal mutation semantics where applicable but award `0`; they must not create `user_level` or `user_level_log` state, and public-conversion XP previews must report no eligible XP.
 - Normal edit XP remains scoped by user, arcade, and part. Basic/hour/sns/gtk edits grant 2 XP with their existing seven-day cooldown. Photo atoms grant 2 XP each only when first published, with a rolling seven-day cap of 10 XP for a photo-campaign target and 4 XP for another public arcade; upload-only, reorder, removal, and reuse of a published atom grant 0. Game edits use a rolling seven-day window of distinct durable `arcade_game_id` values: the target is `min(10, 2*n)` and each request receives only the increase over XP already granted in that window. Revisiting an entry already counted in the window grants 0; entries become eligible again after they leave the window. Administrative bulk game-version updates and public-conversion backfill do not use this scale.
@@ -439,4 +448,7 @@ transactions. Core's schema migration bootstraps only a fresh test database.
 
 `POST /arcade/visit` additionally returns `first_visit_to_arcade`, true only for the newly
 committed first visit; duplicate same-day requests return false and never award another
-stamp or XP. The first visit awards 5 XP and a revisit awards 2 XP. Passport is GPS visit evidence, not play evidence.
+stamp or XP. Clients must acquire a fresh GPS position when the user explicitly starts a
+Passport check rather than submitting persisted coordinates. The measured point must be
+within 100 meters of the arcade, and reported GPS accuracy must be at most 150 meters.
+The first visit awards 5 XP and a revisit awards 2 XP. Passport is GPS visit evidence, not play evidence.
