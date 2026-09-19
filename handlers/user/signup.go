@@ -112,6 +112,8 @@ func SignUp(re *core.RequestEvent) error {
 		userInfoRec.Set("visit_visibility", "summary")
 		userInfoRec.Set("favorite_visibility", "private")
 		userInfoRec.Set("countries", []string{})
+		userInfoRec.Set("country_mode", countryModeAuto)
+		userInfoRec.Set("auto_primary_country", "")
 		if input.Avatar == nil {
 			userInfoRec.Set("avatar", []string{})
 		} else {

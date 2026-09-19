@@ -57,6 +57,7 @@ type Profile struct {
 	Nickname           string             `json:"nickname"`
 	Level              int                `json:"level"`
 	Countries          []string           `json:"countries"`
+	CountryMode        string             `json:"country_mode"`
 	PrimaryCountry     string             `json:"primary_country"`
 	Bio                string             `json:"bio"`
 	Avatar             string             `json:"avatar"`
@@ -116,12 +117,13 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	}
 
 	out := &Profile{
-		ID:        userRec.Id,
-		Created:   userRec.GetString("created"),
-		Tag:       []string{},
-		Countries: []string{},
-		SNS:       ProfileSNS{Items: []ProfileSNSItem{}},
-		Withdrawn: userRec.GetBool("withdrawn"),
+		ID:          userRec.Id,
+		Created:     userRec.GetString("created"),
+		Tag:         []string{},
+		Countries:   []string{},
+		CountryMode: countryModeAuto,
+		SNS:         ProfileSNS{Items: []ProfileSNSItem{}},
+		Withdrawn:   userRec.GetBool("withdrawn"),
 	}
 	if exp, err := LoadCurrentExp(app, userRec.Id); err == nil {
 		out.Level = LevelFromExp(exp)
@@ -152,6 +154,8 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	background := ""
 	backgroundPosition := BackgroundPosition{X: 50, Y: 50}
 	tag := parseUserTag(userRec)
+	countryMode := ProfileCountryMode(userInfoRec)
+	profileCountries := []string{}
 
 	if userInfoRec != nil {
 		nickname = strings.TrimSpace(userInfoRec.GetString("nickname"))
@@ -163,10 +167,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 		out.SeriesPublic = userInfoRec.GetBool("series_public")
 		out.VisitVisibility = visitVisibility(userInfoRec.GetString("visit_visibility"))
 		out.FavoriteVisibility = favoriteVisibility(userInfoRec.GetString("favorite_visibility"))
-		out.Countries = publicProfileCountries(app, userRec, userInfoRec, includePrivateSeries)
-		if len(out.Countries) > 0 {
-			out.PrimaryCountry = out.Countries[0]
-		}
+		profileCountries = publicProfileCountries(app, userRec, userInfoRec, includePrivateSeries)
 	}
 
 	out.Username = username
@@ -191,12 +192,14 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	if userInfoRec != nil && (userInfoRec.GetBool("series_public") || includePrivateSeries) {
 		out.Series = loadProfileSeries(app, userInfoRec)
 	}
-	if !out.Withdrawn {
+	out.Countries, out.PrimaryCountry = ResolveStoredProfileCountries(profileCountries, countryMode, AutoPrimaryProfileCountry(userInfoRec))
+	if !out.Withdrawn && (includePrivateSeries || out.VisitVisibility != "private") {
 		includeVisitDays := includePrivateSeries || out.VisitVisibility == "full"
-		if stats, err := LoadVisitStats(app, userRec.Id, includeVisitDays); err == nil && (includePrivateSeries || out.VisitVisibility != "private") {
+		if stats, err := LoadVisitStats(app, userRec.Id, includeVisitDays); err == nil {
 			out.VisitStats = &stats
 		}
 	}
+	out.CountryMode = countryMode
 
 	return out
 }

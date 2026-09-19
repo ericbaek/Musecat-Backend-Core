@@ -17,6 +17,7 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	_, explorer := createAuthUser(t, app)
 	explorerInfo := ensureUserInfo(t, app, explorer.Id)
 	explorerInfo.Set("countries", []string{"KR"})
+	explorerInfo.Set("country_mode", "manual")
 	if err := app.Save(explorerInfo); err != nil {
 		t.Fatalf("failed to save ranking user countries: %v", err)
 	}
@@ -74,6 +75,25 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected invalid level period to return 400, got %d", res.StatusCode)
 	}
+}
+
+func TestRankings_UseStoredAutoCountryAndHideOffCountry(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	seedUserLevelExp(t, app, user.Id, 100)
+	info := ensureUserInfo(t, app, user.Id)
+	info.Set("country_mode", "auto")
+	info.Set("auto_primary_country", "JP")
+	if err := app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	assertRankingPrimaryCountry(t, app, "/rankings?metric=level&period=all", user.Id, "JP")
+
+	info.Set("country_mode", "off")
+	if err := app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	assertRankingPrimaryCountry(t, app, "/rankings?metric=level&period=all", user.Id, "")
 }
 
 func assertRankingPrimaryCountry(t *testing.T, app *tests.TestApp, url, userID, want string) {

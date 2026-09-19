@@ -36,3 +36,39 @@ func TestNormalizeProfileCountries(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveProfileCountries(t *testing.T) {
+	stats := VisitStats{Arcades: []ArcadeVisitCount{
+		{Arcade: "kr-1", Country: "KR", VisitCount: 4, lastVisitedAt: "2026-09-10T00:00:00Z"},
+		{Arcade: "jp-1", Country: "JP", VisitCount: 4, lastVisitedAt: "2026-09-11T00:00:00Z"},
+		{Arcade: "jp-2", Country: "JP", VisitCount: 1, lastVisitedAt: "2026-09-01T00:00:00Z"},
+	}}
+
+	countries, primary := ResolveProfileCountries([]string{"AU"}, countryModeAuto, stats)
+	if primary != "JP" || len(countries) != 1 || countries[0] != "JP" {
+		t.Fatalf("auto country=%v primary=%q, want JP", countries, primary)
+	}
+	countries, primary = ResolveProfileCountries([]string{"AU", "KR"}, countryModeManual, stats)
+	if primary != "AU" || len(countries) != 2 {
+		t.Fatalf("manual country=%v primary=%q", countries, primary)
+	}
+	countries, primary = ResolveProfileCountries([]string{"AU"}, countryModeOff, stats)
+	if len(countries) != 0 || primary != "" {
+		t.Fatalf("off country=%v primary=%q", countries, primary)
+	}
+}
+
+func TestResolveStoredProfileCountries(t *testing.T) {
+	countries, primary := ResolveStoredProfileCountries([]string{"KR"}, countryModeAuto, "JP")
+	if primary != "JP" || len(countries) != 1 || countries[0] != "JP" {
+		t.Fatalf("auto country=%v primary=%q, want JP", countries, primary)
+	}
+	countries, primary = ResolveStoredProfileCountries([]string{"KR", "JP"}, countryModeManual, "AU")
+	if primary != "KR" || len(countries) != 2 {
+		t.Fatalf("manual country=%v primary=%q", countries, primary)
+	}
+	countries, primary = ResolveStoredProfileCountries([]string{"KR"}, countryModeOff, "JP")
+	if len(countries) != 0 || primary != "" {
+		t.Fatalf("off country=%v primary=%q", countries, primary)
+	}
+}

@@ -95,6 +95,13 @@ func TestArcadeVisitAwardsAndDeduplicatesByArcadeDay(t *testing.T) {
 	if level.GetInt("exp") != 7 {
 		t.Fatalf("exp=%d, want 7", level.GetInt("exp"))
 	}
+	info, err := app.FindRecordById(userhandler.CollectionUserInfo, userRec.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.GetString("auto_primary_country") != "KR" {
+		t.Fatalf("auto_primary_country=%q, want KR", info.GetString("auto_primary_country"))
+	}
 }
 
 func TestArcadeVisitWithoutUsernamePersistsWithoutXP(t *testing.T) {

@@ -1137,6 +1137,7 @@ components:
         - series_public
         - level
         - countries
+        - country_mode
         - primary_country
       properties:
         id:
@@ -1207,14 +1208,17 @@ components:
           type: integer
         countries:
           type: array
-          description: Ordered profile countries. The first item is primary. Public profiles expose only the first stored country after multi-country access is lost; GET /user/me retains all stored selections.
+          description: Resolved profile countries. Auto contains the top verified-visit country, manual exposes the selected list, and off is empty.
           maxItems: 3
           items:
             type: string
             pattern: '^[A-Z]{2}$'
+        country_mode:
+          type: string
+          enum: [auto, manual, off]
         primary_country:
           type: string
-          description: First item in countries, or an empty string when no country is selected.
+          description: Resolved profile country, or an empty string when auto has no visits or the mode is off.
         series:
           type: array
           items:
@@ -1347,13 +1351,14 @@ components:
           description: Sum of straight-line distances between consecutive verified arcade locations in chronological visit order.
         countries:
           type: array
-          description: Counts of distinct visited arcades by their current country code.
+          description: Verified visit and distinct-arcade counts by current country code.
           items:
             type: object
-            required: [country, arcade_count]
+            required: [country, arcade_count, visit_count]
             properties:
               country: {type: string}
               arcade_count: {type: integer}
+              visit_count: {type: integer}
         arcades:
           type: array
           description: Visited public arcades, ordered by visit count descending, then most recent visit descending.
@@ -1669,7 +1674,7 @@ components:
         visit_visibility: {type: string, enum: [private, summary, full]}
     ProfileCountriesRequest:
       type: object
-      required: [countries]
+      required: [countries, country_mode]
       properties:
         countries:
           type: array
@@ -1678,9 +1683,12 @@ components:
           items:
             type: string
             pattern: '^[A-Za-z]{2}$'
+        country_mode:
+          type: string
+          enum: [auto, manual, off]
     ProfileCountriesResponse:
       type: object
-      required: [countries, primary_country]
+      required: [countries, country_mode, primary_country]
       properties:
         countries:
           type: array
@@ -1690,6 +1698,9 @@ components:
             pattern: '^[A-Z]{2}$'
         primary_country:
           type: string
+        country_mode:
+          type: string
+          enum: [auto, manual, off]
     UserActivityRange:
       type: object
       required: [start_date, end_date, tz, days]
@@ -6807,7 +6818,7 @@ paths:
     put:
       tags: [Users]
       summary: /user/countries
-      description: Replaces the authenticated user's ordered profile country list. Empty is allowed. Accounts below level 15 may select zero or one country; accounts at level 15 or above may select up to three. Supporter and staff tags do not change this limit.
+      description: Replaces the authenticated user's ordered profile country list and display mode. Empty is allowed. Accounts below level 15 may select zero or one country; accounts at level 15 or above may select up to three. Supporter and staff tags do not change this limit.
       security: [{bearerAuth: []}]
       requestBody:
         required: true

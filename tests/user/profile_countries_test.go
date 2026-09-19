@@ -16,7 +16,7 @@ func TestUpdateProfileCountries(t *testing.T) {
 	token, userRec := createAuthUser(t, app, true)
 	headers := map[string]string{"Authorization": "Bearer " + token}
 
-	res := doUserRequest(t, app, http.MethodPut, "/user/countries", headers, `{"countries":[" kr "]}`)
+	res := doUserRequest(t, app, http.MethodPut, "/user/countries", headers, `{"countries":[" kr "],"country_mode":"manual"}`)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("single country status=%d", res.StatusCode)
 	}
@@ -25,13 +25,13 @@ func TestUpdateProfileCountries(t *testing.T) {
 		t.Fatalf("unexpected single-country payload: %#v", payload)
 	}
 
-	res = doUserRequest(t, app, http.MethodPut, "/user/countries", headers, `{"countries":["KR","JP"]}`)
+	res = doUserRequest(t, app, http.MethodPut, "/user/countries", headers, `{"countries":["KR","JP"],"country_mode":"manual"}`)
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("ordinary multi-country status=%d", res.StatusCode)
 	}
 
 	setUserLevelForCountriesTest(t, app, userRec.Id, userhandler.LevelBaseExp(15))
-	res = doUserRequest(t, app, http.MethodPut, "/user/countries", headers, `{"countries":["KR","JP","US"]}`)
+	res = doUserRequest(t, app, http.MethodPut, "/user/countries", headers, `{"countries":["KR","JP","US"],"country_mode":"manual"}`)
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("level-15 multi-country status=%d", res.StatusCode)
 	}
@@ -41,10 +41,12 @@ func TestUpdateProfileCountries(t *testing.T) {
 	}
 
 	for _, body := range []string{
-		`{"countries":["KR","kr"]}`,
-		`{"countries":["ZZ"]}`,
-		`{"countries":["KR","JP","US","AU"]}`,
-		`{"countries":null}`,
+		`{"countries":["KR","kr"],"country_mode":"manual"}`,
+		`{"countries":["ZZ"],"country_mode":"manual"}`,
+		`{"countries":["KR","JP","US","AU"],"country_mode":"manual"}`,
+		`{"countries":null,"country_mode":"manual"}`,
+		`{"countries":[],"country_mode":"invalid"}`,
+		`{"countries":[]}`,
 	} {
 		res = doUserRequest(t, app, http.MethodPut, "/user/countries", headers, body)
 		if res.StatusCode != http.StatusBadRequest {
@@ -59,6 +61,7 @@ func TestProfileCountriesRestrictPublicAfterAccessLoss(t *testing.T) {
 	setUserLevelForCountriesTest(t, app, userRec.Id, userhandler.LevelBaseExp(15))
 	info := ensureUserInfo(t, app, userRec.Id)
 	info.Set("countries", []string{"KR", "JP", "US"})
+	info.Set("country_mode", "manual")
 	if err := app.Save(info); err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +90,18 @@ func TestProfileCountriesRestrictPublicAfterAccessLoss(t *testing.T) {
 	}
 	if countries, ok := selfPayload["countries"].([]any); !ok || len(countries) != 3 {
 		t.Fatalf("self profile must retain saved countries: %#v", selfPayload)
+	}
+
+	res := doUserRequest(t, app, http.MethodPut, "/user/countries", map[string]string{"Authorization": "Bearer " + token}, `{"countries":["KR","JP","US"],"country_mode":"off"}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("level-loss mode change should preserve saved countries, status=%d", res.StatusCode)
+	}
+	var offPayload map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&offPayload); err != nil {
+		t.Fatal(err)
+	}
+	if countries, ok := offPayload["countries"].([]any); !ok || len(countries) != 0 || offPayload["primary_country"] != "" {
+		t.Fatalf("off mode should hide preserved countries: %#v", offPayload)
 	}
 }
 

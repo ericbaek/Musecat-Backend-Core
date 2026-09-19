@@ -1111,7 +1111,12 @@ func campaignUser(app core.App, userID string, cache map[string]map[string]any) 
 				if nickname := strings.TrimSpace(info.GetString("nickname")); nickname != "" {
 					user["nickname"] = nickname
 				}
-				user["primary_country"] = userhandler.PrimaryProfileCountry(info)
+				countries := userhandler.ProfileCountriesFromJSON(info.GetString("countries"))
+				_, user["primary_country"] = userhandler.ResolveStoredProfileCountries(
+					countries,
+					userhandler.ProfileCountryMode(info),
+					userhandler.AutoPrimaryProfileCountry(info),
+				)
 			}
 			if exp, err := userhandler.LoadCurrentExp(app, userID); err == nil {
 				user["level"] = userhandler.LevelFromExp(exp)

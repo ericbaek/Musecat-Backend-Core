@@ -202,12 +202,14 @@ func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, 
 	var leaderboardPosition int
 	item.Profile = &profile{}
 	var countries string
-	if err := rows.Scan(&rankingScore, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &countries, &exp, &tags, &leaderboardPosition); err != nil {
+	var countryMode, autoPrimaryCountry string
+	if err := rows.Scan(&rankingScore, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &countries, &countryMode, &autoPrimaryCountry, &exp, &tags, &leaderboardPosition); err != nil {
 		return entry{}, 0, 0, err
 	}
 	item.Score = rankingScore
 	item.Profile.Level = userhandler.LevelFromExp(exp)
-	item.Profile.PrimaryCountry = userhandler.PrimaryProfileCountryFromJSON(countries)
+	profileCountries := userhandler.ProfileCountriesFromJSON(countries)
+	_, item.Profile.PrimaryCountry = userhandler.ResolveStoredProfileCountries(profileCountries, countryMode, autoPrimaryCountry)
 	item.Profile.Tags = parseTags(tags)
 	if m == metricLevel {
 		item.Score = int64(item.Profile.Level)
@@ -321,6 +323,8 @@ SELECT
   u.username,
   COALESCE(ui.avatar, '') AS avatar,
 	  COALESCE(ui.countries, '[]') AS countries,
+  COALESCE(ui.country_mode, 'auto') AS country_mode,
+  COALESCE(ui.auto_primary_country, '') AS auto_primary_country,
   COALESCE(ul.exp, 0) AS exp,
   %s AS tags,
   ROW_NUMBER() OVER (
@@ -335,7 +339,7 @@ LEFT JOIN user_level ul ON ul.user = u.id
 WHERE COALESCE(u.withdrawn, 0) = 0
   AND scores.score > 0%s
 )
-SELECT score, id, nickname, username, avatar, countries, exp, tags, leaderboard_position
+SELECT score, id, nickname, username, avatar, countries, country_mode, auto_primary_country, exp, tags, leaderboard_position
 FROM ranked
 `, source, userTags, visitVisibility), params
 }

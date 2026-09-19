@@ -164,12 +164,23 @@ func ensureProfileCountriesSchema(tb testing.TB, app *tests.TestApp) {
 	if err != nil {
 		tb.Fatalf("failed to load user_info: %v", err)
 	}
-	if info.Fields.GetByName("countries") != nil {
-		return
+	changed := false
+	if info.Fields.GetByName("countries") == nil {
+		info.Fields.Add(&core.JSONField{Name: "countries", MaxSize: 128})
+		changed = true
 	}
-	info.Fields.Add(&core.JSONField{Name: "countries", MaxSize: 128})
-	if err := app.Save(info); err != nil {
-		tb.Fatalf("failed to add user_info.countries: %v", err)
+	if info.Fields.GetByName("country_mode") == nil {
+		info.Fields.Add(&core.TextField{Name: "country_mode", Max: 6, Pattern: "^(auto|manual|off)$"})
+		changed = true
+	}
+	if info.Fields.GetByName("auto_primary_country") == nil {
+		info.Fields.Add(&core.TextField{Name: "auto_primary_country", Max: 2, Pattern: "^[A-Z]{2}$"})
+		changed = true
+	}
+	if changed {
+		if err := app.Save(info); err != nil {
+			tb.Fatalf("failed to update user_info country fields: %v", err)
+		}
 	}
 }
 

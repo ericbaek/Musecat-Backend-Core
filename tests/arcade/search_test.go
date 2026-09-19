@@ -21,6 +21,7 @@ func TestSearch_ReturnsUsersAndArcadesAcrossSupportedFields(t *testing.T) {
 	userByUsernameInfo := ensureUserInfo(t, app, userByUsername.Id)
 	userByUsernameInfo.Set("nickname", "Alpha Nick")
 	userByUsernameInfo.Set("countries", []string{"KR"})
+	userByUsernameInfo.Set("country_mode", "manual")
 	if err := app.Save(userByUsernameInfo); err != nil {
 		t.Fatalf("failed to save username user info: %v", err)
 	}

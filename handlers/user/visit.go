@@ -44,6 +44,7 @@ type VisitStats struct {
 type VisitCountry struct {
 	Country     string `json:"country"`
 	ArcadeCount int    `json:"arcade_count"`
+	VisitCount  int    `json:"visit_count"`
 }
 
 type ArcadeVisitCount struct {
@@ -173,6 +174,9 @@ func VisitArcade(re *core.RequestEvent) error {
 			}
 			granted = true
 		}
+		if _, err := RefreshAutoPrimaryProfileCountry(tx, re.Auth.Id); err != nil {
+			return err
+		}
 		out = visitSummary(rec)
 		return nil
 	})
@@ -291,10 +295,10 @@ func LoadVisitStats(app core.App, userID string, includeVisitDays bool) (VisitSt
 		return stats, err
 	}
 	for _, c := range p.Countries {
-		stats.Countries = append(stats.Countries, VisitCountry{Country: c.Country, ArcadeCount: c.ArcadeCount})
+		stats.Countries = append(stats.Countries, VisitCountry{Country: c.Country, ArcadeCount: c.ArcadeCount, VisitCount: c.VisitCount})
 	}
 	for _, s := range p.Stamps {
-		item := ArcadeVisitCount{Arcade: s.Arcade, Name: s.Name, Country: s.Country, PhotoURL: s.PhotoURL, VisitCount: s.VisitCount, LastVisitDay: s.LastVisitDay}
+		item := ArcadeVisitCount{Arcade: s.Arcade, Name: s.Name, Country: s.Country, PhotoURL: s.PhotoURL, VisitCount: s.VisitCount, LastVisitDay: s.LastVisitDay, lastVisitedAt: s.lastAt}
 		if !includeVisitDays {
 			item.LastVisitDay = ""
 		}

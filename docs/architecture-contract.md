@@ -151,8 +151,14 @@ locations; a visit whose location is unavailable breaks the sequence rather
 than joining the surrounding visits.
 
 Profile countries are stored only through `PUT /user/countries` as an ordered
-`user_info.countries` list of ISO 3166-1 alpha-2 codes. The first code is the
-representative country. Active contributors below level 15 may save one code;
+`user_info.countries` list of ISO 3166-1 alpha-2 codes together with
+`country_mode=auto|manual|off`. `auto` is the default, and resolves one
+representative country from public verified visits by total visit count, then
+distinct arcade count, then most recent visit; a stable country-code tie break
+keeps equal histories deterministic. The resolved Auto country is cached on
+`user_info` and refreshed when a verified visit is recorded, so profile and
+ranking reads do not re-scan a user's visit history. `manual` exposes the saved ordered list;
+`off` exposes neither a country nor a primary country. Active contributors below level 15 may save one code;
 contributors at level 15 or above may save up to three. This limit is based only
 on level and does not depend on supporter or staff tags. A loss of level-15
 access does not delete stored choices: public profile reads expose only the
