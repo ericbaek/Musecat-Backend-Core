@@ -13,6 +13,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.0"
+      - run: go vet ./...
       - run: go test ./...
 
   update-full:

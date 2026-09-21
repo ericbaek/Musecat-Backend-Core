@@ -32,7 +32,7 @@ See [DATA_LICENSE.md](DATA_LICENSE.md) for the permitted uses, contribution lice
 2. Run `go test ./...`.
 3. Run `go run . serve --http=0.0.0.0:8090`.
 
-PocketBase data is stored in `./pb_data` by default and is ignored by Git. A fresh instance starts with the versioned schema migrations in this repository. The committed `testdata/pb_data` fixture contains schema only and no production records.
+PocketBase data is stored in `./pb_data` by default and is ignored by Git. A fresh instance starts with the versioned schema migrations in this repository. Tests bootstrap a fresh Core schema and clone that database per test; the committed `testdata/pb_data` fixture is not used by the test runner.
 
 Deployment-injected environment variables take precedence over `.env`, including intentionally empty values. Docker build context excludes `.env`, `pb_data`, caches, and `.git` via `.dockerignore`.
 
