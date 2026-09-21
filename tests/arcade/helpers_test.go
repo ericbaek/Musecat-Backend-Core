@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,29 +19,20 @@ import (
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/types"
 
+	"github.com/ericbaek/musecat-backend-core/coreapp"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
-	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
-	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
-	arcadecampaign "github.com/ericbaek/musecat-backend-core/handlers/arcade/campaign"
-	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
-	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
-	arcadegtk "github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
-	arcadehour "github.com/ericbaek/musecat-backend-core/handlers/arcade/hour"
-	arcadememo "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo"
-	arcadenotice "github.com/ericbaek/musecat-backend-core/handlers/arcade/notice"
-	arcadephoto "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo"
-	arcadepublic "github.com/ericbaek/musecat-backend-core/handlers/arcade/public"
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
-	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
-	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
-	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
-	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
-	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
 	"github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/ericbaek/musecat-backend-core/testutil"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	testutil.CleanupGoldenDir()
+	os.Exit(code)
+}
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
@@ -136,105 +128,7 @@ func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 	user.RegisterHooks(app)
 	arcadeadmin.RegisterTelegramNotifyHooks(app)
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		se.Router.GET("/search", searchhandler.Search)
-		se.Router.GET("/stats", statshandler.GetStats)
-		se.Router.GET("/rankings", rankinghandler.List)
-		se.Router.GET("/arcade/ranking", rankinghandler.ArcadeVisitRanking)
-		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
-		se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
-		se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
-		se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
-		se.Router.GET("/arcade/memo", arcadememo.GetArcadeMemo)
-		se.Router.GET("/user/changelog", user.GetUserChangelog)
-		se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
-		se.Router.GET("/arcades", arcadequery.ListArcades)
-		se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)
-		se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
-		se.Router.GET("/campaign", arcadecampaign.GetCampaign)
-		se.Router.GET("/campaign/photo", arcadecampaign.ListPhotoCampaign)
-		se.Router.GET("/arcade/campaigns/presence", arcadecampaign.ListArcadeCampaignPresence)
-		se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns).Bind(
-			apis.RequireAuth("user"),
-			user.RequireActiveUser(),
-		)
-		se.Router.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(
-			apis.RequireAuth("user"),
-			user.RequireActiveUser(),
-			arcadequery.RequireGameToolsAccess(),
-		)
-		se.Router.GET("/game_series_version", arcadequery.GetGameSeriesVersion)
-		se.Router.GET("/game/catalog", arcadequery.GetGameCatalog)
-		catalogManagement := se.Router.Group("/moderation/game").Bind(
-			apis.RequireAuth("user"),
-			user.RequireActiveUser(),
-			arcadequery.RequireGameToolsAccess(),
-		)
-		catalogManagement.POST("/catalog/compatibilities", gamecataloghandler.ReplaceCompatibilities)
-		se.Router.POST("/game_series_version", arcadequery.CreateGameSeriesVersion).Bind(
-			apis.RequireAuth("user"),
-			arcadequery.RequireModeratorAccess(),
-		)
-		se.Router.PUT("/game_series_version", arcadequery.UpdateGameSeriesVersion).Bind(
-			apis.RequireAuth("user"),
-			arcadequery.RequireModeratorAccess(),
-		)
-		se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback).Bind(
-			apis.RequireAuth("user"),
-			user.RequireActiveUser(),
-			arcadequery.RequireStrictReviewerAccess(),
-		)
-		se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback)
-		se.Router.GET("/arcade/notice", arcadenotice.ListArcadeNotice)
-		group := se.Router.Group("/arcade").Bind(
-			apis.RequireAuth("user"),
-			user.RequireActiveUser(),
-		)
-		group.POST("/new", arcadebasic.NewArcade)
-		group.GET("/draft", arcadequery.GetArcadeDraft)
-		group.GET("/drafts", arcadequery.ListMyArcadeDrafts)
-		group.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
-		group.GET("/public", arcadepublic.PreviewPublicArcade)
-		group.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin)
-		group.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
-		group.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
-		group.POST("/rollback", arcadeadmin.RollbackArcadePart)
-		group.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
-		group.PUT("/basic", arcadebasic.UpdateArcadeBasic)
-		group.PUT("/gtk", arcadegtk.UpdateArcadeGTK)
-		group.PUT("/sns", arcadesns.UpdateArcadeSNS)
-		group.POST("/flag", arcadeflag.CreateArcadeFlag)
-		group.POST("/flag/delete", arcadeflag.DeleteArcadeFlag)
-		group.POST("/flag/reaction", arcadeflag.UpdateArcadeFlagReaction)
-		group.POST("/notice", arcadenotice.CreateArcadeNotice)
-		group.PUT("/notice", arcadenotice.UpdateArcadeNotice)
-		group.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
-		group.PUT("/game", arcadegame.UpdateArcadeGame)
-		group.PUT("/hour", arcadehour.UpdateArcadeHour)
-		group.PUT("/public", arcadepublic.RequestPublicArcade)
-		group.POST("/location-verification", arcadepublic.VerifyArcadeLocation)
-		group.PUT("/photo", arcadephoto.UpdateArcadePhoto)
-		group.PUT("/memo", arcadememo.UpdateArcadeMemo)
-		group.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)
-		group.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
-		group.POST("/photo/upload", arcadephoto.UploadArcadePhotos)
-
-		authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))
-		authUser.GET("/report", arcadeadmin.ListUserReport).Bind(user.RequireActiveUser())
-		authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(user.RequireActiveUser())
-		reviewQueue := se.Router.Group("/moderation/arcade").Bind(
-			apis.RequireAuth("user"),
-			user.RequireActiveUser(),
-			arcadequery.RequireStrictReviewerAccess(),
-		)
-		reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
-		reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
-		supporter := se.Router.Group("/supporter").Bind(apis.RequireAuth("user"), user.RequireActiveUser())
-		supporter.GET("/score", arcadeadmin.GetSupporterScore)
-		supporter.POST("/request", arcadeadmin.CreateSupporterRequest)
-		se.Router.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
-			apis.RequireAuth("user"),
-			user.RequireActiveUser(),
-		)
+		coreapp.RegisterAPIRoutes(se)
 		return se.Next()
 	})
 	return app
@@ -470,6 +364,10 @@ func decodeLogObject(tb testing.TB, raw any) map[string]any {
 }
 
 func executeJSONRequest(tb testing.TB, app *tests.TestApp, method, url, body string, headers map[string]string) *http.Response {
+	return executeRequest(tb, app, method, url, strings.NewReader(body), headers)
+}
+
+func executeRequest(tb testing.TB, app *tests.TestApp, method, url string, body io.Reader, headers map[string]string) *http.Response {
 	tb.Helper()
 
 	baseRouter, err := apis.NewRouter(app)
@@ -491,7 +389,7 @@ func executeJSONRequest(tb testing.TB, app *tests.TestApp, method, url, body str
 	}
 
 	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(method, url, strings.NewReader(body))
+	req := httptest.NewRequest(method, url, body)
 	req.Header.Set("content-type", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, strings.TrimSpace(v))

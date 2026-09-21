@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,12 @@ import (
 	community "github.com/ericbaek/musecat-backend-core/handlers/community"
 	"github.com/ericbaek/musecat-backend-core/testutil"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	testutil.CleanupGoldenDir()
+	os.Exit(code)
+}
 
 type fakeTranslator struct {
 	result community.TranslationResult

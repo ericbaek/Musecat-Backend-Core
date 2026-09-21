@@ -2,10 +2,11 @@ package arcade_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
@@ -231,220 +232,131 @@ func TestGameSeriesVersion_RejectsInvalidModeShape(t *testing.T) {
 	}
 }
 
+func catalogVersionBody(tb testing.TB, id string, revision int, values map[string]any) string {
+	tb.Helper()
+	body := map[string]any{
+		"entity":       "version",
+		"operation_id": uuid.NewString(),
+		"reason":       "Update catalog version in API test",
+		"values":       values,
+	}
+	if id != "" {
+		body["id"] = id
+		body["expected_revision"] = revision
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return string(encoded)
+}
+
+func catalogVersionValues(seriesID, name, releasedOn string) map[string]any {
+	return map[string]any{
+		"series":      seriesID,
+		"released_on": releasedOn,
+		"en":          name,
+		"kr":          name,
+		"jp":          name,
+		"price_default": map[string]any{
+			"global": map[string]any{
+				"modes": []any{map[string]any{"mode_key": "normal", "label": "NORMAL", "represent": true}},
+			},
+		},
+	}
+}
+
 func TestGameSeriesVersion_CreateAndUpdateAsModerator(t *testing.T) {
 	app := newArcadeTestApp(t)
-	headers := map[string]string{}
-
 	token, _ := createAuthUserWithTags(t, app, []string{"moderator"})
-	headers["Authorization"] = "Bearer " + token
-
+	headers := map[string]string{"Authorization": "Bearer " + token}
 	seriesID := seedGameSeries(t, app, 12, "Moderator Series")
 
-	createBody := fmt.Sprintf(`{
-		"series": %q,
-		"released_on": "2026-04-18",
-		"en": "Moderator Version",
-		"kr": "Moderator Version",
-		"jp": "Moderator Version",
-		"price_default": {
-			"global": {
-				"modes": [
-					{"mode_key":"mode_1","label":"노멀","represent":true},
-					{"mode_key":"mode_2","label":"EXTRA","represent":true},
-					{"mode_key":"mode_3","label":"TIME PLAY (10m)","represent":false},
-					{"mode_key":"mode_4","label":"TIME PLAY (16m)","represent":false}
-				]
-			},
-			"countries": {
-				"KR": {
-					"modes": [
-						{"mode_key":"mode_1","label":"노멀","represent":true},
-						{"mode_key":"mode_2","label":"EXTRA","represent":true},
-						{"mode_key":"mode_3","label":"TIME PLAY (10m)","represent":false},
-						{"mode_key":"mode_4","label":"TIME PLAY (16m)","represent":false}
-					]
-				}
-			}
-		}
-	}`, seriesID)
-
-	createRes := executeJSONRequest(
-		t,
-		app,
-		http.MethodPost,
-		"/game_series_version",
-		createBody,
-		headers,
-	)
-	if createRes.StatusCode != http.StatusOK {
-		t.Fatalf("expected create status 200, got %d", createRes.StatusCode)
+	create := executeJSONRequest(t, app, http.MethodPost, "/moderation/game/catalog", catalogVersionBody(t, "", 0, catalogVersionValues(seriesID, "Moderator Version", "2026-04-18")), headers)
+	defer create.Body.Close()
+	if create.StatusCode != http.StatusOK {
+		t.Fatalf("expected create status 200, got %d", create.StatusCode)
 	}
-	defer createRes.Body.Close()
-
-	var createPayload map[string]any
-	if err := json.NewDecoder(createRes.Body).Decode(&createPayload); err != nil {
-		t.Fatalf("failed to decode create response: %v", err)
+	var created struct {
+		Item map[string]any `json:"item"`
+	}
+	if err := json.NewDecoder(create.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := created.Item["id"].(string)
+	if id == "" || created.Item["en"] != "Moderator Version" {
+		t.Fatalf("unexpected created version: %#v", created.Item)
 	}
 
-	version, ok := createPayload["version"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected version object, got %T", createPayload["version"])
+	update := executeJSONRequest(t, app, http.MethodPut, "/moderation/game/catalog", catalogVersionBody(t, id, 1, catalogVersionValues(seriesID, "Moderator Version Updated", "2026-04-19")), headers)
+	defer update.Body.Close()
+	if update.StatusCode != http.StatusOK {
+		t.Fatalf("expected update status 200, got %d", update.StatusCode)
 	}
-	createdID, _ := version["id"].(string)
-	if createdID == "" {
-		t.Fatalf("expected created version id")
+	var updated struct {
+		Item map[string]any `json:"item"`
 	}
-	if got := version["en"]; got != "Moderator Version" {
-		t.Fatalf("expected version en Moderator Version, got %v", got)
+	if err := json.NewDecoder(update.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
 	}
-
-	updateRes := executeJSONRequest(
-		t,
-		app,
-		http.MethodPut,
-		"/game_series_version",
-		fmt.Sprintf(`{
-			"id": %q,
-			"series": %q,
-			"released_on": "2026-04-19",
-			"en": "Moderator Version Updated",
-			"kr": "Moderator Version Updated",
-			"jp": "Moderator Version Updated",
-			"price_default": {
-				"global": {
-					"modes": [
-						{"mode_key":"mode_1","label":"노멀","represent":true},
-						{"mode_key":"mode_2","label":"EXTRA","represent":true},
-						{"mode_key":"mode_3","label":"TIME PLAY (10m)","represent":false},
-						{"mode_key":"mode_4","label":"TIME PLAY (16m)","represent":false}
-					]
-				},
-				"countries": {
-					"KR": {
-						"modes": [
-							{"mode_key":"mode_1","label":"노멀","represent":true},
-							{"mode_key":"mode_2","label":"EXTRA","represent":true},
-							{"mode_key":"mode_3","label":"TIME PLAY (10m)","represent":false},
-							{"mode_key":"mode_4","label":"TIME PLAY (16m)","represent":false}
-						]
-					}
-				}
-			}
-		}`, createdID, seriesID),
-		headers,
-	)
-	if updateRes.StatusCode != http.StatusOK {
-		t.Fatalf("expected update status 200, got %d", updateRes.StatusCode)
-	}
-	defer updateRes.Body.Close()
-
-	var updatePayload map[string]any
-	if err := json.NewDecoder(updateRes.Body).Decode(&updatePayload); err != nil {
-		t.Fatalf("failed to decode update response: %v", err)
-	}
-
-	updatedVersion, ok := updatePayload["version"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected version object, got %T", updatePayload["version"])
-	}
-	if got := updatedVersion["id"]; got != createdID {
-		t.Fatalf("expected version id %q, got %v", createdID, got)
-	}
-	if got := updatedVersion["en"]; got != "Moderator Version Updated" {
-		t.Fatalf("expected updated version en, got %v", got)
-	}
-	releasedOn, _ := updatedVersion["released_on"].(string)
-	if !strings.HasPrefix(releasedOn, "2026-04-19") {
-		t.Fatalf("expected updated released_on to start with 2026-04-19, got %v", updatedVersion["released_on"])
+	if updated.Item["id"] != id || updated.Item["en"] != "Moderator Version Updated" {
+		t.Fatalf("unexpected updated version: %#v", updated.Item)
 	}
 }
 
 func TestGameSeriesVersion_RejectsMissingRequiredFields(t *testing.T) {
 	app := newArcadeTestApp(t)
-	headers := map[string]string{}
 	token, _ := createAuthUserWithTags(t, app, []string{"moderator"})
-	headers["Authorization"] = "Bearer " + token
-
-	res := executeJSONRequest(t, app, http.MethodPost, "/game_series_version", `{"en":"Missing Fields"}`, headers)
+	res := executeJSONRequest(t, app, http.MethodPost, "/moderation/game/catalog", catalogVersionBody(t, "", 0, map[string]any{"en": "Missing Fields"}), map[string]string{"Authorization": "Bearer " + token})
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d", res.StatusCode)
-	}
-	defer res.Body.Close()
-
-	var payload map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-		t.Fatalf("failed to decode error response: %v", err)
-	}
-	if got := payload["details"]; got == nil {
-		t.Fatalf("expected validation details for missing required fields")
 	}
 }
 
 func TestGameSeriesVersion_AllowsGlobalOnlyPriceDefault(t *testing.T) {
 	app := newArcadeTestApp(t)
-	headers := map[string]string{}
 	token, _ := createAuthUserWithTags(t, app, []string{"moderator"})
-	headers["Authorization"] = "Bearer " + token
-
 	seriesID := seedGameSeries(t, app, 13, "Global Only Series")
-
-	body := fmt.Sprintf(`{
-		"series": %q,
-		"released_on": "2026-04-20",
-		"en": "Global Only Version",
-		"kr": "Global Only Version",
-		"jp": "Global Only Version",
-		"price_default": {
-			"global": {
-				"modes": [
-					{"mode_key":"default","represent":true}
-				]
-			}
-		}
-	}`, seriesID)
-
-	res := executeJSONRequest(t, app, http.MethodPost, "/game_series_version", body, headers)
+	res := executeJSONRequest(t, app, http.MethodPost, "/moderation/game/catalog", catalogVersionBody(t, "", 0, catalogVersionValues(seriesID, "Global Only Version", "2026-04-20")), map[string]string{"Authorization": "Bearer " + token})
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", res.StatusCode)
 	}
-	defer res.Body.Close()
-
-	var payload map[string]any
+	var payload struct {
+		Item map[string]any `json:"item"`
+	}
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
+		t.Fatal(err)
 	}
-
-	version, ok := payload["version"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected version object, got %T", payload["version"])
+	price, _ := payload.Item["price_default"].(map[string]any)
+	if price == nil || price["global"] == nil {
+		t.Fatalf("expected global price default, got %#v", price)
 	}
-
-	priceDefault, ok := version["price_default"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected price_default object, got %T", version["price_default"])
-	}
-	if _, exists := priceDefault["countries"]; exists {
-		t.Fatalf("expected countries to be omitted or absent, got %#v", priceDefault["countries"])
+	if _, exists := price["countries"]; exists {
+		t.Fatalf("expected countries to be absent, got %#v", price)
 	}
 }
 
 func TestGameSeriesVersion_RejectsNonModerator(t *testing.T) {
 	app := newArcadeTestApp(t)
-	headers := map[string]string{}
 	token, _ := createAuthUser(t, app)
-	headers["Authorization"] = "Bearer " + token
-
-	res := executeJSONRequest(t, app, http.MethodPost, "/game_series_version", `{"en":"No Access Version"}`, headers)
+	res := executeJSONRequest(t, app, http.MethodPost, "/moderation/game/catalog", catalogVersionBody(t, "", 0, map[string]any{"en": "No Access Version"}), map[string]string{"Authorization": "Bearer " + token})
+	defer res.Body.Close()
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected status 403, got %d", res.StatusCode)
 	}
-	defer res.Body.Close()
+}
 
-	var payload map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
-		t.Fatalf("failed to decode error response: %v", err)
-	}
-	if got := payload["error"]; got != "moderator access required" {
-		t.Fatalf("expected moderator access error, got %v", got)
+func TestGameSeriesVersion_LegacyMutationRoutesAreAbsent(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, _ := createAuthUserWithTags(t, app, []string{"moderator"})
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		res := executeJSONRequest(t, app, method, "/game_series_version", `{}`, headers)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected legacy %s route to be absent, got %d", method, res.StatusCode)
+		}
 	}
 }

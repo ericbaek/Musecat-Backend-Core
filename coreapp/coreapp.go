@@ -60,183 +60,187 @@ func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		RegisterDocumentationRoutes(se)
-
-		se.Router.GET("/hello", handlers.HelloHandler)
-		se.Router.GET("/geo", handlers.GeoLookupHandler)
-		se.Router.GET("/geocode", handlers.GeocodeHandler)
-		se.Router.GET("/reverse_geocode", handlers.ReverseGeocodeHandler)
-		se.Router.GET("/search", searchhandler.Search)
-		se.Router.GET("/stats", statshandler.GetStats)
-		se.Router.GET("/rankings", rankinghandler.List)
-		se.Router.GET("/arcade/ranking", rankinghandler.ArcadeVisitRanking)
-		se.Router.GET("/subway/map", subwayhandler.GetMap)
-		se.Router.GET("/subway/map/file", subwayhandler.DownloadMapFile)
-		se.Router.POST("/subway/map", subwayhandler.CreateMap).Bind(
-			apis.BodyLimit(24<<20),
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireAdminAccess(),
-		)
-		se.Router.PUT("/subway/map", subwayhandler.UpdateMap).Bind(
-			apis.BodyLimit(24<<20),
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireAdminAccess(),
-		)
-		se.Router.DELETE("/subway/map", subwayhandler.DeleteMap).Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireAdminAccess(),
-		)
-		// Public read endpoint: returns current relation ids for the arcade
-		se.Router.GET("/arcade", arcadequery.GetArcadeValues)
-		se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
-		se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
-		// Public changelog rows are exposed only through this custom API.
-		se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
-		se.Router.GET("/arcade/memo", arcadememo.GetArcadeMemo)
-		se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
-		// Public read endpoint: list all arcades with basic info + gameSeries ids
-		se.Router.GET("/arcades", arcadequery.ListArcades)
-		se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
-		se.Router.GET("/campaigns", arcadecampaign.ListCampaigns)
-		se.Router.GET("/campaign", arcadecampaign.GetCampaign)
-		se.Router.GET("/campaign/photo", arcadecampaign.ListPhotoCampaign)
-		se.Router.GET("/arcade/campaigns/presence", arcadecampaign.ListArcadeCampaignPresence)
-		se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns).Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-		)
-		se.Router.POST("/campaign", arcadecampaign.CreateCampaign).Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireAdminAccess(),
-		)
-		se.Router.PUT("/campaign", arcadecampaign.UpdateCampaign).Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireAdminAccess(),
-		)
-		se.Router.POST("/campaign/end", arcadecampaign.EndCampaign).Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireAdminAccess(),
-		)
-		// Public read endpoint: list arcades by game series near a location with pagination
-		se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)
-		se.Router.GET("/arcade/visits", userhandler.GetArcadeVisitStats)
-		// Public read endpoint: list machine rows filtered by country, game series, and version
-		se.Router.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireGameToolsAccess(),
-		)
-		// Public read endpoint: returns game_series_version and its series
-		se.Router.GET("/game_series_version", arcadequery.GetGameSeriesVersion)
-		// Public read endpoint: locale-localized version/cabinet compatibility catalog.
-		se.Router.GET("/game/catalog", arcadequery.GetGameCatalog)
-		catalogManagement := se.Router.Group("/moderation/game").Bind(
-			apis.BodyLimit(128<<10),
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireGameToolsAccess(),
-		)
-		catalogManagement.GET("/catalog", gamecataloghandler.GetCatalog)
-		catalogManagement.POST("/catalog", gamecataloghandler.Create)
-		catalogManagement.PUT("/catalog", gamecataloghandler.Update)
-		catalogManagement.DELETE("/catalog", gamecataloghandler.Archive)
-		catalogManagement.POST("/catalog/restore", gamecataloghandler.Restore)
-		catalogManagement.POST("/catalog/compatibilities", gamecataloghandler.ReplaceCompatibilities)
-		catalogManagement.GET("/catalog/changes", gamecataloghandler.ListChanges)
-		catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
-		// Public user profile read endpoint
-		se.Router.GET("/user", userhandler.GetUserByID)
-		se.Router.GET("/user/activity", userhandler.GetUserActivity)
-		// Public user-scoped changelog read endpoint; private arcade rows are
-		// returned only to their owner or strict reviewers.
-		se.Router.GET("/user/changelog", userhandler.GetUserChangelog)
-		se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback).Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireStrictReviewerAccess(),
-		)
-		se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback)
-		communityhandler.RegisterRoutes(se)
-
-		authArcade := se.Router.Group("/arcade").Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-		)
-		authArcade.POST("/new", arcadebasic.NewArcade)
-		authArcade.GET("/draft", arcadequery.GetArcadeDraft)
-		authArcade.GET("/drafts", arcadequery.ListMyArcadeDrafts)
-		authArcade.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
-		authArcade.GET("/public", arcadepublic.PreviewPublicArcade)
-		authArcade.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin)
-		authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
-		authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
-		authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart)
-		authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
-		authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic)
-		authArcade.PUT("/public", arcadepublic.RequestPublicArcade)
-		authArcade.POST("/location-verification", arcadepublic.VerifyArcadeLocation)
-		authArcade.PUT("/gtk", arcadegtk.UpdateArcadeGTK)
-		authArcade.PUT("/sns", arcadesns.UpdateArcadeSNS)
-		authArcade.PUT("/hour", arcadehour.UpdateArcadeHour)
-		authArcade.PUT("/game", arcadegame.UpdateArcadeGame)
-		authArcade.PUT("/photo", arcadephoto.UpdateArcadePhoto)
-		authArcade.PUT("/memo", arcadememo.UpdateArcadeMemo)
-		authArcade.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)
-		authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
-		// Allow up to 10 * 20MB photo files (+multipart overhead) in a single request.
-		authArcade.POST("/photo/upload", arcadephoto.UploadArcadePhotos).Bind(apis.BodyLimit(220 << 20))
-		authArcade.POST("/flag", arcadeflag.CreateArcadeFlag)
-		authArcade.POST("/flag/delete", arcadeflag.DeleteArcadeFlag)
-		authArcade.POST("/flag/reaction", arcadeflag.UpdateArcadeFlagReaction)
-		se.Router.GET("/arcade/notice", arcadenotice.ListArcadeNotice)
-		authArcade.POST("/notice", arcadenotice.CreateArcadeNotice)
-		authArcade.PUT("/notice", arcadenotice.UpdateArcadeNotice)
-		authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
-		authArcade.POST("/nearby", nil)
-		authArcade.POST("/visit", userhandler.VisitArcade)
-		authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite)
-		se.Router.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-		)
-
-		authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))
-		authUser.GET("/me", userhandler.GetMe)
-		authUser.POST("/signup", userhandler.SignUp)
-		authUser.POST("/check-in", userhandler.CheckIn).Bind(userhandler.RequireActiveUser())
-		se.Router.GET("/user/passport", userhandler.GetMyPassport)
-		se.Router.GET("/user/passport/stamps", userhandler.GetMyPassportStamps)
-		authUser.GET("/visits", userhandler.GetMyVisits).Bind(userhandler.RequireActiveUser())
-		authUser.PUT("/countries", userhandler.UpdateCountries).Bind(userhandler.RequireActiveUser())
-		authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())
-		authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(userhandler.RequireActiveUser())
-		authUser.POST("/withdraw", userhandler.Withdraw)
-		authUser.GET("/report", arcadeadmin.ListUserReport).Bind(userhandler.RequireActiveUser())
-		authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(userhandler.RequireActiveUser())
-
-		reviewQueue := se.Router.Group("/moderation/arcade").Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireStrictReviewerAccess(),
-		)
-		reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
-		reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
-
-		authSupporter := se.Router.Group("/supporter").Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-		)
-		authSupporter.GET("/score", arcadeadmin.GetSupporterScore)
-		authSupporter.POST("/request", arcadeadmin.CreateSupporterRequest)
-
+		RegisterAPIRoutes(se)
 		return se.Next()
 	})
+}
 
+// RegisterAPIRoutes binds all application API routes to the ServeEvent router.
+// It is exported so test applications and integration suites can wire the exact
+// same routing table without duplicating it.
+func RegisterAPIRoutes(se *core.ServeEvent) {
+	se.Router.GET("/hello", handlers.HelloHandler)
+	se.Router.GET("/geo", handlers.GeoLookupHandler)
+	se.Router.GET("/geocode", handlers.GeocodeHandler)
+	se.Router.GET("/reverse_geocode", handlers.ReverseGeocodeHandler)
+	se.Router.GET("/search", searchhandler.Search)
+	se.Router.GET("/stats", statshandler.GetStats)
+	se.Router.GET("/rankings", rankinghandler.List)
+	se.Router.GET("/arcade/ranking", rankinghandler.ArcadeVisitRanking)
+	se.Router.GET("/subway/map", subwayhandler.GetMap)
+	se.Router.GET("/subway/map/file", subwayhandler.DownloadMapFile)
+	se.Router.POST("/subway/map", subwayhandler.CreateMap).Bind(
+		apis.BodyLimit(24<<20),
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireAdminAccess(),
+	)
+	se.Router.PUT("/subway/map", subwayhandler.UpdateMap).Bind(
+		apis.BodyLimit(24<<20),
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireAdminAccess(),
+	)
+	se.Router.DELETE("/subway/map", subwayhandler.DeleteMap).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireAdminAccess(),
+	)
+	// Public read endpoint: returns current relation ids for the arcade
+	se.Router.GET("/arcade", arcadequery.GetArcadeValues)
+	se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
+	se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
+	// Public changelog rows are exposed only through this custom API.
+	se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
+	se.Router.GET("/arcade/memo", arcadememo.GetArcadeMemo)
+	se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
+	// Public read endpoint: list all arcades with basic info + gameSeries ids
+	se.Router.GET("/arcades", arcadequery.ListArcades)
+	se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
+	se.Router.GET("/campaigns", arcadecampaign.ListCampaigns)
+	se.Router.GET("/campaign", arcadecampaign.GetCampaign)
+	se.Router.GET("/campaign/photo", arcadecampaign.ListPhotoCampaign)
+	se.Router.GET("/arcade/campaigns/presence", arcadecampaign.ListArcadeCampaignPresence)
+	se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+	)
+	se.Router.POST("/campaign", arcadecampaign.CreateCampaign).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireAdminAccess(),
+	)
+	se.Router.PUT("/campaign", arcadecampaign.UpdateCampaign).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireAdminAccess(),
+	)
+	se.Router.POST("/campaign/end", arcadecampaign.EndCampaign).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireAdminAccess(),
+	)
+	// Public read endpoint: list arcades by game series near a location with pagination
+	se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)
+	se.Router.GET("/arcade/visits", userhandler.GetArcadeVisitStats)
+	// Public read endpoint: list machine rows filtered by country, game series, and version
+	se.Router.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireGameToolsAccess(),
+	)
+	// Public read endpoint: returns game_series_version and its series
+	se.Router.GET("/game_series_version", arcadequery.GetGameSeriesVersion)
+	// Public read endpoint: locale-localized version/cabinet compatibility catalog.
+	se.Router.GET("/game/catalog", arcadequery.GetGameCatalog)
+	catalogManagement := se.Router.Group("/moderation/game").Bind(
+		apis.BodyLimit(128<<10),
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireGameToolsAccess(),
+	)
+	catalogManagement.GET("/catalog", gamecataloghandler.GetCatalog)
+	catalogManagement.POST("/catalog", gamecataloghandler.Create)
+	catalogManagement.PUT("/catalog", gamecataloghandler.Update)
+	catalogManagement.DELETE("/catalog", gamecataloghandler.Archive)
+	catalogManagement.POST("/catalog/restore", gamecataloghandler.Restore)
+	catalogManagement.POST("/catalog/compatibilities", gamecataloghandler.ReplaceCompatibilities)
+	catalogManagement.GET("/catalog/changes", gamecataloghandler.ListChanges)
+	catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
+	// Public user profile read endpoint
+	se.Router.GET("/user", userhandler.GetUserByID)
+	se.Router.GET("/user/activity", userhandler.GetUserActivity)
+	// Public user-scoped changelog read endpoint; private arcade rows are
+	// returned only to their owner or strict reviewers.
+	se.Router.GET("/user/changelog", userhandler.GetUserChangelog)
+	se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireStrictReviewerAccess(),
+	)
+	se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback)
+	communityhandler.RegisterRoutes(se)
+
+	authArcade := se.Router.Group("/arcade").Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+	)
+	authArcade.POST("/new", arcadebasic.NewArcade)
+	authArcade.GET("/draft", arcadequery.GetArcadeDraft)
+	authArcade.GET("/drafts", arcadequery.ListMyArcadeDrafts)
+	authArcade.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
+	authArcade.GET("/public", arcadepublic.PreviewPublicArcade)
+	authArcade.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin)
+	authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
+	authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
+	authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart)
+	authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
+	authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic)
+	authArcade.PUT("/public", arcadepublic.RequestPublicArcade)
+	authArcade.POST("/location-verification", arcadepublic.VerifyArcadeLocation)
+	authArcade.PUT("/gtk", arcadegtk.UpdateArcadeGTK)
+	authArcade.PUT("/sns", arcadesns.UpdateArcadeSNS)
+	authArcade.PUT("/hour", arcadehour.UpdateArcadeHour)
+	authArcade.PUT("/game", arcadegame.UpdateArcadeGame)
+	authArcade.PUT("/photo", arcadephoto.UpdateArcadePhoto)
+	authArcade.PUT("/memo", arcadememo.UpdateArcadeMemo)
+	authArcade.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)
+	authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
+	// Allow up to 10 * 20MB photo files (+multipart overhead) in a single request.
+	authArcade.POST("/photo/upload", arcadephoto.UploadArcadePhotos).Bind(apis.BodyLimit(220 << 20))
+	authArcade.POST("/flag", arcadeflag.CreateArcadeFlag)
+	authArcade.POST("/flag/delete", arcadeflag.DeleteArcadeFlag)
+	authArcade.POST("/flag/reaction", arcadeflag.UpdateArcadeFlagReaction)
+	se.Router.GET("/arcade/notice", arcadenotice.ListArcadeNotice)
+	authArcade.POST("/notice", arcadenotice.CreateArcadeNotice)
+	authArcade.PUT("/notice", arcadenotice.UpdateArcadeNotice)
+	authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
+	authArcade.POST("/nearby", nil)
+	authArcade.POST("/visit", userhandler.VisitArcade)
+	authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite)
+	se.Router.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+	)
+
+	authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))
+	authUser.GET("/me", userhandler.GetMe)
+	authUser.POST("/signup", userhandler.SignUp)
+	authUser.POST("/check-in", userhandler.CheckIn).Bind(userhandler.RequireActiveUser())
+	se.Router.GET("/user/passport", userhandler.GetMyPassport)
+	se.Router.GET("/user/passport/stamps", userhandler.GetMyPassportStamps)
+	authUser.GET("/visits", userhandler.GetMyVisits).Bind(userhandler.RequireActiveUser())
+	authUser.PUT("/countries", userhandler.UpdateCountries).Bind(userhandler.RequireActiveUser())
+	authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())
+	authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(userhandler.RequireActiveUser())
+	authUser.POST("/withdraw", userhandler.Withdraw)
+	authUser.GET("/report", arcadeadmin.ListUserReport).Bind(userhandler.RequireActiveUser())
+	authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(userhandler.RequireActiveUser())
+
+	reviewQueue := se.Router.Group("/moderation/arcade").Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireStrictReviewerAccess(),
+	)
+	reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
+	reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
+
+	authSupporter := se.Router.Group("/supporter").Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+	)
+	authSupporter.GET("/score", arcadeadmin.GetSupporterScore)
+	authSupporter.POST("/request", arcadeadmin.CreateSupporterRequest)
 }
 
 func configureOfflineGeo(app *pocketbase.PocketBase) {

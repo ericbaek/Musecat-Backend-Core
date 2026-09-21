@@ -33,24 +33,28 @@ func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
 	}
 
 	operations := documentedOperations(string(spec))
-	configure := configureFunction(t, file)
-	prefixes := routerGroupPrefixes(configure.Body)
-	for operation := range directRouteOperations(configure.Body, prefixes) {
+	routeDecl := routeFunction(t, file)
+	prefixes := routerGroupPrefixes(routeDecl.Body)
+	directOps := directRouteOperations(routeDecl.Body, prefixes)
+	if len(directOps) == 0 {
+		t.Fatal("expected non-empty direct route operations")
+	}
+	for operation := range directOps {
 		if !operations[operation] {
 			t.Errorf("OpenAPI is missing %s", operation)
 		}
 	}
 }
 
-func configureFunction(t *testing.T, file *ast.File) *ast.FuncDecl {
+func routeFunction(t *testing.T, file *ast.File) *ast.FuncDecl {
 	t.Helper()
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
-		if ok && function.Name.Name == "Configure" {
+		if ok && function.Name.Name == "RegisterAPIRoutes" {
 			return function
 		}
 	}
-	t.Fatal("Configure function not found")
+	t.Fatal("RegisterAPIRoutes function not found")
 	return nil
 }
 

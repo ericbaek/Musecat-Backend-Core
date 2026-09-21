@@ -1,378 +1,104 @@
 package testutil
 
 import (
-	"database/sql"
-	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
-	"github.com/pocketbase/pocketbase/tools/types"
 	"github.com/pocketbase/pocketbase/ui"
 
 	_ "github.com/ericbaek/musecat-backend-core/migrations"
 )
 
-// NewTestApp clones the configured PocketBase data directory and returns a ready TestApp.
+var (
+	goldenMu  sync.Mutex
+	goldenDir string
+)
+
+func getGoldenDataDir() (string, error) {
+	goldenMu.Lock()
+	defer goldenMu.Unlock()
+
+	if goldenDir != "" {
+		if _, err := os.Stat(goldenDir); err == nil {
+			return goldenDir, nil
+		}
+		goldenDir = ""
+	}
+
+	dir, err := os.MkdirTemp("", fmt.Sprintf("musecat_core_golden_%d_*", os.Getpid()))
+	if err != nil {
+		return "", fmt.Errorf("create golden test dir: %w", err)
+	}
+
+	app := core.NewBaseApp(core.BaseAppConfig{
+		DataDir:       dir,
+		EncryptionEnv: "pb_test_env",
+	})
+
+	if err := app.Bootstrap(); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", fmt.Errorf("bootstrap golden app: %w", err)
+	}
+
+	if err := app.RunAllMigrations(); err != nil {
+		_ = app.ResetBootstrapState()
+		_ = os.RemoveAll(dir)
+		return "", fmt.Errorf("run migrations on golden app: %w", err)
+	}
+
+	// Ensure SQLite writes all pages into data.db and auxiliary.db and truncates WAL
+	if _, err := app.DB().NewQuery("PRAGMA wal_checkpoint(TRUNCATE)").Execute(); err != nil {
+		_ = app.ResetBootstrapState()
+		_ = os.RemoveAll(dir)
+		return "", fmt.Errorf("checkpoint golden data db: %w", err)
+	}
+	if _, err := app.AuxDB().NewQuery("PRAGMA wal_checkpoint(TRUNCATE)").Execute(); err != nil {
+		_ = app.ResetBootstrapState()
+		_ = os.RemoveAll(dir)
+		return "", fmt.Errorf("checkpoint golden aux db: %w", err)
+	}
+
+	if err := app.ResetBootstrapState(); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", fmt.Errorf("reset golden app bootstrap state: %w", err)
+	}
+
+	goldenDir = dir
+	return goldenDir, nil
+}
+
+// CleanupGoldenDir removes the process-level golden bootstrap directory if initialized.
+// Subsequent calls to NewTestApp will safely re-bootstrap a fresh golden directory.
+func CleanupGoldenDir() {
+	goldenMu.Lock()
+	defer goldenMu.Unlock()
+
+	if goldenDir != "" {
+		_ = os.RemoveAll(goldenDir)
+		goldenDir = ""
+	}
+}
+
+// NewTestApp clones a fresh Core bootstrap database without altering its schema.
 func NewTestApp(tb testing.TB) *tests.TestApp {
 	tb.Helper()
 
-	dataDir := os.Getenv("PB_TEST_DATA_DIR")
-	resolved, err := resolveDataDir(dataDir)
+	resolved, err := getGoldenDataDir()
 	if err != nil {
-		tb.Fatalf("failed to resolve test data directory: %v", err)
+		tb.Fatalf("failed to bootstrap golden test data directory: %v", err)
 	}
-
 	app, err := tests.NewTestApp(resolved)
 	if err != nil {
 		tb.Fatalf("failed to initialize test app: %v", err)
 	}
+	tb.Cleanup(app.Cleanup)
+
 	// PocketBase v0.39.9 registers UI extension routes on every new API router.
 	// Core tests create multiple routers but don't exercise the bundled UI.
 	ui.DistDirFS = nil
-	ensureVisitSchema(tb, app)
-	ensureArcadeLocationVerificationSchema(tb, app)
-	ensureProfileCountriesSchema(tb, app)
-	ensureNoticeAuthorSchema(tb, app)
-	ensureFlagResolutionSchema(tb, app)
-	ensureGTKTypeCatalog(tb, app)
-	ensureGameCatalogManagementSchema(tb, app)
-
 	return app
-}
-
-// The checked-in test fixture predates the protected catalog-management
-// collections. Isolated handler tests still need the current Core bootstrap
-// contract, so this mirrors only the schema additions made by that bootstrap
-// migration on each disposable test database.
-func ensureGameCatalogManagementSchema(tb testing.TB, app *tests.TestApp) {
-	tb.Helper()
-	users, err := app.FindCollectionByNameOrId("user")
-	if err != nil {
-		tb.Fatalf("failed to load user collection: %v", err)
-	}
-	for _, name := range []string{"game_manufacturer", "game_series", "game_series_version", "game_cabinet", "game_series_version_cabinet"} {
-		collection, findErr := app.FindCollectionByNameOrId(name)
-		if findErr != nil {
-			tb.Fatalf("failed to load %s: %v", name, findErr)
-		}
-		changed := false
-		if collection.Fields.GetByName("archived") == nil {
-			collection.Fields.Add(&core.BoolField{Name: "archived"})
-			changed = true
-		}
-		if collection.Fields.GetByName("archived_at") == nil {
-			collection.Fields.Add(&core.DateField{Name: "archived_at"})
-			changed = true
-		}
-		if collection.Fields.GetByName("archived_by") == nil {
-			collection.Fields.Add(&core.RelationField{Name: "archived_by", CollectionId: users.Id, MaxSelect: 1})
-			changed = true
-		}
-		if collection.Fields.GetByName("revision") == nil {
-			one := float64(1)
-			collection.Fields.Add(&core.NumberField{Name: "revision", OnlyInt: true, Min: &one})
-			changed = true
-		}
-		if changed {
-			if saveErr := app.Save(collection); saveErr != nil {
-				tb.Fatalf("failed to update %s catalog management schema: %v", name, saveErr)
-			}
-		}
-	}
-	if _, err := app.FindCollectionByNameOrId("game_catalog_changelog"); err == nil {
-		return
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		tb.Fatalf("failed to load game_catalog_changelog: %v", err)
-	}
-	changes := core.NewBaseCollection("game_catalog_changelog")
-	changes.Fields.Add(
-		&core.TextField{Name: "operation_id", Required: true, Max: 64},
-		&core.TextField{Name: "payload_hash", Required: true, Max: 64},
-		&core.RelationField{Name: "actor", CollectionId: users.Id, Required: true, MaxSelect: 1},
-		&core.JSONField{Name: "actor_tags", Required: true, MaxSize: 4096},
-		&core.SelectField{Name: "action", Values: []string{"create", "update", "archive", "restore", "revert"}, Required: true, MaxSelect: 1},
-		&core.SelectField{Name: "entity_type", Values: []string{"series", "version", "cabinet", "compatibility", "manufacturer"}, Required: true, MaxSelect: 1},
-		&core.TextField{Name: "entity_id", Required: true, Max: 64},
-		&core.JSONField{Name: "before", MaxSize: 131072},
-		&core.JSONField{Name: "after", MaxSize: 131072},
-		&core.TextField{Name: "reason", Required: true, Max: 500},
-		&core.NumberField{Name: "revision_before", OnlyInt: true},
-		&core.NumberField{Name: "revision_after", OnlyInt: true},
-		&core.TextField{Name: "reverts_change", Max: 64},
-		&core.AutodateField{Name: "created", OnCreate: true},
-	)
-	changes.AddIndex("idx_game_catalog_changelog_operation", true, "operation_id", "")
-	changes.AddIndex("idx_game_catalog_changelog_entity_created", false, "entity_type, entity_id, created", "")
-	changes.AddIndex("idx_game_catalog_changelog_actor_created", false, "actor, created", "")
-	if err := app.Save(changes); err != nil {
-		tb.Fatalf("failed to create game_catalog_changelog: %v", err)
-	}
-}
-
-// Production Core and Backend Full own these optional arcade fields. Test
-// fixtures are intentionally older than the current schema, so add them to
-// each cloned fixture used by isolated handler tests.
-func ensureArcadeLocationVerificationSchema(tb testing.TB, app *tests.TestApp) {
-	tb.Helper()
-	arcades, err := app.FindCollectionByNameOrId("arcade")
-	if err != nil {
-		tb.Fatalf("failed to load arcade: %v", err)
-	}
-	basics, err := app.FindCollectionByNameOrId("arcade_basic")
-	if err != nil {
-		tb.Fatalf("failed to load arcade_basic: %v", err)
-	}
-	users, err := app.FindCollectionByNameOrId("user")
-	if err != nil {
-		tb.Fatalf("failed to load user collection: %v", err)
-	}
-	changed := false
-	if arcades.Fields.GetByName("location_verification_basic") == nil {
-		arcades.Fields.Add(&core.RelationField{Name: "location_verification_basic", CollectionId: basics.Id, MaxSelect: 1})
-		changed = true
-	}
-	if arcades.Fields.GetByName("location_verification_by") == nil {
-		arcades.Fields.Add(&core.RelationField{Name: "location_verification_by", CollectionId: users.Id, MaxSelect: 1})
-		changed = true
-	}
-	for _, name := range []string{"location_verification_at", "location_verification_distance_meters", "location_verification_accuracy_meters"} {
-		if arcades.Fields.GetByName(name) != nil {
-			continue
-		}
-		if name == "location_verification_at" {
-			arcades.Fields.Add(&core.DateField{Name: name})
-		} else {
-			zero := 0.0
-			arcades.Fields.Add(&core.NumberField{Name: name, Min: &zero})
-		}
-		changed = true
-	}
-	if changed {
-		if err := app.Save(arcades); err != nil {
-			tb.Fatalf("failed to add arcade location verification fields: %v", err)
-		}
-	}
-}
-
-func ensureProfileCountriesSchema(tb testing.TB, app *tests.TestApp) {
-	tb.Helper()
-	info, err := app.FindCollectionByNameOrId("user_info")
-	if err != nil {
-		tb.Fatalf("failed to load user_info: %v", err)
-	}
-	changed := false
-	if info.Fields.GetByName("countries") == nil {
-		info.Fields.Add(&core.JSONField{Name: "countries", MaxSize: 128})
-		changed = true
-	}
-	if info.Fields.GetByName("country_mode") == nil {
-		info.Fields.Add(&core.TextField{Name: "country_mode", Max: 6, Pattern: "^(auto|manual|off)$"})
-		changed = true
-	}
-	if info.Fields.GetByName("auto_primary_country") == nil {
-		info.Fields.Add(&core.TextField{Name: "auto_primary_country", Max: 2, Pattern: "^[A-Z]{2}$"})
-		changed = true
-	}
-	if changed {
-		if err := app.Save(info); err != nil {
-			tb.Fatalf("failed to update user_info country fields: %v", err)
-		}
-	}
-}
-
-// Production Core's bootstrap schema and Backend Full's forward migration own
-// the GTK catalog. The checked-in test fixture predates new GTK values, so
-// isolated handler tests add them to their cloned database.
-func ensureGTKTypeCatalog(tb testing.TB, app *tests.TestApp) {
-	tb.Helper()
-	collection, err := app.FindCollectionByNameOrId("arcade_gtk_atoms")
-	if err != nil {
-		tb.Fatalf("failed to load arcade_gtk_atoms: %v", err)
-	}
-	field, ok := collection.Fields.GetByName("type").(*core.SelectField)
-	if !ok {
-		tb.Fatalf("arcade_gtk_atoms.type must be a select field")
-	}
-	changed := false
-	for _, value := range []string{"SellFood", "SeatingArea"} {
-		if containsGTKType(field.Values, value) {
-			continue
-		}
-		field.Values = append(field.Values, value)
-		changed = true
-	}
-	if changed {
-		if err := app.Save(collection); err != nil {
-			tb.Fatalf("failed to update GTK type catalog: %v", err)
-		}
-	}
-}
-
-func containsGTKType(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
-// Production Core's bootstrap schema and Backend Full's forward migration own
-// these fields. Test fixtures are intentionally older than the current schema,
-// so keep isolated handler tests compatible without changing fixture databases.
-func ensureFlagResolutionSchema(tb testing.TB, app *tests.TestApp) {
-	tb.Helper()
-	flags, err := app.FindCollectionByNameOrId("arcade_flag")
-	if err != nil {
-		tb.Fatalf("failed to load arcade_flag: %v", err)
-	}
-	reactions, err := app.FindCollectionByNameOrId("arcade_flag_reaction")
-	if err != nil {
-		tb.Fatalf("failed to load arcade_flag_reaction: %v", err)
-	}
-	flagChanged := false
-	if flags.Fields.GetByName("resolution_vote_state") == nil {
-		flags.Fields.Add(&core.SelectField{Name: "resolution_vote_state", Values: []string{"idle", "active"}, MaxSelect: 1})
-		flagChanged = true
-	}
-	if flags.Fields.GetByName("resolution_vote_mode") == nil {
-		flags.Fields.Add(&core.SelectField{Name: "resolution_vote_mode", Values: []string{"standard", "stale"}, MaxSelect: 1})
-		flagChanged = true
-	}
-	if flags.Fields.GetByName("resolution_vote_round") == nil {
-		flags.Fields.Add(&core.TextField{Name: "resolution_vote_round", Max: 64})
-		flagChanged = true
-	}
-	for _, name := range []string{"resolution_vote_started_at", "resolution_vote_resolve_at"} {
-		if flags.Fields.GetByName(name) == nil {
-			flags.Fields.Add(&core.DateField{Name: name})
-			flagChanged = true
-		}
-	}
-	if flagChanged {
-		if err := app.Save(flags); err != nil {
-			tb.Fatalf("failed to add flag resolution fields: %v", err)
-		}
-	}
-	reactionChanged := false
-	if reactions.Fields.GetByName("resolution_context") == nil {
-		reactions.Fields.Add(&core.SelectField{Name: "resolution_context", Values: []string{"legacy", "report", "vote"}, MaxSelect: 1})
-		reactionChanged = true
-	}
-	if reactions.Fields.GetByName("vote_round") == nil {
-		reactions.Fields.Add(&core.TextField{Name: "vote_round", Max: 64})
-		reactionChanged = true
-	}
-	if reactions.Fields.GetByName("level_snapshot") == nil {
-		min := float64(0)
-		reactions.Fields.Add(&core.NumberField{Name: "level_snapshot", OnlyInt: true, Min: &min})
-		reactionChanged = true
-	}
-	if reactionChanged {
-		if err := app.Save(reactions); err != nil {
-			tb.Fatalf("failed to add reaction resolution fields: %v", err)
-		}
-	}
-}
-
-// Production Full owns the forward migration for this field. Core's isolated
-// handler tests add the same optional relation to their cloned fixture.
-func ensureNoticeAuthorSchema(tb testing.TB, app *tests.TestApp) {
-	tb.Helper()
-	notices, err := app.FindCollectionByNameOrId("arcade_notice")
-	if err != nil {
-		tb.Fatalf("failed to load arcade_notice: %v", err)
-	}
-	if notices.Fields.GetByName("createdBy") != nil {
-		return
-	}
-	users, err := app.FindCollectionByNameOrId("user")
-	if err != nil {
-		tb.Fatalf("failed to load user: %v", err)
-	}
-	notices.Fields.Add(&core.RelationField{Name: "createdBy", CollectionId: users.Id, MaxSelect: 1})
-	if err := app.Save(notices); err != nil {
-		tb.Fatalf("failed to add arcade_notice.createdBy: %v", err)
-	}
-}
-
-func ensureVisitSchema(tb testing.TB, app *tests.TestApp) {
-	tb.Helper()
-	info, err := app.FindCollectionByNameOrId("user_info")
-	if err != nil {
-		tb.Fatalf("failed to load user_info: %v", err)
-	}
-	if info.Fields.GetByName("visit_visibility") == nil {
-		info.Fields.Add(&core.SelectField{Name: "visit_visibility", Values: []string{"private", "summary", "full"}, MaxSelect: 1})
-		if err := app.Save(info); err != nil {
-			tb.Fatalf("failed to add visit_visibility: %v", err)
-		}
-	}
-	if visits, err := app.FindCollectionByNameOrId("arcade_visit"); err == nil {
-		changed := false
-		for _, name := range []string{"distance_meters", "accuracy_meters", "gained_exp"} {
-			if field, ok := visits.Fields.GetByName(name).(*core.NumberField); ok && field.Required {
-				field.Required = false
-				changed = true
-			}
-		}
-		if changed {
-			if err := app.Save(visits); err != nil {
-				tb.Fatalf("failed to update arcade_visit: %v", err)
-			}
-		}
-		return
-	}
-	users, err := app.FindCollectionByNameOrId("user")
-	if err != nil {
-		tb.Fatalf("failed to load user collection: %v", err)
-	}
-	arcades, err := app.FindCollectionByNameOrId("arcade")
-	if err != nil {
-		tb.Fatalf("failed to load arcade collection: %v", err)
-	}
-	visits := core.NewBaseCollection("arcade_visit")
-	zero := 0.0
-	visits.Fields.Add(&core.RelationField{Name: "user", CollectionId: users.Id, Required: true, MaxSelect: 1}, &core.RelationField{Name: "arcade", CollectionId: arcades.Id, Required: true, MaxSelect: 1}, &core.TextField{Name: "visit_day", Required: true, Max: 10}, &core.DateField{Name: "visited_at", Required: true}, &core.NumberField{Name: "distance_meters", Min: &zero}, &core.NumberField{Name: "accuracy_meters", Min: &zero}, &core.NumberField{Name: "gained_exp", OnlyInt: true})
-	visits.Indexes = types.JSONArray[string]{"CREATE UNIQUE INDEX idx_arcade_visit_user_arcade_day ON arcade_visit (user, arcade, visit_day)"}
-	if err := app.Save(visits); err != nil {
-		tb.Fatalf("failed to create arcade_visit: %v", err)
-	}
-}
-
-func resolveDataDir(dir string) (string, error) {
-	if dir == "" {
-		dir = "testdata/pb_data"
-	}
-
-	if filepath.IsAbs(dir) {
-		if _, err := os.Stat(filepath.Join(dir, "data.db")); err != nil {
-			return "", fmt.Errorf("missing PocketBase test data directory %q: %w", dir, err)
-		}
-		return dir, nil
-	}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-
-	for {
-		candidate := filepath.Join(wd, dir)
-		if _, err := os.Stat(filepath.Join(candidate, "data.db")); err == nil {
-			return candidate, nil
-		}
-
-		parent := filepath.Dir(wd)
-		if parent == wd {
-			break
-		}
-		wd = parent
-	}
-
-	return "", fmt.Errorf("PocketBase test data directory %q not found", dir)
 }

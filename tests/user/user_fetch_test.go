@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,12 @@ import (
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/ericbaek/musecat-backend-core/testutil"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	testutil.CleanupGoldenDir()
+	os.Exit(code)
+}
 
 func newUserFetchTestApp(tb testing.TB) *tests.TestApp {
 	app := testutil.NewTestApp(tb)

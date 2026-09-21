@@ -8,21 +8,25 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ericbaek/musecat-backend-core/coreapp"
+	"github.com/ericbaek/musecat-backend-core/testutil"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 	"github.com/pocketbase/pocketbase/tools/types"
-
-	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
-	"github.com/ericbaek/musecat-backend-core/handlers/subway"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
-	"github.com/ericbaek/musecat-backend-core/testutil"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	testutil.CleanupGoldenDir()
+	os.Exit(code)
+}
 
 type subwayMapFileResponse struct {
 	Name    string `json:"name"`
@@ -55,7 +59,6 @@ type multipartFile struct {
 
 func TestSubwayMapPublicReadAndFile(t *testing.T) {
 	app := newSubwayTestApp(t)
-	defer app.Cleanup()
 
 	seedSubwayMap(t, app, "center", "2025-01-01", "lightSVG", "old.svg", svgFixture("old"), []string{"old"})
 	latest := seedSubwayMap(t, app, "center", "2026-08-24", "lightSVG", "latest.svg", svgFixture("latest"), []string{"new", "accessible"})
@@ -127,7 +130,6 @@ func TestSubwayMapCreateAuthorization(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			app := newSubwayTestApp(t)
-			defer app.Cleanup()
 
 			token := ""
 			if test.auth {
@@ -148,7 +150,6 @@ func TestSubwayMapCreateAuthorization(t *testing.T) {
 
 func TestSubwayMapCreateUpdateDeleteLifecycle(t *testing.T) {
 	app := newSubwayTestApp(t)
-	defer app.Cleanup()
 
 	previous := seedSubwayMap(t, app, "center", "2025-01-01", "image", "previous.png", pngFixture(), []string{"previous"})
 	token, _ := createSubwayAuthUser(t, app, []string{"moderator"})
@@ -270,7 +271,6 @@ func TestSubwayMapMutationValidation(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			app := newSubwayTestApp(t)
-			defer app.Cleanup()
 			token, _ := createSubwayAuthUser(t, app, []string{"developer"})
 			body, contentType := buildSubwayMultipart(t, test.fields, test.files)
 			response := subwayRequest(t, app, http.MethodPost, "/subway/map", bytes.NewReader(body), contentType, token)
@@ -284,7 +284,6 @@ func TestSubwayMapMutationValidation(t *testing.T) {
 
 func TestSubwayMapUpdateAndDeleteAuthorization(t *testing.T) {
 	app := newSubwayTestApp(t)
-	defer app.Cleanup()
 
 	record := seedSubwayMap(t, app, "center", "2026-08-24", "lightSVG", "map.svg", svgFixture("map"), nil)
 	token, _ := createSubwayAuthUser(t, app, []string{"supporter"})
@@ -307,25 +306,7 @@ func newSubwayTestApp(tb testing.TB) *tests.TestApp {
 	tb.Helper()
 	app := testutil.NewTestApp(tb)
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		se.Router.GET("/subway/map", subway.GetMap)
-		se.Router.GET("/subway/map/file", subway.DownloadMapFile)
-		se.Router.POST("/subway/map", subway.CreateMap).Bind(
-			apis.BodyLimit(24<<20),
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireAdminAccess(),
-		)
-		se.Router.PUT("/subway/map", subway.UpdateMap).Bind(
-			apis.BodyLimit(24<<20),
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireAdminAccess(),
-		)
-		se.Router.DELETE("/subway/map", subway.DeleteMap).Bind(
-			apis.RequireAuth("user"),
-			userhandler.RequireActiveUser(),
-			arcadequery.RequireAdminAccess(),
-		)
+		coreapp.RegisterAPIRoutes(se)
 		return se.Next()
 	})
 	return app

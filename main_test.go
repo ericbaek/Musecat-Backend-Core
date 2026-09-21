@@ -19,6 +19,12 @@ import (
 	"github.com/ericbaek/musecat-backend-core/testutil"
 )
 
+func TestMain(m *testing.M) {
+	code := m.Run()
+	testutil.CleanupGoldenDir()
+	os.Exit(code)
+}
+
 func TestHelloRoute(t *testing.T) {
 	scenario := tests.ApiScenario{
 		Name:           "GET /hello returns greeting",
