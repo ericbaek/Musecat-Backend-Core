@@ -285,6 +285,7 @@ func expandFlag(app core.App, flagID string, flagRec *core.Record, userID string
 	}
 	resolution, _ := BuildFlagResolutionValueForUser(app, flagRec, userID)
 	reportHistory, _ := BuildFlagReportHistoryValue(app, flagRec)
+	createdByID := flagRec.GetString("createdBy")
 	return map[string]any{
 		"id":            flagRec.Id,
 		"arcade":        flagRec.GetString("arcade"),
@@ -292,7 +293,7 @@ func expandFlag(app core.App, flagID string, flagRec *core.Record, userID string
 		"solved":        flagRec.GetBool("solved"),
 		"message":       flagRec.GetString("message"),
 		"photos":        flagRec.GetStringSlice("photos"),
-		"createdBy":     flagRec.GetString("createdBy"),
+		"createdBy":     createdByID,
 		"created":       flagRec.Get("created"),
 		"updated":       flagRec.Get("updated"),
 		"reactions":     reactions,

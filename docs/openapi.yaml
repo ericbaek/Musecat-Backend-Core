@@ -826,10 +826,12 @@ components:
             - type: number
             - type: 'null'
         tag:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
+          oneOf:
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
+            - type: 'null'
         id:
           type: string
         updated:
@@ -2982,6 +2984,7 @@ paths:
         Returns only a public arcade (open or closed) and relation ids by default.
         Private arcades always return `404`; use authenticated `GET /arcade/draft` for a creator or developer/moderator draft read.
         When `expand=game`, each `game.items[]` entry includes `version`, `series`, `updated`, and the editable game fields.
+        Unauthenticated callers receive redacted sensitive data: `tag` is null, `location` and `updated` are empty strings, `price` retains only representative items with `hasHiddenPrices=true` and `accept=null`, and `expand=hour` returns only today's schedule for the arcade timezone.
       parameters:
         - name: id
           in: query
@@ -4185,6 +4188,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: /arcade/hour
+      description: Active authenticated users may edit public arcades without a level threshold. Private drafts require the creator or a developer/moderator.
       security:
         - bearerAuth: []
       requestBody:
@@ -4318,6 +4322,7 @@ paths:
     post:
       tags: [Arcade Mutations]
       summary: /arcade/photo/upload
+      description: Uploads pending photo atoms. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
       requestBody:
@@ -4457,7 +4462,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: /arcade/photo
-      description: Pending atoms receive 2 XP each when first published, up to 10 XP per campaign target or 4 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP.
+      description: Pending atoms receive 2 XP each when first published, up to 10 XP per campaign target or 4 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
       requestBody:
@@ -5341,7 +5346,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Requires `developer`, `moderator`, or `arcade_owner` in `tag` or `tags`, or a `supporter`/`founding_supporter` at level 30 or above. Developers and moderators may create on any arcade. Official accounts may create only on their own `owns` arcades. Level-30+ supporters may create unless another official account manages the target through `owns`.
+        Requires `developer`, `moderator`, or `arcade_owner` in `tag` or `tags`, or a `supporter`/`founding_supporter` at level 30 or above. Developers and moderators may create on any arcade. Official accounts may create only on their own `owns` arcades. Level-30+ supporters may create unless another official account manages the target through `owns`. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
       requestBody:
@@ -5398,7 +5403,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Developers and moderators may update every notice. Official account authors may update their own notices. Level-30+ supporter authors may update their own notices.
+        Developers and moderators may update every notice. Official account authors may update their own notices. Level-30+ supporter authors may update their own notices. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
       requestBody:
@@ -5455,7 +5460,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Developers and moderators may delete every notice. Official account authors may delete their own notices. Level-30+ supporter authors may delete their own notices.
+        Developers and moderators may delete every notice. Official account authors may delete their own notices. Level-30+ supporter authors may delete their own notices. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
       requestBody:
@@ -5511,7 +5516,7 @@ paths:
     post:
       tags: [Support]
       summary: /arcade/rollback
-      description: Applies an immediate rollback. With `report=true`, it atomically creates a `rollback_report` linked to the cited changelog; it never auto-bans the cited editor.
+      description: Applies an immediate rollback. With `report=true`, it atomically creates a `rollback_report` linked to the cited changelog; it never auto-bans the cited editor. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
       requestBody:
@@ -5612,7 +5617,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: /arcade/basic
-      description: Location changes are limited by the authenticated editor's level: below 10, at most 1 km; 10-14, at most 5 km; 15-29, at most 10 km; 30 or above, any distance within the arcade's current country. Policy denials return a machine-readable code.
+      description: Active authenticated users may edit public arcades without a level threshold; private drafts require the creator or a developer/moderator. Location changes are limited by the editor's level below 10 (at most 1 km), 10-14 (at most 5 km), 15-29 (at most 10 km), and 30 or above (any distance within the current country). Policy denials return a machine-readable code.
       security:
         - bearerAuth: []
       requestBody:
@@ -5834,6 +5839,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: /arcade/gtk
+      description: Active authenticated users may edit public arcades without a level threshold. Private drafts require the creator or a developer/moderator.
       security:
         - bearerAuth: []
       requestBody:
@@ -5882,6 +5888,7 @@ paths:
       description: |
         Creates a new `arcade_sns` molecule and writes the atoms under it.
         The success response returns the same expanded SNS shape used by `GET /arcade?expand=sns`.
+        Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
       requestBody:
@@ -5937,6 +5944,7 @@ paths:
         seven-day distinct-entry XP window with target `min(10, 2*n)`;
         private edits do not award normal edit XP, and administrative bulk
         updates do not award it either.
+        Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
       requestBody:
@@ -5991,6 +5999,7 @@ paths:
     post:
       tags: [Arcade Mutations]
       summary: /arcade/flag
+      description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold.
       security:
         - bearerAuth: []
       requestBody:
@@ -6101,6 +6110,7 @@ paths:
     post:
       tags: [Arcade Mutations]
       summary: /arcade/flag/reaction
+      description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold.
       security:
         - bearerAuth: []
       requestBody:

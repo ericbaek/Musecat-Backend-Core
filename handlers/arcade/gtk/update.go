@@ -3,6 +3,7 @@ package gtk
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,7 +12,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 // UpdateArcadeGTKBody represents the request body for updating arcade GTK.
@@ -240,7 +241,7 @@ func UpdateArcadeGTK(re *core.RequestEvent) error {
 
 	var newGTKId string
 	var expandedGTKValue ExpandedGTKValue
-	var xpFeedback userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
 		// 1) Verify the arcade exists and capture the previous GTK molecule for diffing.
@@ -248,11 +249,14 @@ func UpdateArcadeGTK(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
+		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
+			return arcadeinternal.ErrArcadeWriteForbidden
+		}
 		prevAtoms, err := loadCurrentGTKAtoms(txApp, body.Arcade, strings.TrimSpace(arcadeRec.GetString("gtk")))
 		if err != nil {
 			return err
 		}
-		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		baseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
 		}
@@ -345,7 +349,7 @@ func UpdateArcadeGTK(re *core.RequestEvent) error {
 			return fmt.Errorf("failed to update arcade.gtk: %w", err)
 		}
 		if arcadeRec.GetBool("public") {
-			nextExp, _, err := userhandler.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "gtk", 2, baseExp, time.Now().UTC())
+			nextExp, _, err := xp.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "gtk", 2, baseExp, time.Now().UTC())
 			if err != nil {
 				return err
 			}
@@ -353,9 +357,12 @@ func UpdateArcadeGTK(re *core.RequestEvent) error {
 		}
 
 		expandedGTKValue = BuildExpandedGTKValue(newGTKId, nextItems)
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
+		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "transaction failed",
 			"details": err.Error(),

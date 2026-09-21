@@ -57,7 +57,7 @@ func TestUpdateArcadeFlagReaction_NeverPostponesAnEarlierDeadline(t *testing.T) 
 	tokenB, userB := createAuthUser(t, app)
 	setUserLevel(t, app, userA.Id, 19)
 	setUserLevel(t, app, userB.Id, 2)
-	arcadeID, _ := seedArcade(t, app, userA.Id, arcadeSeed{Name: "Deadline Arcade", Address: "Deadline Street", Nickname: []string{"Deadline"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	arcadeID, _ := seedPublicArcade(t, app, userA.Id, arcadeSeed{Name: "Deadline Arcade", Address: "Deadline Street", Nickname: []string{"Deadline"}, Location: location{Lat: 37.5665, Lon: 126.978}})
 	flagID := createFlagWithReactions(t, app, arcadeID, userA.Id, time.Now().UTC(), nil)
 
 	response := postFlagReaction(t, app, tokenA, flagID, "fixed", "add")
@@ -104,7 +104,7 @@ func TestUpdateArcadeFlagReaction_StillChangesContextAndSwitchesVote(t *testing.
 	tokenB, userB := createAuthUser(t, app)
 	setUserLevel(t, app, userA.Id, 5)
 	setUserLevel(t, app, userB.Id, 5)
-	arcadeID, _ := seedArcade(t, app, userA.Id, arcadeSeed{Name: "Context Arcade", Address: "Context Street", Nickname: []string{"Context"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	arcadeID, _ := seedPublicArcade(t, app, userA.Id, arcadeSeed{Name: "Context Arcade", Address: "Context Street", Nickname: []string{"Context"}, Location: location{Lat: 37.5665, Lon: 126.978}})
 	flagID := createFlagWithReactions(t, app, arcadeID, userA.Id, time.Now().UTC(), nil)
 	flagBefore, err := app.FindRecordById("arcade_flag", flagID)
 	if err != nil {
@@ -198,7 +198,7 @@ func TestUpdateArcadeFlagReaction_NegativeVoteClosesAndRefreshesActivity(t *test
 	tokenB, userB := createAuthUser(t, app)
 	setUserLevel(t, app, userA.Id, 5)
 	setUserLevel(t, app, userB.Id, 30)
-	arcadeID, _ := seedArcade(t, app, userA.Id, arcadeSeed{Name: "Negative Resolution Arcade", Address: "Negative Resolution Street", Nickname: []string{"NegativeResolution"}, Location: location{Lat: 37.5665, Lon: 126.978}})
+	arcadeID, _ := seedPublicArcade(t, app, userA.Id, arcadeSeed{Name: "Negative Resolution Arcade", Address: "Negative Resolution Street", Nickname: []string{"NegativeResolution"}, Location: location{Lat: 37.5665, Lon: 126.978}})
 	flagID := createFlagWithReactions(t, app, arcadeID, userA.Id, time.Now().UTC(), nil)
 
 	response := postFlagReaction(t, app, tokenA, flagID, "fixed", "add")

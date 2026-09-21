@@ -10,7 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 const flagDeleteWindow = 15 * time.Minute
@@ -51,7 +51,7 @@ func DeleteArcadeFlag(re *core.RequestEvent) error {
 	now := time.Now().UTC()
 	var arcadeID string
 	var expandedGameValue map[string]any
-	var xpFeedback userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
 		flagRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeFlag, body.Flag)
 		if err != nil {
@@ -61,7 +61,7 @@ func DeleteArcadeFlag(re *core.RequestEvent) error {
 			return fmt.Errorf("flag is already solved")
 		}
 		arcadeID = flagRec.GetString("arcade")
-		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		baseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
 		}
@@ -83,13 +83,13 @@ func DeleteArcadeFlag(re *core.RequestEvent) error {
 			return fmt.Errorf("failed to delete flag: %w", err)
 		}
 		if arcadeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, arcadeID); err == nil && arcadeRec.GetBool("public") {
-			positiveKind := userhandler.FlagKind(body.Flag)
-			wasAwarded, err := userhandler.HasLevelLogKind(txApp, re.Auth.Id, positiveKind)
+			positiveKind := xp.FlagKind(body.Flag)
+			wasAwarded, err := xp.HasLevelLogKind(txApp, re.Auth.Id, positiveKind)
 			if err != nil {
 				return err
 			}
 			if wasAwarded {
-				nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, "xp:flag-delete:"+body.Flag, -5, baseExp)
+				nextExp, _, err := xp.AwardExpTx(txApp, re.Auth.Id, "xp:flag-delete:"+body.Flag, -5, baseExp)
 				if err != nil {
 					return err
 				}
@@ -110,7 +110,7 @@ func DeleteArcadeFlag(re *core.RequestEvent) error {
 			}
 		}
 
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{

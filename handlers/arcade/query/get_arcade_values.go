@@ -141,7 +141,11 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 
 	if want["hour"] && hourId != "" {
 		if hourRec, err := re.App.FindRecordById(arcadeinternal.CollectionArcadeHour, hourId); err == nil {
-			out["hour"] = arcadehour.BuildArcadeHourExpandedValue(hourRec)
+			hourValue := arcadehour.BuildArcadeHourExpandedValue(hourRec)
+			if re.Auth == nil {
+				hourValue = arcadehour.RedactGuestHour(hourValue, rec.GetString("timezone"))
+			}
+			out["hour"] = hourValue
 		}
 	}
 
@@ -189,6 +193,9 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 			userID = re.Auth.Id
 		}
 		if gameObj, ok := arcadeinternal.BuildExpandedGameValueForUser(re.App, gameId, userID); ok {
+			if re.Auth == nil {
+				gameObj = arcadeinternal.RedactGuestGame(gameObj)
+			}
 			out["game"] = gameObj
 		}
 	}

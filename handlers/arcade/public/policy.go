@@ -8,7 +8,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 const (
@@ -34,11 +34,11 @@ type PublicConversionState struct {
 }
 
 func loadPublicConversionState(app core.App, arcade *core.Record, userID string) (PublicConversionState, error) {
-	exp, err := userhandler.LoadCurrentExp(app, userID)
+	exp, err := xp.LoadCurrentExp(app, userID)
 	if err != nil {
 		return PublicConversionState{}, fmt.Errorf("failed to load current exp: %w", err)
 	}
-	level := userhandler.LevelFromExp(exp)
+	level := xp.LevelFromExp(exp)
 	requirements, err := publicConversionRequirements(app, arcade, userID, level)
 	if err != nil {
 		return PublicConversionState{}, err

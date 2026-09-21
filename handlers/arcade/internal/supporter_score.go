@@ -8,7 +8,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 const SupporterScoreThreshold = 300
@@ -63,7 +63,7 @@ func BuildSupporterScore(app core.App, userID string) (*SupporterScoreResponse, 
 		return nil, fmt.Errorf("user id is required")
 	}
 
-	totalExp, err := userhandler.LoadCurrentExp(app, userID)
+	totalExp, err := xp.LoadCurrentExp(app, userID)
 	if err != nil {
 		return nil, err
 	}

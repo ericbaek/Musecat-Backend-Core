@@ -12,7 +12,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 var (
@@ -155,14 +155,14 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 		})
 	}
 
-	baseExp, err := userhandler.LoadCurrentExp(re.App, re.Auth.Id)
+	baseExp, err := xp.LoadCurrentExp(re.App, re.Auth.Id)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to load current exp",
 			"details": err.Error(),
 		})
 	}
-	levelSnapshot := userhandler.LevelFromExp(baseExp)
+	levelSnapshot := xp.LevelFromExp(baseExp)
 	requirements, err := publicConversionRequirements(re.App, arcade, re.Auth.Id, levelSnapshot)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
@@ -178,13 +178,13 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 	}
 
 	// 5) make arcade public immediately.
-	var xpFeedback userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
 		txArcade, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
-		txBaseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		txBaseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
 		}
@@ -224,17 +224,17 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 			return err
 		}
 
-		if nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.ArcadePublicKind(body.Arcade), 5, currentExp); err != nil {
+		if nextExp, _, err := xp.AwardExpTx(txApp, re.Auth.Id, xp.ArcadePublicKind(body.Arcade), 5, currentExp); err != nil {
 			return err
 		} else {
 			currentExp = nextExp
 		}
-		if nextExp, err := userhandler.GrantArcadePublicBackfillTx(txApp, re.Auth.Id, body.Arcade, currentExp); err != nil {
+		if nextExp, err := xp.GrantArcadePublicBackfillTx(txApp, re.Auth.Id, body.Arcade, currentExp); err != nil {
 			return err
 		} else {
 			currentExp = nextExp
 		}
-		xpFeedback = userhandler.BuildExpFeedback(txBaseExp, currentExp)
+		xpFeedback = xp.BuildExpFeedback(txBaseExp, currentExp)
 		return nil
 	}); err != nil {
 		if errors.Is(err, arcadeinternal.ErrArcadeCountryConflict) {

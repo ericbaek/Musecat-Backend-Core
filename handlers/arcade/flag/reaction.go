@@ -2,6 +2,7 @@ package flag
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,7 +12,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 const (
@@ -79,7 +80,7 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 	}
 
 	var reactionID string
-	var xpFeedback userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 	now := time.Now().UTC()
 	err = re.App.RunInTransaction(func(txApp core.App) error {
 		flagRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeFlag, body.Flag)
@@ -99,7 +100,10 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
-		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
+			return arcadeinternal.ErrArcadeWriteForbidden
+		}
+		baseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
 		}
@@ -153,13 +157,13 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 				}
 			}
 			if arcadeRec.GetBool("public") {
-				nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.FlagReactionKind(reactionID), reactionExp(body.Reaction), currentExp)
+				nextExp, _, err := xp.AwardExpTx(txApp, re.Auth.Id, xp.FlagReactionKind(reactionID), reactionExp(body.Reaction), currentExp)
 				if err != nil {
 					return err
 				}
 				currentExp = nextExp
 			}
-			xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+			xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 			if _, err = arcadeinternal.ReconcileFlagResolutionTx(txApp, flagRec, now, true); err != nil {
 				return err
 			}
@@ -196,7 +200,7 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 		if err := removeReactionRecordTx(txApp, target, re.Auth.Id, baseExp, &currentExp); err != nil {
 			return err
 		}
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		if body.Reaction != "issue_persist" {
 			if _, err = arcadeinternal.ReconcileFlagResolutionTx(txApp, flagRec, now, true); err != nil {
 				return err
@@ -205,6 +209,9 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 		return touchFlagActivityTx(txApp, flagRec)
 	})
 	if err != nil {
+		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "reaction update failed", "details": err.Error()})
 	}
 
@@ -316,7 +323,7 @@ func removeReactionRecordTx(app core.App, target *core.Record, userID string, ba
 	if err := app.Delete(target); err != nil {
 		return fmt.Errorf("failed to delete reaction: %w", err)
 	}
-	wasAwarded, err := userhandler.HasLevelLogKind(app, userID, userhandler.FlagReactionKind(reactionID))
+	wasAwarded, err := xp.HasLevelLogKind(app, userID, xp.FlagReactionKind(reactionID))
 	if err != nil {
 		return err
 	}
@@ -327,12 +334,12 @@ func removeReactionRecordTx(app core.App, target *core.Record, userID string, ba
 	// rows awarded under an earlier policy. New wrong votes have no positive
 	// ledger row and therefore reach the !wasAwarded branch above.
 	positiveRows, err := app.FindRecordsByFilter(
-		userhandler.CollectionUserLevelLog,
+		xp.CollectionUserLevelLog,
 		"user={:user} && kind={:kind}",
 		"",
 		1,
 		0,
-		dbx.Params{"user": userID, "kind": userhandler.FlagReactionKind(reactionID)},
+		dbx.Params{"user": userID, "kind": xp.FlagReactionKind(reactionID)},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to load reaction xp grant: %w", err)
@@ -341,7 +348,7 @@ func removeReactionRecordTx(app core.App, target *core.Record, userID string, ba
 		return nil
 	}
 	grant := positiveRows[0].GetInt("diff_exp")
-	nextExp, _, err := userhandler.AwardExpTx(app, userID, "xp:flag-reaction-delete:"+reactionID, -grant, baseExp)
+	nextExp, _, err := xp.AwardExpTx(app, userID, "xp:flag-reaction-delete:"+reactionID, -grant, baseExp)
 	if err != nil {
 		return err
 	}

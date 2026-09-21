@@ -46,7 +46,7 @@ Each row uses these common columns:
 | `POST /campaign/check` | `game` when an old target is updated or reverted | one row | `game_diff` | Campaign checks append a report event with location-verification status. `result=updated` uses the normal immutable game-state batch flow; level-10+ location bypass awards 1 XP. A `still_old` report awards 1 XP and can revert the latest campaign update for seven days. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `PUT /arcade/memo` | `memo` | one row per changed request | `memo_diff` | Creates an immutable Tiptap JSON revision and moves `arcade.memo` for an authenticated user with arcade write access. |
-| `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, `photo`, or `memo`; memo rollback requires authenticated arcade write access. |
+| `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, `photo`, or `memo`; private draft rollback requires the creator or a developer/moderator. |
 
 The read-only arcade timeline accepts the optional
 `changed=basic|game|hour|sns|gtk|photo|memo` filter. The user timeline is available

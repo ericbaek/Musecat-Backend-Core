@@ -11,7 +11,6 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
 )
 
 var rollbackPartCollections = map[string]string{
@@ -146,8 +145,8 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 		if err != nil {
 			return &rollbackValidationError{message: "arcade not found"}
 		}
-		if body.Part == "memo" && !arcadeRec.GetBool("public") && (arcadeRec.GetString("createdBy") != re.Auth.Id && !arcadequery.HasStrictReviewerAccess(re.Auth)) {
-			return &rollbackValidationError{message: "arcade memo editing is not permitted"}
+		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
+			return arcadeinternal.ErrArcadeWriteForbidden
 		}
 
 		field := body.Part
@@ -202,6 +201,9 @@ func RollbackArcadePart(re *core.RequestEvent) error {
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
 		var validationErr *rollbackValidationError
 		if errors.As(err, &validationErr) {
 			return re.JSON(http.StatusBadRequest, map[string]any{

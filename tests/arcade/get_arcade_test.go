@@ -11,9 +11,11 @@ import (
 )
 
 func TestGetArcadeValues_ExpandGameOmitsMissingTagQuantity(t *testing.T) {
+	headers := map[string]string{}
 	scenario := tests.ApiScenario{
-		Name:   "GET /arcade expand game omits missing tag quantity",
-		Method: http.MethodGet,
+		Name:    "GET /arcade expand game omits missing tag quantity",
+		Method:  http.MethodGet,
+		Headers: headers,
 		ExpectedContent: []string{
 			`"game":{"id":"`,
 		},
@@ -26,7 +28,8 @@ func TestGetArcadeValues_ExpandGameOmitsMissingTagQuantity(t *testing.T) {
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
 		tb.Helper()
 
-		_, user := createAuthUser(tb, app)
+		token, user := createAuthUser(tb, app)
+		headers["Authorization"] = "Bearer " + token
 		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
 			Name:     "Tagless Quantity Arcade",
 			Address:  "No Qty Street",
@@ -80,6 +83,254 @@ func TestGetArcadeValues_ExpandGameOmitsMissingTagQuantity(t *testing.T) {
 		}
 		if _, exists := tag["quantity"]; exists {
 			tb.Fatalf("expected response tag to omit quantity, got %#v", tag)
+		}
+	}
+
+	scenario.Test(t)
+}
+
+func TestGetArcadeValues_ExpandGame_AnonymousRedaction(t *testing.T) {
+	scenario := tests.ApiScenario{
+		Name:           "GET /arcade expand=game,hour redacts sensitive data for anonymous users",
+		Method:         http.MethodGet,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"game":{"id":"`,
+			`"hour":{"`,
+		},
+		TestAppFactory: func(tb testing.TB) *tests.TestApp {
+			return newArcadeTestApp(tb)
+		},
+	}
+
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		tb.Helper()
+
+		_, user := createAuthUser(tb, app)
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
+			Name:     "Redacted Arcade",
+			Address:  "Secret Street 10",
+			Nickname: []string{"Redacted"},
+			Location: location{Lat: 37.5665, Lon: 126.978},
+		})
+		versionID := seedGameSeriesVersion(tb, app)
+		moleculeID := seedArcadeGameMolecule(tb, app, arcadeID)
+		atomID := seedArcadeGameAtom(tb, app, moleculeID, versionID, "2F-Hidden")
+
+		atom, err := app.FindFirstRecordByFilter("arcade_game_history", "batch={:batch} && entry={:entry}", map[string]any{"batch": moleculeID, "entry": atomID})
+		if err != nil {
+			tb.Fatalf("failed to load atom: %v", err)
+		}
+		atom.Set("tag", []map[string]any{{"category": "기타", "note": "secret note"}})
+		atom.Set("price", map[string]any{
+			"currency": "KRW",
+			"type":     "credit",
+			"accept":   []string{"Cash", "Credit Card"},
+			"list": []map[string]any{
+				{"title": "1 Credit", "value": 1000, "represent": true},
+				{"title": "VIP Pass", "value": 5000, "represent": false},
+			},
+		})
+		if err := app.Save(atom); err != nil {
+			tb.Fatalf("failed to update atom: %v", err)
+		}
+		seedHourMolecule(tb, app, arcadeID, user.Id, map[string]any{
+			"Monday":  map[string]any{"start": 1000, "end": 2200},
+			"Tuesday": map[string]any{"start": 1000, "end": 2200},
+			"Note":    "Open daily",
+		})
+
+		scenario.URL = fmt.Sprintf("/arcade?id=%s&expand=game,hour", arcadeID)
+	}
+
+	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
+		tb.Helper()
+		defer res.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			tb.Fatalf("failed to decode response: %v", err)
+		}
+
+		gameObj, ok := payload["game"].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected expanded game object, got %T", payload["game"])
+		}
+		items, ok := gameObj["items"].([]any)
+		if !ok || len(items) != 1 {
+			tb.Fatalf("expected 1 game item, got %T %#v", gameObj["items"], gameObj["items"])
+		}
+		item, ok := items[0].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected item map, got %T", items[0])
+		}
+
+		// Verify redaction on anonymous game item
+		if item["tag"] != nil {
+			t.Errorf("expected tag to be nil for anonymous caller, got %#v", item["tag"])
+		}
+		if item["location"] != "" {
+			t.Errorf("expected location to be empty for anonymous caller, got %#v", item["location"])
+		}
+		if item["updated"] != "" {
+			t.Errorf("expected updated to be empty for anonymous caller, got %#v", item["updated"])
+		}
+		if item["updated_by"] != "" {
+			t.Errorf("expected updated_by to be empty for anonymous caller, got %#v", item["updated_by"])
+		}
+
+		priceObj, ok := item["price"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected price object, got %T", item["price"])
+		}
+		if priceObj["accept"] != nil {
+			t.Errorf("expected accept to be nil, got %#v", priceObj["accept"])
+		}
+		if priceObj["hasHiddenPrices"] != true {
+			t.Errorf("expected hasHiddenPrices to be true, got %#v", priceObj["hasHiddenPrices"])
+		}
+		priceList, ok := priceObj["list"].([]any)
+		if !ok || len(priceList) != 1 {
+			t.Fatalf("expected 1 representative price item, got %d", len(priceList))
+		}
+
+		// Verify redaction on anonymous hour
+		hourObj, ok := payload["hour"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected expanded hour object, got %T", payload["hour"])
+		}
+		// In Korea timezone (Asia/Seoul), check that only 1 weekday field is returned
+		weekdayCount := 0
+		allDays := []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+		for _, day := range allDays {
+			if _, exists := hourObj[day]; exists {
+				weekdayCount++
+			}
+		}
+		if weekdayCount > 1 {
+			t.Errorf("expected at most 1 day in redacted hour, got %d", weekdayCount)
+		}
+	}
+
+	scenario.Test(t)
+}
+
+func TestGetArcadeValues_ExpandGame_AuthenticatedFull(t *testing.T) {
+	headers := map[string]string{}
+	scenario := tests.ApiScenario{
+		Name:           "GET /arcade expand=game,hour returns full data for authenticated users",
+		Method:         http.MethodGet,
+		Headers:        headers,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"game":{"id":"`,
+			`"hour":{"`,
+		},
+		TestAppFactory: func(tb testing.TB) *tests.TestApp {
+			return newArcadeTestApp(tb)
+		},
+	}
+
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		tb.Helper()
+
+		token, user := createAuthUser(tb, app)
+		headers["Authorization"] = "Bearer " + token
+
+		arcadeID, _ := seedPublicArcade(tb, app, user.Id, arcadeSeed{
+			Name:     "Full Auth Arcade",
+			Address:  "Public Street 20",
+			Nickname: []string{"FullAuth"},
+			Location: location{Lat: 37.5665, Lon: 126.978},
+		})
+		versionID := seedGameSeriesVersion(tb, app)
+		moleculeID := seedArcadeGameMolecule(tb, app, arcadeID)
+		atomID := seedArcadeGameAtom(tb, app, moleculeID, versionID, "3F-Center")
+
+		atom, err := app.FindFirstRecordByFilter("arcade_game_history", "batch={:batch} && entry={:entry}", map[string]any{"batch": moleculeID, "entry": atomID})
+		if err != nil {
+			tb.Fatalf("failed to load atom: %v", err)
+		}
+		atom.Set("tag", []map[string]any{{"category": "기타", "note": "visible note"}})
+		atom.Set("last_modified_at", "2026-09-21 10:00:00.000Z")
+		atom.Set("price", map[string]any{
+			"currency": "KRW",
+			"type":     "credit",
+			"accept":   []string{"Cash", "Credit Card"},
+			"list": []map[string]any{
+				{"title": "1 Credit", "value": 1000, "represent": true},
+				{"title": "VIP Pass", "value": 5000, "represent": false},
+			},
+		})
+		if err := app.Save(atom); err != nil {
+			tb.Fatalf("failed to update atom: %v", err)
+		}
+		seedHourMolecule(tb, app, arcadeID, user.Id, map[string]any{
+			"Monday":  map[string]any{"start": 1000, "end": 2200},
+			"Tuesday": map[string]any{"start": 1000, "end": 2200},
+			"Note":    "Open daily",
+		})
+
+		scenario.URL = fmt.Sprintf("/arcade?id=%s&expand=game,hour", arcadeID)
+	}
+
+	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
+		tb.Helper()
+		defer res.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			tb.Fatalf("failed to decode response: %v", err)
+		}
+
+		gameObj, ok := payload["game"].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected expanded game object, got %T", payload["game"])
+		}
+		items, ok := gameObj["items"].([]any)
+		if !ok || len(items) != 1 {
+			tb.Fatalf("expected 1 game item, got %T %#v", gameObj["items"], gameObj["items"])
+		}
+		item, ok := items[0].(map[string]any)
+		if !ok {
+			tb.Fatalf("expected item map, got %T", items[0])
+		}
+
+		// Authenticated user should receive full tags, location, updated
+		tags, ok := item["tag"].([]any)
+		if !ok || len(tags) != 1 {
+			t.Fatalf("expected 1 tag entry for authenticated caller, got %#v", item["tag"])
+		}
+		if item["location"] != "3F-Center" {
+			t.Errorf("expected location '3F-Center', got %#v", item["location"])
+		}
+		if item["updated"] != "2026-09-21 10:00:00.000Z" {
+			t.Errorf("expected updated '2026-09-21 10:00:00.000Z', got %#v", item["updated"])
+		}
+
+		priceObj, ok := item["price"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected price object, got %T", item["price"])
+		}
+		accepts, ok := priceObj["accept"].([]any)
+		if !ok || len(accepts) != 2 {
+			t.Errorf("expected accept with 2 methods, got %#v", priceObj["accept"])
+		}
+		priceList, ok := priceObj["list"].([]any)
+		if !ok || len(priceList) != 2 {
+			t.Errorf("expected 2 price items for authenticated caller, got %#v", priceObj["list"])
+		}
+
+		// Verify full hour for authenticated user
+		hourObj, ok := payload["hour"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected expanded hour object, got %T", payload["hour"])
+		}
+		if _, exists := hourObj["Monday"]; !exists {
+			t.Errorf("expected Monday in full hour")
+		}
+		if _, exists := hourObj["Tuesday"]; !exists {
+			t.Errorf("expected Tuesday in full hour")
 		}
 	}
 

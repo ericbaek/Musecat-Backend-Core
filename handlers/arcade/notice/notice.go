@@ -16,7 +16,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/types"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 const noticeSupporterMinimumLevel = 30
@@ -174,7 +174,7 @@ func hasSupporterNoticeAccess(app core.App, auth *core.Record) bool {
 		return false
 	}
 
-	level, err := userhandler.LoadUserLevelState(app, auth.Id)
+	level, err := xp.LoadUserLevelState(app, auth.Id)
 	return err == nil && level.Level >= noticeSupporterMinimumLevel
 }
 
@@ -248,6 +248,13 @@ func rejectNoticeCreateAccess(re *core.RequestEvent, arcadeID string) error {
 func rejectNoticeMutationAccess(re *core.RequestEvent, rec *core.Record) error {
 	if re.Auth == nil {
 		return re.UnauthorizedError("The request requires valid record authorization token.", nil)
+	}
+	arcade, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, rec.GetString("arcade"))
+	if err != nil {
+		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
+	}
+	if !arcadeinternal.CanWriteArcade(re.Auth, arcade) {
+		return re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
 	}
 	if hasElevatedNoticeAccess(re.Auth) {
 		return nil
@@ -500,6 +507,9 @@ func CreateArcadeNotice(re *core.RequestEvent) error {
 			"error":   "arcade not found",
 			"details": err.Error(),
 		})
+	}
+	if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
+		return re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
 	}
 
 	coll, err := re.App.FindCollectionByNameOrId(arcadeinternal.CollectionArcadeNotice)

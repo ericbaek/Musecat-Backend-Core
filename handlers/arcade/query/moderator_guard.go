@@ -7,7 +7,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
 
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 var moderatorAccessTags = map[string]struct{}{
@@ -119,7 +119,7 @@ func HasGameToolsAccess(app core.App, auth *core.Record) bool {
 		return false
 	}
 
-	level, err := userhandler.LoadUserLevelState(app, auth.Id)
+	level, err := xp.LoadUserLevelState(app, auth.Id)
 	return err == nil && level.Level >= 30
 }
 

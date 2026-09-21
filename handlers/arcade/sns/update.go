@@ -2,6 +2,7 @@ package sns
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,7 +11,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 // UpdateArcadeSNSBody represents the request body for updating arcade SNS.
@@ -73,7 +74,7 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 	// newly created molecule id plus the rendered atom list together here.
 	var newSNSId string
 	var expandedSNSValue ExpandedSNSValue
-	var xpFeedback userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
 		// 1) Verify the arcade exists and capture the previous SNS molecule for diffing.
@@ -81,11 +82,14 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
+		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
+			return arcadeinternal.ErrArcadeWriteForbidden
+		}
 		prevAtoms, err := loadCurrentSNSAtoms(txApp, body.Arcade, strings.TrimSpace(arcadeRec.GetString("sns")))
 		if err != nil {
 			return err
 		}
-		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		baseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
 		}
@@ -184,7 +188,7 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 			return fmt.Errorf("failed to update arcade.sns: %w", err)
 		}
 		if arcadeRec.GetBool("public") {
-			nextExp, _, err := userhandler.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "sns", 2, baseExp, time.Now().UTC())
+			nextExp, _, err := xp.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "sns", 2, baseExp, time.Now().UTC())
 			if err != nil {
 				return err
 			}
@@ -192,9 +196,12 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 		}
 
 		expandedSNSValue = BuildExpandedSNSValue(newSNSId, nextItems)
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
+		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "transaction failed",
 			"details": err.Error(),

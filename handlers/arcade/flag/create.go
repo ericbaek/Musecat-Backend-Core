@@ -13,7 +13,7 @@ import (
 
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 var validDisruptions = map[string]struct{}{
@@ -114,12 +114,15 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 
 	var newFlagID string
 	var expandedGameValue map[string]any
-	var xpFeedback userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
 		arcadeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
+		}
+		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
+			return arcadeinternal.ErrArcadeWriteForbidden
 		}
 
 		entryRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeGameEntry, body.GameID)
@@ -134,7 +137,7 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 		if err != nil || len(active) == 0 {
 			return fmt.Errorf("game_id is not active in the current game state")
 		}
-		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		baseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
 		}
@@ -166,7 +169,7 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 		}
 
 		if arcadeRec.GetBool("public") {
-			nextExp, _, err := userhandler.AwardExpTx(txApp, re.Auth.Id, userhandler.FlagKind(newFlagID), 5, baseExp)
+			nextExp, _, err := xp.AwardExpTx(txApp, re.Auth.Id, xp.FlagKind(newFlagID), 5, baseExp)
 			if err != nil {
 				return err
 			}
@@ -182,9 +185,12 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 			}
 		}
 
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
+		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "transaction failed",
 			"details": err.Error(),

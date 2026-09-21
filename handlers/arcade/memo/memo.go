@@ -157,5 +157,5 @@ func canReadArcade(re *core.RequestEvent, arcade *core.Record) bool {
 }
 
 func canWriteArcade(re *core.RequestEvent, arcade *core.Record) bool {
-	return arcade.GetBool("public") || (re.Auth != nil && (arcade.GetString("createdBy") == re.Auth.Id || arcadequery.HasStrictReviewerAccess(re.Auth)))
+	return arcadeinternal.CanWriteArcade(re.Auth, arcade)
 }

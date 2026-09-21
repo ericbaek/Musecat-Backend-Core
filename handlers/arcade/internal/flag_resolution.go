@@ -10,7 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 const (
@@ -367,11 +367,11 @@ func closeFlagResolutionTx(app core.App, flagRec *core.Record) (bool, error) {
 }
 
 func LevelSnapshot(app core.App, userID string) (int, error) {
-	exp, err := userhandler.LoadCurrentExp(app, userID)
+	exp, err := xp.LoadCurrentExp(app, userID)
 	if err != nil {
 		return 0, err
 	}
-	return userhandler.LevelFromExp(exp), nil
+	return xp.LevelFromExp(exp), nil
 }
 
 func normalizeResolutionNow(now time.Time) time.Time {

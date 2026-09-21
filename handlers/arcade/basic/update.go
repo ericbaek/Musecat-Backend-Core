@@ -15,7 +15,7 @@ import (
 
 	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 var errStaleBasic = errors.New("basic information changed; reload before updating")
@@ -221,6 +221,15 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		})
 	}
 
+	// Check access before reading private basic values or performing geo lookup.
+	arcade, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
+	if err != nil {
+		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
+	}
+	if !arcadeinternal.CanWriteArcade(re.Auth, arcade) {
+		return re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
+	}
+
 	// 3) load current state
 	cur, err := getCurrentBasic(re.App, body.Arcade)
 	if err != nil {
@@ -267,11 +276,14 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 	}
 
 	var newBasicID string
-	var xpFeedback userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
 		arcadeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
+		}
+		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
+			return arcadeinternal.ErrArcadeWriteForbidden
 		}
 		if body.BaseBasicID != nil && arcadeRec.GetString("basic") != *body.BaseBasicID {
 			return errStaleBasic
@@ -286,7 +298,7 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 				return errInvalidCity
 			}
 		}
-		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		baseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
 		}
@@ -297,7 +309,7 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 			}
 		}
 		if locationChanged {
-			level := userhandler.LevelFromExp(baseExp)
+			level := xp.LevelFromExp(baseExp)
 			if level < 30 && (!cur.HasLocation || !isUsableBasicLocation(cur.Lat, cur.Lon)) {
 				return &locationMovePolicyError{code: locationMoveOriginMissingCode}
 			}
@@ -335,15 +347,18 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		}
 
 		if arcadeRec.GetBool("public") {
-			nextExp, _, err := userhandler.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "basic", 2, baseExp, time.Now().UTC())
+			nextExp, _, err := xp.AwardArcadeEditExpTx(txApp, re.Auth.Id, body.Arcade, "basic", 2, baseExp, time.Now().UTC())
 			if err != nil {
 				return err
 			}
 			currentExp = nextExp
 		}
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
+		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
 		if errors.Is(err, errStaleBasic) {
 			return re.JSON(409, map[string]any{"error": err.Error()})
 		}

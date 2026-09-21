@@ -75,7 +75,7 @@ Definitions:
 | Private detail via `/arcade/draft` | deny | deny | allow | allow |
 | Public-conversion XP preview | deny | deny | creator only | deny |
 | My draft list/delete | deny | own drafts only | own drafts only | use specific draft route |
-| Immediate wiki edits on public arcade | deny | allow for level 10+ | allow for level 10+ | allow |
+| Immediate wiki edits on public arcade | deny | allow | allow | allow |
 | Arcade memo create/update/rollback | deny | authenticated users with arcade write access | authenticated users with arcade write access | authenticated users with arcade write access |
 | Arcade notice create | deny | deny; level-30+ supporters may create unless another official account manages the arcade through `owns` | official account may create only in own `owns` arcade | allow |
 | Arcade notice update/delete | deny | own authored notice only for level-30+ supporters | own authored notice only | allow |
@@ -85,6 +85,15 @@ Definitions:
 | Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |
 | Latest subway map metadata and file bytes | allow | allow | allow | allow |
 | Subway map create/update/delete | deny | deny | deny | allow |
+
+Public arcade wiki edits have no level threshold for active authenticated users.
+Private draft edits, photo uploads, flag/notice mutations, and rollbacks require
+the draft creator or a `developer|moderator`. Aggregate mutations recheck this
+against the current arcade record inside their transaction.
+
+Unauthenticated (anonymous) callers of `GET /arcade` receive redacted sensitive payloads:
+- When `expand=game`, each item has `tag: null`, `location: ""`, `updated: ""`, and `updated_by: ""`. `price` retains only representative price items (`represent=true`, falling back to the first item for legacy rows), sets `accept: null`, and marks `hasHiddenPrices=true` when additional items are hidden.
+- When `expand=hour`, the response retains only today's schedule for the arcade's resolved timezone and `Note`, omitting all other weekday keys.
 
 `PUT /arcade/basic` location changes use the authenticated editor's current
 level, regardless of supporter or staff tags. Levels below 10 may move the

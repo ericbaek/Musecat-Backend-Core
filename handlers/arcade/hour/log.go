@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 
@@ -31,6 +32,53 @@ func BuildArcadeHourExpandedValue(rec *core.Record) map[string]any {
 		"Sunday":    normalizeHourFieldValue(rec.GetRaw("Sunday")),
 		"Note":      note,
 	}
+}
+
+// CurrentHourDayKey returns the weekday name ("Monday", "Tuesday", etc.) in the given timezone (defaulting to UTC).
+func CurrentHourDayKey(timezone string) string {
+	loc := time.UTC
+	if strings.TrimSpace(timezone) != "" {
+		if l, err := time.LoadLocation(strings.TrimSpace(timezone)); err == nil {
+			loc = l
+		}
+	}
+	weekday := time.Now().In(loc).Weekday()
+	switch weekday {
+	case time.Monday:
+		return "Monday"
+	case time.Tuesday:
+		return "Tuesday"
+	case time.Wednesday:
+		return "Wednesday"
+	case time.Thursday:
+		return "Thursday"
+	case time.Friday:
+		return "Friday"
+	case time.Saturday:
+		return "Saturday"
+	case time.Sunday:
+		return "Sunday"
+	default:
+		return "Monday"
+	}
+}
+
+// RedactGuestHour keeps only today's schedule and the note for unauthenticated callers.
+func RedactGuestHour(hourMap map[string]any, timezone string) map[string]any {
+	if hourMap == nil {
+		return nil
+	}
+	todayKey := CurrentHourDayKey(timezone)
+	out := map[string]any{
+		"id": hourMap["id"],
+	}
+	if todayVal, ok := hourMap[todayKey]; ok {
+		out[todayKey] = todayVal
+	}
+	if note, ok := hourMap["Note"]; ok && note != "" {
+		out["Note"] = note
+	}
+	return out
 }
 
 type hourDiffLogItem struct {

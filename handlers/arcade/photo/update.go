@@ -2,6 +2,7 @@ package photo
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,7 +12,7 @@ import (
 
 	arcadecampaign "github.com/ericbaek/musecat-backend-core/handlers/arcade/campaign"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 // UpdateArcadePhotoBody represents the request body for updating arcade photos.
@@ -70,13 +71,16 @@ func UpdateArcadePhoto(re *core.RequestEvent) error {
 	}
 
 	var newPhotoID string
-	var xpFeedback userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
 		now := time.Now().UTC()
 		arcadeRec, err := txApp.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
+		}
+		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
+			return arcadeinternal.ErrArcadeWriteForbidden
 		}
 		campaignTarget := false
 		if arcadeRec.GetBool("public") {
@@ -85,7 +89,7 @@ func UpdateArcadePhoto(re *core.RequestEvent) error {
 				return fmt.Errorf("failed to determine photo campaign target: %w", err)
 			}
 		}
-		baseExp, err := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		baseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
 			return fmt.Errorf("failed to load current exp: %w", err)
 		}
@@ -169,16 +173,19 @@ func UpdateArcadePhoto(re *core.RequestEvent) error {
 			return fmt.Errorf("failed to update arcade.photo: %w", err)
 		}
 		if arcadeRec.GetBool("public") && len(newlyPublicAtomIDs) > 0 {
-			nextExp, _, err := userhandler.AwardArcadePhotoExpTx(txApp, re.Auth.Id, body.Arcade, newlyPublicAtomIDs, campaignTarget, baseExp, now)
+			nextExp, _, err := xp.AwardArcadePhotoExpTx(txApp, re.Auth.Id, body.Arcade, newlyPublicAtomIDs, campaignTarget, baseExp, now)
 			if err != nil {
 				return err
 			}
 			currentExp = nextExp
 		}
 
-		xpFeedback = userhandler.BuildExpFeedback(baseExp, currentExp)
+		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
+		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "transaction failed",
 			"details": err.Error(),

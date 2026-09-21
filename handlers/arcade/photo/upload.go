@@ -11,7 +11,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 const maxUploadPhotosPerRequest = 10
@@ -79,10 +79,14 @@ func UploadArcadePhotos(re *core.RequestEvent) error {
 		})
 	}
 
-	if _, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, arcadeID); err != nil {
+	arcade, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, arcadeID)
+	if err != nil {
 		return re.JSON(http.StatusNotFound, map[string]any{
 			"error": "arcade not found",
 		})
+	}
+	if !arcadeinternal.CanWriteArcade(re.Auth, arcade) {
+		return re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
 	}
 
 	atomColl, err := re.App.FindCollectionByNameOrId(arcadeinternal.CollectionArcadePhotoAtoms)
@@ -152,7 +156,7 @@ func UploadArcadePhotos(re *core.RequestEvent) error {
 
 	// Uploading creates a pending atom only. XP is awarded atomically by
 	// PUT /arcade/photo when a pending atom is first published in the gallery.
-	var xpFeedback userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 
 	status := http.StatusOK
 	if summary.Success == 0 {

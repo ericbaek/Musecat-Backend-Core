@@ -12,8 +12,11 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
+
+// ErrGameStateConflict is returned when base_state_id does not match the current game_v2 batch.
+var ErrGameStateConflict = errors.New("game state conflict")
 
 type PriceItem struct {
 	Title     *string  `json:"title,omitempty"`
@@ -329,7 +332,7 @@ func materializeUpdateGameDelta(txApp core.App, delta UpdateArcadeGameDeltaBody)
 	}
 	currentState := strings.TrimSpace(arcadeRec.GetString("game_v2"))
 	if strings.TrimSpace(delta.BaseStateID) != currentState {
-		return UpdateArcadeGameBody{}, 0, fmt.Errorf("game state conflict")
+		return UpdateArcadeGameBody{}, 0, ErrGameStateConflict
 	}
 
 	full := UpdateArcadeGameBody{
@@ -521,7 +524,7 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 	}
 	currentState := strings.TrimSpace(arcadeRec.GetString("game_v2"))
 	if strings.TrimSpace(body.BaseStateID) != currentState {
-		return "", fmt.Errorf("game state conflict")
+		return "", ErrGameStateConflict
 	}
 	previousByEntry := map[string]*core.Record{}
 	if currentState != "" {
@@ -745,13 +748,16 @@ func UpdateArcadeGame(re *core.RequestEvent) error {
 	var stateID string
 	var materialized UpdateArcadeGameBody
 	var changedEntryIDs []string
-	var xp userhandler.ExpFeedback
+	var xpFeedback xp.ExpFeedback
 	if err := re.App.RunInTransaction(func(txApp core.App) error {
 		arcadeRec, findErr := txApp.FindRecordById(arcadeinternal.CollectionArcade, delta.Arcade)
 		if findErr != nil {
 			return fmt.Errorf("arcade not found: %w", findErr)
 		}
-		base, expErr := userhandler.LoadCurrentExp(txApp, re.Auth.Id)
+		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
+			return arcadeinternal.ErrArcadeWriteForbidden
+		}
+		base, expErr := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if expErr != nil {
 			return expErr
 		}
@@ -769,19 +775,22 @@ func UpdateArcadeGame(re *core.RequestEvent) error {
 		}
 		current := base
 		if arcadeRec.GetBool("public") {
-			current, _, err = userhandler.AwardArcadeGameEditExpTx(txApp, re.Auth.Id, delta.Arcade, changedEntryIDs, base, time.Now().UTC())
+			current, _, err = xp.AwardArcadeGameEditExpTx(txApp, re.Auth.Id, delta.Arcade, changedEntryIDs, base, time.Now().UTC())
 			if err != nil {
 				return err
 			}
 		}
-		xp = userhandler.BuildExpFeedback(base, current)
+		xpFeedback = xp.BuildExpFeedback(base, current)
 		return nil
 	}); err != nil {
+		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
+			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
 		status := http.StatusBadGateway
 		var validationErr *gameRequestValidationError
 		if errors.As(err, &validationErr) {
 			status = http.StatusBadRequest
-		} else if strings.Contains(err.Error(), "game state conflict") {
+		} else if errors.Is(err, ErrGameStateConflict) {
 			status = http.StatusConflict
 		}
 		return re.JSON(status, map[string]any{"error": "game update failed", "details": err.Error()})
@@ -790,5 +799,5 @@ func UpdateArcadeGame(re *core.RequestEvent) error {
 	if !ok {
 		gameValue = map[string]any{"id": stateID, "items": []map[string]any{}}
 	}
-	return re.JSON(http.StatusOK, map[string]any{"arcade": delta.Arcade, "game": gameValue, "count": len(materialized.Games), "xp_feedback": xp})
+	return re.JSON(http.StatusOK, map[string]any{"arcade": delta.Arcade, "game": gameValue, "count": len(materialized.Games), "xp_feedback": xpFeedback})
 }

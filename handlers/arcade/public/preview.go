@@ -7,7 +7,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 // PreviewPublicArcade returns the XP that the creator would receive if the
@@ -42,7 +42,7 @@ func PreviewPublicArcade(re *core.RequestEvent) error {
 		})
 	}
 
-	preview, err := userhandler.PreviewArcadePublicExp(re.App, re.Auth.Id, arcadeID)
+	preview, err := xp.PreviewArcadePublicExp(re.App, re.Auth.Id, arcadeID)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to preview public conversion XP",
