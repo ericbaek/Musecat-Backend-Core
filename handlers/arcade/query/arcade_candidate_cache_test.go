@@ -1,6 +1,8 @@
 package query
 
 import (
+	"fmt"
+	"os"
 	"testing"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -8,6 +10,12 @@ import (
 
 	"github.com/ericbaek/musecat-backend-core/testutil"
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	testutil.CleanupGoldenDir()
+	os.Exit(code)
+}
 
 func TestGetArcadeCandidates_RebuildsAndInvalidates(t *testing.T) {
 	t.Parallel()
@@ -104,6 +112,44 @@ func TestGetArcadeCandidates_RebuildsAndInvalidates(t *testing.T) {
 	}
 	if len(candidate.GameSeries) != 1 || candidate.GameSeries[0] != seriesID {
 		t.Fatalf("expected updated game series %q, got %#v", seriesID, candidate.GameSeries)
+	}
+}
+
+func TestGetArcadeCandidates_UsesSelectedBasicAfterRollback(t *testing.T) {
+	app := testutil.NewTestApp(t)
+	RegisterCandidateSnapshotHooks(app)
+	arcadeID, originalID := seedArcadeCandidateRecord(t, app, "Original", "Original address")
+
+	basics, err := app.FindCollectionByNameOrId("arcade_basic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := core.NewRecord(basics)
+	later.Set("arcade", arcadeID)
+	later.Set("name", "Later")
+	later.Set("address", "Later address")
+	if err := app.Save(later); err != nil {
+		t.Fatal(err)
+	}
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arcade.Set("basic", later.Id)
+	if err := app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+	arcade.Set("basic", originalID)
+	if err := app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := GetArcadeCandidates(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findArcadeCandidate(candidates, arcadeID).Name; got != "Original" {
+		t.Fatalf("expected selected basic name after rollback, got %q", got)
 	}
 }
 
@@ -280,4 +326,29 @@ func seedArcadeCandidateGameState(tb testing.TB, app *tests.TestApp, arcadeID, v
 		tb.Fatalf("failed to link arcade.game_v2: %v", err)
 	}
 	return revision.Id
+}
+
+func TestFindCandidateRecords_ExceedsFilterExprLimit(t *testing.T) {
+	t.Parallel()
+
+	app := testutil.NewTestApp(t)
+	_, basicID := seedArcadeCandidateRecord(t, app, "Test Basic", "Test Address")
+
+	// Generate 450 IDs to exceed PocketBase's DefaultFilterExprLimit (200) and batchSize (400).
+	ids := make([]string, 450)
+	ids[0] = basicID
+	for i := 1; i < 450; i++ {
+		ids[i] = fmt.Sprintf("nonexistent_id_%04d", i)
+	}
+
+	records, err := findCandidateRecords(app, "arcade_basic", "id", ids)
+	if err != nil {
+		t.Fatalf("expected findCandidateRecords to succeed with >200 IDs: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record found, got %d", len(records))
+	}
+	if records[0].Id != basicID {
+		t.Fatalf("expected record ID %q, got %q", basicID, records[0].Id)
+	}
 }

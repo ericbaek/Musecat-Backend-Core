@@ -164,26 +164,32 @@ func BuildArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
 		return nil, err
 	}
 
-	basics, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeBasic, "", "", 0, 0)
+	basicIDs := make([]string, 0, len(arcades))
+	stateIDs := make([]string, 0, len(arcades))
+	for _, arcade := range arcades {
+		basicIDs = append(basicIDs, arcade.GetString("basic"))
+		stateIDs = append(stateIDs, arcade.GetString("game_v2"))
+	}
+	basics, err := findCandidateRecords(app, arcadeinternal.CollectionArcadeBasic, "id", basicIDs)
 	if err != nil {
 		return nil, err
 	}
-	revisions, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeGameRevision, "", "", 0, 0)
+	revisions, err := findCandidateRecords(app, arcadeinternal.CollectionArcadeGameRevision, "batch", stateIDs)
 	if err != nil {
 		return nil, err
 	}
-	versions, err := app.FindRecordsByFilter(arcadeinternal.CollectionGameSeriesVersion, "", "", 0, 0)
+	versionIDs := make([]string, 0, len(revisions))
+	for _, revision := range revisions {
+		versionIDs = append(versionIDs, revision.GetString("version"))
+	}
+	versions, err := findCandidateRecords(app, arcadeinternal.CollectionGameSeriesVersion, "id", versionIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	basicByArcadeID := make(map[string]*core.Record, len(basics))
+	basicByID := make(map[string]*core.Record, len(basics))
 	for _, basicRec := range basics {
-		arcadeID := strings.TrimSpace(basicRec.GetString("arcade"))
-		if arcadeID == "" {
-			continue
-		}
-		basicByArcadeID[arcadeID] = basicRec
+		basicByID[basicRec.Id] = basicRec
 	}
 
 	seriesByVersionID := make(map[string]string, len(versions))
@@ -220,7 +226,10 @@ func BuildArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
 
 	candidates := make([]ArcadeCandidate, 0, len(arcades))
 	for _, arcadeRec := range arcades {
-		basicRec := basicByArcadeID[arcadeRec.Id]
+		basicRec := basicByID[arcadeRec.GetString("basic")]
+		if basicRec == nil || basicRec.GetString("arcade") != arcadeRec.Id {
+			continue
+		}
 		stateID := strings.TrimSpace(arcadeRec.GetString("game_v2"))
 		candidate, ok := buildArcadeCandidateFromRecords(arcadeRec, basicRec, installationsByStateID[stateID])
 		if !ok {
@@ -230,6 +239,43 @@ func BuildArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
 	}
 
 	return candidates, nil
+}
+
+// findCandidateRecords reads only selected current records. Batching keeps the
+// filter below SQLite's parameter limit on larger public arcade catalogs.
+func findCandidateRecords(app core.App, collection, field string, values []string) ([]*core.Record, error) {
+	const batchSize = 400
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	if len(unique) == 0 {
+		return []*core.Record{}, nil
+	}
+
+	records := make([]*core.Record, 0, len(unique))
+	for start := 0; start < len(unique); start += batchSize {
+		end := min(start+batchSize, len(unique))
+		batchValues := make([]any, end-start)
+		for i, value := range unique[start:end] {
+			batchValues[i] = value
+		}
+		batch, err := app.FindAllRecords(collection, dbx.In(field, batchValues...))
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, batch...)
+	}
+	return records, nil
 }
 
 func buildArcadeCandidate(app core.App, arcadeRec *core.Record) (ArcadeCandidate, bool) {
