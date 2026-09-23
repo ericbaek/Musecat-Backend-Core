@@ -3443,12 +3443,17 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcade/photo/file
-      description: Streams one photo through the custom API. A published photo of a public arcade is anonymous-readable. Pending or draft photos require a bearer token with atom-list access. Clients must use the returned `file_url`, not PocketBase `/api/files` URLs.
+      description: Streams one photo through the custom API. A published photo of a public arcade is anonymous-readable. Pending or draft photos require a bearer token with atom-list access. Clients must use the returned `file_url`, not PocketBase `/api/files` URLs. The optional `thumb=680x0` query returns the configured width-limited thumbnail and never silently falls back to the original file.
       parameters:
         - name: id
           in: query
           required: true
           schema: {type: string}
+        - name: thumb
+          in: query
+          required: false
+          schema: {type: string, enum: [680x0]}
+          description: Returns a 680px-wide thumbnail while preserving aspect ratio.
       responses:
         '200':
           description: Photo bytes.
@@ -3458,7 +3463,7 @@ paths:
             image/jpeg:
               schema: {type: string, format: binary}
         '400':
-          description: Missing photo atom id.
+          description: Missing photo atom id or unsupported thumbnail size.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

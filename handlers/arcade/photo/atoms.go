@@ -17,6 +17,8 @@ var (
 	errPhotoAtomPublished = errors.New("published photo atoms are immutable")
 )
 
+const arcadePhotoThumbnailSize = "680x0"
+
 // ListArcadePhotoAtoms replaces the raw PocketBase atom list. A public arcade
 // is editable by authenticated contributors; a private draft is visible only
 // to its creator or a developer/moderator.
@@ -120,7 +122,27 @@ func DownloadArcadePhotoAtom(re *core.RequestEvent) error {
 		return re.InternalServerError("failed to load photo file", err)
 	}
 	defer fsys.Close()
-	if err := fsys.Serve(re.Response, re.Request, atom.BaseFilesPath()+"/"+filename, filename); err != nil {
+	baseFilesPath := atom.BaseFilesPath()
+	servedPath := baseFilesPath + "/" + filename
+	servedName := filename
+	thumb := strings.TrimSpace(re.Request.URL.Query().Get("thumb"))
+	if thumb != "" {
+		if thumb != arcadePhotoThumbnailSize {
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "unsupported photo thumbnail size"})
+		}
+		servedName = thumb + "_" + filename
+		servedPath = baseFilesPath + "/thumbs_" + filename + "/" + servedName
+		exists, err := fsys.Exists(servedPath)
+		if err != nil {
+			return re.InternalServerError("failed to inspect photo thumbnail", err)
+		}
+		if !exists {
+			if err := fsys.CreateThumb(baseFilesPath+"/"+filename, servedPath, thumb); err != nil {
+				return re.InternalServerError("failed to create photo thumbnail", err)
+			}
+		}
+	}
+	if err := fsys.Serve(re.Response, re.Request, servedPath, servedName); err != nil {
 		return re.NotFoundError("photo file not found", err)
 	}
 	return nil

@@ -323,7 +323,7 @@ single-record operations do not write arcade changelog or XP rows.
 | user-authored changelog timeline | `GET /user/changelog?user=...` (optional `changed=basic|game|hour|sns|gtk|photo|memo`) |
 | arcade favorites | `PUT /arcade/favorite`; owner profile reads include `favorite_arcades`, while public profile reads include it only when `favorite_visibility=public`; owners control this with `PUT /user/favorite-visibility` |
 | photo atom list | `GET /arcade/photo/atoms?arcade=...` |
-| photo bytes | `GET /arcade/photo/file?id=...` (the `file_url` returned for an atom) |
+| photo bytes | `GET /arcade/photo/file?id=...` (the `file_url` returned for an atom; optional `thumb=680x0`) |
 | delete pending own photo atom | `DELETE /arcade/photo/atom?id=...` |
 | standalone edit report | `POST /arcade/edit_report` |
 | reviewer queue | `GET /moderation/arcade/edit-reports` |
