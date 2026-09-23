@@ -30,6 +30,7 @@ func TestArcadeContributionRanking_CombinesVisitsAndEdits(t *testing.T) {
 	setArcadeVisitGainedExp(t, app, combined.Id, arcadeID, now.Add(-time.Hour), 5)
 	seedSupporterLedgerEntry(t, app, combined.Id, userhandler.ArcadeEditKind(arcadeID, "basic"), 0, 8, now.Add(-2*time.Hour))
 	seedSupporterLedgerEntry(t, app, combined.Id, userhandler.ArcadeEditKind(arcadeID, "game"), 8, 12, now.Add(-time.Minute))
+	seedSupporterLedgerEntry(t, app, combined.Id, userhandler.ArcadeEditKind(arcadeID, "memo"), 12, 7, now)
 
 	seedArcadeVisit(t, app, visitor.Id, arcadeID, now.Add(-2*time.Hour))
 	setArcadeVisitGainedExp(t, app, visitor.Id, arcadeID, now.Add(-2*time.Hour), 15)
@@ -52,6 +53,7 @@ func TestArcadeContributionRanking_CombinesVisitsAndEdits(t *testing.T) {
 
 	var payload struct {
 		Arcade  string `json:"arcade"`
+		Metric  string `json:"metric"`
 		Entries []struct {
 			Rank    int   `json:"rank"`
 			Score   int64 `json:"score"`
@@ -63,8 +65,8 @@ func TestArcadeContributionRanking_CombinesVisitsAndEdits(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode arcade ranking response: %v", err)
 	}
-	if payload.Arcade != arcadeID {
-		t.Fatalf("expected arcade %s, got %s", arcadeID, payload.Arcade)
+	if payload.Arcade != arcadeID || payload.Metric != "total" {
+		t.Fatalf("unexpected ranking scope: arcade=%s metric=%s", payload.Arcade, payload.Metric)
 	}
 	if len(payload.Entries) != 5 {
 		t.Fatalf("expected five entries, got %d", len(payload.Entries))
@@ -87,6 +89,58 @@ func TestArcadeContributionRanking_CombinesVisitsAndEdits(t *testing.T) {
 		if item.Profile.ID == privateVisitor.Id {
 			t.Fatal("private visit XP must not be included in the public ranking")
 		}
+	}
+
+	for _, tc := range []struct {
+		metric    string
+		wantID    string
+		wantScore int64
+		wantCount int
+	}{
+		{"total", combined.Id, 17, 5},
+		{"edit", "", 12, 5},
+		{"passport", visitor.Id, 15, 2},
+	} {
+		res := executeJSONRequest(t, app, http.MethodGet, "/arcade/ranking?arcade="+arcadeID+"&metric="+tc.metric, "", nil)
+		var ranked struct {
+			Metric  string `json:"metric"`
+			Entries []struct {
+				Rank    int   `json:"rank"`
+				Score   int64 `json:"score"`
+				Profile struct {
+					ID string `json:"id"`
+				} `json:"profile"`
+			} `json:"entries"`
+		}
+		if res.StatusCode != http.StatusOK {
+			res.Body.Close()
+			t.Fatalf("%s ranking status: %d", tc.metric, res.StatusCode)
+		}
+		if err := json.NewDecoder(res.Body).Decode(&ranked); err != nil {
+			res.Body.Close()
+			t.Fatalf("decode %s ranking: %v", tc.metric, err)
+		}
+		res.Body.Close()
+		if ranked.Metric != tc.metric || len(ranked.Entries) != tc.wantCount || (tc.wantID != "" && ranked.Entries[0].Profile.ID != tc.wantID) || ranked.Entries[0].Score != tc.wantScore {
+			t.Fatalf("unexpected %s ranking: %#v", tc.metric, ranked)
+		}
+		if tc.metric == "edit" {
+			found := map[string]bool{}
+			for _, item := range ranked.Entries {
+				if item.Score == 12 && item.Rank == 1 {
+					found[item.Profile.ID] = true
+				}
+			}
+			if !found[combined.Id] || !found[editor.Id] {
+				t.Fatalf("edit ranking missing tied editors: %#v", ranked.Entries)
+			}
+		}
+	}
+
+	invalidRes := executeJSONRequest(t, app, http.MethodGet, "/arcade/ranking?arcade="+arcadeID+"&metric=visits", "", nil)
+	defer invalidRes.Body.Close()
+	if invalidRes.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected invalid metric to return 400, got %d", invalidRes.StatusCode)
 	}
 
 	arcade, err := app.FindRecordById("arcade", arcadeID)

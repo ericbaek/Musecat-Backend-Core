@@ -320,6 +320,10 @@ components:
         id: {type: string}
         name: {type: string}
         country: {type: string}
+        photo_url:
+          type: string
+          format: uri-reference
+          description: First publicly readable photo in the arcade's current photo molecule. Omitted when unavailable.
     RankingArcadeStats:
       type: object
       required: [visit_count]
@@ -347,13 +351,14 @@ components:
         score:
           type: integer
           format: int64
-          description: XP earned from this arcade's completed visit verifications and arcade edit changelog grants.
+          description: XP earned for the selected metric. Total combines completed visit verifications and positive arcade edit grants; edit and passport each count their respective source only.
         profile: {$ref: '#/components/schemas/RankingProfile'}
     ArcadeVisitRankingResponse:
       type: object
-      required: [arcade, entries]
+      required: [arcade, metric, entries]
       properties:
         arcade: {type: string}
+        metric: {type: string, enum: [total, edit, passport]}
         entries:
           type: array
           maxItems: 5
@@ -3443,7 +3448,7 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcade/photo/file
-      description: Streams one photo through the custom API. A published photo of a public arcade is anonymous-readable. Pending or draft photos require a bearer token with atom-list access. Clients must use the returned `file_url`, not PocketBase `/api/files` URLs. The optional `thumb=680x0` query returns the configured width-limited thumbnail and never silently falls back to the original file.
+      description: Streams one photo through the custom API. A published photo of a public arcade is anonymous-readable and privately browser-cacheable for five minutes. Pending or draft photos require a bearer token with atom-list access and are never cached. Clients must use the returned `file_url`, not PocketBase `/api/files` URLs. Supported thumbnail queries return the configured derivative and never silently fall back to the original file.
       parameters:
         - name: id
           in: query
@@ -3452,8 +3457,8 @@ paths:
         - name: thumb
           in: query
           required: false
-          schema: {type: string, enum: [680x0]}
-          description: Returns a 680px-wide thumbnail while preserving aspect ratio.
+          schema: {type: string, enum: [96x96, 384x384, 680x0]}
+          description: Returns a configured square crop or a 680px-wide aspect-preserving thumbnail.
       responses:
         '200':
           description: Photo bytes.
@@ -6457,12 +6462,16 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcade/ranking
-      description: Returns up to five users ranked by XP earned from this public arcade's completed visit verifications and arcade edit changelog grants. Public closed arcades remain eligible. Private arcades return 404, and visit XP with private visit visibility is omitted.
+      description: Returns up to five users ranked by XP earned from this public arcade. The total metric combines completed visit verifications and positive arcade edit grants; edit and passport rank those sources separately. Public closed arcades remain eligible. Private arcades return 404, and visit XP with private visit visibility is omitted.
       parameters:
         - name: arcade
           in: query
           required: true
           schema: {type: string}
+        - name: metric
+          in: query
+          required: false
+          schema: {type: string, enum: [total, edit, passport], default: total}
       responses:
         '200':
           description: Top five contributors for the arcade.
@@ -6470,7 +6479,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ArcadeVisitRankingResponse'}
         '400':
-          description: Missing arcade id.
+          description: Missing arcade id or invalid metric.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

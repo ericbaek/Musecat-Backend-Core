@@ -60,13 +60,17 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	setRecordCreated(t, app, "arcade_photo_atoms", privatePhoto, now.Add(-time.Hour))
 	oldPhoto := seedPhotoAtom(t, app, arcadeOne, photographer.Id, true)
 	setRecordCreated(t, app, "arcade_photo_atoms", oldPhoto, now.Add(-8*24*time.Hour))
+	rankingPhoto := seedPhotoAtom(t, app, arcadeTwo, photographer.Id, true)
+	setRecordCreated(t, app, "arcade_photo_atoms", rankingPhoto, now.Add(-8*24*time.Hour))
+	pendingRankingPhoto := seedPhotoAtom(t, app, arcadeTwo, photographer.Id, false)
+	seedPhotoMolecule(t, app, arcadeTwo, photographer.Id, []string{pendingRankingPhoto, rankingPhoto})
 
 	assertRankingTop(t, app, "/rankings?metric=explorer&period=week", explorer.Id, 2)
 	assertRankingTop(t, app, "/rankings?metric=visits&period=week", explorer.Id, 3)
 	assertRankingTop(t, app, "/rankings?metric=xp&period=week", explorer.Id, 10)
 	assertRankingTop(t, app, "/rankings?metric=level&period=all", photographer.Id, 16)
 	assertRankingTop(t, app, "/rankings?metric=photographer&period=week", photographer.Id, 1)
-	assertArcadeRankingTop(t, app, "/rankings?metric=arcade_visits&period=week", arcadeTwo, 20, 2)
+	assertArcadeRankingTop(t, app, "/rankings?metric=arcade_visits&period=week", arcadeTwo, 20, 2, "/arcade/photo/file?id="+rankingPhoto)
 	assertExplorerDistance(t, app, "/rankings?metric=explorer&period=week", explorer.Id)
 	assertRankingPrimaryCountry(t, app, "/rankings?metric=explorer&period=week", explorer.Id, "KR")
 
@@ -153,7 +157,7 @@ func TestRankings_PreservesTiedRanks(t *testing.T) {
 	}
 }
 
-func assertArcadeRankingTop(t *testing.T, app *tests.TestApp, url, arcadeID string, score int64, visitCount int64) {
+func assertArcadeRankingTop(t *testing.T, app *tests.TestApp, url, arcadeID string, score int64, visitCount int64, photoURL string) {
 	t.Helper()
 	res := executeJSONRequest(t, app, http.MethodGet, url, "", nil)
 	defer res.Body.Close()
@@ -167,7 +171,8 @@ func assertArcadeRankingTop(t *testing.T, app *tests.TestApp, url, arcadeID stri
 				VisitCount int64 `json:"visit_count"`
 			} `json:"stats"`
 			Arcade struct {
-				ID string `json:"id"`
+				ID       string `json:"id"`
+				PhotoURL string `json:"photo_url"`
 			} `json:"arcade"`
 		} `json:"entries"`
 	}
@@ -176,6 +181,9 @@ func assertArcadeRankingTop(t *testing.T, app *tests.TestApp, url, arcadeID stri
 	}
 	if len(payload.Entries) == 0 || payload.Entries[0].Arcade.ID != arcadeID || payload.Entries[0].Score != score || payload.Entries[0].Stats.VisitCount != visitCount {
 		t.Fatalf("%s: unexpected top entry: %#v", url, payload.Entries)
+	}
+	if payload.Entries[0].Arcade.PhotoURL != photoURL {
+		t.Fatalf("%s: photo_url=%q, want %q", url, payload.Entries[0].Arcade.PhotoURL, photoURL)
 	}
 }
 

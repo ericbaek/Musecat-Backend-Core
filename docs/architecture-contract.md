@@ -191,7 +191,9 @@ lock the existing `user_info` update rule before this API cutover.
 `GET /rankings` always returns the public top 100. User metrics include explorer,
 visits, XP, level, and photographer. The `arcade_visits` metric returns public
 arcades ranked by the total XP awarded by their completed visit-verification
-records; the response displays the verification count separately. Public
+records; the response displays the verification count separately and includes
+the first publicly readable photo from the current photo molecule when one is
+available. Public
 closed arcades remain eligible as historical venues, while private arcades are excluded. For
 explorer entries, `score` is the number of distinct public arcades and
 `stats.travel_distance_km` is the rounded whole-kilometer straight-line distance
@@ -203,13 +205,16 @@ visibility predicates as the public list; otherwise `viewer` is `null`. In
 particular, `private` visit visibility excludes explorer and visit rankings,
 including the authenticated user's own entry.
 
-`GET /arcade/ranking` returns up to five users for one public arcade, ranked by
-the total XP earned from that arcade's completed visit verifications plus
-positive `xp:arcade-edit:<part>:<arcadeId>` changelog grants for all supported
+`GET /arcade/ranking?arcade=...&metric=total|edit|passport` returns up to five
+users for one public arcade. `total` (also the default) ranks by visit XP plus
+edit XP, `edit` by edit XP only, and `passport` by completed visit-verification
+XP only. Edit XP comes from positive `xp:arcade-edit:<part>:<arcadeId>` grants for all supported
 parts (`basic`, `game`, `hour`, `sns`, `gtk`, `photo`, and `memo`). Public closed
 arcades remain eligible. Private arcades return `404`; visit XP from users with
 `visit_visibility=private` is omitted, while their eligible arcade edit XP is
-still ranked. Withdrawn users are omitted.
+still ranked. Only positive edit grants count; corrections do not reduce a
+contributor's earned XP. Withdrawn users are omitted. Each metric independently
+selects its top five and computes tie ranks from its own score.
 
 ## Arcade aggregate and history
 
@@ -319,11 +324,11 @@ single-record operations do not write arcade changelog or XP rows.
 | delete own draft | `DELETE /arcade/draft?id=...` |
 | arcade memo | `GET /arcade/memo?arcade=...`, `PUT /arcade/memo` |
 | changelog timeline | `GET /arcade/changelog?arcade=...` (optional `changed=basic|game|hour|sns|gtk|photo|memo`) |
-| arcade contribution ranking | `GET /arcade/ranking?arcade=...` |
+| arcade contribution ranking | `GET /arcade/ranking?arcade=...` (optional `metric=total|edit|passport`, default `total`) |
 | user-authored changelog timeline | `GET /user/changelog?user=...` (optional `changed=basic|game|hour|sns|gtk|photo|memo`) |
 | arcade favorites | `PUT /arcade/favorite`; owner profile reads include `favorite_arcades`, while public profile reads include it only when `favorite_visibility=public`; owners control this with `PUT /user/favorite-visibility` |
 | photo atom list | `GET /arcade/photo/atoms?arcade=...` |
-| photo bytes | `GET /arcade/photo/file?id=...` (the `file_url` returned for an atom; optional `thumb=680x0`) |
+| photo bytes | `GET /arcade/photo/file?id=...` (the `file_url` returned for an atom; optional `thumb=96x96|384x384|680x0`) |
 | delete pending own photo atom | `DELETE /arcade/photo/atom?id=...` |
 | standalone edit report | `POST /arcade/edit_report` |
 | reviewer queue | `GET /moderation/arcade/edit-reports` |

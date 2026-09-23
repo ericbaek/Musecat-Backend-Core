@@ -2302,6 +2302,8 @@ func init() {
 						"required": true,
 						"system": false,
 						"thumbs": [
+							"96x96",
+							"384x384",
 							"680x0"
 						],
 						"type": "file"

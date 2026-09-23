@@ -14,6 +14,12 @@ import (
 
 const arcadeContributionRankingLimit = 5
 
+const (
+	arcadeRankingTotal    = "total"
+	arcadeRankingEdit     = "edit"
+	arcadeRankingPassport = "passport"
+)
+
 var arcadeEditRankingParts = []string{
 	"basic",
 	"game",
@@ -24,13 +30,18 @@ var arcadeEditRankingParts = []string{
 	"memo",
 }
 
-// ArcadeVisitRanking handles GET /arcade/ranking?arcade=<id>.
-// It ranks contributors by XP earned from this arcade's visit verifications
-// and arcade changelog edit grants.
+// ArcadeVisitRanking handles GET /arcade/ranking?arcade=<id>&metric=<total|edit|passport>.
 func ArcadeVisitRanking(re *core.RequestEvent) error {
 	arcadeID := strings.TrimSpace(re.Request.URL.Query().Get("arcade"))
 	if arcadeID == "" {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "arcade is required"})
+	}
+	metric := strings.TrimSpace(re.Request.URL.Query().Get("metric"))
+	if metric == "" {
+		metric = arcadeRankingTotal
+	}
+	if metric != arcadeRankingTotal && metric != arcadeRankingEdit && metric != arcadeRankingPassport {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid ranking metric"})
 	}
 
 	arcade, err := re.App.FindRecordById("arcade", arcadeID)
@@ -38,20 +49,22 @@ func ArcadeVisitRanking(re *core.RequestEvent) error {
 		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
 	}
 
-	entries, err := loadArcadeContributionRankings(re.App, re.Request.Context(), arcadeID)
+	entries, err := loadArcadeContributionRankings(re.App, re.Request.Context(), arcadeID, metric)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load arcade ranking", "details": err.Error()})
 	}
 
 	return re.JSON(http.StatusOK, map[string]any{
 		"arcade":  arcadeID,
+		"metric":  metric,
 		"entries": entries,
 	})
 }
 
-func loadArcadeContributionRankings(app core.App, ctx context.Context, arcadeID string) ([]entry, error) {
+func loadArcadeContributionRankings(app core.App, ctx context.Context, arcadeID, metric string) ([]entry, error) {
 	params := dbx.Params{
 		"arcade": arcadeID,
+		"metric": metric,
 		"limit":  arcadeContributionRankingLimit,
 	}
 	editPredicates := make([]string, 0, len(arcadeEditRankingParts))
@@ -72,13 +85,16 @@ SELECT v.user AS user_id, SUM(COALESCE(v.gained_exp, 0)) AS score
 FROM arcade_visit v
 LEFT JOIN user_info ui ON ui.id = v.user
 WHERE v.arcade = {:arcade}
+  AND {:metric} != 'edit'
   AND COALESCE(v.gained_exp, 0) > 0
   AND COALESCE(NULLIF(ui.visit_visibility, ''), 'summary') IN ('summary', 'full')
 GROUP BY v.user
 UNION ALL
 SELECT l.user AS user_id, SUM(COALESCE(l.diff_exp, 0)) AS score
 FROM user_level_log l
-WHERE %s
+WHERE (%s)
+  AND {:metric} != 'passport'
+  AND l.diff_exp > 0
 GROUP BY l.user
 ), scores AS (
 SELECT user_id, SUM(score) AS score

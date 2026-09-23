@@ -14,6 +14,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 
+	photoread "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo/read"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
@@ -59,9 +60,10 @@ type arcadeRankingStats struct {
 }
 
 type arcadeSummary struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Country string `json:"country"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Country  string `json:"country"`
+	PhotoURL string `json:"photo_url,omitempty"`
 }
 
 type entry struct {
@@ -243,15 +245,34 @@ SELECT
   a.id,
   COALESCE(NULLIF(ab.name, ''), a.id) AS name,
   COALESCE(a.country, '') AS country,
+  a.photo AS photo_molecule_id,
   RANK() OVER (ORDER BY scores.score DESC) AS rank
 FROM scores
 INNER JOIN arcade a ON a.id = scores.arcade
 LEFT JOIN arcade_basic ab ON ab.id = a.basic
-)
-SELECT score, visit_count, id, name, country, rank
+), leaders AS (
+SELECT score, visit_count, id, name, country, photo_molecule_id, rank
 FROM ranked
 ORDER BY score DESC, name COLLATE NOCASE ASC, id ASC
 LIMIT {:limit}
+)
+SELECT score, visit_count, id, name, country,
+  COALESCE((
+    SELECT atom.id
+    FROM arcade_photo ap
+    INNER JOIN json_each(COALESCE(NULLIF(ap.photos, ''), '[]')) selected
+    INNER JOIN arcade_photo_atoms atom ON atom.id = selected.value
+    WHERE ap.id = leaders.photo_molecule_id
+      AND ap.arcade = leaders.id
+      AND atom.arcade = leaders.id
+      AND atom.public = true
+      AND TRIM(COALESCE(atom.photo, '')) != ''
+    ORDER BY CAST(selected.key AS INTEGER)
+    LIMIT 1
+  ), '') AS photo_atom_id,
+  rank
+FROM leaders
+ORDER BY score DESC, name COLLATE NOCASE ASC, id ASC
 `).Bind(params).WithContext(ctx).Rows()
 	if err != nil {
 		return nil, nil, err
@@ -263,8 +284,12 @@ LIMIT {:limit}
 		var item entry
 		item.Arcade = &arcadeSummary{}
 		var visitCount int64
-		if err := rows.Scan(&item.Score, &visitCount, &item.Arcade.ID, &item.Arcade.Name, &item.Arcade.Country, &item.Rank); err != nil {
+		var photoAtomID string
+		if err := rows.Scan(&item.Score, &visitCount, &item.Arcade.ID, &item.Arcade.Name, &item.Arcade.Country, &photoAtomID, &item.Rank); err != nil {
 			return nil, nil, err
+		}
+		if photoAtomID != "" {
+			item.Arcade.PhotoURL = photoread.FileURL(photoAtomID)
 		}
 		item.Stats = &arcadeRankingStats{VisitCount: visitCount}
 		entries = append(entries, item)
