@@ -1996,15 +1996,35 @@ components:
             $ref: '#/components/schemas/GameCatalogVersion'
     GameCatalogSeries:
       type: object
-      required: [id, name, series_number]
+      required: [id, name, full_name, hide_at, series_number, manufacturer]
       properties:
         id:
           type: string
         name:
           type: string
+        full_name:
+          type: string
+          description: Locale-resolved full series name.
+        hide_at:
+          type: array
+          description: Stored locale visibility codes. Clients use these to hide home filters without another collection request.
+          items:
+            type: string
         series_number:
           type: integer
           description: Canonical game-series ordering number.
+        manufacturer:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [id, name]
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                  description: Locale-resolved manufacturer display name.
+          description: Manufacturer of this game series, null if unassigned.
     GameCatalogVersion:
       type: object
       required: [id, series_id, name, released_on, price_default, cabinets]
@@ -3957,6 +3977,125 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /user/profile:
+    put:
+      tags: [Users]
+      summary: Update the authenticated user's profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname]
+              properties:
+                nickname: {type: string, minLength: 1, maxLength: 25}
+                bio: {type: string, maxLength: 100}
+                sns: {$ref: '#/components/schemas/UserProfileSns'}
+                avatar: {type: 'null', description: Null deletes the current avatar.}
+                background: {type: 'null', description: Null deletes the current background; requires level 15.}
+                background_position: {$ref: '#/components/schemas/UserProfile/properties/background_position'}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [nickname]
+              properties:
+                nickname: {type: string, minLength: 1, maxLength: 25}
+                bio: {type: string, maxLength: 100}
+                sns: {type: string, description: JSON encoded UserProfileSns object.}
+                avatar: {type: string, format: binary, description: PNG or JPEG up to 15 MB; empty or "null" text deletes.}
+                background: {type: string, format: binary, description: PNG or JPEG up to 15 MB; empty or "null" text deletes. Requires level 15.}
+                background_position: {type: string, description: JSON encoded x and y percentages (0 to 100); requires level 15.}
+      responses:
+        '200':
+          description: Updated self profile, including private series.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserProfile'}
+        '400':
+          description: Invalid profile input.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Inactive user or background access requires level 15.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Missing user_info record.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Storage or profile read failed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /user/game-preferences:
+    put:
+      tags: [Users]
+      summary: Replace the authenticated user's preferred game series and visibility
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [series, series_public]
+              properties:
+                series:
+                  type: array
+                  items: {type: string}
+                series_public: {type: boolean}
+                warp: {type: boolean, description: Omit to retain the current value.}
+      responses:
+        '200':
+          description: Saved preferences with duplicate and blank series IDs removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, series, series_public, warp]
+                properties:
+                  success: {type: boolean}
+                  series: {type: array, items: {type: string}}
+                  series_public: {type: boolean}
+                  warp: {type: boolean}
+        '400':
+          description: Invalid preferences or unknown game series.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Inactive user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Missing user_info record.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Storage failure.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /user/activity:
     get:
       tags: [Users]

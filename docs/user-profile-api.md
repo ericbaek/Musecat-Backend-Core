@@ -4,6 +4,8 @@
 This document describes the newly added user profile APIs:
 - `GET /user` (public lookup by id or username)
 - `GET /user/me` (authenticated self profile)
+- `PUT /user/profile` (authenticated self profile update)
+- `PUT /user/game-preferences` (authenticated game series preferences)
 - `GET /user/activity` (public activity heatmap lookup)
 - `PUT /user/countries` (authenticated profile-country selection)
 - `GET /supporter/score` and `POST /supporter/request` are documented separately in `docs/supporter-api.md`
@@ -295,6 +297,34 @@ Authenticated self profile lookup.
   "details": "..."
 }
 ```
+
+## Endpoint: PUT /user/profile
+
+An active authenticated user updates their own profile with JSON or multipart
+form data. `nickname` is required after trimming (1–25 Unicode characters; flag
+emoji are rejected). Optional `bio` is limited to 100 characters and five lines.
+Optional `sns` is an `{ "items": [{ "type": "website", "link": "https://example.com" }] }`
+object with unique types: website, twitter, instagram, facebook, discord, or
+threads. Links require HTTP(S) URLs except Discord links.
+
+Multipart `sns` and `background_position` values are JSON encoded strings.
+`avatar` and `background` accept one PNG or JPEG file up to 15 MB. Sending an
+empty string or `null` deletes the existing file; omission preserves it.
+Background upload, deletion, or a `background_position` change requires level
+15. Position coordinates `x` and `y` must each be between 0 and 100.
+Success returns the current `GET /user/me` profile (200). Invalid input returns
+400, unauthorized requests 401, inactive users or insufficient background level
+403, a missing `user_info` record 409, and storage failures 502.
+
+## Endpoint: PUT /user/game-preferences
+
+An active authenticated user sends JSON with required `series` (string array)
+and `series_public` (boolean), plus optional `warp` (boolean). Blank and duplicate
+series IDs are removed; remaining IDs must exist in `game_series`. Omitted
+`warp` retains its saved value. Success returns 200 with `success`, normalized
+`series`, `series_public`, and `warp`. Invalid input returns 400, unauthorized
+requests 401, inactive users 403, missing `user_info` 409, and storage failures
+502.
 
 ## Endpoint: GET /user/activity
 Public user activity heatmap lookup.

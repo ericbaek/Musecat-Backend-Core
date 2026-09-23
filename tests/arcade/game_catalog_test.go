@@ -22,6 +22,7 @@ func TestGameCatalog_LocalizesCompatibilityAndCabinetDefaults(t *testing.T) {
 	series.Set("en_short", "Rhythm")
 	series.Set("kr_short", "리듬")
 	series.Set("jp_short", "リズム")
+	series.Set("hide_at", []string{"jp"})
 	series.Set("seriesNumber", 2)
 	if err := app.Save(series); err != nil {
 		t.Fatal(err)
@@ -61,9 +62,15 @@ func TestGameCatalog_LocalizesCompatibilityAndCabinetDefaults(t *testing.T) {
 	}
 	var payload struct {
 		Series []struct {
-			ID           string `json:"id"`
-			Name         string `json:"name"`
-			SeriesNumber int    `json:"series_number"`
+			ID           string   `json:"id"`
+			Name         string   `json:"name"`
+			FullName     string   `json:"full_name"`
+			HideAt       []string `json:"hide_at"`
+			SeriesNumber int      `json:"series_number"`
+			Manufacturer *struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"manufacturer"`
 		} `json:"series"`
 		Versions []struct {
 			ID           string         `json:"id"`
@@ -83,6 +90,12 @@ func TestGameCatalog_LocalizesCompatibilityAndCabinetDefaults(t *testing.T) {
 	}
 	if len(payload.Series) != 1 || payload.Series[0].ID != series.Id || payload.Series[0].Name != "리듬" || payload.Series[0].SeriesNumber != 2 {
 		t.Fatalf("unexpected localized series: %#v", payload.Series)
+	}
+	if payload.Series[0].FullName != "리듬 시리즈" || len(payload.Series[0].HideAt) != 1 || payload.Series[0].HideAt[0] != "jp" {
+		t.Fatalf("expected full name and visibility codes: %#v", payload.Series[0])
+	}
+	if payload.Series[0].Manufacturer != nil {
+		t.Fatalf("expected null manufacturer for series without manufacturer, got %#v", payload.Series[0].Manufacturer)
 	}
 	if len(payload.Versions) != 1 {
 		t.Fatalf("expected one version, got %#v", payload.Versions)
@@ -137,5 +150,91 @@ func TestGameCatalog_OrdersSeriesAndVersions(t *testing.T) {
 	}
 	if len(payload.Versions) != 2 || payload.Versions[0].ID != newVersion || payload.Versions[1].ID != oldVersion {
 		t.Fatalf("versions must be ordered by latest release: %#v", payload.Versions)
+	}
+}
+
+func TestGameCatalog_IncludesManufacturer(t *testing.T) {
+	app := newArcadeTestApp(t)
+
+	manufacturerColl, err := app.FindCollectionByNameOrId("game_manufacturer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manufacturer := core.NewRecord(manufacturerColl)
+	manufacturer.Set("en", "KONAMI")
+	manufacturer.Set("kr", "코나미")
+	manufacturer.Set("jp", "コナミ")
+	if err := app.Save(manufacturer); err != nil {
+		t.Fatal(err)
+	}
+
+	seriesColl, err := app.FindCollectionByNameOrId("game_series")
+	if err != nil {
+		t.Fatal(err)
+	}
+	withMfr := core.NewRecord(seriesColl)
+	withMfr.Set("en", "With Manufacturer")
+	withMfr.Set("kr", "제조사 있음")
+	withMfr.Set("en_short", "With Mfr")
+	withMfr.Set("kr_short", "제조사")
+	withMfr.Set("seriesNumber", 1)
+	withMfr.Set("manufacturer", manufacturer.Id)
+	if err := app.Save(withMfr); err != nil {
+		t.Fatal(err)
+	}
+
+	withoutMfr := core.NewRecord(seriesColl)
+	withoutMfr.Set("en", "Without Manufacturer")
+	withoutMfr.Set("kr", "제조사 없음")
+	withoutMfr.Set("en_short", "No Mfr")
+	withoutMfr.Set("kr_short", "없음")
+	withoutMfr.Set("seriesNumber", 2)
+	if err := app.Save(withoutMfr); err != nil {
+		t.Fatal(err)
+	}
+
+	response := executeJSONRequest(t, app, http.MethodGet, "/game/catalog?locale=ko-KR", "", nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Series []struct {
+			ID           string `json:"id"`
+			Name         string `json:"name"`
+			SeriesNumber int    `json:"series_number"`
+			Manufacturer *struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"manufacturer"`
+		} `json:"series"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Series) != 2 {
+		t.Fatalf("expected 2 series, got %d: %#v", len(payload.Series), payload.Series)
+	}
+	// Series are ordered by series_number, so index 0 is withMfr (1), index 1 is withoutMfr (2).
+	got := payload.Series[0]
+	if got.ID != withMfr.Id {
+		t.Fatalf("first series should be withMfr (seriesNumber=1), got %s", got.ID)
+	}
+	if got.Manufacturer == nil {
+		t.Fatal("expected manufacturer to be present for series with manufacturer")
+	}
+	if got.Manufacturer.ID != manufacturer.Id {
+		t.Fatalf("expected manufacturer id %s, got %s", manufacturer.Id, got.Manufacturer.ID)
+	}
+	if got.Manufacturer.Name != "코나미" {
+		t.Fatalf("expected localized manufacturer name '코나미', got %q", got.Manufacturer.Name)
+	}
+
+	gotWithout := payload.Series[1]
+	if gotWithout.ID != withoutMfr.Id {
+		t.Fatalf("second series should be withoutMfr, got %s", gotWithout.ID)
+	}
+	if gotWithout.Manufacturer != nil {
+		t.Fatalf("expected null manufacturer for series without manufacturer, got %#v", gotWithout.Manufacturer)
 	}
 }

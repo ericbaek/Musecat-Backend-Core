@@ -8,10 +8,6 @@
 
 ## Current Coverage
 `docs/openapi.yaml` now covers every implemented route registered in `main.go`.
-
-Excluded:
-- `POST /arcade/nearby` because the route is registered with `nil` and is not implemented yet.
-
 ## Update Rules
 When adding or changing an endpoint:
 1. Update the handler and tests.

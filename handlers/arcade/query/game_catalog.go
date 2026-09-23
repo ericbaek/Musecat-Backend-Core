@@ -15,10 +15,18 @@ type gameCatalogResponse struct {
 	Versions []gameCatalogVersion `json:"versions"`
 }
 
+type gameCatalogManufacturer struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type gameCatalogSeries struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	SeriesNumber int    `json:"series_number"`
+	ID           string                   `json:"id"`
+	Name         string                   `json:"name"`
+	FullName     string                   `json:"full_name"`
+	HideAt       []string                 `json:"hide_at"`
+	SeriesNumber int                      `json:"series_number"`
+	Manufacturer *gameCatalogManufacturer `json:"manufacturer"`
 }
 
 type gameCatalogVersion struct {
@@ -48,6 +56,27 @@ func GetGameCatalog(re *core.RequestEvent) error {
 		})
 	}
 
+	manufacturerRecords, err := re.App.FindRecordsByFilter(
+		arcadeinternal.CollectionGameManufacturer,
+		"",
+		"",
+		0,
+		0,
+		nil,
+	)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]string{
+			"error": "failed to load game catalog manufacturers",
+		})
+	}
+	manufacturerByID := make(map[string]*gameCatalogManufacturer, len(manufacturerRecords))
+	for _, record := range manufacturerRecords {
+		manufacturerByID[record.Id] = &gameCatalogManufacturer{
+			ID:   record.Id,
+			Name: catalogName(record, locale),
+		}
+	}
+
 	seriesRecords, err := re.App.FindRecordsByFilter(
 		arcadeinternal.CollectionGameSeries,
 		"",
@@ -69,7 +98,10 @@ func GetGameCatalog(re *core.RequestEvent) error {
 		seriesByID[record.Id] = gameCatalogSeries{
 			ID:           record.Id,
 			Name:         catalogSeriesName(record, locale),
+			FullName:     catalogName(record, locale),
+			HideAt:       record.GetStringSlice("hide_at"),
 			SeriesNumber: record.GetInt("seriesNumber"),
+			Manufacturer: manufacturerByID[record.GetString("manufacturer")],
 		}
 	}
 

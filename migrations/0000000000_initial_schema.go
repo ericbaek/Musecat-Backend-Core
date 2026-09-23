@@ -3285,7 +3285,7 @@ func init() {
 				"name": "user_info",
 				"system": false,
 				"type": "base",
-				"updateRule": "id = @request.auth.id",
+				"updateRule": null,
 				"viewRule": "id = @request.auth.id"
 			},
 			{

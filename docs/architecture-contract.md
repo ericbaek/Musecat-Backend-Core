@@ -176,6 +176,18 @@ expose only `primary_country`, and the client renders it with the Dashboard
 country icon source in every nickname profile surface whenever a country is
 present. The icon is ordered before any supporter or staff badge.
 
+Active users edit their own `user_info` profile only through `PUT /user/profile`
+and game series preferences only through `PUT /user/game-preferences`. The
+`user_info` raw PocketBase update rule is locked in Core bootstrap. Profile
+updates validate nickname, bio, SNS links, image files, and background position
+on the server. Avatar deletion is explicit; omitted files remain unchanged.
+Background upload, deletion, and position changes require level 15 based on
+`user_level.exp`. Inactive or withdrawn accounts cannot use either mutation.
+The preference route replaces the ordered series list, removes duplicates,
+validates series IDs, and preserves `warp` when omitted.
+Existing Full installations require their own guarded forward migration to
+lock the existing `user_info` update rule before this API cutover.
+
 `GET /rankings` always returns the public top 100. User metrics include explorer,
 visits, XP, level, and photographer. The `arcade_visits` metric returns public
 arcades ranked by the total XP awarded by their completed visit-verification

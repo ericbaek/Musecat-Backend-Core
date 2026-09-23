@@ -36,6 +36,8 @@ func newUserFetchTestApp(tb testing.TB) *tests.TestApp {
 
 		authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))
 		authUser.GET("/me", userhandler.GetMe)
+		authUser.PUT("/profile", userhandler.UpdateProfile).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(35<<20))
+		authUser.PUT("/game-preferences", userhandler.UpdateGamePreferences).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(128<<10))
 		authUser.POST("/signup", userhandler.SignUp)
 		authUser.POST("/check-in", userhandler.CheckIn).Bind(userhandler.RequireActiveUser())
 		se.Router.GET("/user/passport", userhandler.GetMyPassport)
