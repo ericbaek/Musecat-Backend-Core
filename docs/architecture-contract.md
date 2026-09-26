@@ -326,7 +326,7 @@ single-record operations do not write arcade changelog or XP rows.
 | changelog timeline | `GET /arcade/changelog?arcade=...` (optional `changed=basic|game|hour|sns|gtk|photo|memo`) |
 | arcade contribution ranking | `GET /arcade/ranking?arcade=...` (optional `metric=total|edit|passport`, default `total`) |
 | user-authored changelog timeline | `GET /user/changelog?user=...` (optional `changed=basic|game|hour|sns|gtk|photo|memo`) |
-| arcade favorites | `PUT /arcade/favorite`; owner profile reads include `favorite_arcades`, while public profile reads include it only when `favorite_visibility=public`; owners control this with `PUT /user/favorite-visibility` |
+| arcade favorites | `PUT /arcade/favorite`; `PUT /arcade/favorite/order` persists an active owner's ordered arcade IDs, rejects duplicate/non-owned IDs, and appends omitted favorites in their existing order. New favorites append to the end. Owner profile reads include `favorite_arcades`, while public profile reads include it only when `favorite_visibility=public`; owners control this with `PUT /user/favorite-visibility` |
 | photo atom list | `GET /arcade/photo/atoms?arcade=...` |
 | photo bytes | `GET /arcade/photo/file?id=...` (the `file_url` returned for an atom; optional `thumb=96x96|384x384|680x0`) |
 | delete pending own photo atom | `DELETE /arcade/photo/atom?id=...` |

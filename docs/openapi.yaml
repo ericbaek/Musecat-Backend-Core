@@ -6977,6 +6977,28 @@ paths:
           description: Updated favorite state for the arcade.
         '404':
           description: Arcade does not exist or is not public.
+  /arcade/favorite/order:
+    put:
+      tags: [Arcades]
+      summary: /arcade/favorite/order
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcades]
+              properties:
+                arcades:
+                  type: array
+                  items: {type: string}
+                  description: Ordered list of arcade IDs representing the user's favorite order.
+      responses:
+        '200':
+          description: Updated favorite order for the authenticated user.
+        '400':
+          description: Invalid request body or contains duplicate/unfavorited arcades.
   /user/countries:
     put:
       tags: [Users]

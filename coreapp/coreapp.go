@@ -207,6 +207,7 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
 	authArcade.POST("/visit", userhandler.VisitArcade)
 	authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite)
+	authArcade.PUT("/favorite/order", userhandler.UpdateArcadeFavoriteOrder)
 	se.Router.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),

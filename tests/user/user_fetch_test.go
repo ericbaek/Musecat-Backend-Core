@@ -48,6 +48,7 @@ func newUserFetchTestApp(tb testing.TB) *tests.TestApp {
 		authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(userhandler.RequireActiveUser())
 		authArcade := se.Router.Group("/arcade").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
 		authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite)
+		authArcade.PUT("/favorite/order", userhandler.UpdateArcadeFavoriteOrder)
 		se.Router.Group("/arcade").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser()).POST("/visit", userhandler.VisitArcade)
 
 		return se.Next()

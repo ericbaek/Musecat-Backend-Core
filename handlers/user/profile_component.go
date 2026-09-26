@@ -371,7 +371,7 @@ func loadFavoriteArcades(app core.App, userID string) []FavoriteArcade {
 	favorites, err := app.FindRecordsByFilter(
 		CollectionArcadeFavorite,
 		"user={:user}",
-		"-created",
+		"sort_order,-created",
 		100,
 		0,
 		map[string]any{"user": userID},

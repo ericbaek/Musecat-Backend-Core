@@ -2,8 +2,11 @@ package user_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
+
+	"github.com/pocketbase/pocketbase/core"
 )
 
 func TestArcadeFavoriteToggleIsIdempotent(t *testing.T) {
@@ -111,6 +114,73 @@ func TestFavoriteVisibilityControlsProfileArcades(t *testing.T) {
 	res = doUserRequest(t, app, http.MethodPut, "/arcade/favorite", headers, `{"arcade":"`+privateArcade.Id+`","favorited":true}`)
 	if res.StatusCode != http.StatusNotFound {
 		t.Fatalf("private arcade favorite status = %d, want %d", res.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestArcadeFavoriteOrder(t *testing.T) {
+	app := newUserFetchTestApp(t)
+	token, _ := createAuthUser(t, app, true)
+	headers := map[string]string{"Authorization": "Bearer " + token}
+
+	arcade1 := seedVisitArcade(t, app, "Asia/Seoul")
+	arcade2 := seedVisitArcade(t, app, "Asia/Seoul")
+	arcade3 := seedVisitArcade(t, app, "Asia/Seoul")
+
+	// Favorite them in order: 1, 2, 3
+	for _, arc := range []*core.Record{arcade1, arcade2, arcade3} {
+		res := doUserRequest(t, app, http.MethodPut, "/arcade/favorite", headers, `{"arcade":"`+arc.Id+`","favorited":true}`)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("add favorite %s status = %d, want %d", arc.Id, res.StatusCode, http.StatusOK)
+		}
+	}
+
+	// Verify order on profile is [1, 2, 3]
+	res := doUserRequest(t, app, http.MethodGet, "/user/me", headers, "")
+	myProfile := decodeJSON(t, res)
+	gotIDs := profileFavoriteArcadeIDs(t, myProfile)
+	if len(gotIDs) != 3 || gotIDs[0] != arcade1.Id || gotIDs[1] != arcade2.Id || gotIDs[2] != arcade3.Id {
+		t.Fatalf("initial favorite order = %#v, want [%s, %s, %s]", gotIDs, arcade1.Id, arcade2.Id, arcade3.Id)
+	}
+
+	// Reorder to [3, 1, 2]
+	reorderBody := fmt.Sprintf(`{"arcades":["%s","%s","%s"]}`, arcade3.Id, arcade1.Id, arcade2.Id)
+	res = doUserRequest(t, app, http.MethodPut, "/arcade/favorite/order", headers, reorderBody)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("reorder status = %d, want %d", res.StatusCode, http.StatusOK)
+	}
+
+	// Verify updated order on profile
+	res = doUserRequest(t, app, http.MethodGet, "/user/me", headers, "")
+	myProfile = decodeJSON(t, res)
+	gotIDs = profileFavoriteArcadeIDs(t, myProfile)
+	if len(gotIDs) != 3 || gotIDs[0] != arcade3.Id || gotIDs[1] != arcade1.Id || gotIDs[2] != arcade2.Id {
+		t.Fatalf("reordered favorite order = %#v, want [%s, %s, %s]", gotIDs, arcade3.Id, arcade1.Id, arcade2.Id)
+	}
+
+	// Reorder with a duplicate arcade should return 400
+	for _, body := range []string{`{}`, `{"arcades":null}`, `{"arcades":[3]}`} {
+		res = doUserRequest(t, app, http.MethodPut, "/arcade/favorite/order", headers, body)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("invalid body %s status = %d", body, res.StatusCode)
+		}
+	}
+	res = doUserRequest(t, app, http.MethodPut, "/arcade/favorite/order", nil, reorderBody)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous reorder status = %d", res.StatusCode)
+	}
+
+	dupBody := fmt.Sprintf(`{"arcades":["%s","%s"]}`, arcade1.Id, arcade1.Id)
+	res = doUserRequest(t, app, http.MethodPut, "/arcade/favorite/order", headers, dupBody)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("duplicate arcade reorder status = %d, want %d", res.StatusCode, http.StatusBadRequest)
+	}
+
+	// Reorder with an unfavorited arcade should return 400
+	unfavArcade := seedVisitArcade(t, app, "Asia/Seoul")
+	unfavBody := fmt.Sprintf(`{"arcades":["%s"]}`, unfavArcade.Id)
+	res = doUserRequest(t, app, http.MethodPut, "/arcade/favorite/order", headers, unfavBody)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unfavorited arcade reorder status = %d, want %d", res.StatusCode, http.StatusBadRequest)
 	}
 }
 
