@@ -2,8 +2,10 @@ package user
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -333,10 +335,10 @@ func loadPublicOwnedArcades(app core.App, userRec *core.Record) []OwnedArcade {
 		return []OwnedArcade{}
 	}
 
-	out := make([]OwnedArcade, 0, len(ownedIDs))
+	uniqueIDs := make([]string, 0, len(ownedIDs))
 	seen := make(map[string]struct{}, len(ownedIDs))
-	for _, ownedID := range ownedIDs {
-		id := strings.TrimSpace(ownedID)
+	for _, raw := range ownedIDs {
+		id := strings.TrimSpace(raw)
 		if id == "" {
 			continue
 		}
@@ -344,63 +346,93 @@ func loadPublicOwnedArcades(app core.App, userRec *core.Record) []OwnedArcade {
 			continue
 		}
 		seen[id] = struct{}{}
-
-		arcade, err := app.FindRecordById("arcade", id)
-		if err != nil || arcade == nil || !arcade.GetBool("public") {
-			continue
-		}
-
-		owned := OwnedArcade{
-			ID:      arcade.Id,
-			Country: strings.TrimSpace(arcade.GetString("country")),
-			Closed:  arcade.GetBool("closed"),
-		}
-		if basicID := strings.TrimSpace(arcade.GetString("basic")); basicID != "" {
-			if basic, basicErr := app.FindRecordById("arcade_basic", basicID); basicErr == nil && basic != nil {
-				owned.Name = strings.TrimSpace(basic.GetString("name"))
-				owned.Address = strings.TrimSpace(basic.GetString("address"))
-			}
-		}
-		out = append(out, owned)
+		uniqueIDs = append(uniqueIDs, id)
 	}
 
+	if len(uniqueIDs) == 0 {
+		return []OwnedArcade{}
+	}
+
+	params := make(dbx.Params, len(uniqueIDs))
+	placeholders := make([]string, len(uniqueIDs))
+	for i, id := range uniqueIDs {
+		key := fmt.Sprintf("id%d", i)
+		placeholders[i] = "{:" + key + "}"
+		params[key] = id
+	}
+
+	rows, err := app.DB().NewQuery(`
+SELECT
+  a.id,
+  COALESCE(a.country, '') AS country,
+  a.closed,
+  COALESCE(b.name, '') AS name,
+  COALESCE(b.address, '') AS address
+FROM arcade a
+LEFT JOIN arcade_basic b ON b.id = a.basic
+WHERE a.id IN (` + strings.Join(placeholders, ", ") + `) AND a.public = true
+`).Bind(params).Rows()
+	if err != nil {
+		return []OwnedArcade{}
+	}
+	defer rows.Close()
+
+	byID := make(map[string]OwnedArcade, len(uniqueIDs))
+	for rows.Next() {
+		var item OwnedArcade
+		if err := rows.Scan(&item.ID, &item.Country, &item.Closed, &item.Name, &item.Address); err != nil {
+			return []OwnedArcade{}
+		}
+		item.ID = strings.TrimSpace(item.ID)
+		item.Country = strings.TrimSpace(item.Country)
+		item.Name = strings.TrimSpace(item.Name)
+		item.Address = strings.TrimSpace(item.Address)
+		byID[item.ID] = item
+	}
+
+	out := make([]OwnedArcade, 0, len(uniqueIDs))
+	for _, id := range uniqueIDs {
+		if item, exists := byID[id]; exists {
+			out = append(out, item)
+		}
+	}
 	return out
 }
 
 func loadFavoriteArcades(app core.App, userID string) []FavoriteArcade {
-	favorites, err := app.FindRecordsByFilter(
-		CollectionArcadeFavorite,
-		"user={:user}",
-		"sort_order,-created",
-		100,
-		0,
-		map[string]any{"user": userID},
-	)
-	if err != nil {
+	if app == nil || strings.TrimSpace(userID) == "" {
 		return []FavoriteArcade{}
 	}
 
-	out := make([]FavoriteArcade, 0, len(favorites))
-	for _, favorite := range favorites {
-		arcadeID := strings.TrimSpace(favorite.GetString("arcade"))
-		if arcadeID == "" {
-			continue
+	rows, err := app.DB().NewQuery(`
+SELECT
+  a.id,
+  COALESCE(a.country, '') AS country,
+  a.closed,
+  COALESCE(b.name, '') AS name,
+  COALESCE(b.address, '') AS address
+FROM arcade_favorite f
+INNER JOIN arcade a ON a.id = f.arcade AND a.public = true
+LEFT JOIN arcade_basic b ON b.id = a.basic
+WHERE f.user = {:user}
+ORDER BY f.sort_order ASC, f.created DESC
+LIMIT 100
+`).Bind(dbx.Params{"user": strings.TrimSpace(userID)}).Rows()
+	if err != nil {
+		return []FavoriteArcade{}
+	}
+	defer rows.Close()
+
+	out := make([]FavoriteArcade, 0)
+	for rows.Next() {
+		var item FavoriteArcade
+		if err := rows.Scan(&item.ID, &item.Country, &item.Closed, &item.Name, &item.Address); err != nil {
+			return []FavoriteArcade{}
 		}
-		arcade, err := app.FindRecordById("arcade", arcadeID)
-		if err != nil || arcade == nil || !arcade.GetBool("public") {
-			continue
-		}
-		item := FavoriteArcade{
-			ID:      arcade.Id,
-			Country: strings.TrimSpace(arcade.GetString("country")),
-			Closed:  arcade.GetBool("closed"),
-		}
-		if basicID := strings.TrimSpace(arcade.GetString("basic")); basicID != "" {
-			if basic, basicErr := app.FindRecordById("arcade_basic", basicID); basicErr == nil && basic != nil {
-				item.Name = strings.TrimSpace(basic.GetString("name"))
-				item.Address = strings.TrimSpace(basic.GetString("address"))
-			}
-		}
+		item.ID = strings.TrimSpace(item.ID)
+		item.Country = strings.TrimSpace(item.Country)
+		item.Name = strings.TrimSpace(item.Name)
+		item.Address = strings.TrimSpace(item.Address)
 		out = append(out, item)
 	}
 	return out

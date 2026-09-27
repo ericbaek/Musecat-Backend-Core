@@ -27,7 +27,9 @@ func TestGetUserActivity_ByID_Default365MergesCounts(t *testing.T) {
 	}
 
 	var userID string
-	now := time.Now().UTC()
+	// Anchor synthetic timestamps at noon so relative-hour fixtures stay in
+	// their intended calendar day even when the suite runs just after midnight.
+	now := time.Now().UTC().Truncate(24 * time.Hour).Add(12 * time.Hour)
 
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
 		tb.Helper()

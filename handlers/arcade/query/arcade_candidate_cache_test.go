@@ -3,6 +3,10 @@ package query
 import (
 	"fmt"
 	"os"
+	"sync"
+	"time"
+
+	"github.com/pocketbase/dbx"
 	"testing"
 
 	"github.com/pocketbase/pocketbase/core"
@@ -350,5 +354,80 @@ func TestFindCandidateRecords_ExceedsFilterExprLimit(t *testing.T) {
 	}
 	if records[0].Id != basicID {
 		t.Fatalf("expected record ID %q, got %q", basicID, records[0].Id)
+	}
+}
+
+// Hold the first public-arcade read after it has observed the old visibility.
+type pausedCandidateApp struct {
+	core.App
+	once         sync.Once
+	read, resume chan struct{}
+}
+
+func (app *pausedCandidateApp) FindRecordsByFilter(collection any, filter, sort string, limit, offset int, params ...dbx.Params) ([]*core.Record, error) {
+	records, err := app.App.FindRecordsByFilter(collection, filter, sort, limit, offset, params...)
+	if collection == "arcade" {
+		app.once.Do(func() { close(app.read); <-app.resume })
+	}
+	return records, err
+}
+
+func TestGetArcadeCandidates_InvalidationDuringBuildPreventsStaleCache(t *testing.T) {
+	app := testutil.NewTestApp(t)
+	RegisterCandidateSnapshotHooks(app)
+	arcadeID, _ := seedArcadeCandidateRecord(t, app, "Active Arcade", "Public Street")
+	paused := &pausedCandidateApp{App: app, read: make(chan struct{}), resume: make(chan struct{})}
+	type result struct {
+		candidates []ArcadeCandidate
+		err        error
+	}
+	first := make(chan result, 1)
+	go func() {
+		candidates, err := GetArcadeCandidates(paused)
+		first <- result{candidates, err}
+	}()
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(paused.resume) }) }
+	defer release()
+	select {
+	case <-paused.read:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first build did not reach public-arcade read")
+	}
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arcade.Set("public", false)
+	if err := app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+
+	// A request starting after commit must not join the obsolete build.
+	second := make(chan result, 1)
+	go func() {
+		candidates, err := GetArcadeCandidates(app)
+		second <- result{candidates, err}
+	}()
+	select {
+	case got := <-second:
+		if got.err != nil || findArcadeCandidate(got.candidates, arcadeID) != nil {
+			t.Errorf("post-commit request exposed private arcade: %+v", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("post-commit request joined an obsolete build")
+	}
+	release()
+	select {
+	case got := <-first:
+		if got.err != nil || findArcadeCandidate(got.candidates, arcadeID) != nil {
+			t.Errorf("in-flight request returned stale visibility: %+v", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("first build did not finish")
+	}
+	candidates, err := GetArcadeCandidates(app)
+	if err != nil || findArcadeCandidate(candidates, arcadeID) != nil {
+		t.Fatalf("private arcade remained cached: %v, %v", candidates, err)
 	}
 }

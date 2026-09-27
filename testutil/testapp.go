@@ -18,6 +18,12 @@ var (
 	goldenDir string
 )
 
+func init() {
+	// Configure the test process before any parallel apps or API routers exist.
+	// Reassigning this global in NewTestApp races with other tests.
+	ui.DistDirFS = nil
+}
+
 func getGoldenDataDir() (string, error) {
 	goldenMu.Lock()
 	defer goldenMu.Unlock()
@@ -97,8 +103,5 @@ func NewTestApp(tb testing.TB) *tests.TestApp {
 	}
 	tb.Cleanup(app.Cleanup)
 
-	// PocketBase v0.39.9 registers UI extension routes on every new API router.
-	// Core tests create multiple routers but don't exercise the bundled UI.
-	ui.DistDirFS = nil
 	return app
 }

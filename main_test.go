@@ -385,7 +385,7 @@ func TestGeocodeRoute(t *testing.T) {
 			URL:            "/geocode?query=Sydney",
 			ExpectedStatus: http.StatusBadGateway,
 			ExpectedContent: []string{
-				`google geocoding http 500`,
+				`"error":"geocoding failed"`,
 			},
 			TestAppFactory: func(tb testing.TB) *tests.TestApp {
 				return newGeoTestApp(tb)
@@ -412,7 +412,7 @@ func TestGeocodeRoute(t *testing.T) {
 			URL:            "/geocode?query=%EC%84%9C%EC%9A%B8&region=kr",
 			ExpectedStatus: http.StatusBadGateway,
 			ExpectedContent: []string{
-				`kakao geocoding http 503`,
+				`"error":"geocoding failed"`,
 			},
 			TestAppFactory: func(tb testing.TB) *tests.TestApp {
 				return newGeoTestApp(tb)
@@ -636,7 +636,7 @@ func TestReverseGeocodeRoute(t *testing.T) {
 			URL:            "/reverse_geocode?lat=37.422&lon=-122.084",
 			ExpectedStatus: http.StatusBadGateway,
 			ExpectedContent: []string{
-				`google reverse geocoding http 500`,
+				`"error":"reverse geocoding failed"`,
 			},
 			TestAppFactory: func(tb testing.TB) *tests.TestApp {
 				return newGeoTestApp(tb)

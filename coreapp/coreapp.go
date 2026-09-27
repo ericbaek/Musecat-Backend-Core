@@ -4,12 +4,10 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 
 	"github.com/ericbaek/musecat-backend-core/docs"
 	"github.com/ericbaek/musecat-backend-core/geo"
@@ -38,31 +36,64 @@ import (
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
-const (
-	documentationSpecPathEnv = "MUSECAT_OPENAPI_SPEC_PATH"
-	documentationSiteDir     = "docs-site"
-)
+// Config contains dependencies selected by the executable. Configure never reads
+// environment variables, registers migrations, or starts scheduled jobs.
+// A nil GeoResolver deliberately disables geographic lookup (fail closed).
+type Config struct {
+	GeoResolver           *geo.OfflineResolver
+	Documentation         DocumentationConfig
+	ClientIPForwardSecret string
+}
 
-func Configure(app *pocketbase.PocketBase, autoMigrate bool) {
-	configureOfflineGeo(app)
-	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{
-		// enable auto creation of migration files when making collection changes in the Dashboard
-		// (production environment keeps this off unless explicitly overridden)
-		Automigrate: autoMigrate,
-	})
+// DocumentationConfig defaults to Core's embedded contract and docs-site UI.
+// SpecPath is an explicit development override; deployments should leave it empty.
+type DocumentationConfig struct {
+	SpecPath string
+	SiteDir  string
+	Username string
+	Password string
+}
+
+func Configure(app *pocketbase.PocketBase, config Config) {
+	geo.SetOfflineResolver(config.GeoResolver, true)
 	arcadeversion.RegisterHooks(app)
 	arcadequery.RegisterCandidateSnapshotHooks(app)
-	arcadeflag.RegisterAutoSolveCron(app)
 	arcadeflag.RegisterAutoSolveReactionCreateHook(app)
-	communityhandler.RegisterTranslationCron(app)
 	userhandler.RegisterHooks(app)
-	// arcade.RegisterArcadeChangelogHook(app)
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
-		RegisterDocumentationRoutes(se)
+		se.Router.Bind(clientIPForwarding(config.ClientIPForwardSecret))
+		configureDefaultRateLimits(se.App)
+		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se)
 		return se.Next()
 	})
+}
+
+func configureDefaultRateLimits(app core.App) {
+	if app == nil {
+		return
+	}
+	settings := app.Settings()
+	settings.RateLimits.Enabled = true
+	defaults := []core.RateLimitRule{
+		{Label: "GET /geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "GET /reverse_geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "GET /geo", MaxRequests: 60, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /support_feedback", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+	}
+	for _, rule := range defaults {
+		found := false
+		for _, existing := range settings.RateLimits.Rules {
+			if existing.Label == rule.Label && existing.Audience == rule.Audience {
+				found = true
+				break
+			}
+		}
+		if !found {
+			settings.RateLimits.Rules = append(settings.RateLimits.Rules, rule)
+		}
+	}
 }
 
 // RegisterAPIRoutes binds all application API routes to the ServeEvent router.
@@ -163,12 +194,16 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	// Public user-scoped changelog read endpoint; private arcade rows are
 	// returned only to their owner or strict reviewers.
 	se.Router.GET("/user/changelog", userhandler.GetUserChangelog)
+	se.Router.GET("/user/feedback", arcadeadmin.ListMySupportFeedback).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+	)
 	se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireStrictReviewerAccess(),
 	)
-	se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback)
+	se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback).Bind(apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
 	communityhandler.RegisterRoutes(se)
 
 	authArcade := se.Router.Group("/arcade").Bind(
@@ -198,12 +233,12 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
 	// Allow up to 10 * 20MB photo files (+multipart overhead) in a single request.
 	authArcade.POST("/photo/upload", arcadephoto.UploadArcadePhotos).Bind(apis.BodyLimit(220 << 20))
-	authArcade.POST("/flag", arcadeflag.CreateArcadeFlag)
+	authArcade.POST("/flag", arcadeflag.CreateArcadeFlag).Bind(apis.BodyLimit(arcadeflag.MaxFlagBodyBytes))
 	authArcade.POST("/flag/delete", arcadeflag.DeleteArcadeFlag)
 	authArcade.POST("/flag/reaction", arcadeflag.UpdateArcadeFlagReaction)
 	se.Router.GET("/arcade/notice", arcadenotice.ListArcadeNotice)
-	authArcade.POST("/notice", arcadenotice.CreateArcadeNotice)
-	authArcade.PUT("/notice", arcadenotice.UpdateArcadeNotice)
+	authArcade.POST("/notice", arcadenotice.CreateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
+	authArcade.PUT("/notice", arcadenotice.UpdateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
 	authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
 	authArcade.POST("/visit", userhandler.VisitArcade)
 	authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite)
@@ -245,40 +280,17 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	authSupporter.POST("/request", arcadeadmin.CreateSupporterRequest)
 }
 
-func configureOfflineGeo(app *pocketbase.PocketBase) {
-	dir := strings.TrimSpace(os.Getenv("MUSECAT_GEO_DATA_DIR"))
-	var (
-		resolver *geo.OfflineResolver
-		err      error
-		source   string
-	)
-	if dir == "" {
-		resolver, err = geo.LoadEmbeddedResolver()
-		source = "embedded"
-	} else {
-		resolver, err = geo.LoadOfflineResolver(dir)
-		source = dir
+func RegisterDocumentationRoutes(se *core.ServeEvent, config DocumentationConfig) {
+	if config.SiteDir == "" {
+		config.SiteDir = "docs-site"
 	}
-	if err != nil {
-		// A malformed or incomplete bundle must fail closed; silently switching to
-		// a network provider would make a deployment non-reproducible.
-		geo.SetOfflineResolver(nil, true)
-		app.Logger().Error("offline geo data unavailable", "source", source, "error", err)
-		return
-	}
-	geo.SetOfflineResolver(resolver, true)
-	app.Logger().Info("offline geo data loaded", "source", source)
-}
-
-func RegisterDocumentationRoutes(se *core.ServeEvent) {
-	docsAuth := docsBasicAuthConfigFromEnv()
 
 	se.Router.GET("/openapi.yaml", func(re *core.RequestEvent) error {
-		if err := docsAuth.authorize(re); err != nil {
+		if err := config.authorize(re); err != nil {
 			return err
 		}
 
-		spec, err := loadDocumentationSpec()
+		spec, err := loadDocumentationSpec(config.SpecPath)
 		if err != nil {
 			return re.JSON(http.StatusInternalServerError, map[string]any{
 				"error":   "failed to load OpenAPI spec",
@@ -290,7 +302,7 @@ func RegisterDocumentationRoutes(se *core.ServeEvent) {
 	})
 
 	se.Router.GET("/docs", func(re *core.RequestEvent) error {
-		if err := docsAuth.authorize(re); err != nil {
+		if err := config.authorize(re); err != nil {
 			return err
 		}
 
@@ -298,50 +310,30 @@ func RegisterDocumentationRoutes(se *core.ServeEvent) {
 	})
 
 	se.Router.GET("/docs/{path...}", func(re *core.RequestEvent) error {
-		if err := docsAuth.authorize(re); err != nil {
+		if err := config.authorize(re); err != nil {
 			return err
 		}
 
-		return apis.Static(os.DirFS(documentationSiteDir), true)(re)
+		return apis.Static(os.DirFS(config.SiteDir), true)(re)
 	})
 }
 
-func loadDocumentationSpec() ([]byte, error) {
-	if path := strings.TrimSpace(os.Getenv(documentationSpecPathEnv)); path != "" {
+func loadDocumentationSpec(path string) ([]byte, error) {
+	if path != "" {
 		return os.ReadFile(path)
 	}
-
-	// Core's packaged contract is the default for every binary that imports it.
-	// A file can be selected only through the explicit path override above.
 	return apidocs.OpenAPISpec(), nil
 }
 
-type docsBasicAuthConfig struct {
-	enabled  bool
-	username string
-	password string
-}
-
-func docsBasicAuthConfigFromEnv() docsBasicAuthConfig {
-	username := strings.TrimSpace(os.Getenv("DOCS_BASIC_AUTH_USER"))
-	password := strings.TrimSpace(os.Getenv("DOCS_BASIC_AUTH_PASS"))
-
-	return docsBasicAuthConfig{
-		enabled:  username != "" && password != "",
-		username: username,
-		password: password,
-	}
-}
-
-func (c docsBasicAuthConfig) authorize(re *core.RequestEvent) error {
-	if !c.enabled {
+func (c DocumentationConfig) authorize(re *core.RequestEvent) error {
+	if c.Username == "" && c.Password == "" {
 		return nil
 	}
 
 	username, password, ok := re.Request.BasicAuth()
-	if ok &&
-		subtle.ConstantTimeCompare([]byte(username), []byte(c.username)) == 1 &&
-		subtle.ConstantTimeCompare([]byte(password), []byte(c.password)) == 1 {
+	if ok && c.Username != "" && c.Password != "" &&
+		subtle.ConstantTimeCompare([]byte(username), []byte(c.Username)) == 1 &&
+		subtle.ConstantTimeCompare([]byte(password), []byte(c.Password)) == 1 {
 		return nil
 	}
 

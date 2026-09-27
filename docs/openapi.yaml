@@ -2320,7 +2320,8 @@ components:
           type: number
         photos:
           type: array
-          maxItems: 99
+          maxItems: 3
+          description: Images only; at most 5242880 bytes per file. Server verifies file contents.
           items:
             type: string
             format: binary
@@ -2366,7 +2367,8 @@ components:
           type: number
         photos:
           type: array
-          maxItems: 99
+          maxItems: 3
+          description: Images only; at most 5242880 bytes per file. Server verifies file contents.
           items:
             type: string
             format: binary
@@ -2717,15 +2719,18 @@ components:
       properties:
         message:
           type: string
+          maxLength: 13000
     CreateSupportFeedbackMultipartRequest:
       type: object
       required: [message]
       properties:
         message:
           type: string
+          maxLength: 13000
         photos:
           type: array
           maxItems: 3
+          description: Images only, at most 15000000 bytes per image. Server verifies file contents.
           items:
             type: string
             format: binary
@@ -4717,6 +4722,7 @@ paths:
     get:
       tags: [Geo]
       summary: /geo
+      description: Default per-client-IP limit is 60 requests per 60 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults.
       parameters:
         - name: lat
           in: query
@@ -4743,6 +4749,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Client IP request limit exceeded, including authenticated requests.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '502':
           description: Upstream lookup failure.
           content:
@@ -4753,6 +4764,7 @@ paths:
     get:
       tags: [Geo]
       summary: /geocode
+      description: Default per-client-IP limit is 30 requests per 60 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults. Cached responses preserve the requested query or exact coordinates.
       parameters:
         - name: query
           in: query
@@ -4782,6 +4794,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Client IP request limit exceeded, including authenticated requests.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '502':
           description: Upstream geocoding failure.
           content:
@@ -4792,6 +4809,7 @@ paths:
     get:
       tags: [Geo]
       summary: /reverse_geocode
+      description: Default per-client-IP limit is 30 requests per 60 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults. Cached responses preserve the requested query or exact coordinates.
       parameters:
         - name: lat
           in: query
@@ -4826,6 +4844,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Client IP request limit exceeded, including authenticated requests.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '502':
           description: Upstream reverse geocoding failure.
           content:
@@ -5106,6 +5129,25 @@ paths:
       summary: List immutable game catalog changes
       security:
         - bearerAuth: []
+      parameters:
+        - name: entity
+          in: query
+          schema: {type: string}
+        - name: entity_id
+          in: query
+          schema: {type: string}
+        - name: actor
+          in: query
+          schema: {type: string}
+        - name: action
+          in: query
+          schema: {type: string}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
       responses:
         '200':
           description: Paginated catalog audit evidence.
@@ -5134,6 +5176,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/GameCatalogMutationResponse'
         '409': { description: Current item cannot safely be reverted. }
+  /user/feedback:
+    get:
+      tags: [Support, Users]
+      summary: List the authenticated user's own feedback
+      description: Active users only. Ownership is forced from the bearer token; createdBy query values are ignored. Anonymous submissions and other users' records are never returned. Includes all statuses unless filtered, with id, message, status, createdBy, photos (filenames), created and updated. This does not grant file access or open the reviewer queue.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: Own records ordered newest first, with items and total; an empty history returns an empty array.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ListEnvelope'}
+        '401': {description: Missing or invalid user token.}
+        '403': {description: Withdrawn or banned user.}
+        '502': {description: List failure.}
   /support_feedback:
     get:
       tags: [Support]
@@ -5178,6 +5240,7 @@ paths:
     post:
       tags: [Support]
       summary: /support_feedback
+      description: Default per-client-IP limit is 10 requests per 600 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults. Accepts at most 3 images of 15000000 bytes each; the total encoded body is limited to 46048576 bytes (45 MB of photos plus 1 MiB of form overhead).
       requestBody:
         required: true
         content:
@@ -5198,7 +5261,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [id, message, status, createdBy, photos]
+                required: [id, message, status, createdBy, photos, created, updated]
                 properties:
                   id:
                     type: string
@@ -5207,6 +5270,10 @@ paths:
                   status:
                     type: string
                   createdBy:
+                    type: string
+                  created:
+                    type: string
+                  updated:
                     type: string
                   photos:
                     type: array
@@ -5218,6 +5285,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: File exceeds 15000000 bytes or encoded request body exceeds 46048576 bytes.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '429':
+          description: Client IP request limit exceeded, including authenticated requests.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '502':
           description: Create failure.
           content:
@@ -5498,6 +5575,7 @@ paths:
         Requires `developer`, `moderator`, or `arcade_owner` in `tag` or `tags`, or a `supporter`/`founding_supporter` at level 30 or above. Developers and moderators may create on any arcade. Official accounts may create only on their own `owns` arcades. Level-30+ supporters may create unless another official account manages the target through `owns`. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
+      x-upload-limits: {maxPhotos: 3, maxPhotoBytes: 5242880, maxBodyBytes: 16777216}
       requestBody:
         required: true
         content:
@@ -5518,6 +5596,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ArcadeNotice'
+        '413': {description: Image exceeds 5 MiB or encoded body exceeds 16 MiB.}
         '400':
           description: Invalid JSON or missing arcade id.
           content:
@@ -5555,6 +5634,7 @@ paths:
         Developers and moderators may update every notice. Official account authors may update their own notices. Level-30+ supporter authors may update their own notices. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
+      x-upload-limits: {maxPhotos: 3, maxPhotoBytes: 5242880, maxBodyBytes: 16777216}
       requestBody:
         required: true
         content:
@@ -5575,6 +5655,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ArcadeNotice'
+        '413': {description: Image exceeds 5 MiB or encoded body exceeds 16 MiB.}
         '400':
           description: Invalid JSON or missing notice id.
           content:
@@ -5751,7 +5832,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
         '403':
-          description: Supporter level 30 or staff access required.
+          description: Developer or moderator access required.
           content:
             application/json:
               schema:
@@ -6148,7 +6229,7 @@ paths:
     post:
       tags: [Arcade Mutations]
       summary: /arcade/flag
-      description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold.
+      description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold. Accepts at most 3 images, 15000000 bytes each, within a 46048576-byte encoded request body.
       security:
         - bearerAuth: []
       requestBody:
@@ -6174,6 +6255,7 @@ paths:
                 photos:
                   type: array
                   maxItems: 3
+                  description: Images only; at most 15000000 bytes per file. Server verifies contents.
                   items:
                     type: string
                     format: binary
@@ -6202,6 +6284,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '413': {description: File or encoded request body exceeds its limit.}
         '401':
           description: Missing or invalid bearer token.
           content:
@@ -6838,6 +6921,14 @@ paths:
         - name: per_page
           in: query
           schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: lat
+          in: query
+          description: Optional latitude for distance ordering; must be supplied with lon.
+          schema: {type: number, minimum: -90, maximum: 90}
+        - name: lon
+          in: query
+          description: Optional longitude for distance ordering; must be supplied with lat.
+          schema: {type: number, minimum: -180, maximum: 180}
       responses:
         '200':
           description: Current automatic photo campaign targets.

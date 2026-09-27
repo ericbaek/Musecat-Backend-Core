@@ -163,20 +163,11 @@ ORDER BY leaderboard_position ASC
 
 	entries := make([]entry, 0)
 	var viewer *entry
-	var previousScore int64
-	var currentRank int
-	var hasPreviousScore bool
 	for rows.Next() {
-		item, leaderboardPosition, rankingScore, err := scanUserEntry(rows, m)
+		item, leaderboardPosition, err := scanUserEntry(rows, m)
 		if err != nil {
 			return nil, nil, err
 		}
-		if !hasPreviousScore || rankingScore != previousScore {
-			currentRank = leaderboardPosition
-			previousScore = rankingScore
-			hasPreviousScore = true
-		}
-		item.Rank = currentRank
 		if leaderboardPosition <= leaderboardLimit {
 			entries = append(entries, item)
 		}
@@ -196,19 +187,21 @@ ORDER BY leaderboard_position ASC
 	return entries, viewer, nil
 }
 
-func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, int, int64, error) {
+func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, int, error) {
 	var item entry
 	var rankingScore int64
 	var exp int
 	var tags string
+	var rank int
 	var leaderboardPosition int
 	item.Profile = &profile{}
 	var countries string
 	var countryMode, autoPrimaryCountry string
-	if err := rows.Scan(&rankingScore, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &countries, &countryMode, &autoPrimaryCountry, &exp, &tags, &leaderboardPosition); err != nil {
-		return entry{}, 0, 0, err
+	if err := rows.Scan(&rankingScore, &item.Profile.ID, &item.Profile.Nickname, &item.Profile.Username, &item.Profile.Avatar, &countries, &countryMode, &autoPrimaryCountry, &exp, &tags, &rank, &leaderboardPosition); err != nil {
+		return entry{}, 0, err
 	}
 	item.Score = rankingScore
+	item.Rank = rank
 	item.Profile.Level = userhandler.LevelFromExp(exp)
 	profileCountries := userhandler.ProfileCountriesFromJSON(countries)
 	_, item.Profile.PrimaryCountry = userhandler.ResolveStoredProfileCountries(profileCountries, countryMode, autoPrimaryCountry)
@@ -219,7 +212,7 @@ func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, 
 	if m == metricExplorer {
 		item.Stats = &rankingStats{}
 	}
-	return item, leaderboardPosition, rankingScore, nil
+	return item, leaderboardPosition, nil
 }
 
 func loadArcadeRankings(app core.App, ctx context.Context, p period, now time.Time) ([]entry, *entry, error) {
@@ -352,6 +345,9 @@ SELECT
   COALESCE(ui.auto_primary_country, '') AS auto_primary_country,
   COALESCE(ul.exp, 0) AS exp,
   %s AS tags,
+  RANK() OVER (
+    ORDER BY scores.score DESC
+  ) AS rank,
   ROW_NUMBER() OVER (
     ORDER BY scores.score DESC,
       COALESCE(NULLIF(ui.nickname, ''), u.username) COLLATE NOCASE ASC,
@@ -364,7 +360,7 @@ LEFT JOIN user_level ul ON ul.user = u.id
 WHERE COALESCE(u.withdrawn, 0) = 0
   AND scores.score > 0%s
 )
-SELECT score, id, nickname, username, avatar, countries, country_mode, auto_primary_country, exp, tags, leaderboard_position
+SELECT score, id, nickname, username, avatar, countries, country_mode, auto_primary_country, exp, tags, rank, leaderboard_position
 FROM ranked
 `, source, userTags, visitVisibility), params
 }

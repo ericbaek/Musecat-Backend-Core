@@ -24,7 +24,8 @@ func GeoLookupHandler(re *core.RequestEvent) error {
 
 	res, err := geo.LookupCountryAndTimezone(re.Request.Context(), lat, lon)
 	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		re.App.Logger().Error("geo lookup failed", "error", err)
+		return re.JSON(http.StatusBadGateway, map[string]string{"error": "country and timezone lookup failed"})
 	}
 	return re.JSON(http.StatusOK, res)
 }
@@ -39,7 +40,8 @@ func GeocodeHandler(re *core.RequestEvent) error {
 
 	res, err := geo.ForwardGeocode(re.Request.Context(), query, q.Get("region"), q.Get("mode"))
 	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		re.App.Logger().Error("forward geocode failed", "error", err)
+		return re.JSON(http.StatusBadGateway, map[string]string{"error": "geocoding failed"})
 	}
 	return re.JSON(http.StatusOK, res)
 }
@@ -61,7 +63,8 @@ func ReverseGeocodeHandler(re *core.RequestEvent) error {
 		if err.Error() == "invalid coordinates" {
 			return re.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
-		return re.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
+		re.App.Logger().Error("reverse geocode failed", "error", err)
+		return re.JSON(http.StatusBadGateway, map[string]string{"error": "reverse geocoding failed"})
 	}
 	return re.JSON(http.StatusOK, res)
 }

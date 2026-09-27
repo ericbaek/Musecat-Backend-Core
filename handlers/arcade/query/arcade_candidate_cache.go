@@ -5,11 +5,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
+	"golang.org/x/sync/singleflight"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 )
@@ -77,10 +79,20 @@ func (c ArcadeCandidate) Summary(includeLocation bool, includeGameSeries bool) m
 
 type arcadeCandidateSnapshot struct {
 	builtAt    time.Time
+	generation uint64
 	candidates []ArcadeCandidate
 }
 
-var arcadeCandidateSnapshotCache sync.Map
+var (
+	arcadeCandidateSnapshotCache sync.Map
+	arcadeCandidateBuildGroup    singleflight.Group
+	snapshotGenerationMap        sync.Map
+)
+
+func getAppGeneration(key string) *atomic.Uint64 {
+	val, _ := snapshotGenerationMap.LoadOrStore(key, &atomic.Uint64{})
+	return val.(*atomic.Uint64)
+}
 
 func RegisterCandidateSnapshotHooks(app core.App) {
 	if app == nil {
@@ -128,7 +140,9 @@ func bindInvalidateHook(app core.App, collectionName string) {
 }
 
 func InvalidateArcadeCandidateSnapshots(app core.App) {
-	arcadeCandidateSnapshotCache.Delete(appCacheKey(app))
+	key := appCacheKey(app)
+	getAppGeneration(key).Add(1)
+	arcadeCandidateSnapshotCache.Delete(key)
 }
 
 func GetArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
@@ -136,26 +150,49 @@ func GetArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {
 		return nil, fmt.Errorf("app is required")
 	}
 
-	now := time.Now().UTC()
 	key := appCacheKey(app)
-	if cached, ok := arcadeCandidateSnapshotCache.Load(key); ok {
-		entry := cached.(*arcadeCandidateSnapshot)
-		if now.Sub(entry.builtAt) <= arcadeCandidateCacheTTL {
-			return cloneArcadeCandidates(entry.candidates), nil
+	genTracker := getAppGeneration(key)
+	for {
+		currentGen := genTracker.Load()
+		if cached, ok := arcadeCandidateSnapshotCache.Load(key); ok {
+			entry := cached.(*arcadeCandidateSnapshot)
+			if entry.generation == currentGen && time.Since(entry.builtAt) <= arcadeCandidateCacheTTL {
+				candidates := cloneArcadeCandidates(entry.candidates)
+				if genTracker.Load() == currentGen {
+					return candidates, nil
+				}
+				continue
+			}
+		}
+
+		// Requests after invalidation must not join a build of the old generation.
+		buildKey := fmt.Sprintf("%s:%d", key, currentGen)
+		val, err, _ := arcadeCandidateBuildGroup.Do(buildKey, func() (any, error) {
+			candidates, err := BuildArcadeCandidates(app)
+			if err != nil {
+				return nil, err
+			}
+			entry := &arcadeCandidateSnapshot{
+				builtAt:    time.Now().UTC(),
+				generation: currentGen,
+				candidates: candidates,
+			}
+			if genTracker.Load() == currentGen {
+				arcadeCandidateSnapshotCache.Store(key, entry)
+			}
+			return entry, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		entry := val.(*arcadeCandidateSnapshot)
+		candidates := cloneArcadeCandidates(entry.candidates)
+		// Every waiter rechecks visibility and receives its own mutable copy.
+		if genTracker.Load() == entry.generation {
+			return candidates, nil
 		}
 	}
-
-	candidates, err := BuildArcadeCandidates(app)
-	if err != nil {
-		return nil, err
-	}
-
-	arcadeCandidateSnapshotCache.Store(key, &arcadeCandidateSnapshot{
-		builtAt:    now,
-		candidates: cloneArcadeCandidates(candidates),
-	})
-
-	return cloneArcadeCandidates(candidates), nil
 }
 
 func BuildArcadeCandidates(app core.App) ([]ArcadeCandidate, error) {

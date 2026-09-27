@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -45,49 +44,23 @@ type TranslationConfig struct {
 	Glossary string
 }
 
-func TranslationConfigFromEnv() TranslationConfig {
-	provider := strings.ToLower(strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_PROVIDER")))
-	if provider == "" {
-		provider = "gemini"
-	}
-	apiKey := strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_API_KEY"))
-	if apiKey == "" {
-		if provider == "deepseek" {
-			apiKey = strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
-		} else {
-			apiKey = strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
-		}
-	}
-	baseURL := strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_BASE_URL"))
-	if baseURL == "" {
-		if provider == "deepseek" {
-			baseURL = defaultDeepSeekBaseURL
-		} else {
-			baseURL = defaultGeminiBaseURL
-		}
-	}
-	model := strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_MODEL"))
-	if model == "" {
-		if provider == "deepseek" {
-			model = defaultDeepSeekModel
-		} else {
-			model = defaultGeminiModel
-		}
-	}
-	return TranslationConfig{
-		Provider: provider,
-		APIKey:   apiKey,
-		BaseURL:  strings.TrimRight(baseURL, "/"),
-		Model:    model,
-		Glossary: strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_GLOSSARY")),
-	}
-}
-
 func NewConfiguredTranslator(config TranslationConfig, client *http.Client) (Translator, error) {
 	switch strings.ToLower(strings.TrimSpace(config.Provider)) {
 	case "", "gemini":
+		if strings.TrimSpace(config.BaseURL) == "" {
+			config.BaseURL = defaultGeminiBaseURL
+		}
+		if strings.TrimSpace(config.Model) == "" {
+			config.Model = defaultGeminiModel
+		}
 		return NewGeminiTranslator(config, client)
 	case "deepseek":
+		if strings.TrimSpace(config.BaseURL) == "" {
+			config.BaseURL = defaultDeepSeekBaseURL
+		}
+		if strings.TrimSpace(config.Model) == "" {
+			config.Model = defaultDeepSeekModel
+		}
 		return NewDeepSeekTranslator(config, client)
 	default:
 		return nil, fmt.Errorf("unsupported translation provider %q", config.Provider)

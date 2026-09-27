@@ -17,6 +17,63 @@ API v2 is a deliberate breaking cutover. Existing frontend calls to PocketBase c
 4. Every cross-record arcade mutation MUST use a transaction. External HTTP, notification delivery, and unbounded work MUST NOT occur inside that transaction.
 5. Core owns reusable schema and API semantics. Full owns deployment-only migration execution and operational notification delivery.
 
+## Product and deployment composition
+
+| Concern | Core | Full (deployment application) |
+| --- | --- | --- |
+| API, authorization, visibility, XP, history | Own implementation and contract | Consume Core without parallel handlers |
+| Schema | Reusable schema and fresh bootstrap only | Guarded forward migrations for existing data |
+| Background work | Domain transitions and reusable worker/provider adapters | Choose providers, credentials, and register schedules |
+| Runtime | Reference runner for a fresh standalone instance | Compose production resources and operational hooks |
+| Documentation | Canonical OpenAPI embedded in the module | Serve the exact contract from the compiled Core dependency |
+| Release | Test and publish Core independently | Pin, test, migrate, and deploy the selected version |
+
+`coreapp.Configure` accepts a `Config` with an offline geo resolver and explicit
+`DocumentationConfig`. It installs domain hooks and routes, but does not read
+environment variables, register a migration runner, or register cron jobs.
+The executables own those decisions in `main.go` and `runtime.go`. A translation
+job is registered only with an injected `community.Translator`; credentials are
+read once at startup. Missing translation credentials disable that job. Invalid
+configured resources fail startup. Core's reference runner supports an explicit
+OpenAPI file override for development; Full always serves the embedded contract.
+Documentation credentials are optional, but supplying only one credential fails
+closed for all documentation routes.
+
+A local workspace is an explicit development opt-in. Release builds and CI use
+`GOWORK=off` and Full's `go.mod`; an adjacent Core checkout never selects the
+contract implicitly. Full must pin a Core revision containing the APIs it uses
+before a release. Core CI must not require access to the private Full repository.
+
+## Public endpoint request limits
+
+Fresh Core databases enable per-client-IP limits for anonymous and authenticated
+users together: `GET /geocode` and `GET /reverse_geocode` allow 30 requests per
+60 seconds each, `GET /geo` allows 60 per 60 seconds, and
+`POST /support_feedback` allows 10 per 600 seconds. Exceeding a limit returns
+`429` with the PocketBase error envelope. Switching authentication state does
+not reset the default IP bucket. PocketBase superuser and excluded-IP exemptions
+still apply.
+
+At server startup, Core enables rate limiting and adds missing all-user rules
+without replacing existing rules or their configured thresholds. Existing
+operator-defined audience-specific rules retain their precedence. This runtime
+configuration also covers Full installations without importing Core migrations.
+
+`POST /support_feedback` accepts at most three images, each at most 15,000,000
+bytes. Its encoded body ceiling is 46,048,576 bytes (three files plus 1 MiB for
+form fields and multipart overhead). File and body overflow return `413`,
+including streamed requests without Content-Length. The web BFF enforces the
+same byte ceiling before parsing the body. Creation includes `created` and
+`updated` timestamps, matching the feedback mapper. Raw collection capacity is
+not the public upload contract. The strict reviewer-only GET queue is unchanged.
+
+## Geocoding cache identity
+
+Geocoding caches encode query, region, and mode as separate components. Forward
+responses preserve the exact trimmed query, including its case. Reverse lookup
+keys retain full coordinate precision; nearby positions must not reuse another
+position's address or response coordinates. Non-finite coordinates are rejected.
+
 ## Community post prototype
 
 `community_post` is the source of truth for the first community vertical slice.
@@ -41,9 +98,9 @@ Its raw PocketBase REST rules are locked; clients use only `GET /community/posts
   enabled, `locale=en-US|ja-JP` falls back to the Korean original even when
   translations are ready. This allows translation quality to be verified
   before the non-Korean experience is launched.
-- Translation providers are selected only through server environment variables.
-  Full development uses DeepSeek V4 Flash in non-thinking JSON mode; the Gemini
-  adapter remains available as a fallback. Prompts preserve official arcade,
+- Translation providers are selected by the executable and injected into the
+  worker. The reference runner reads server environment variables; reusable
+  DeepSeek and Gemini adapters are available. Prompts preserve official arcade,
   game, cabinet, version, product, username, URL, price, and mention values and
   may include an operator-maintained Musecat glossary.
 
@@ -81,6 +138,7 @@ Definitions:
 | Arcade notice update/delete | deny | own authored notice only for level-30+ supporters | own authored notice only | allow |
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
+| Own feedback (`GET /user/feedback`) | deny | own records only | own records only | own records only |
 | Support feedback queue (`GET /support_feedback`) | deny | deny | deny | active developer or moderator only |
 | Bulk game version update (`POST /arcade/game/bulk_version`) | deny | deny | deny | allow |
 | Latest subway map metadata and file bytes | allow | allow | allow | allow |
@@ -367,6 +425,7 @@ immutable in-memory bundle on every request.
 
 ### Cache, XP, and notifications
 
+- Candidate snapshot builds are scoped to an invalidation generation. Each caller rechecks that generation before returning and retries if visibility changed during the build; post-invalidation requests cannot join an obsolete build.
 - `/arcades`, `/search`, and `/arcades/nearby` MUST read the same public arcade candidate snapshot. The snapshot derives game membership only from the immutable batch selected by `arcade.game_v2` and retains revision-level `(series, cabinet)` pairs rather than independent sets.
 - `/arcades/nearby` accepts grouped `game_filter` values for cabinet-aware filtering. Each repeated value is a JSON object with a `series` id and an optional `cabinet` id; omitting `cabinet` means all cabinets for that series, and separate series groups use AND semantics. Grouped and legacy game parameters cannot be mixed. The legacy `game_series`/`game_cabinet` pair remains supported for compatibility: series-only filters ignore cabinet identity, while repeated and comma-separated values preserve positional `(series, cabinet)` pairs and require equal lengths. Invalid grouped filters, cabinet-only legacy requests, or unequal legacy list lengths return `400`.
 - Nearby remains an operating-discovery route: private and public/closed arcades, historical unselected batches, and unverified cabinet revisions for a cabinet-qualified pair MUST NOT affect results, pagination, country totals, or nearest-arcade summaries.
@@ -484,3 +543,28 @@ stamp or XP. Clients must acquire a fresh GPS position when the user explicitly 
 Passport check rather than submitting persisted coordinates. The measured point must be
 within 100 meters of the arcade, and reported GPS accuracy must be at most 150 meters.
 The first visit awards 5 XP and a revisit awards 2 XP. Passport is GPS visit evidence, not play evidence.
+
+
+### Feedback and small image upload limits
+
+`POST /support_feedback` accepts a non-empty message up to 13,000 Unicode code points,
+including any frontend classification or reply-email metadata. The frontend retains
+its 1,200-character general and 12,000-character error-report input limits. Core's
+fresh schema declares the stored limit explicitly; Full upgrades existing schemas
+with its own guarded forward migration and preserves any larger operator limit.
+
+`GET /user/feedback` requires an active user, always scopes createdBy to that token,
+and returns that user's records (all statuses by default) newest first, with an
+optional status filter. Foreign createdBy query parameters cannot change the scope.
+Anonymous submissions cannot be claimed. Withdrawn and banned accounts are denied.
+The existing developer/moderator queue remains separately protected. The own-history
+DTO contains id, message, status, createdBy, photos (filenames), created and updated;
+it does not change file authorization.
+
+Flag uploads accept 3 images of 15,000,000 bytes and a 46,048,576-byte encoded body.
+Notice create/update accepts 3 images of 5,242,880 bytes and a 16,777,216-byte body.
+Both verify actual file contents and return 413 for file/body overflow; excessive
+counts or non-images return 400. Files are multipart-only, never JSON file objects.
+The frontend shares each feature's limits across UI, service and bounded BFF reader.
+Existing stored attachments are preserved when updates omit photos. These checks do
+not change arcade visibility, author/reviewer permissions, XP or history semantics.

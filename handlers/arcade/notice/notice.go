@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 	"github.com/pocketbase/pocketbase/tools/types"
@@ -20,6 +21,11 @@ import (
 )
 
 const noticeSupporterMinimumLevel = 30
+const maxNoticePhotos = 3
+const maxNoticePhotoBytes = 5 << 20
+
+// MaxNoticeBodyBytes includes one MiB for the document and multipart metadata.
+const MaxNoticeBodyBytes = maxNoticePhotos*maxNoticePhotoBytes + (1 << 20)
 
 var noticeAccessTags = map[string]struct{}{
 	"arcade_owner":       {},
@@ -30,14 +36,14 @@ var noticeAccessTags = map[string]struct{}{
 }
 
 type NoticeBody struct {
-	ID       string          `json:"id,omitempty"`
-	Arcade   string          `json:"arcade,omitempty"`
-	Type     *string         `json:"type,omitempty"`
-	Document json.RawMessage `json:"document,omitempty"`
-	Link     *string         `json:"link,omitempty"`
-	Until    *time.Time      `json:"until,omitempty"`
-	Priority *float64        `json:"priority,omitempty"`
-	Photos   []*filesystem.File
+	ID       string             `json:"id,omitempty"`
+	Arcade   string             `json:"arcade,omitempty"`
+	Type     *string            `json:"type,omitempty"`
+	Document json.RawMessage    `json:"document,omitempty"`
+	Link     *string            `json:"link,omitempty"`
+	Until    *time.Time         `json:"until,omitempty"`
+	Priority *float64           `json:"priority,omitempty"`
+	Photos   []*filesystem.File `json:"-"`
 }
 
 func parseNoticeBody(re *core.RequestEvent) (NoticeBody, error) {
@@ -84,7 +90,7 @@ func parseNoticeBody(re *core.RequestEvent) (NoticeBody, error) {
 			body.Photos = files
 		}
 
-		return body, nil
+		return body, arcadeinternal.ValidateImageUploads(body.Photos, maxNoticePhotos, maxNoticePhotoBytes)
 	}
 
 	var body NoticeBody
@@ -482,6 +488,9 @@ func applyNoticeFields(rec *core.Record, body NoticeBody) error {
 func CreateArcadeNotice(re *core.RequestEvent) error {
 	body, err := parseNoticeBody(re)
 	if err != nil {
+		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
+			return apis.ErrRequestEntityTooLarge
+		}
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error":   "invalid JSON body",
 			"details": err.Error(),
@@ -541,6 +550,9 @@ func CreateArcadeNotice(re *core.RequestEvent) error {
 func UpdateArcadeNotice(re *core.RequestEvent) error {
 	body, err := parseNoticeBody(re)
 	if err != nil {
+		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
+			return apis.ErrRequestEntityTooLarge
+		}
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error":   "invalid JSON body",
 			"details": err.Error(),
@@ -582,6 +594,9 @@ func UpdateArcadeNotice(re *core.RequestEvent) error {
 func DeleteArcadeNotice(re *core.RequestEvent) error {
 	body, err := parseNoticeBody(re)
 	if err != nil {
+		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
+			return apis.ErrRequestEntityTooLarge
+		}
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error":   "invalid JSON body",
 			"details": err.Error(),

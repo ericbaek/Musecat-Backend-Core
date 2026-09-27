@@ -55,12 +55,14 @@ func SetHTTPClient(client *http.Client) func() {
 	httpClient = client
 	httpClientMu.Unlock()
 	clearLookupCache()
+	ClearGeocodeCache()
 
 	return func() {
 		httpClientMu.Lock()
 		httpClient = prev
 		httpClientMu.Unlock()
 		clearLookupCache()
+		ClearGeocodeCache()
 	}
 }
 

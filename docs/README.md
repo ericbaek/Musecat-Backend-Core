@@ -7,7 +7,7 @@
 - `/docs/` renders the OpenAPI spec through Stoplight Elements.
 
 ## Current Coverage
-`docs/openapi.yaml` now covers every implemented route registered in `main.go`.
+`docs/openapi.yaml` now covers every implemented route registered in `coreapp.RegisterAPIRoutes`.
 ## Update Rules
 When adding or changing an endpoint:
 1. Update the handler and tests.

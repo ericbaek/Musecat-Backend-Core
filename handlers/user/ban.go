@@ -91,6 +91,32 @@ func registerUserBanHooks(app core.App) {
 		},
 	})
 
+	app.OnRecordCreateRequest(CollectionUser).Bind(&hook.Handler[*core.RecordRequestEvent]{
+		Id: "blockRestrictedUserFieldsOnCreateRequest",
+		Func: func(e *core.RecordRequestEvent) error {
+			if e.HasSuperuserAuth() {
+				return e.Next()
+			}
+			reqInfo, _ := e.RequestInfo()
+			if reqInfo != nil && reqInfo.Body != nil {
+				restricted := []string{"tags", "owns", "withdrawn", "withdrawnAt", "withdrawReason", "verified"}
+				var errs validation.Errors
+				for _, field := range restricted {
+					if _, exists := reqInfo.Body[field]; exists {
+						if errs == nil {
+							errs = validation.Errors{}
+						}
+						errs[field] = validation.NewError("validation_not_allowed", field+" cannot be set on user creation")
+					}
+				}
+				if len(errs) > 0 {
+					return errs
+				}
+			}
+			return e.Next()
+		},
+	})
+
 	app.OnRecordCreateRequest(arcadeWriteProtectedCollections...).Bind(&hook.Handler[*core.RecordRequestEvent]{
 		Id:   "blockRestrictedArcadeCreateRequests",
 		Func: enforceArcadeWriteAllowed,

@@ -595,7 +595,7 @@ func init() {
 					"body": "<p>Hello,</p>\n<p>Click on the button below to confirm your new email address.</p>\n<p>\n  <a class=\"btn\" href=\"{APP_URL}/_/#/auth/confirm-email-change/{TOKEN}\" target=\"_blank\" rel=\"noopener\">Confirm new email</a>\n</p>\n<p><i>If you didn't ask to change your email address, you can ignore this email.</i></p>\n<p>\n  Thanks,<br/>\n  {APP_NAME} team\n</p>",
 					"subject": "Confirm your {APP_NAME} new email address"
 				},
-				"createRule": "",
+				"createRule": "@request.body.tags:isset = false && @request.body.owns:isset = false && @request.body.withdrawn:isset = false && @request.body.withdrawnAt:isset = false && @request.body.withdrawReason:isset = false && @request.body.verified:isset = false",
 				"deleteRule": null,
 				"emailChangeToken": {
 					"duration": 1800
@@ -3372,12 +3372,12 @@ func init() {
 				"indexes": [
 					"CREATE INDEX ` + "`" + `idx_user_ban_hashed_email` + "`" + ` ON ` + "`" + `user_ban` + "`" + ` (` + "`" + `hashed_email` + "`" + `) WHERE ` + "`" + `hashed_email` + "`" + ` != ''"
 				],
-				"listRule": "",
+				"listRule": null,
 				"name": "user_ban",
 				"system": false,
 				"type": "base",
 				"updateRule": null,
-				"viewRule": ""
+				"viewRule": null
 			},
 			{
 				"createRule": null,
@@ -3917,7 +3917,7 @@ func init() {
 						"autogeneratePattern": "",
 						"hidden": false,
 						"id": "text3065852031",
-						"max": 0,
+						"max": 13000,
 						"min": 0,
 						"name": "message",
 						"pattern": "",
@@ -4604,7 +4604,38 @@ func init() {
 		if err != nil {
 			return fmt.Errorf("encode initial schema: %w", err)
 		}
-		return app.ImportCollectionsByMarshaledJSON(finalSchema, false)
+		if err := app.ImportCollectionsByMarshaledJSON(finalSchema, false); err != nil {
+			return err
+		}
+		settings := app.Settings()
+		settings.RateLimits.Enabled = true
+		settings.RateLimits.Rules = append(settings.RateLimits.Rules, []core.RateLimitRule{
+			{
+				Label:       "GET /geocode",
+				MaxRequests: 30,
+				Duration:    60,
+				Audience:    core.RateLimitRuleAudienceAll,
+			},
+			{
+				Label:       "GET /reverse_geocode",
+				MaxRequests: 30,
+				Duration:    60,
+				Audience:    core.RateLimitRuleAudienceAll,
+			},
+			{
+				Label:       "GET /geo",
+				MaxRequests: 60,
+				Duration:    60,
+				Audience:    core.RateLimitRuleAudienceAll,
+			},
+			{
+				Label:       "POST /support_feedback",
+				MaxRequests: 10,
+				Duration:    600,
+				Audience:    core.RateLimitRuleAudienceAll,
+			},
+		}...)
+		return app.Save(settings)
 	}, func(app core.App) error {
 		return nil
 	})

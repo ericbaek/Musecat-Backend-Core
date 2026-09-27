@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 
@@ -24,13 +25,17 @@ var validDisruptions = map[string]struct{}{
 }
 
 const maxFlagPhotosPerRequest = 3
+const maxFlagPhotoBytes = 15_000_000
+
+// MaxFlagBodyBytes includes multipart overhead for three full-size photos.
+const MaxFlagBodyBytes = maxFlagPhotosPerRequest*maxFlagPhotoBytes + (1 << 20)
 
 type CreateArcadeFlagBody struct {
-	Arcade     string `json:"arcade"`
-	GameID     string `json:"game_id"`
-	Disruption string `json:"disruption"`
-	Message    string `json:"message"`
-	Photos     []*filesystem.File
+	Arcade     string             `json:"arcade"`
+	GameID     string             `json:"game_id"`
+	Disruption string             `json:"disruption"`
+	Message    string             `json:"message"`
+	Photos     []*filesystem.File `json:"-"`
 }
 
 func parseCreateArcadeFlagBody(re *core.RequestEvent) (CreateArcadeFlagBody, error) {
@@ -85,16 +90,15 @@ func validateCreateArcadeFlagBody(body *CreateArcadeFlagBody) error {
 	if body.Message == "" {
 		return fmt.Errorf("message is required")
 	}
-	if len(body.Photos) > maxFlagPhotosPerRequest {
-		return fmt.Errorf("photos must have at most %d items", maxFlagPhotosPerRequest)
-	}
-
-	return nil
+	return arcadeinternal.ValidateImageUploads(body.Photos, maxFlagPhotosPerRequest, maxFlagPhotoBytes)
 }
 
 func CreateArcadeFlag(re *core.RequestEvent) error {
 	body, err := parseCreateArcadeFlagBody(re)
 	if err != nil {
+		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
+			return apis.ErrRequestEntityTooLarge
+		}
 		errorMessage := "invalid JSON body"
 		contentType := strings.ToLower(strings.TrimSpace(re.Request.Header.Get("Content-Type")))
 		if strings.HasPrefix(contentType, "multipart/form-data") {
@@ -106,6 +110,9 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 		})
 	}
 	if err := validateCreateArcadeFlagBody(&body); err != nil {
+		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
+			return apis.ErrRequestEntityTooLarge
+		}
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error":   "validation failed",
 			"details": err.Error(),

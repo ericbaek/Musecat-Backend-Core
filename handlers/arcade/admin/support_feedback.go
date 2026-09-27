@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 
@@ -16,10 +18,15 @@ import (
 
 const supportFeedbackWaitingStatus = "waiting"
 const maxSupportFeedbackPhotosPerRequest = 3
+const maxSupportFeedbackPhotoBytes = 15_000_000
+const maxSupportFeedbackMessageLength = 13_000
+
+// MaxSupportFeedbackBodyBytes allows three maximum-size photos plus form overhead.
+const MaxSupportFeedbackBodyBytes = maxSupportFeedbackPhotosPerRequest*maxSupportFeedbackPhotoBytes + (1 << 20)
 
 type CreateSupportFeedbackBody struct {
-	Message string `json:"message"`
-	Photos  []*filesystem.File
+	Message string             `json:"message"`
+	Photos  []*filesystem.File `json:"-"`
 }
 
 func parseCreateSupportFeedbackBody(re *core.RequestEvent) (CreateSupportFeedbackBody, error) {
@@ -57,21 +64,27 @@ func validateCreateSupportFeedbackBody(body *CreateSupportFeedbackBody) error {
 	if body.Message == "" {
 		return fmt.Errorf("message is required")
 	}
-	if len(body.Photos) > maxSupportFeedbackPhotosPerRequest {
-		return fmt.Errorf("photos must have at most %d items", maxSupportFeedbackPhotosPerRequest)
+	if utf8.RuneCountInString(body.Message) > maxSupportFeedbackMessageLength {
+		return fmt.Errorf("message must have at most %d characters", maxSupportFeedbackMessageLength)
 	}
-	return nil
+	return arcadeinternal.ValidateImageUploads(body.Photos, maxSupportFeedbackPhotosPerRequest, maxSupportFeedbackPhotoBytes)
 }
 
 func CreateSupportFeedback(re *core.RequestEvent) error {
 	body, err := parseCreateSupportFeedbackBody(re)
 	if err != nil {
+		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
+			return apis.ErrRequestEntityTooLarge
+		}
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error":   "invalid JSON body",
 			"details": err.Error(),
 		})
 	}
 	if err := validateCreateSupportFeedbackBody(&body); err != nil {
+		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
+			return apis.ErrRequestEntityTooLarge
+		}
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error":   "validation failed",
 			"details": err.Error(),
@@ -113,11 +126,22 @@ func CreateSupportFeedback(re *core.RequestEvent) error {
 		"status":    rec.GetString("status"),
 		"createdBy": rec.GetString("createdBy"),
 		"photos":    append([]string{}, rec.GetStringSlice("photos")...),
+		"created":   rec.GetString("created"),
+		"updated":   rec.GetString("updated"),
 	})
 }
 
 func ListSupportFeedback(re *core.RequestEvent) error {
 	createdByID := strings.TrimSpace(re.Request.URL.Query().Get("createdBy"))
+	return listSupportFeedback(re, createdByID)
+}
+
+// ListMySupportFeedback ignores client-supplied owner filters.
+func ListMySupportFeedback(re *core.RequestEvent) error {
+	return listSupportFeedback(re, re.Auth.Id)
+}
+
+func listSupportFeedback(re *core.RequestEvent, createdByID string) error {
 	status := strings.TrimSpace(re.Request.URL.Query().Get("status"))
 
 	filters := make([]string, 0, 2)

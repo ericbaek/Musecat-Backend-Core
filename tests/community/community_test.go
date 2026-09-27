@@ -408,18 +408,6 @@ func TestDeepSeekTranslator_RequestAndResponseContract(t *testing.T) {
 	}
 }
 
-func TestTranslationConfig_DeepSeekDefaults(t *testing.T) {
-	t.Setenv("MUSECAT_TRANSLATION_PROVIDER", "deepseek")
-	t.Setenv("DEEPSEEK_API_KEY", "deepseek-env-key")
-	t.Setenv("MUSECAT_TRANSLATION_API_KEY", "")
-	t.Setenv("MUSECAT_TRANSLATION_BASE_URL", "")
-	t.Setenv("MUSECAT_TRANSLATION_MODEL", "")
-	config := community.TranslationConfigFromEnv()
-	if config.Provider != "deepseek" || config.APIKey != "deepseek-env-key" || config.BaseURL != "https://api.deepseek.com" || config.Model != "deepseek-v4-flash" {
-		t.Fatalf("unexpected DeepSeek defaults: %#v", config)
-	}
-}
-
 func TestCommunitySchemaAndCronAreLocked(t *testing.T) {
 	app := newCommunityTestApp(t)
 	collection, err := app.FindCollectionByNameOrId(community.CollectionPost)
@@ -429,7 +417,7 @@ func TestCommunitySchemaAndCronAreLocked(t *testing.T) {
 	if collection.ListRule != nil || collection.ViewRule != nil || collection.CreateRule != nil || collection.UpdateRule != nil || collection.DeleteRule != nil {
 		t.Fatalf("community_post raw REST rules must be locked")
 	}
-	community.RegisterTranslationCron(app)
+	community.RegisterTranslationCron(app, &fakeTranslator{})
 	found := false
 	for _, job := range app.Cron().Jobs() {
 		if job.Id() == community.TranslationCronJobID && job.Expression() == community.TranslationCronExprUTC {

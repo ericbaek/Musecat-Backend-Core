@@ -9,6 +9,7 @@ import (
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 
 	"github.com/ericbaek/musecat-backend-core/coreapp"
 	_ "github.com/ericbaek/musecat-backend-core/migrations"
@@ -31,14 +32,17 @@ func main() {
 		}
 	}
 	app := pocketbase.NewWithConfig(pocketbase.Config{DefaultDataDir: dataDir})
-	coreapp.Configure(app, autoMigrate)
+	migratecmd.MustRegister(app, app.RootCmd, migratecmd.Config{Automigrate: autoMigrate})
+	if err := configureRuntime(app); err != nil {
+		log.Fatal(err)
+	}
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}
 }
 
 func registerDocumentationRoutes(se *core.ServeEvent) {
-	coreapp.RegisterDocumentationRoutes(se)
+	coreapp.RegisterDocumentationRoutes(se, documentationConfig())
 }
 
 func loadEnvFile(path string) {

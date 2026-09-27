@@ -261,7 +261,7 @@ This endpoint uses the normal `game_diff` shape described for `PUT /arcade/game`
 There is one changelog row per affected arcade. Its `state_from` and `state_to`
 identify the immutable revision batches, and `items[]` contains entry-level
 before/after snapshots. The operation is restricted to `developer`/`moderator`
-accounts and supporters who have reached level 30; it does not award XP.
+accounts; it does not award XP.
 
 ### `PUT /arcade/photo`
 
@@ -367,3 +367,11 @@ the selected revision's city reference. `base_basic_id` optionally rejects a sta
 with 409 before changing any row. Full's reviewed assignment command uses these normal
 mutations and authenticated editor attribution, including the existing basic-edit XP
 cooldown. GeoNames catalog import is reference-data maintenance and grants no XP.
+
+
+### Flag and notice upload validation
+
+Flag and notice mutations validate image count, bytes and actual contents before
+writing. These validation changes do not add or rewrite arcade_changelog rows or
+change XP rules. The limits and multipart-only file contract are documented in the
+architecture contract and OpenAPI; Full retains ownership of existing-data migrations.

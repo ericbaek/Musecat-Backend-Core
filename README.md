@@ -2,6 +2,24 @@
 
 Musecat Backend Core is a PocketBase-based API server for arcade, user, and contribution workflows. It is the reusable server core only: production data, data-ingestion pipelines, bulk backfills, deployment configuration, and operational notifications are intentionally maintained outside this repository.
 
+## Core and deployment ownership
+
+Core is the reusable backend product, not a reduced edition of Full. It owns
+custom APIs, authorization, aggregate transactions, immutable history, XP,
+worker state transitions, the canonical OpenAPI contract, and fresh-bootstrap
+schema. Its `main.go` / `runtime.go` are a standalone reference runner.
+
+Backend Full is the private deployment application. It consumes a pinned Core
+module and owns existing-database migrations, runtime configuration, provider
+selection, scheduled-job registration, imports/backfills, notifications, and
+release decisions. It does not maintain a second API or OpenAPI specification.
+
+`coreapp.Configure(app, coreapp.Config{...})` installs API routes and domain hooks
+with explicit geo/documentation dependencies. Executables register their own
+migration runner and cron jobs; translation jobs receive a `community.Translator`.
+Core's CI tests Core only. Updating the deployed Core version belongs to Full.
+See [the architecture contract](docs/architecture-contract.md) for the boundary.
+
 ## Status
 
 This repository is prepared for public release. The included license is source-available, not an OSI-approved open-source license: commercial use is not permitted and redistributed modifications must be published under the same terms.

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -21,17 +20,13 @@ const (
 	translationLease       = 10 * time.Minute
 )
 
-func RegisterTranslationCron(app core.App) {
+// RegisterTranslationCron schedules the domain worker with an injected provider.
+// A nil provider leaves the job disabled. Executables own provider selection.
+func RegisterTranslationCron(app core.App, translator Translator) {
+	if translator == nil {
+		return
+	}
 	if err := app.Cron().Add(TranslationCronJobID, TranslationCronExprUTC, func() {
-		config := TranslationConfigFromEnv()
-		if config.APIKey == "" {
-			return
-		}
-		translator, err := NewConfiguredTranslator(config, &http.Client{Timeout: 30 * time.Second})
-		if err != nil {
-			app.Logger().Error("community translation configuration failed", slog.String("error", err.Error()))
-			return
-		}
 		processed, runErr := RunDueTranslations(context.Background(), app, translator, time.Now().UTC())
 		if runErr != nil {
 			app.Logger().Error("community translation cron failed", slog.String("error", runErr.Error()))

@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -20,6 +24,128 @@ const (
 )
 
 var errNoResults = errors.New("no results")
+
+func sanitizeURLError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		if parsed, parseErr := url.Parse(urlErr.URL); parseErr == nil {
+			parsed.RawQuery = ""
+			cleanErr := *urlErr
+			cleanErr.URL = parsed.String()
+			return &cleanErr
+		}
+	}
+	return err
+}
+
+var (
+	forwardGeocodeCache = struct {
+		sync.Mutex
+		entries map[string]forwardGeocodeCacheEntry
+	}{entries: map[string]forwardGeocodeCacheEntry{}}
+	forwardGeocodeGroup singleflight.Group
+
+	reverseGeocodeCache = struct {
+		sync.Mutex
+		entries map[string]reverseGeocodeCacheEntry
+	}{entries: map[string]reverseGeocodeCacheEntry{}}
+	reverseGeocodeGroup singleflight.Group
+)
+
+const (
+	geocodeCacheTTL     = 24 * time.Hour
+	geocodeCacheMaxSize = 4096
+)
+
+type forwardGeocodeCacheEntry struct {
+	result    GeocodeResponse
+	expiresAt time.Time
+}
+
+type reverseGeocodeCacheEntry struct {
+	result    ReverseGeocodeResponse
+	expiresAt time.Time
+}
+
+// ClearGeocodeCache purges both forward and reverse geocode cached entries.
+func ClearGeocodeCache() {
+	forwardGeocodeCache.Lock()
+	forwardGeocodeCache.entries = map[string]forwardGeocodeCacheEntry{}
+	forwardGeocodeCache.Unlock()
+
+	reverseGeocodeCache.Lock()
+	reverseGeocodeCache.entries = map[string]reverseGeocodeCacheEntry{}
+	reverseGeocodeCache.Unlock()
+}
+
+func loadForwardGeocodeCache(key string) (GeocodeResponse, bool) {
+	now := time.Now().UTC()
+	forwardGeocodeCache.Lock()
+	defer forwardGeocodeCache.Unlock()
+
+	entry, ok := forwardGeocodeCache.entries[key]
+	if !ok {
+		return GeocodeResponse{}, false
+	}
+	if now.After(entry.expiresAt) {
+		delete(forwardGeocodeCache.entries, key)
+		return GeocodeResponse{}, false
+	}
+	return entry.result, true
+}
+
+func storeForwardGeocodeCache(key string, result GeocodeResponse) {
+	now := time.Now().UTC()
+	forwardGeocodeCache.Lock()
+	defer forwardGeocodeCache.Unlock()
+
+	if len(forwardGeocodeCache.entries) >= geocodeCacheMaxSize {
+		for k := range forwardGeocodeCache.entries {
+			delete(forwardGeocodeCache.entries, k)
+			break
+		}
+	}
+	forwardGeocodeCache.entries[key] = forwardGeocodeCacheEntry{
+		result:    result,
+		expiresAt: now.Add(geocodeCacheTTL),
+	}
+}
+
+func loadReverseGeocodeCache(key string) (ReverseGeocodeResponse, bool) {
+	now := time.Now().UTC()
+	reverseGeocodeCache.Lock()
+	defer reverseGeocodeCache.Unlock()
+
+	entry, ok := reverseGeocodeCache.entries[key]
+	if !ok {
+		return ReverseGeocodeResponse{}, false
+	}
+	if now.After(entry.expiresAt) {
+		delete(reverseGeocodeCache.entries, key)
+		return ReverseGeocodeResponse{}, false
+	}
+	return entry.result, true
+}
+
+func storeReverseGeocodeCache(key string, result ReverseGeocodeResponse) {
+	now := time.Now().UTC()
+	reverseGeocodeCache.Lock()
+	defer reverseGeocodeCache.Unlock()
+
+	if len(reverseGeocodeCache.entries) >= geocodeCacheMaxSize {
+		for k := range reverseGeocodeCache.entries {
+			delete(reverseGeocodeCache.entries, k)
+			break
+		}
+	}
+	reverseGeocodeCache.entries[key] = reverseGeocodeCacheEntry{
+		result:    result,
+		expiresAt: now.Add(geocodeCacheTTL),
+	}
+}
 
 // GeocodeCandidate is a normalized forward-geocoding result item.
 type GeocodeCandidate struct {
@@ -48,6 +174,13 @@ type ReverseGeocodeResponse struct {
 	PlaceID     string  `json:"place_id,omitempty"`
 }
 
+// JSON encodes component boundaries unambiguously, including user-supplied pipes.
+// Keep the query's case: responses echo the request and providers may distinguish it.
+func geocodeCacheKey(query, region, mode string) string {
+	key, _ := json.Marshal([3]string{query, strings.ToLower(strings.TrimSpace(region)), strings.ToLower(strings.TrimSpace(mode))})
+	return string(key)
+}
+
 // ForwardGeocode resolves a query to coordinates using a provider selected by region.
 // region=kr uses Kakao, all other regions use Google.
 func ForwardGeocode(ctx context.Context, query, region, mode string) (GeocodeResponse, error) {
@@ -56,6 +189,26 @@ func ForwardGeocode(ctx context.Context, query, region, mode string) (GeocodeRes
 		return GeocodeResponse{}, errors.New("query is required")
 	}
 
+	cacheKey := geocodeCacheKey(query, region, mode)
+	if cached, ok := loadForwardGeocodeCache(cacheKey); ok {
+		return cached, nil
+	}
+
+	val, err, _ := forwardGeocodeGroup.Do(cacheKey, func() (any, error) {
+		res, err := forwardGeocodeUncached(ctx, query, region, mode)
+		if err != nil {
+			return GeocodeResponse{}, err
+		}
+		storeForwardGeocodeCache(cacheKey, res)
+		return res, nil
+	})
+	if err != nil {
+		return GeocodeResponse{}, err
+	}
+	return val.(GeocodeResponse), nil
+}
+
+func forwardGeocodeUncached(ctx context.Context, query, region, mode string) (GeocodeResponse, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -95,10 +248,30 @@ func ForwardGeocode(ctx context.Context, query, region, mode string) (GeocodeRes
 // ReverseGeocode resolves coordinates to a human-readable address.
 // region=kr uses Kakao, all other regions use Google.
 func ReverseGeocode(ctx context.Context, lat, lon float64, region, mode string) (ReverseGeocodeResponse, error) {
-	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+	if math.IsNaN(lat) || math.IsNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180 {
 		return ReverseGeocodeResponse{}, errors.New("invalid coordinates")
 	}
 
+	cacheKey := geocodeCacheKey(strconv.FormatFloat(lat, 'g', -1, 64)+","+strconv.FormatFloat(lon, 'g', -1, 64), region, mode)
+	if cached, ok := loadReverseGeocodeCache(cacheKey); ok {
+		return cached, nil
+	}
+
+	val, err, _ := reverseGeocodeGroup.Do(cacheKey, func() (any, error) {
+		res, err := reverseGeocodeUncached(ctx, lat, lon, region, mode)
+		if err != nil {
+			return ReverseGeocodeResponse{}, err
+		}
+		storeReverseGeocodeCache(cacheKey, res)
+		return res, nil
+	})
+	if err != nil {
+		return ReverseGeocodeResponse{}, err
+	}
+	return val.(ReverseGeocodeResponse), nil
+}
+
+func reverseGeocodeUncached(ctx context.Context, lat, lon float64, region, mode string) (ReverseGeocodeResponse, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -190,7 +363,7 @@ func geocodeWithGoogle(ctx context.Context, query string) ([]GeocodeCandidate, e
 
 	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeURLError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -259,7 +432,7 @@ func reverseGeocodeWithGoogle(ctx context.Context, lat, lon float64) (ReverseGeo
 
 	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
-		return ReverseGeocodeResponse{}, err
+		return ReverseGeocodeResponse{}, sanitizeURLError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -326,7 +499,7 @@ func geocodeWithKakao(ctx context.Context, query string) ([]GeocodeCandidate, er
 
 	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeURLError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -401,7 +574,7 @@ func geocodeWithOSM(ctx context.Context, query string) ([]GeocodeCandidate, erro
 
 	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
-		return nil, err
+		return nil, sanitizeURLError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -472,7 +645,7 @@ func reverseGeocodeWithKakao(ctx context.Context, lat, lon float64) (ReverseGeoc
 
 	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
-		return ReverseGeocodeResponse{}, err
+		return ReverseGeocodeResponse{}, sanitizeURLError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -541,7 +714,7 @@ func reverseGeocodeWithOSM(ctx context.Context, lat, lon float64) (ReverseGeocod
 
 	resp, err := currentHTTPClient().Do(req)
 	if err != nil {
-		return ReverseGeocodeResponse{}, err
+		return ReverseGeocodeResponse{}, sanitizeURLError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

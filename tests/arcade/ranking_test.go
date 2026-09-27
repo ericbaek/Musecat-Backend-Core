@@ -299,6 +299,48 @@ func TestRankings_ReturnsAuthenticatedViewerRankOutsideLeaderboard(t *testing.T)
 	}
 }
 
+func TestRankings_TiedRanksOutsideLeaderboard(t *testing.T) {
+	app := newArcadeTestApp(t)
+
+	// Seed 100 users with high exp (scores 200..299)
+	for i := 0; i < 100; i++ {
+		_, u := createAuthUser(t, app)
+		seedUserLevelExp(t, app, u.Id, 200+i)
+	}
+
+	// Seed 4 other users with tied exp = 10 (positions 101, 102, 103, 104)
+	for i := 0; i < 4; i++ {
+		_, other := createAuthUser(t, app)
+		seedUserLevelExp(t, app, other.Id, 10)
+	}
+
+	// Viewer user also has tied exp = 10 (position 105 in row_number, but tied rank 101 in rank())
+	viewerToken, viewer := createAuthUser(t, app)
+	seedUserLevelExp(t, app, viewer.Id, 10)
+
+	response := executeJSONRequest(t, app, http.MethodGet, "/rankings?metric=level&period=all", "", map[string]string{
+		"Authorization": "Bearer " + viewerToken,
+	})
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Viewer *struct {
+			Rank int `json:"rank"`
+		} `json:"viewer"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode authenticated ranking response: %v", err)
+	}
+	if payload.Viewer == nil {
+		t.Fatalf("expected viewer entry in payload")
+	}
+	if payload.Viewer.Rank != 101 {
+		t.Fatalf("expected tied viewer rank 101, got %d", payload.Viewer.Rank)
+	}
+}
+
 func assertRankingTop(t *testing.T, app *tests.TestApp, url, userID string, score int64) {
 	t.Helper()
 	res := executeJSONRequest(t, app, http.MethodGet, url, "", nil)

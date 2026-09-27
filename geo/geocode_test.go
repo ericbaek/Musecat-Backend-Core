@@ -467,3 +467,130 @@ func TestReverseGeocode_FreeModeKROffersKakaoFirst(t *testing.T) {
 		t.Fatalf("expected provider %q, got %q", ProviderKakao, res.Provider)
 	}
 }
+
+func TestForwardGeocode_SanitizesKeyOnNetworkError(t *testing.T) {
+	secretKey := "AIzaSySecretFakeKey123456789"
+	setEnv(t, "GOOGLE_MAPS_API_KEY", secretKey)
+	setEnv(t, "KAKAO_REST_API_KEY", "")
+
+	stubGeocodeHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("dial tcp 127.0.0.1:443: connect: connection refused")
+	})
+
+	_, err := ForwardGeocode(context.Background(), "Shinjuku Station", "jp", "")
+	if err == nil {
+		t.Fatalf("expected error from failed network call")
+	}
+	if strings.Contains(err.Error(), secretKey) {
+		t.Fatalf("API key leaked in error string: %v", err)
+	}
+}
+
+func TestForwardGeocode_CachesResults(t *testing.T) {
+	setEnv(t, "GOOGLE_MAPS_API_KEY", "google-test-key")
+	setEnv(t, "KAKAO_REST_API_KEY", "")
+
+	httpCalls := 0
+	stubGeocodeHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		httpCalls++
+		body := `{"status":"OK","results":[{"formatted_address":"Akihabara Station, Tokyo","place_id":"place_123","geometry":{"location":{"lat":35.6983,"lng":139.7731}}}]}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Request:    req,
+		}, nil
+	})
+
+	first, err := ForwardGeocode(context.Background(), "Akihabara Station", "jp", "")
+	if err != nil {
+		t.Fatalf("first forward geocode failed: %v", err)
+	}
+	if httpCalls != 1 {
+		t.Fatalf("expected 1 http call, got %d", httpCalls)
+	}
+
+	second, err := ForwardGeocode(context.Background(), "Akihabara Station", "jp", "")
+	if err != nil {
+		t.Fatalf("second forward geocode failed: %v", err)
+	}
+	if httpCalls != 1 {
+		t.Fatalf("expected cached result without additional http call, got %d calls", httpCalls)
+	}
+	if len(first.Results) != len(second.Results) || first.Results[0].Address != second.Results[0].Address {
+		t.Fatalf("cached result mismatch: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestReverseGeocode_CachesResults(t *testing.T) {
+	setEnv(t, "GOOGLE_MAPS_API_KEY", "google-test-key")
+	setEnv(t, "KAKAO_REST_API_KEY", "")
+
+	httpCalls := 0
+	stubGeocodeHTTPClient(t, func(req *http.Request) (*http.Response, error) {
+		httpCalls++
+		body := `{"status":"OK","results":[{"formatted_address":"Akihabara Station, Tokyo","place_id":"place_123"}]}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Request:    req,
+		}, nil
+	})
+
+	first, err := ReverseGeocode(context.Background(), 35.6983, 139.7731, "jp", "")
+	if err != nil {
+		t.Fatalf("first reverse geocode failed: %v", err)
+	}
+	if httpCalls != 1 {
+		t.Fatalf("expected 1 http call, got %d", httpCalls)
+	}
+
+	second, err := ReverseGeocode(context.Background(), 35.6983, 139.7731, "jp", "")
+	if err != nil {
+		t.Fatalf("second reverse geocode failed: %v", err)
+	}
+	if httpCalls != 1 {
+		t.Fatalf("expected cached result without additional http call, got %d calls", httpCalls)
+	}
+	if first.Address != second.Address {
+		t.Fatalf("cached result mismatch: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestReverseGeocodePreservesExactCoordinates(t *testing.T) {
+	t.Setenv("GOOGLE_MAPS_API_KEY", "test-key")
+	stubGeocodeHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"status":"OK","results":[{"formatted_address":"first location","place_id":"first"}]}`)), Header: http.Header{}, Request: r}, nil
+	})
+	first, err := ReverseGeocode(context.Background(), 37.12341, 127.12341, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ReverseGeocode(context.Background(), 37.12344, 127.12344, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Lat != 37.12344 || second.Lon != 127.12344 {
+		t.Errorf("second request reused first coordinates: first=(%v,%v), second=(%v,%v)", first.Lat, first.Lon, second.Lat, second.Lon)
+	}
+}
+func TestForwardGeocodeSeparatesCacheKeyComponents(t *testing.T) {
+	t.Setenv("GOOGLE_MAPS_API_KEY", "test-key")
+	calls := 0
+	stubGeocodeHTTPClient(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"status":"OK","results":[{"formatted_address":%q,"geometry":{"location":{"lat":1,"lng":2}}}]}`, r.URL.Query().Get("address")))), Header: http.Header{}, Request: r}, nil
+	})
+	_, err := ForwardGeocode(context.Background(), "venue|us", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := ForwardGeocode(context.Background(), "venue", "us|", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Query != "venue" || calls != 2 {
+		t.Errorf("distinct query/region inputs collided: query=%q, provider calls=%d", result.Query, calls)
+	}
+}
