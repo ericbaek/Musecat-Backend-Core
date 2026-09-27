@@ -3,6 +3,7 @@ package arcade_test
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -163,6 +164,10 @@ func TestFlagAndNoticeBodyLimit(t *testing.T) {
 				token, _ := createAuthUserWithTags(tb, app, []string{"moderator"})
 				headers["Authorization"] = "Bearer " + token
 				scenario.Body = strings.NewReader(`{"message":"` + strings.Repeat("x", tc.limit))
+				if !declared {
+					// Prevent httptest.NewRequest from inferring ContentLength.
+					scenario.Body = io.MultiReader(scenario.Body)
+				}
 			}
 			scenario.Test(t)
 		}
