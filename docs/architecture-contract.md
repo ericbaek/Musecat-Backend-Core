@@ -327,6 +327,12 @@ canonical ID and the `game_series_version_cabinet.price_default` snapshot;
 version-level `price_default` remains available as a fallback. Unverified
 cabinet identity is intentionally not a catalog row and is represented only as
 `null` in an arcade game entry or game mutation input.
+Each series also includes its distinct compatible cabinets. Both that list and
+each version's cabinet list are ordered by the earliest release date among all
+active versions compatible with the cabinet, newest date first. Cabinets with
+no dated compatible version follow dated cabinets, then localized name and ID
+break ties. The protected catalog management response orders its cabinets by
+the same active compatibility rule.
 
 `/moderation/game/catalog` is the only game-catalog write boundary. An active
 authenticated user with `developer` or `moderator` access, or a

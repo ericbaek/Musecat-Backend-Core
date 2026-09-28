@@ -2001,7 +2001,7 @@ components:
             $ref: '#/components/schemas/GameCatalogVersion'
     GameCatalogSeries:
       type: object
-      required: [id, name, full_name, hide_at, series_number, manufacturer]
+      required: [id, name, full_name, hide_at, series_number, manufacturer, cabinets]
       properties:
         id:
           type: string
@@ -2030,6 +2030,15 @@ components:
                   type: string
                   description: Locale-resolved manufacturer display name.
           description: Manufacturer of this game series, null if unassigned.
+        cabinets:
+          type: array
+          description: Distinct compatible cabinets in canonical display order.
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: {type: string}
+              name: {type: string}
     GameCatalogVersion:
       type: object
       required: [id, series_id, name, released_on, price_default, cabinets]
@@ -2048,6 +2057,7 @@ components:
           $ref: '#/components/schemas/GameCatalogPriceDefault'
         cabinets:
           type: array
+          description: Compatible cabinets in canonical display order.
           items:
             $ref: '#/components/schemas/GameCatalogCabinet'
     GameCatalogCabinet:
@@ -4948,7 +4958,7 @@ paths:
     get:
       tags: [Arcades]
       summary: Localized game/version/cabinet catalog
-      description: Returns only explicitly supported cabinets for each version. An unverified cabinet is represented by `null` only in arcade game entries and mutations, never as a catalog item.
+      description: Returns only explicitly supported cabinets for each version and distinct cabinets for each series. Cabinet arrays are ordered by the earliest release date among active compatible versions, newest first; undated cabinets follow, then name and ID break ties. An unverified cabinet is represented by `null` only in arcade game entries and mutations, never as a catalog item.
       parameters:
         - name: locale
           in: query
@@ -5008,7 +5018,7 @@ paths:
     get:
       tags: [Moderator]
       summary: Read protected game catalog management data
-      description: Active developer or moderator, or an active supporter or founding supporter at level 30 or above.
+      description: Active developer or moderator, or an active supporter or founding supporter at level 30 or above. Cabinets are ordered by the earliest release date among active compatible versions, newest first.
       security:
         - bearerAuth: []
       parameters:

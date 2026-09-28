@@ -153,6 +153,84 @@ func TestGameCatalog_OrdersSeriesAndVersions(t *testing.T) {
 	}
 }
 
+func TestGameCatalog_OrdersCabinetsByOldestCompatibleRelease(t *testing.T) {
+	app := newArcadeTestApp(t)
+	series := seedGameSeries(t, app, 1, "Rhythm")
+	oldVersion := seedGameSeriesVersionWithSeries(t, app, series, "2020-01-01", "Old")
+	middleVersion := seedGameSeriesVersionWithSeries(t, app, series, "2023-01-01", "Middle")
+	newVersion := seedGameSeriesVersionWithSeries(t, app, series, "2025-01-01", "New")
+	oldCabinet := seedGameCabinet(t, app, "Alpha")
+	middleCabinet := seedGameCabinet(t, app, "Beta")
+	newCabinet := seedGameCabinet(t, app, "Zed")
+	linkVersionCabinet(t, app, oldVersion, oldCabinet)
+	linkVersionCabinet(t, app, middleVersion, middleCabinet)
+	for _, cabinet := range []string{oldCabinet, middleCabinet, newCabinet} {
+		linkVersionCabinet(t, app, newVersion, cabinet)
+	}
+
+	response := executeJSONRequest(t, app, http.MethodGet, "/game/catalog?locale=en-US", "", nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Series []struct {
+			Cabinets []struct {
+				ID string `json:"id"`
+			} `json:"cabinets"`
+		} `json:"series"`
+		Versions []struct {
+			ID       string `json:"id"`
+			Cabinets []struct {
+				ID string `json:"id"`
+			} `json:"cabinets"`
+		} `json:"versions"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{newCabinet, middleCabinet, oldCabinet}
+	if len(payload.Series) != 1 || len(payload.Series[0].Cabinets) != len(want) {
+		t.Fatalf("unexpected series cabinets: %#v", payload.Series)
+	}
+	for index, cabinet := range payload.Series[0].Cabinets {
+		if cabinet.ID != want[index] {
+			t.Fatalf("series cabinet %d: got %s, want %s", index, cabinet.ID, want[index])
+		}
+	}
+	if len(payload.Versions) == 0 || payload.Versions[0].ID != newVersion || len(payload.Versions[0].Cabinets) != len(want) {
+		t.Fatalf("unexpected newest version cabinets: %#v", payload.Versions)
+	}
+	for index, cabinet := range payload.Versions[0].Cabinets {
+		if cabinet.ID != want[index] {
+			t.Fatalf("version cabinet %d: got %s, want %s", index, cabinet.ID, want[index])
+		}
+	}
+
+	token, _ := createAuthUserWithTags(t, app, []string{"moderator"})
+	management := executeJSONRequest(t, app, http.MethodGet, "/moderation/game/catalog?locale=en-US", "", map[string]string{"Authorization": "Bearer " + token})
+	defer management.Body.Close()
+	if management.StatusCode != http.StatusOK {
+		t.Fatalf("expected management status 200, got %d", management.StatusCode)
+	}
+	var managed struct {
+		Cabinets []struct {
+			ID string `json:"id"`
+		} `json:"cabinets"`
+	}
+	if err := json.NewDecoder(management.Body).Decode(&managed); err != nil {
+		t.Fatal(err)
+	}
+	if len(managed.Cabinets) != len(want) {
+		t.Fatalf("unexpected managed cabinets: %#v", managed.Cabinets)
+	}
+	for index, cabinet := range managed.Cabinets {
+		if cabinet.ID != want[index] {
+			t.Fatalf("managed cabinet %d: got %s, want %s", index, cabinet.ID, want[index])
+		}
+	}
+}
+
 func TestGameCatalog_IncludesManufacturer(t *testing.T) {
 	app := newArcadeTestApp(t)
 
