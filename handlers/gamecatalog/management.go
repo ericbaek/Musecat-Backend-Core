@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -18,6 +19,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
+	"github.com/ericbaek/musecat-backend-core/handlers/gamecatalog/cabinetorder"
 )
 
 const (
@@ -107,6 +109,34 @@ func GetCatalog(re *core.RequestEvent) error {
 		}
 		response[plural(entity)] = items
 	}
+	versionReleases := make(map[string]string)
+	for _, version := range response["versions"].([]map[string]any) {
+		if version["archived"] != true {
+			versionReleases[optionalText(version["id"])] = optionalText(version["released_on"])
+		}
+	}
+	oldestReleaseByCabinet := make(map[string]string)
+	for _, compatibility := range response["compatibilities"].([]map[string]any) {
+		if compatibility["archived"] != true {
+			cabinetorder.Record(oldestReleaseByCabinet,
+				optionalText(compatibility["cabinet"]),
+				versionReleases[optionalText(compatibility["version"])])
+		}
+	}
+	cabinets := response["cabinets"].([]map[string]any)
+	sort.Slice(cabinets, func(i, j int) bool {
+		name := func(item map[string]any) string {
+			for _, field := range []string{"en", "kr", "jp"} {
+				if value := optionalText(item[field]); value != "" {
+					return value
+				}
+			}
+			return optionalText(item["id"])
+		}
+		left, right := cabinets[i], cabinets[j]
+		return cabinetorder.Less(oldestReleaseByCabinet,
+			optionalText(left["id"]), name(left), optionalText(right["id"]), name(right))
+	})
 
 	manufacturers, err := re.App.FindRecordsByFilter(collectionGameManufacturer, "", "created", 0, 0, nil)
 	if err != nil {

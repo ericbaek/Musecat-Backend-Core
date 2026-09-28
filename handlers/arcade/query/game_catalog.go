@@ -8,6 +8,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	"github.com/ericbaek/musecat-backend-core/handlers/gamecatalog/cabinetorder"
 )
 
 type gameCatalogResponse struct {
@@ -21,12 +22,18 @@ type gameCatalogManufacturer struct {
 }
 
 type gameCatalogSeries struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	FullName     string                   `json:"full_name"`
-	HideAt       []string                 `json:"hide_at"`
-	SeriesNumber int                      `json:"series_number"`
-	Manufacturer *gameCatalogManufacturer `json:"manufacturer"`
+	ID           string                     `json:"id"`
+	Name         string                     `json:"name"`
+	FullName     string                     `json:"full_name"`
+	HideAt       []string                   `json:"hide_at"`
+	SeriesNumber int                        `json:"series_number"`
+	Manufacturer *gameCatalogManufacturer   `json:"manufacturer"`
+	Cabinets     []gameCatalogSeriesCabinet `json:"cabinets"`
+}
+
+type gameCatalogSeriesCabinet struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type gameCatalogVersion struct {
@@ -102,6 +109,7 @@ func GetGameCatalog(re *core.RequestEvent) error {
 			HideAt:       record.GetStringSlice("hide_at"),
 			SeriesNumber: record.GetInt("seriesNumber"),
 			Manufacturer: manufacturerByID[record.GetString("manufacturer")],
+			Cabinets:     []gameCatalogSeriesCabinet{},
 		}
 	}
 
@@ -174,6 +182,8 @@ func GetGameCatalog(re *core.RequestEvent) error {
 			"error": "failed to load game catalog compatibility",
 		})
 	}
+	oldestReleaseByCabinet := make(map[string]string)
+	seriesCabinetsByID := make(map[string]map[string]gameCatalogSeriesCabinet)
 	for _, record := range compatibilityRecords {
 		if record.GetBool("archived") {
 			continue
@@ -186,6 +196,15 @@ func GetGameCatalog(re *core.RequestEvent) error {
 		cabinet.PriceDefault = record.Get("price_default")
 		version.Cabinets = append(version.Cabinets, cabinet)
 		versionsByID[version.ID] = version
+		seriesCabinets := seriesCabinetsByID[version.SeriesID]
+		if seriesCabinets == nil {
+			seriesCabinets = make(map[string]gameCatalogSeriesCabinet)
+			seriesCabinetsByID[version.SeriesID] = seriesCabinets
+		}
+		seriesCabinets[cabinet.ID] = gameCatalogSeriesCabinet{ID: cabinet.ID, Name: cabinet.Name}
+		if version.ReleasedOn != nil {
+			cabinetorder.Record(oldestReleaseByCabinet, cabinet.ID, *version.ReleasedOn)
+		}
 	}
 
 	response := gameCatalogResponse{
@@ -193,11 +212,19 @@ func GetGameCatalog(re *core.RequestEvent) error {
 		Versions: make([]gameCatalogVersion, 0, len(versionsByID)),
 	}
 	for _, series := range seriesByID {
+		for _, cabinet := range seriesCabinetsByID[series.ID] {
+			series.Cabinets = append(series.Cabinets, cabinet)
+		}
+		sort.Slice(series.Cabinets, func(i, j int) bool {
+			left, right := series.Cabinets[i], series.Cabinets[j]
+			return cabinetorder.Less(oldestReleaseByCabinet, left.ID, left.Name, right.ID, right.Name)
+		})
 		response.Series = append(response.Series, series)
 	}
 	for _, version := range versionsByID {
 		sort.Slice(version.Cabinets, func(i, j int) bool {
-			return catalogLess(version.Cabinets[i].Name, version.Cabinets[i].ID, version.Cabinets[j].Name, version.Cabinets[j].ID)
+			left, right := version.Cabinets[i], version.Cabinets[j]
+			return cabinetorder.Less(oldestReleaseByCabinet, left.ID, left.Name, right.ID, right.Name)
 		})
 		response.Versions = append(response.Versions, version)
 	}
