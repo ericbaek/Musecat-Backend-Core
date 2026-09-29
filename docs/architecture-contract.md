@@ -46,6 +46,14 @@ before a release. Core CI must not require access to the private Full repository
 
 ## Public endpoint request limits
 
+Active `user_ban` records block OAuth sign-in by the provider email hash or
+the matched user's record and email hash. Password sign-in and auth refresh
+also check the matched user. The OAuth and refresh auth responses include
+`ACCOUNT_BANNED`, reason, expiry, and permanence so clients can explain the
+restriction. `POST /user/signup` returns the same ban details with 403 when
+an authenticated account becomes banned before signup is completed, including
+an active withdrawal cooldown on an already withdrawn account.
+
 Fresh Core databases enable per-client-IP limits for anonymous and authenticated
 users together: `GET /geocode` and `GET /reverse_geocode` allow 30 requests per
 60 seconds each, `GET /geo` allows 60 per 60 seconds, and

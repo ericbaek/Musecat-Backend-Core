@@ -83,10 +83,73 @@ func registerUserBanHooks(app core.App) {
 					"details": err.Error(),
 				})
 			}
+
+			if banRec == nil {
+				var targetUser *core.Record
+				if e.Record != nil {
+					targetUser = e.Record
+				} else if email != "" {
+					targetUser, err = e.App.FindAuthRecordByEmail(CollectionUser, email)
+					if err != nil && !isNotFoundError(err) {
+						return e.JSON(http.StatusBadGateway, map[string]any{
+							"error":   "failed to check user ban",
+							"details": err.Error(),
+						})
+					}
+				}
+				if targetUser != nil {
+					banRec, err = findActiveBanForUser(e.App, targetUser, userBanNow())
+					if err != nil {
+						return e.JSON(http.StatusBadGateway, map[string]any{
+							"error":   "failed to check user ban",
+							"details": err.Error(),
+						})
+					}
+				}
+			}
+
 			if banRec != nil {
 				return e.JSON(http.StatusBadRequest, buildBanAuthResponse(banRec))
 			}
 
+			return e.Next()
+		},
+	})
+
+	app.OnRecordAuthWithPasswordRequest(CollectionUser).Bind(&hook.Handler[*core.RecordAuthWithPasswordRequestEvent]{
+		Id: "blockBannedUserPasswordAuth",
+		Func: func(e *core.RecordAuthWithPasswordRequestEvent) error {
+			if e.Record != nil {
+				banRec, err := findActiveBanForUser(e.App, e.Record, userBanNow())
+				if err != nil {
+					return e.JSON(http.StatusBadGateway, map[string]any{
+						"error":   "failed to check user ban",
+						"details": err.Error(),
+					})
+				}
+				if banRec != nil {
+					return e.JSON(http.StatusBadRequest, buildBanAuthResponse(banRec))
+				}
+			}
+			return e.Next()
+		},
+	})
+
+	app.OnRecordAuthRefreshRequest(CollectionUser).Bind(&hook.Handler[*core.RecordAuthRefreshRequestEvent]{
+		Id: "blockBannedUserAuthRefresh",
+		Func: func(e *core.RecordAuthRefreshRequestEvent) error {
+			if e.Record != nil {
+				banRec, err := findActiveBanForUser(e.App, e.Record, userBanNow())
+				if err != nil {
+					return e.JSON(http.StatusBadGateway, map[string]any{
+						"error":   "failed to check user ban",
+						"details": err.Error(),
+					})
+				}
+				if banRec != nil {
+					return e.JSON(http.StatusBadRequest, buildBanAuthResponse(banRec))
+				}
+			}
 			return e.Next()
 		},
 	})
@@ -193,6 +256,37 @@ func findBanByUserID(app core.App, userID string) (*core.Record, error) {
 	return rec, nil
 }
 
+func findActiveBanByUserID(app core.App, userID string, now time.Time) (*core.Record, error) {
+	rec, err := findBanByUserID(app, userID)
+	if err != nil || rec == nil {
+		return nil, err
+	}
+	if !isBanActive(rec.GetString("until"), now) {
+		return nil, nil
+	}
+	return rec, nil
+}
+
+func findActiveBanForUser(app core.App, userRec *core.Record, now time.Time) (*core.Record, error) {
+	if app == nil || userRec == nil {
+		return nil, nil
+	}
+
+	banRec, err := findActiveBanByUserID(app, userRec.Id, now)
+	if err != nil {
+		return nil, err
+	}
+	if banRec != nil {
+		return banRec, nil
+	}
+
+	if email := userRec.Email(); email != "" {
+		return findActiveBanByHashedEmail(app, hashNormalizedEmail(email), now)
+	}
+
+	return nil, nil
+}
+
 func findActiveBanByHashedEmail(app core.App, hashedEmail string, now time.Time) (*core.Record, error) {
 	if app == nil || strings.TrimSpace(hashedEmail) == "" {
 		return nil, nil
@@ -267,23 +361,37 @@ func upsertUserBanByUserID(
 }
 
 func checkArcadeWriteRestriction(app core.App, authRec *core.Record, now time.Time) (string, string, error) {
-	if authRec == nil {
-		return "", "", nil
-	}
-
-	if authRec.GetBool("withdrawn") {
-		return "account withdrawn", AccountWithdrawnCode, nil
-	}
-
-	banRec, err := findBanByUserID(app, authRec.Id)
+	_, code, err := checkAccountRestrictionWithBan(app, authRec, now)
 	if err != nil {
 		return "", "", err
 	}
-	if banRec != nil && isBanActive(banRec.GetString("until"), now) {
-		return userBanBlockedErrorText, AccountBannedCode, nil
+	if code == AccountWithdrawnCode {
+		return "account withdrawn", code, nil
+	}
+	if code == AccountBannedCode {
+		return userBanBlockedErrorText, code, nil
+	}
+	return "", "", nil
+}
+
+func checkAccountRestrictionWithBan(app core.App, authRec *core.Record, now time.Time) (*core.Record, string, error) {
+	if authRec == nil {
+		return nil, "", nil
 	}
 
-	return "", "", nil
+	if authRec.GetBool("withdrawn") {
+		return nil, AccountWithdrawnCode, nil
+	}
+
+	banRec, err := findActiveBanForUser(app, authRec, now)
+	if err != nil {
+		return nil, "", err
+	}
+	if banRec != nil {
+		return banRec, AccountBannedCode, nil
+	}
+
+	return nil, "", nil
 }
 
 func buildBanAuthResponse(banRec *core.Record) map[string]any {

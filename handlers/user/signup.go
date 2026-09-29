@@ -19,6 +19,14 @@ var (
 	errSignupUsernameTaken  = fmt.Errorf("signup_username_taken")
 )
 
+type signupBanError struct {
+	banRec *core.Record
+}
+
+func (e *signupBanError) Error() string {
+	return "signup_banned_user"
+}
+
 var signupUsernamePattern = regexp.MustCompile(`^[A-Za-z0-9]+$`)
 
 const signupUsernameMaxLength = 15
@@ -78,6 +86,14 @@ func SignUp(re *core.RequestEvent) error {
 			return fmt.Errorf("failed to load user: %w", err)
 		}
 
+		banRec, err := findActiveBanForUser(txApp, userRec, userBanNow())
+		if err != nil {
+			return fmt.Errorf("failed to check user ban: %w", err)
+		}
+		if banRec != nil {
+			return &signupBanError{banRec: banRec}
+		}
+
 		if userRec.GetBool("withdrawn") {
 			return errSignupWithdrawn
 		}
@@ -127,6 +143,10 @@ func SignUp(re *core.RequestEvent) error {
 		return nil
 	})
 	if err != nil {
+		var banErr *signupBanError
+		if errors.As(err, &banErr) {
+			return re.JSON(http.StatusForbidden, buildBanAuthResponse(banErr.banRec))
+		}
 		switch err {
 		case errSignupUsernameExists:
 			return re.JSON(http.StatusConflict, map[string]any{

@@ -72,6 +72,23 @@ components:
           type: string
         code:
           type: string
+    AccountBannedResponse:
+      type: object
+      required: [error, code, reason, until, permanent]
+      properties:
+        error:
+          type: string
+          enum: [account banned]
+        code:
+          type: string
+          enum: [ACCOUNT_BANNED]
+        reason:
+          type: string
+        until:
+          type: string
+          description: Empty for a permanent restriction; otherwise a UTC date-time.
+        permanent:
+          type: boolean
     CommunityPostInput:
       type: object
       required: [body]
@@ -6463,11 +6480,13 @@ paths:
                   - $ref: '#/components/schemas/PocketBaseAuthError'
                   - $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: Withdrawn account cannot sign up.
+          description: Withdrawn or banned account cannot sign up.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                anyOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - $ref: '#/components/schemas/AccountBannedResponse'
         '409':
           description: Username or user_info already initialized, or username already taken.
           content:

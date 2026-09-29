@@ -16,16 +16,19 @@ func RequireActiveUser() *hook.Handler[*core.RequestEvent] {
 				return re.UnauthorizedError("The request requires valid record authorization token.", nil)
 			}
 
-			errText, code, err := checkArcadeWriteRestriction(re.App, re.Auth, userBanNow())
+			banRec, code, err := checkAccountRestrictionWithBan(re.App, re.Auth, userBanNow())
 			if err != nil {
 				return re.JSON(http.StatusBadGateway, map[string]any{
 					"error":   "failed to verify account restriction",
 					"details": err.Error(),
 				})
 			}
+			if code == AccountBannedCode {
+				return re.JSON(http.StatusForbidden, buildBanAuthResponse(banRec))
+			}
 			if code != "" {
 				return re.JSON(http.StatusForbidden, map[string]any{
-					"error": errText,
+					"error": "account withdrawn",
 					"code":  code,
 				})
 			}
