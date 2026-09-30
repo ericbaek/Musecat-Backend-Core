@@ -2,7 +2,6 @@ package user
 
 import (
 	"fmt"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -141,17 +140,19 @@ func parseActivityDays(raw string) (int, error) {
 	return days, nil
 }
 
-func computeActivityLevel(count, maxDaily int) int {
-	if count <= 0 || maxDaily <= 0 {
+func computeActivityLevel(count int) int {
+	// Fixed logarithmic buckets keep a single unusually busy day from flattening
+	// the heatmap for every other day in the requested range.
+	switch {
+	case count <= 0:
 		return 0
-	}
-
-	level := int(math.Ceil(float64(count*4) / float64(maxDaily)))
-	if level < 1 {
+	case count == 1:
 		return 1
-	}
-	if level > 4 {
+	case count <= 3:
+		return 2
+	case count <= 7:
+		return 3
+	default:
 		return 4
 	}
-	return level
 }

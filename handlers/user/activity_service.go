@@ -108,7 +108,7 @@ func BuildUserActivity(app core.App, profile *Profile, loc *time.Location, tzNam
 	}
 
 	for _, day := range outDays {
-		day.Level = computeActivityLevel(day.TotalCount, resp.Totals.MaxDailyCount)
+		day.Level = computeActivityLevel(day.TotalCount)
 	}
 
 	return resp, nil

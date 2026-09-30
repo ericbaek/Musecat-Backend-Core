@@ -125,7 +125,7 @@ func TestGetUserActivity_ByID_Default365MergesCounts(t *testing.T) {
 		assertJSONNumber(tb, today["flag_count"], 2)
 		assertJSONNumber(tb, today["legacy_ticket_count"], 0)
 		assertJSONNumber(tb, today["total_count"], 3)
-		assertJSONNumber(tb, today["level"], 4)
+		assertJSONNumber(tb, today["level"], 2)
 
 		yesterday := dayByDate[yesterdayKey]
 		if yesterday == nil {
@@ -133,7 +133,7 @@ func TestGetUserActivity_ByID_Default365MergesCounts(t *testing.T) {
 		}
 		assertJSONNumber(tb, yesterday["legacy_ticket_count"], 1)
 		assertJSONNumber(tb, yesterday["total_count"], 1)
-		assertJSONNumber(tb, yesterday["level"], 2)
+		assertJSONNumber(tb, yesterday["level"], 1)
 	}
 
 	scenario.Test(t)

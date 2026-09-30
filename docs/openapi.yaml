@@ -1768,6 +1768,7 @@ components:
           type: integer
           minimum: 0
           maximum: 4
+          description: Heatmap intensity uses fixed logarithmic daily-count buckets: 0 for no activity, 1 for one activity, 2 for 2–3, 3 for 4–7, and 4 for 8 or more. It is independent of the maximum count in the requested range.
         changelog_count:
           type: integer
         flag_count:
@@ -4159,7 +4160,7 @@ paths:
             maximum: 365
       responses:
         '200':
-          description: User profile plus activity counts and heatmap buckets.
+          description: User profile plus activity counts and heatmap buckets. Heatmap intensity uses fixed logarithmic daily-count buckets so an outlier does not flatten the rest of the range.
           content:
             application/json:
               schema:
@@ -4194,7 +4195,7 @@ paths:
                 days:
                   - date: "2026-03-29"
                     total_count: 2
-                    level: 3
+                    level: 2
                     changelog_count: 1
                     flag_count: 1
                     legacy_ticket_count: 0

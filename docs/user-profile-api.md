@@ -378,7 +378,7 @@ Public user activity heatmap lookup.
     {
       "date": "2026-03-29",
       "total_count": 2,
-      "level": 3,
+      "level": 2,
       "changelog_count": 1,
       "flag_count": 1,
       "legacy_ticket_count": 0,
@@ -394,7 +394,7 @@ Public user activity heatmap lookup.
 - `legacy_ticket_count`: rows from `z_legacy_tickets` where `createdBy = user.id`
 - `attendance_count`: rows from `user_level_log` with attendance check-in kinds
 - `total_count`: sum of the four category counts
-- `level`: relative heatmap level `0..4` derived from `total_count` within the requested range
+- `level`: heatmap intensity based on daily `total_count`: `0` for no activity, `1` for one activity, `2` for `2–3`, `3` for `4–7`, and `4` for `8+`. The fixed logarithmic buckets are independent of the maximum count in the requested range.
 
 ### Error Responses
 - `400 Bad Request` when `id` and `username` are both missing or both supplied:
