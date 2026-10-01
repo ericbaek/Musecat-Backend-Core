@@ -311,7 +311,7 @@ Multipart `sns` and `background_position` values are JSON encoded strings.
 `avatar` and `background` accept one PNG or JPEG file up to 15 MB. Sending an
 empty string or `null` deletes the existing file; omission preserves it.
 Background upload, deletion, or a `background_position` change requires level
-15. Position coordinates `x` and `y` must each be between 0 and 100.
+15. Position coordinates `x` and `y` must each be between 0 and 100. Optional `zoom` is between 1 and 4 (default 1), and clockwise `rotation` is 0, 90, 180, or 270 (default 0). Coordinates apply to the rotated image with cover sizing. Store the full image; transforms do not crop stored pixels. Existing x/y-only records remain valid.
 Success returns the current `GET /user/me` profile (200). Invalid input returns
 400, unauthorized requests 401, inactive users or insufficient background level
 403, a missing `user_info` record 409, and storage failures 502.

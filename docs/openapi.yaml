@@ -1181,7 +1181,7 @@ components:
           type: string
         background_position:
           type: object
-          description: Focal point used when rendering the profile background with cover sizing.
+          description: Cover anchor on the rotated original image, with non-destructive zoom and clockwise rotation.
           required: [x, y]
           properties:
             x:
@@ -1192,6 +1192,15 @@ components:
               type: number
               minimum: 0
               maximum: 100
+            zoom:
+              type: number
+              minimum: 1
+              maximum: 4
+              default: 1
+            rotation:
+              type: integer
+              enum: [0, 90, 180, 270]
+              default: 0
         tag:
           type: array
           items:
@@ -4050,7 +4059,7 @@ paths:
                 sns: {type: string, description: JSON encoded UserProfileSns object.}
                 avatar: {type: string, format: binary, description: PNG or JPEG up to 15 MB; empty or "null" text deletes.}
                 background: {type: string, format: binary, description: PNG or JPEG up to 15 MB; empty or "null" text deletes. Requires level 15.}
-                background_position: {type: string, description: JSON encoded x and y percentages (0 to 100); requires level 15.}
+                background_position: {type: string, description: "JSON encoded x/y percentages (0 to 100), optional zoom (1 to 4) and rotation (0/90/180/270); requires level 15."}
       responses:
         '200':
           description: Updated self profile, including private series.

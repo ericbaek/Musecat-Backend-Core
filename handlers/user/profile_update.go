@@ -88,11 +88,24 @@ func UpdateProfile(re *core.RequestEvent) error {
 	}
 	if in.positionProvided {
 		var position struct {
-			X *float64 `json:"x"`
-			Y *float64 `json:"y"`
+			X        *float64 `json:"x"`
+			Y        *float64 `json:"y"`
+			Zoom     *float64 `json:"zoom"`
+			Rotation *int     `json:"rotation"`
 		}
 		if err := json.Unmarshal(in.position, &position); err != nil || position.X == nil || position.Y == nil || math.IsNaN(*position.X) || math.IsNaN(*position.Y) || math.IsInf(*position.X, 0) || math.IsInf(*position.Y, 0) || *position.X < 0 || *position.X > 100 || *position.Y < 0 || *position.Y > 100 {
 			return re.JSON(http.StatusBadRequest, map[string]any{"error": "background_position must have x and y between 0 and 100"})
+		}
+		if position.Zoom != nil && (math.IsNaN(*position.Zoom) || math.IsInf(*position.Zoom, 0) || *position.Zoom < 1 || *position.Zoom > 4) {
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "background_position zoom must be between 1 and 4"})
+		}
+		if position.Rotation != nil && *position.Rotation != 0 && *position.Rotation != 90 && *position.Rotation != 180 && *position.Rotation != 270 {
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "background_position rotation must be 0, 90, 180, or 270"})
+		}
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(in.position, &fields)
+		if string(fields["zoom"]) == "null" || string(fields["rotation"]) == "null" {
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "background_position transform cannot be null"})
 		}
 	}
 	rec, err := re.App.FindRecordById(CollectionUserInfo, re.Auth.Id)

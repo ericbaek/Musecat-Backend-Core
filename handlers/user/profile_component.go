@@ -48,8 +48,10 @@ type FavoriteArcade struct {
 }
 
 type BackgroundPosition struct {
-	X float64 `json:"x"`
-	Y float64 `json:"y"`
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	Zoom     float64 `json:"zoom"`
+	Rotation int     `json:"rotation"`
 }
 
 type Profile struct {
@@ -144,7 +146,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 		out.Bio = ""
 		out.Avatar = ""
 		out.Background = ""
-		out.BackgroundPosition = BackgroundPosition{X: 50, Y: 50}
+		out.BackgroundPosition = BackgroundPosition{X: 50, Y: 50, Zoom: 1}
 		out.Tag = []string{}
 		return out
 	}
@@ -154,7 +156,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 	bio := ""
 	avatar := ""
 	background := ""
-	backgroundPosition := BackgroundPosition{X: 50, Y: 50}
+	backgroundPosition := BackgroundPosition{X: 50, Y: 50, Zoom: 1}
 	tag := parseUserTag(userRec)
 	countryMode := ProfileCountryMode(userInfoRec)
 	profileCountries := []string{}
@@ -207,12 +209,12 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 }
 
 func parseBackgroundPosition(raw string) BackgroundPosition {
-	position := BackgroundPosition{X: 50, Y: 50}
+	position := BackgroundPosition{X: 50, Y: 50, Zoom: 1}
 	if err := json.Unmarshal([]byte(raw), &position); err != nil {
-		return BackgroundPosition{X: 50, Y: 50}
+		return BackgroundPosition{X: 50, Y: 50, Zoom: 1}
 	}
-	if position.X < 0 || position.X > 100 || position.Y < 0 || position.Y > 100 {
-		return BackgroundPosition{X: 50, Y: 50}
+	if position.X < 0 || position.X > 100 || position.Y < 0 || position.Y > 100 || position.Zoom < 1 || position.Zoom > 4 || (position.Rotation != 0 && position.Rotation != 90 && position.Rotation != 180 && position.Rotation != 270) {
+		return BackgroundPosition{X: 50, Y: 50, Zoom: 1}
 	}
 	return position
 }

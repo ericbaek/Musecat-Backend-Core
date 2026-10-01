@@ -598,3 +598,7 @@ counts or non-images return 400. Files are multipart-only, never JSON file objec
 The frontend shares each feature's limits across UI, service and bounded BFF reader.
 Existing stored attachments are preserved when updates omit photos. These checks do
 not change arcade visibility, author/reviewer permissions, XP or history semantics.
+
+### Profile background framing
+
+`background_position` stores x/y cover anchors (0–100), optional zoom (1–4, default 1), and clockwise rotation (0/90/180/270, default 0). Anchors apply after rotation. Preserve the full image; these are rendering transforms. Legacy x/y-only JSON remains valid within the existing 128-byte field, so no schema migration or data backfill is required. Publish this Core contract before updating Full’s pinned Core dependency and deploying frontend transform writes.

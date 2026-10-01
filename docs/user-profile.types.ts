@@ -17,6 +17,8 @@ export interface UserProfile {
   primary_country: string;
   bio: string;
   avatar: string; // filename only
+  background: string; // full-image filename
+  background_position: { x: number; y: number; zoom: number; rotation: 0 | 90 | 180 | 270 };
   sns: UserProfileSNS;
   withdrawn: boolean;
   warp?: boolean;

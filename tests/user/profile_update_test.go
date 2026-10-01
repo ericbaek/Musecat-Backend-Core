@@ -80,7 +80,7 @@ func TestProfileUpdateBackgroundAccessAndFiles(t *testing.T) {
 	if _, err := avatar.Write(pngFixtureBytes()); err != nil {
 		t.Fatal(err)
 	}
-	_ = writer.WriteField("background_position", `{"x":25,"y":75}`)
+	_ = writer.WriteField("background_position", `{"x":25,"y":75,"zoom":2.5,"rotation":90}`)
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestProfileUpdateBackgroundAccessAndFiles(t *testing.T) {
 		t.Fatalf("images missing: %#v", profile)
 	}
 	position := profile["background_position"].(map[string]any)
-	if position["x"] != float64(25) || position["y"] != float64(75) {
+	if position["x"] != float64(25) || position["y"] != float64(75) || position["zoom"] != 2.5 || position["rotation"] != float64(90) {
 		t.Fatalf("position=%#v", position)
 	}
 	delete(headers, "Content-Type")
@@ -123,6 +123,35 @@ func TestProfileUpdateBackgroundAccessAndFiles(t *testing.T) {
 	}
 	if decodeJSON(t, res)["avatar"] != "" {
 		t.Fatal("avatar was not deleted")
+	}
+}
+
+func TestProfileBackgroundTransformValidationAndLegacyDefaults(t *testing.T) {
+	app := newUserFetchTestApp(t)
+	token, user := createAuthUser(t, app, true)
+	setUserLevelForCountriesTest(t, app, user.Id, userhandler.LevelBaseExp(15))
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	for _, transform := range []string{
+		`{"x":10,"y":90,"zoom":0.5}`, `{"x":10,"y":90,"zoom":4.1}`,
+		`{"x":10,"y":90,"rotation":45}`, `{"x":10,"y":90,"rotation":90.5}`,
+		`{"x":10,"y":90,"zoom":null}`, `{"x":10,"y":90,"rotation":null}`,
+	} {
+		res := doUserRequest(t, app, http.MethodPut, "/user/profile", headers, `{"nickname":"ok","background_position":`+transform+`}`)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("invalid %s status=%d", transform, res.StatusCode)
+		}
+	}
+	res := doUserRequest(t, app, http.MethodPut, "/user/profile", headers, `{"nickname":"ok","background_position":{"x":10,"y":90}}`)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("legacy status=%d", res.StatusCode)
+	}
+	position := decodeJSON(t, res)["background_position"].(map[string]any)
+	if position["x"] != float64(10) || position["y"] != float64(90) || position["zoom"] != float64(1) || position["rotation"] != float64(0) {
+		t.Fatalf("legacy position=%#v", position)
+	}
+	res = doUserRequest(t, app, http.MethodGet, "/user/me", headers, "")
+	if decodeJSON(t, res)["background_position"].(map[string]any)["zoom"] != float64(1) {
+		t.Fatal("legacy read lost zoom default")
 	}
 }
 
