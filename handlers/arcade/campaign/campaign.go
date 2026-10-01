@@ -828,6 +828,19 @@ func loadCampaignRowsByVersion(app core.App, config campaignConfig, versionID st
 	if arcadeID = strings.TrimSpace(arcadeID); arcadeID != "" {
 		clauses = append(clauses, "a.id = {:arcade_id}")
 		params["arcade_id"] = arcadeID
+		if versionID == config.ToVersion {
+			// Arcade prompts retain updates only during their report review window.
+			// The campaign overview still includes all current to-version targets.
+			clauses = append(clauses, `EXISTS (
+SELECT 1 FROM arcade_campaign_check c
+WHERE c.campaign = {:campaign} AND c.arcade = a.id AND c.game_id = r.entry
+  AND c.result = 'updated' AND c.created > {:report_cutoff} AND c.created <= {:report_now}
+)`)
+			now := time.Now().UTC()
+			params["campaign"] = config.ID
+			params["report_cutoff"], _ = pbtypes.ParseDateTime(now.Add(-campaignRollbackWindow))
+			params["report_now"], _ = pbtypes.ParseDateTime(now)
+		}
 	}
 	if config.CabinetScope == "include" {
 		placeholders := make([]string, 0, len(config.Cabinets))

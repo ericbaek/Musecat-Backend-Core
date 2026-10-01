@@ -4976,7 +4976,7 @@ paths:
     get:
       tags: [Arcades]
       summary: Localized game/version/cabinet catalog
-      description: Returns only explicitly supported cabinets for each version and distinct cabinets for each series. Cabinet arrays are ordered by the earliest release date among active compatible versions, newest first; undated cabinets follow, then name and ID break ties. An unverified cabinet is represented by `null` only in arcade game entries and mutations, never as a catalog item.
+      description: Omits historical version aliases (non-empty alias_of) while retaining their records for historical game reads. Returns only explicitly supported cabinets for each version and distinct cabinets for each series. Cabinet arrays are ordered by the earliest release date among active compatible versions, newest first; undated cabinets follow, then name and ID break ties. An unverified cabinet is represented by `null` only in arcade game entries and mutations, never as a catalog item.
       parameters:
         - name: locale
           in: query
@@ -5036,7 +5036,7 @@ paths:
     get:
       tags: [Moderator]
       summary: Read protected game catalog management data
-      description: Active developer or moderator, or an active supporter or founding supporter at level 30 or above. Cabinets are ordered by the earliest release date among active compatible versions, newest first.
+      description: Active developer or moderator, or an active supporter or founding supporter at level 30 or above. Historical version aliases (non-empty alias_of) are omitted from the versions list without deleting their records or historical references. Cabinets are ordered by the earliest release date among active compatible versions, newest first.
       security:
         - bearerAuth: []
       parameters:
@@ -6839,7 +6839,7 @@ paths:
     get:
       tags: [Arcades]
       summary: List active campaign prompts for an arcade
-      description: Returns campaign targets for the requested public/open arcade to an authenticated active user. Each item includes current target status and report history.
+      description: Returns campaign prompts for the requested public/open arcade to an authenticated active user. Includes current from_version machines and current to_version machines with an updated report for the same campaign and arcade/game created less than seven days ago. Already-updated machines without a campaign update report and reports aged seven days or more are excluded. Each item includes current target status and report history; expiry leaves game state and campaign overview history intact.
       security: [{bearerAuth: []}]
       parameters:
         - name: id
@@ -6871,7 +6871,7 @@ paths:
     get:
       tags: [Arcades]
       summary: List campaign-target game ids for an arcade
-      description: Returns only the game ids targeted by active campaigns for a public/open arcade. Campaign configuration, rewards, locations, and reports are omitted so anonymous detail pages can show campaign presence safely.
+      description: Returns only game ids with active campaign prompts for a public/open arcade, using the same eligibility as /arcade/campaigns (current from_version machines or current to_version machines with an updated campaign report created less than seven days ago). Already-updated machines without reports and updates aged seven days or more are excluded. Campaign configuration, rewards, locations, and reports are omitted so anonymous detail pages can show campaign presence safely.
       parameters:
         - name: id
           in: query

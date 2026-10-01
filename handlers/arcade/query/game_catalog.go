@@ -128,7 +128,7 @@ func GetGameCatalog(re *core.RequestEvent) error {
 	}
 	versionsByID := make(map[string]gameCatalogVersion, len(versionRecords))
 	for _, record := range versionRecords {
-		if record.GetBool("archived") {
+		if record.GetBool("archived") || strings.TrimSpace(record.GetString("alias_of")) != "" {
 			continue
 		}
 		seriesID := record.GetString("series")

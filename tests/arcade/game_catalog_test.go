@@ -121,6 +121,67 @@ func TestGameCatalog_RequiresSupportedLocale(t *testing.T) {
 	}
 }
 
+func TestGameCatalog_ExcludesHistoricalVersionAliases(t *testing.T) {
+	app := newArcadeTestApp(t)
+	seriesID := seedGameSeries(t, app, 1, "IIDX")
+	canonicalID := seedGameSeriesVersionWithSeries(t, app, seriesID, "2026-09-16", "34 ZINRAI")
+	aliasID := seedGameSeriesVersionWithSeries(t, app, seriesID, "2026-09-16", "34 ZINRAI")
+	// Equal names alone do not make a version an alias.
+	otherID := seedGameSeriesVersionWithSeries(t, app, seriesID, "2026-09-16", "34 ZINRAI")
+	alias, err := app.FindRecordById("game_series_version", aliasID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias.Set("alias_of", canonicalID)
+	if err := app.Save(alias); err != nil {
+		t.Fatal(err)
+	}
+	cabinetID := seedGameCabinet(t, app, "Lightning")
+	for _, versionID := range []string{canonicalID, aliasID, otherID} {
+		linkVersionCabinet(t, app, versionID, cabinetID)
+	}
+	token, user := createAuthUserWithTags(t, app, []string{"moderator"})
+	arcadeID, _ := seedPublicArcade(t, app, user.Id, arcadeSeed{
+		Name: "Historical Arcade", Address: "History Street",
+		Location: location{Lat: 37.5, Lon: 127.0},
+	})
+	_, historicalStateID := seedBulkHistoryState(t, app, arcadeID, user.Id, aliasID)
+
+	for _, endpoint := range []struct {
+		path    string
+		headers map[string]string
+	}{
+		{path: "/game/catalog?locale=en-US"},
+		{path: "/moderation/game/catalog?locale=en-US", headers: map[string]string{"Authorization": "Bearer " + token}},
+	} {
+		response := executeJSONRequest(t, app, http.MethodGet, endpoint.path, "", endpoint.headers)
+		var payload struct {
+			Versions []struct {
+				ID string `json:"id"`
+			} `json:"versions"`
+		}
+		err := json.NewDecoder(response.Body).Decode(&payload)
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || err != nil {
+			t.Fatalf("%s failed: status=%d err=%v", endpoint.path, response.StatusCode, err)
+		}
+		ids := map[string]bool{}
+		for _, version := range payload.Versions {
+			ids[version.ID] = true
+		}
+		if len(ids) != 2 || !ids[canonicalID] || !ids[otherID] || ids[aliasID] {
+			t.Fatalf("%s must exclude aliases without deduplicating names: %#v", endpoint.path, ids)
+		}
+	}
+	if _, err := app.FindRecordById("game_series_version", aliasID); err != nil {
+		t.Fatalf("catalog reads must preserve the historical alias: %v", err)
+	}
+	history, err := app.FindFirstRecordByFilter("arcade_game_history", "batch={:batch}", map[string]any{"batch": historicalStateID})
+	if err != nil || history.GetString("version") != aliasID {
+		t.Fatalf("catalog reads must preserve historical version references: history=%v err=%v", history, err)
+	}
+}
+
 func TestGameCatalog_OrdersSeriesAndVersions(t *testing.T) {
 	app := newArcadeTestApp(t)
 	secondSeries := seedGameSeries(t, app, 20, "Second")

@@ -190,6 +190,16 @@ the current public game state at the campaign's `to_version`, not only from
 campaign `result=updated` checks, so machines already on the target version
 are included. The report view includes only currently public/open arcades.
 
+Arcade detail prompts (`GET /arcade/campaigns`) and anonymous presence
+(`GET /arcade/campaigns/presence`) use a narrower target set: current
+`from_version` machines plus current `to_version` machines with an `updated`
+report for that campaign and arcade/game created less than seven days ago.
+Machines already on `to_version` without a campaign update report never show
+a prompt. Once the update report's seven-day review window expires, the
+machine is accepted as updated and its prompt/presence disappears on the next
+read. Expiry does not mutate the game, delete reports, or remove updated
+machines from campaign overview statistics/history.
+
 `GET /campaign/photo` is the automatic photo-update campaign discovery route.
 It returns only public/open arcades whose current `arcade.photo` molecule has
 no public atom (`photo_status=missing`) or whose newest public atom is at least
@@ -341,6 +351,12 @@ active versions compatible with the cabinet, newest date first. Cabinets with
 no dated compatible version follow dated cabinets, then localized name and ID
 break ties. The protected catalog management response orders its cabinets by
 the same active compatibility rule.
+
+Both the public catalog and protected management catalog omit version records
+with a non-empty `alias_of`. These source IDs remain stored for immutable
+historical game revisions but are not selectable versions for editing, bulk
+version changes, or campaign setup. Filtering uses alias identity, not matching
+display names; distinct non-alias versions with equal names remain separate.
 
 `/moderation/game/catalog` is the only game-catalog write boundary. An active
 authenticated user with `developer` or `moderator` access, or a

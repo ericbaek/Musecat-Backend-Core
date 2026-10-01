@@ -105,6 +105,9 @@ func GetCatalog(re *core.RequestEvent) error {
 		}
 		items := make([]map[string]any, 0, len(records))
 		for _, record := range records {
+			if entity == "version" && strings.TrimSpace(record.GetString("alias_of")) != "" {
+				continue
+			}
 			items = append(items, snapshot(entity, record))
 		}
 		response[plural(entity)] = items

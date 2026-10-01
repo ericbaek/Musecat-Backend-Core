@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	pbtypes "github.com/pocketbase/pocketbase/tools/types"
 )
 
 func TestCampaignLocationBypass(t *testing.T) {
@@ -84,6 +86,95 @@ func TestListArcadeCampaignPresenceIsPublicAndRedacted(t *testing.T) {
 	}
 	if _, ok := payload.Items[0]["campaign"]; ok {
 		t.Fatal("campaign presence must not expose campaign details")
+	}
+}
+
+func TestArcadeCampaignPromptsReviewWindow(t *testing.T) {
+	for _, scenario := range []struct {
+		name           string
+		alreadyUpdated bool
+		reportAge      time.Duration
+		wantPrompt     bool
+	}{
+		{name: "old version without reports", wantPrompt: true},
+		{name: "already updated without campaign reports", alreadyUpdated: true},
+		{name: "updated report less than seven days old", reportAge: 7*24*time.Hour - time.Hour, wantPrompt: true},
+		{name: "updated report exactly seven days old", reportAge: 7 * 24 * time.Hour},
+		{name: "updated report more than seven days old", reportAge: 8 * 24 * time.Hour},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			app := newArcadeTestApp(t)
+			token, arcadeID, campaignID, gameID, _ := seedCampaignCheckFixture(t, app, []string{"supporter"})
+			campaign, err := app.FindRecordById("arcade_campaign", campaignID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			campaign.Set("start_at", time.Now().UTC().Add(-10*24*time.Hour))
+			if err := app.Save(campaign); err != nil {
+				t.Fatal(err)
+			}
+			if scenario.alreadyUpdated {
+				arcade, err := app.FindRecordById("arcade", arcadeID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				arcadeID, _ = seedPublicArcade(t, app, arcade.GetString("createdBy"), arcadeSeed{
+					Name: "Already Updated Arcade", Address: "Updated Street", Country: "KR",
+					Timezone: "Asia/Seoul", Location: location{Lat: 37.5, Lon: 127.0},
+				})
+				entries, _ := seedBulkHistoryState(t, app, arcadeID, arcade.GetString("createdBy"), campaign.GetString("to_version"))
+				gameID = entries[0]
+			} else if scenario.reportAge > 0 {
+				response := executeJSONRequest(t, app, http.MethodPost, "/campaign/check", fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"updated","bypass_location":true}`, campaignID, arcadeID, gameID), map[string]string{"Authorization": "Bearer " + token})
+				response.Body.Close()
+				if response.StatusCode != http.StatusOK {
+					t.Fatalf("expected updated report to succeed, got %d", response.StatusCode)
+				}
+				created, _ := pbtypes.ParseDateTime(time.Now().UTC().Add(-scenario.reportAge))
+				// Keep updated fresh to verify that report creation controls expiry.
+				if _, err := app.NonconcurrentDB().NewQuery("UPDATE arcade_campaign_check SET created={:created} WHERE campaign={:campaign}").Bind(dbx.Params{"created": created, "campaign": campaignID}).Execute(); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			for _, endpoint := range []struct {
+				path    string
+				headers map[string]string
+			}{
+				{path: "/arcade/campaigns", headers: map[string]string{"Authorization": "Bearer " + token}},
+				{path: "/arcade/campaigns/presence"},
+			} {
+				response := executeJSONRequest(t, app, http.MethodGet, endpoint.path+"?id="+arcadeID, "", endpoint.headers)
+				var payload struct {
+					Items []map[string]any `json:"items"`
+				}
+				err := json.NewDecoder(response.Body).Decode(&payload)
+				response.Body.Close()
+				if response.StatusCode != http.StatusOK || err != nil {
+					t.Fatalf("%s failed: status=%d err=%v", endpoint.path, response.StatusCode, err)
+				}
+				wantCount := 0
+				if scenario.wantPrompt {
+					wantCount = 1
+				}
+				if len(payload.Items) != wantCount {
+					t.Fatalf("%s: expected %d prompts, got %#v", endpoint.path, wantCount, payload.Items)
+				}
+				if scenario.wantPrompt {
+					if endpoint.path == "/arcade/campaigns/presence" {
+						if payload.Items[0]["game_id"] != gameID {
+							t.Fatalf("expected presence for game %s, got %#v", gameID, payload.Items)
+						}
+					} else {
+						target := payload.Items[0]["target"].(map[string]any)
+						game := target["game"].(map[string]any)
+						if game["id"] != gameID {
+							t.Fatalf("expected prompt for game %s, got %#v", gameID, payload.Items)
+						}
+					}
+				}
+			}
+		})
 	}
 }
 
