@@ -431,8 +431,12 @@ components:
             $ref: '#/components/schemas/SearchArcadeItem'
     ArcadeSummary:
       type: object
-      required: [id, country, game_series]
+      required: [id, country, game_series, updated]
       properties:
+        updated:
+          type: string
+          format: date-time
+          description: Persisted arcade aggregate update time; cache rebuilds do not change it.
         id:
           type: string
         country:

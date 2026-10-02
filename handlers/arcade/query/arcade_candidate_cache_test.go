@@ -431,3 +431,49 @@ func TestGetArcadeCandidates_InvalidationDuringBuildPreventsStaleCache(t *testin
 		t.Fatalf("private arcade remained cached: %v, %v", candidates, err)
 	}
 }
+
+func TestArcadeCandidateSummary_UsesAggregateUpdatedTimestamp(t *testing.T) {
+	app := testutil.NewTestApp(t)
+	RegisterCandidateSnapshotHooks(app)
+	arcadeID, _ := seedArcadeCandidateRecord(t, app, "Venue", "Address")
+	// Use an old persisted timestamp to distinguish content updates from cache rebuild time.
+	if _, err := app.DB().NewQuery("UPDATE arcade SET updated = '2025-01-02 03:04:05.000Z' WHERE id = {:id}").Bind(dbx.Params{"id": arcadeID}).Execute(); err != nil {
+		t.Fatal(err)
+	}
+	assertTimestamp := func() string {
+		t.Helper()
+		arcade, err := app.FindRecordById("arcade", arcadeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidates, err := GetArcadeCandidates(app)
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidate := findArcadeCandidate(candidates, arcadeID)
+		if candidate == nil {
+			t.Fatal("missing public arcade")
+		}
+		expected := arcade.GetString("updated")
+		if got := candidate.Summary(true, true)["updated"]; got != expected || expected == "" {
+			t.Fatalf("summary updated = %v, want persisted aggregate timestamp %q", got, expected)
+		}
+		return expected
+	}
+	before := assertTimestamp()
+	InvalidateArcadeCandidateSnapshots(app)
+	if got := assertTimestamp(); got != before {
+		t.Fatalf("cache rebuild changed timestamp: %q", got)
+	}
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arcade.Set("closed", true)
+	if err := app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+	if got := assertTimestamp(); got == before {
+		t.Fatal("content update did not refresh summary timestamp")
+	}
+}

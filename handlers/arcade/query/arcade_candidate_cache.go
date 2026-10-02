@@ -32,6 +32,7 @@ var arcadeCandidateCacheHookCollections = []string{
 
 type ArcadeCandidate struct {
 	ID                string
+	Updated           string
 	Country           string
 	Closed            bool
 	Name              string
@@ -56,6 +57,7 @@ type ArcadeGameInstallation struct {
 func (c ArcadeCandidate) Summary(includeLocation bool, includeGameSeries bool) map[string]any {
 	item := map[string]any{
 		"id":       c.ID,
+		"updated":  c.Updated,
 		"country":  c.Country,
 		"name":     c.Name,
 		"address":  c.Address,
@@ -341,6 +343,7 @@ func buildArcadeCandidateFromRecords(arcadeRec, basicRec *core.Record, installat
 
 	candidate := ArcadeCandidate{
 		ID:      arcadeRec.Id,
+		Updated: arcadeRec.GetString("updated"),
 		Country: strings.TrimSpace(arcadeRec.GetString("country")),
 		Closed:  arcadeRec.GetBool("closed"),
 		GameID:  strings.TrimSpace(arcadeRec.GetString("game_v2")),

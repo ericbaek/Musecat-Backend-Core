@@ -602,3 +602,7 @@ not change arcade visibility, author/reviewer permissions, XP or history semanti
 ### Profile background framing
 
 `background_position` stores x/y cover anchors (0–100), optional zoom (1–4, default 1), and clockwise rotation (0/90/180/270, default 0). Anchors apply after rotation. Preserve the full image; these are rendering transforms. Legacy x/y-only JSON remains valid within the existing 128-byte field, so no schema migration or data backfill is required. Publish this Core contract before updating Full’s pinned Core dependency and deploying frontend transform writes.
+
+## Public arcade summary timestamps
+
+`ArcadeSummary.updated` exposes the persisted `arcade.updated` aggregate timestamp, including in `GET /arcades`. Content mutations and rollbacks save the aggregate root, so sitemap consumers can use this value as the page modification time. Candidate snapshot rebuilds and read requests never substitute the current clock time. The existing public/closed/private visibility rules are unchanged.
