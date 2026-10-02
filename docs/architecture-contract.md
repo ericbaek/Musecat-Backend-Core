@@ -606,3 +606,12 @@ not change arcade visibility, author/reviewer permissions, XP or history semanti
 ## Public arcade summary timestamps
 
 `ArcadeSummary.updated` exposes the persisted `arcade.updated` aggregate timestamp, including in `GET /arcades`. Content mutations and rollbacks save the aggregate root, so sitemap consumers can use this value as the page modification time. Candidate snapshot rebuilds and read requests never substitute the current clock time. The existing public/closed/private visibility rules are unchanged.
+
+### Deployment visit policy extension
+
+Core does not own deployment-specific abuse detection, sanctions, schemas, or API routes.
+Full can register a visit policy evaluated inside the visit transaction, after the
+same-day duplicate check and before XP or a visit is created. A returned restriction
+code is committed and returned as a generic 403. Policy failures roll back the request.
+Full can decorate new visit records and supply a trusted, server-owned aggregate SQL
+condition for visit-derived rankings and counts; Core defaults to unrestricted visits.

@@ -84,7 +84,7 @@ WITH contributions AS (
 SELECT v.user AS user_id, SUM(COALESCE(v.gained_exp, 0)) AS score
 FROM arcade_visit v
 LEFT JOIN user_info ui ON ui.id = v.user
-WHERE v.arcade = {:arcade}
+WHERE v.arcade = {:arcade} AND `+userhandler.VisitAggregateCondition(app)+`
   AND {:metric} != 'edit'
   AND COALESCE(v.gained_exp, 0) > 0
   AND COALESCE(NULLIF(ui.visit_visibility, ''), 'summary') IN ('summary', 'full')

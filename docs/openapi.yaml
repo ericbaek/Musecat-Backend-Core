@@ -6646,7 +6646,7 @@ paths:
                   level: {type: integer}
                   xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
         '400': {description: Invalid coordinates or GPS accuracy greater than 150 m.}
-        '403': {description: Inactive user, ineligible arcade, or outside the 100m radius.}
+        '403': {description: Inactive user, ineligible arcade, outside the 100m radius, or a deployment-provided visit policy restriction.}
         '409': {description: Missing arcade coordinates or timezone.}
   /subway/map:
     get:

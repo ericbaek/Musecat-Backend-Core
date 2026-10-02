@@ -228,7 +228,7 @@ WITH scores AS (
 SELECT v.arcade, SUM(COALESCE(v.gained_exp, 0)) AS score, COUNT(*) AS visit_count
 FROM arcade_visit v
 INNER JOIN arcade a ON a.id = v.arcade
-WHERE a.public = true` + filter + `
+WHERE a.public = true AND ` + userhandler.VisitAggregateCondition(app) + filter + `
 GROUP BY v.arcade
 HAVING SUM(COALESCE(v.gained_exp, 0)) > 0
 ), ranked AS (
@@ -311,9 +311,9 @@ func metricQuery(app core.App, m metric, start string) (string, dbx.Params) {
 	var source string
 	switch m {
 	case metricExplorer:
-		source = `SELECT v.user, COUNT(DISTINCT v.arcade) AS score FROM arcade_visit v INNER JOIN arcade a ON a.id = v.arcade AND a.public = true WHERE 1=1` + filterFor("v.visited_at") + ` GROUP BY v.user`
+		source = `SELECT v.user, COUNT(DISTINCT v.arcade) AS score FROM arcade_visit v INNER JOIN arcade a ON a.id = v.arcade AND a.public = true WHERE ` + userhandler.VisitAggregateCondition(app) + filterFor("v.visited_at") + ` GROUP BY v.user`
 	case metricVisits:
-		source = `SELECT v.user, COUNT(*) AS score FROM arcade_visit v INNER JOIN arcade a ON a.id = v.arcade AND a.public = true WHERE 1=1` + filterFor("v.visited_at") + ` GROUP BY v.user`
+		source = `SELECT v.user, COUNT(*) AS score FROM arcade_visit v INNER JOIN arcade a ON a.id = v.arcade AND a.public = true WHERE ` + userhandler.VisitAggregateCondition(app) + filterFor("v.visited_at") + ` GROUP BY v.user`
 	case metricXP:
 		source = `SELECT user, SUM(diff_exp) AS score FROM user_level_log WHERE 1=1` + filterFor("created") + ` GROUP BY user HAVING SUM(diff_exp) > 0`
 	case metricLevel:

@@ -113,7 +113,8 @@ func VisitArcade(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusConflict, map[string]any{"error": "arcade timezone unavailable"})
 	}
-	visitDay := visitNow().In(loc).Format("2006-01-02")
+	now := visitNow()
+	visitDay := now.In(loc).Format("2006-01-02")
 	baseExp, err := LoadCurrentExp(re.App, re.Auth.Id)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load current exp"})
@@ -122,6 +123,7 @@ func VisitArcade(re *core.RequestEvent) error {
 	var exp int
 	var granted bool
 	var firstVisit bool
+	var restrictionCode string
 	err = re.App.RunInTransaction(func(tx core.App) error {
 		existing, err := tx.FindRecordsByFilter(CollectionArcadeVisit, "user={:user} && arcade={:arcade} && visit_day={:day}", "", 1, 0, dbx.Params{"user": re.Auth.Id, "arcade": in.Arcade, "day": visitDay})
 		if err != nil {
@@ -130,6 +132,10 @@ func VisitArcade(re *core.RequestEvent) error {
 		if len(existing) > 0 {
 			out = visitSummary(existing[0])
 			exp, err = LoadCurrentExp(tx, re.Auth.Id)
+			return err
+		}
+		restrictionCode, err = evaluateVisitPolicy(tx, VisitAttempt{re.Auth.Id, in.Arcade, lat, lon, now})
+		if err != nil || restrictionCode != "" {
 			return err
 		}
 		prior, err := tx.FindRecordsByFilter(CollectionArcadeVisit, "user={:user} && arcade={:arcade}", "", 1, 0, dbx.Params{"user": re.Auth.Id, "arcade": in.Arcade})
@@ -144,7 +150,8 @@ func VisitArcade(re *core.RequestEvent) error {
 		rec.Set("user", re.Auth.Id)
 		rec.Set("arcade", in.Arcade)
 		rec.Set("visit_day", visitDay)
-		rec.Set("visited_at", visitNow().UTC().Format(time.RFC3339Nano))
+		rec.Set("visited_at", now.UTC().Format(time.RFC3339Nano))
+		decorateVisitRecord(tx, rec, VisitAttempt{re.Auth.Id, in.Arcade, lat, lon, now})
 		rec.Set("distance_meters", distance)
 		rec.Set("accuracy_meters", in.Accuracy)
 		gain := revisitExp
@@ -182,6 +189,9 @@ func VisitArcade(re *core.RequestEvent) error {
 	})
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "visit verification failed", "details": err.Error()})
+	}
+	if restrictionCode != "" {
+		return re.JSON(http.StatusForbidden, map[string]any{"code": restrictionCode, "error": "visit verification restricted"})
 	}
 	return re.JSON(http.StatusOK, map[string]any{"first_visit_to_arcade": firstVisit, "visited": granted, "already_visited": !granted, "visit": out, "gained_exp": func() int {
 		if granted {
@@ -334,7 +344,7 @@ func visitArcadePhotoURL(app core.App, arcadeID, photoMoleculeID string) string 
 
 func LoadArcadeVisitStats(app core.App, arcadeID string) (map[string]any, error) {
 	var total, users int
-	err := app.DB().NewQuery("SELECT COUNT(*), COUNT(DISTINCT user) FROM arcade_visit WHERE arcade={:arcade}").Bind(dbx.Params{"arcade": arcadeID}).Row(&total, &users)
+	err := app.DB().NewQuery("SELECT COUNT(*), COUNT(DISTINCT user) FROM arcade_visit v WHERE arcade={:arcade} AND "+VisitAggregateCondition(app)+"").Bind(dbx.Params{"arcade": arcadeID}).Row(&total, &users)
 	return map[string]any{"arcade": arcadeID, "total_visits": total, "distinct_visitors": users}, err
 }
 func slicesReverse(values []string) {

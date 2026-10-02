@@ -14,6 +14,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
 const (
@@ -391,8 +392,8 @@ WHERE arcade = {:arcade} AND event_type = 'direction_click'
 	}
 	if err := app.DB().NewQuery(`
 SELECT COUNT(*), COUNT(DISTINCT user)
-FROM arcade_visit
-WHERE arcade = {:arcade}
+FROM arcade_visit v
+WHERE arcade = {:arcade} AND `+userhandler.VisitAggregateCondition(app)+`
 `).Bind(dbx.Params{"arcade": arcadeID}).Row(&stats.VisitVerifications, &stats.DistinctVisitors); err != nil {
 		return stats, err
 	}
