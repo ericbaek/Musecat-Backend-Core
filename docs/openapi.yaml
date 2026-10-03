@@ -104,16 +104,23 @@ components:
           type: string
           enum: [achievement, question, tip, news, event, art, chitchat]
           default: chitchat
+        photos:
+          type: array
+          maxItems: 8
+          items: {type: string, format: binary}
+          description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes.
         game_series:
           type: string
           description: Optional canonical game_series id.
     CommunityPost:
       type: object
-      required: [id, author, game_series, title, body, flair, locale, requested_locale, source_locale, translated, translation_status, editable_until, created, updated]
+      required: [id, photos, author, game_series, title, body, flair, locale, requested_locale, source_locale, translated, translation_status, editable_until, created, updated]
       properties:
         id: {type: string}
         author: {type: string}
+        author_name: {type: string, description: Public nickname or username.}
         game_series: {type: string}
+        photos: {type: array, items: {type: string}, maxItems: 8, description: Ordered stored filenames.}
         title: {type: string}
         body: {type: string}
         flair: {type: string, enum: [achievement, question, tip, news, event, art, chitchat]}
@@ -3810,6 +3817,26 @@ paths:
       tags: [Community]
       summary: List immediately public community posts
       parameters:
+        - name: game_series
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 50
+            items: {type: string, minLength: 1}
+          description: Include posts matching any selected game series; omit to list all posts. Applied before pagination.
+        - name: author
+          in: query
+          schema: {type: string}
+          description: Restrict to this author before pagination.
+        - name: flair
+          in: query
+          schema: {type: string, enum: [achievement, question, tip, news, event, art, chitchat]}
+        - name: has_images
+          in: query
+          schema: {type: string, enum: ["true"]}
+          description: Only posts with photos, applied before pagination.
         - name: locale
           in: query
           schema: {type: string, enum: [ko-KR, en-US, ja-JP], default: ko-KR}
@@ -3874,6 +3901,8 @@ paths:
         content:
           application/json:
             schema: {$ref: '#/components/schemas/CommunityPostInput'}
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/CommunityPostInput'}
       responses:
         '201':
           description: Korean original is public immediately; translation is scheduled five minutes later.
@@ -3908,6 +3937,8 @@ paths:
         required: true
         content:
           application/json:
+            schema: {$ref: '#/components/schemas/CommunityPostInput'}
+          multipart/form-data:
             schema: {$ref: '#/components/schemas/CommunityPostInput'}
       responses:
         '200':

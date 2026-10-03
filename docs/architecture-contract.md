@@ -88,6 +88,8 @@ position's address or response coordinates. Non-finite coordinates are rejected.
 Its raw PocketBase REST rules are locked; clients use only `GET /community/posts`,
 `GET /community/post`, `POST /community/post`, and `PUT /community/post`.
 
+- List reads accept repeated `game_series` IDs and apply their union before
+  counting and pagination. Omitted filters include all active posts.
 - Phase one labels originals as Korean (`ko-KR`) and assumes Korean authors;
   it does not reject Latin-only game or venue names. Active authenticated users
   may publish, and active posts are publicly readable immediately after persistence.
@@ -615,3 +617,5 @@ same-day duplicate check and before XP or a visit is created. A returned restric
 code is committed and returned as a generic 403. Policy failures roll back the request.
 Full can decorate new visit records and supply a trusted, server-owned aggregate SQL
 condition for visit-derived rankings and counts; Core defaults to unrestricted visits.
+
+Community post media accepts up to eight ordered JPEG/PNG/WebP/GIF files, each at most 10 MiB, through bounded multipart POST/PUT. Active profile achievement galleries apply author/flair/has_images filters before count and pagination; media has public originals and thumbnails, while translations continue to cache text only.

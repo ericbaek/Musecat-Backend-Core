@@ -43,6 +43,7 @@ func applyCommunityPostSchema(app core.App) error {
 				&core.RelationField{Name: "game_series", CollectionId: series.Id, MaxSelect: 1},
 				&core.TextField{Name: "title", Max: 200},
 				&core.TextField{Name: "body", Required: true, Max: 10000},
+				&core.FileField{Name: "photos", MaxSelect: 8, MaxSize: 10 << 20, MimeTypes: []string{"image/jpeg", "image/png", "image/webp", "image/gif"}, Thumbs: []string{"600x600", "1200x0"}},
 				&core.SelectField{Name: "original_locale", Values: []string{"ko-KR"}, Required: true, MaxSelect: 1},
 				&core.SelectField{Name: "flair", Values: []string{"achievement", "question", "tip", "news", "event", "art", "chitchat"}, Required: true, MaxSelect: 1},
 				&core.SelectField{Name: "status", Values: []string{"active", "deleted"}, Required: true, MaxSelect: 1},
@@ -61,6 +62,7 @@ func applyCommunityPostSchema(app core.App) error {
 			posts.AddIndex("idx_community_post_status_created", false, "status, created", "")
 			posts.AddIndex("idx_community_post_translation_due", false, "translation_status, translate_after", "")
 			posts.AddIndex("idx_community_post_author_created", false, "author, created", "")
+			posts.AddIndex("idx_community_post_author_flair_created", false, "author, flair, created", "")
 			posts.AddIndex("idx_community_post_game_created", false, "game_series, created", "")
 		} else {
 			if err := validateCommunityPostCollection(posts, users, series); err != nil {
@@ -89,6 +91,10 @@ func validateCommunityPostCollection(collection, users, series *core.Collection)
 	}
 	if err := requireExactRelationField(collection, "game_series", series.Id, false, false); err != nil {
 		return err
+	}
+	photos, ok := collection.Fields.GetByName("photos").(*core.FileField)
+	if !ok || photos.Required || photos.Protected || photos.MaxSelect != 8 || photos.MaxSize != 10<<20 {
+		return fmt.Errorf("community_post.photos has incompatible file settings")
 	}
 	for _, spec := range []struct {
 		name     string

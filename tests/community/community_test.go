@@ -1,10 +1,14 @@
 package community_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -426,5 +430,139 @@ func TestCommunitySchemaAndCronAreLocked(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("community translation cron was not registered")
+	}
+}
+
+func TestCommunityPosts_GameFilterBeforePagination(t *testing.T) {
+	app := newCommunityTestApp(t)
+	defer app.Cleanup()
+	token, _ := createCommunityUser(t, app)
+	collection, err := app.FindCollectionByNameOrId("game_series")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{}
+	for _, name := range []string{"First", "Second", "Other"} {
+		record := core.NewRecord(collection)
+		record.Set("en", name)
+		if err := app.Save(record); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, record.Id)
+		response := communityRequest(t, app, http.MethodPost, "/community/post", fmt.Sprintf(`{"body":"제목 없이 작성한 테스트 원문","game_series":%q}`, record.Id), token)
+		if response.StatusCode != http.StatusCreated {
+			t.Fatalf("create status %d", response.StatusCode)
+		}
+		payload := decodeBody(t, response)
+		if payload["title"] != "" {
+			t.Fatalf("expected titleless post: %#v", payload)
+		}
+	}
+	target := "/community/posts?game_series=" + ids[0] + "&game_series=" + ids[1] + "&per_page=1"
+	for page := 1; page <= 2; page++ {
+		response := communityRequest(t, app, http.MethodGet, target+fmt.Sprintf("&page=%d", page), "", "")
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("list status %d", response.StatusCode)
+		}
+		payload := decodeBody(t, response)
+		if payload["total"] != float64(2) || payload["last_page"] != float64(2) {
+			t.Fatalf("wrong filtered count: %#v", payload)
+		}
+		items := payload["items"].([]any)
+		if len(items) != 1 || items[0].(map[string]any)["game_series"] == ids[2] {
+			t.Fatalf("wrong filtered page: %#v", payload)
+		}
+	}
+	response := communityRequest(t, app, http.MethodGet, "/community/posts?game_series=", "", "")
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty series status %d", response.StatusCode)
+	}
+	response.Body.Close()
+}
+
+func communityPhotoRequest(t *testing.T, app *tests.TestApp, token, flair string, files [][]byte) *http.Response {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	writer.WriteField("body", "이미지 업적 테스트")
+	writer.WriteField("flair", flair)
+	for i, data := range files {
+		part, err := writer.CreateFormFile("photos", fmt.Sprintf("photo%d.png", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		part.Write(data)
+	}
+	writer.Close()
+	router, err := apis.NewRouter(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	se := &core.ServeEvent{App: app, Router: router}
+	if err := app.OnServe().Trigger(se, func(e *core.ServeEvent) error { return e.Next() }); err != nil {
+		t.Fatal(err)
+	}
+	mux, err := se.Router.BuildMux()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/community/post", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, req)
+	return recorder.Result()
+}
+
+func TestCommunityPost_MultiplePhotosAndAchievementGallery(t *testing.T) {
+	app := newCommunityTestApp(t)
+	defer app.Cleanup()
+	token, user := createCommunityUser(t, app)
+	otherToken, _ := createCommunityUser(t, app)
+	var img bytes.Buffer
+	if err := png.Encode(&img, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	files := make([][]byte, 8)
+	for i := range files {
+		files[i] = img.Bytes()
+	}
+	response := communityPhotoRequest(t, app, token, "achievement", files)
+	payload := decodeBody(t, response)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d %#v", response.StatusCode, payload)
+	}
+	if len(payload["photos"].([]any)) != 8 {
+		t.Fatalf("missing photos: %#v", payload)
+	}
+	id := payload["id"].(string)
+	// Text-only achievements, other categories, and another author's images must not leak into this gallery.
+	for _, input := range []struct {
+		token, flair string
+		files        [][]byte
+	}{{token, "achievement", nil}, {token, "chitchat", files[:1]}, {otherToken, "achievement", files[:1]}} {
+		res := communityPhotoRequest(t, app, input.token, input.flair, input.files)
+		data := decodeBody(t, res)
+		if res.StatusCode != http.StatusCreated {
+			t.Fatalf("fixture: %#v", data)
+		}
+	}
+	response = communityRequest(t, app, http.MethodGet, "/community/posts?author="+user.Id+"&flair=achievement&has_images=true&per_page=1", "", "")
+	payload = decodeBody(t, response)
+	if response.StatusCode != 200 || payload["total"] != float64(1) || payload["items"].([]any)[0].(map[string]any)["id"] != id {
+		t.Fatalf("gallery: %d %#v", response.StatusCode, payload)
+	}
+	response = communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"body":"사진은 그대로 유지"}`, token)
+	payload = decodeBody(t, response)
+	if response.StatusCode != 200 || len(payload["photos"].([]any)) != 8 {
+		t.Fatalf("edit: %d %#v", response.StatusCode, payload)
+	}
+	files = append(files, img.Bytes())
+	for _, invalid := range [][][]byte{files, {[]byte("not an image")}, {bytes.Repeat([]byte("x"), community.MaxPostPhotoBytes+1)}} {
+		response = communityPhotoRequest(t, app, token, "achievement", invalid)
+		response.Body.Close()
+		if response.StatusCode != 400 {
+			t.Fatalf("invalid upload accepted: %d", response.StatusCode)
+		}
 	}
 }

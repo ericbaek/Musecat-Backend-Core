@@ -63,3 +63,9 @@ No provider call occurs during a read request.
 - Comments, reactions, mentions, reports, and media are intentionally deferred.
 - Core defines the fresh-bootstrap schema. Backend Full must add the equivalent
   schema through its own guarded forward migration before deployment.
+
+## Community images and profile achievements
+
+POST/PUT `/community/post` also accept multipart `body`, `title`, `game_series`, `flair` and repeated `photos` files. Maximum eight files per post, 10 MiB per file; JPEG, PNG, WebP and GIF content is verified server-side. JSON edits preserve existing photos; multipart edits append within the same total limit. Responses contain ordered `photos` filenames. Public PocketBase file delivery provides originals and `600x600`/`1200x0` thumbnails.
+
+GET `/community/posts?author=USER_ID&flair=achievement&has_images=true` selects image-bearing active achievements before pagination/counting. Flairs: achievement, question, tip, news, event, art, chitchat.
