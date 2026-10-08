@@ -558,3 +558,13 @@ go test ./...
 재시도 시 같은 add를 무조건 다시 보내지 말고, 먼저 409 여부와 현재 state를
 확인한다. 성공 response를 받았는데 네트워크 응답만 유실된 경우에도 stale
 state를 기준으로 중복 add하지 않도록 최신 arcade detail을 다시 조회한다.
+
+`price.list[].title` accepts a string or number, including numeric credit counts.
+Game mutations preserve numeric titles in existing revisions and new requests.
+Historical revisions remain immutable; an untouched numeric title does not count
+as a changed entry for changelog or XP.
+
+Delta mutations validate fields and catalog references only for submitted add/modify
+items. Untouched active revisions are copied without revalidating their price,
+tags, or cabinet compatibility. The resulting list still enforces durable-entry
+and version/cabinet uniqueness, and base-state concurrency checks remain required.

@@ -14,7 +14,7 @@ func TestNormalizePriceForStorage(t *testing.T) {
 		Type:     "  credit  ",
 		List: []PriceItem{
 			{
-				Title:   &title,
+				Title:   title,
 				ModeKey: &modeKey,
 				Value:   &val,
 			},
@@ -33,8 +33,8 @@ func TestNormalizePriceForStorage(t *testing.T) {
 	if len(normalized.List) != 1 {
 		t.Fatalf("expected 1 list item, got %d", len(normalized.List))
 	}
-	if *normalized.List[0].Title != "Standard Play" {
-		t.Errorf("expected trimmed title, got %q", *normalized.List[0].Title)
+	if normalized.List[0].Title != "Standard Play" {
+		t.Errorf("expected trimmed title, got %q", normalized.List[0].Title)
 	}
 	if *normalized.List[0].ModeKey != "card" {
 		t.Errorf("expected trimmed modeKey, got %q", *normalized.List[0].ModeKey)

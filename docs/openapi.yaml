@@ -2603,7 +2603,9 @@ components:
       type: object
       properties:
         title:
-          type: string
+          oneOf:
+            - type: string
+            - type: number
         value:
           oneOf:
             - type: number
@@ -6242,7 +6244,11 @@ paths:
         objects are complete replacements, not partial patches. Existing item ids
         are durable entries; a deleted entry may be reused when the same arcade,
         series, and verified cabinet match historical state. Cabinet ids must be
-        supported by the submitted version. Public game edits use a rolling
+        supported by the submitted version. Price titles accept strings or numbers
+        (for example, a numeric credit count) and preserve their stored type.
+        Fields and catalog references are validated only for submitted add/modify
+        items; untouched revisions are preserved. The resulting list still requires
+        unique entry ids and version/cabinet pairs. Public game edits use a rolling
         seven-day distinct-entry XP window with target `min(10, 2*n)`;
         private edits do not award normal edit XP, and administrative bulk
         updates do not award it either.

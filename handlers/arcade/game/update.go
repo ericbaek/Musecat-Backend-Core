@@ -19,7 +19,7 @@ import (
 var ErrGameStateConflict = errors.New("game state conflict")
 
 type PriceItem struct {
-	Title     *string  `json:"title,omitempty"`
+	Title     any      `json:"title,omitempty"`
 	Value     *float32 `json:"value"`
 	ModeKey   *string  `json:"mode_key,omitempty"`
 	Represent *bool    `json:"represent,omitempty"`
@@ -68,6 +68,8 @@ type UpdateArcadeGameBody struct {
 	Arcade      string          `json:"arcade"`
 	BaseStateID string          `json:"base_state_id"`
 	Games       []GameAtomInput `json:"games"`
+	// Only delta materialization marks untouched revisions for preservation.
+	preservedEntries map[string]struct{}
 }
 
 // UpdateArcadeGameDeltaBody is the public request contract. The internal
@@ -121,9 +123,8 @@ func NormalizePriceForStorage(p Price) Price {
 	p.Currency = strings.TrimSpace(p.Currency)
 	p.Type = strings.TrimSpace(p.Type)
 	for i := range p.List {
-		if p.List[i].Title != nil {
-			v := strings.TrimSpace(*p.List[i].Title)
-			p.List[i].Title = &v
+		if title, ok := p.List[i].Title.(string); ok {
+			p.List[i].Title = strings.TrimSpace(title)
 		}
 		if p.List[i].ModeKey != nil {
 			v := strings.TrimSpace(*p.List[i].ModeKey)
@@ -162,7 +163,7 @@ func normalizePriceForComparison(raw any) any {
 		price.List = []PriceItem{}
 	}
 	for i := range price.List {
-		if price.List[i].Title != nil && strings.TrimSpace(*price.List[i].Title) == "" {
+		if title, ok := price.List[i].Title.(string); ok && strings.TrimSpace(title) == "" {
 			price.List[i].Title = nil
 		}
 		if price.List[i].ModeKey != nil && strings.TrimSpace(*price.List[i].ModeKey) == "" {
@@ -200,6 +201,11 @@ func validatePrice(p Price) error {
 		return fmt.Errorf("price.list must have at least 1 item")
 	}
 	for i, it := range p.List {
+		switch it.Title.(type) {
+		case nil, string, float64:
+		default:
+			return fmt.Errorf("price.list[%d].title must be a string or number", i)
+		}
 		if it.Value != nil && *it.Value <= 0 {
 			return fmt.Errorf("price.list[%d].value must be > 0 or null", i)
 		}
@@ -252,8 +258,10 @@ func validateUpdateGameBody(body *UpdateArcadeGameBody) error {
 	seenEntries, seenVersions := map[string]struct{}{}, map[string]struct{}{}
 	for i := range body.Games {
 		g := &body.Games[i]
-		if err := validateGameAtomFields(fmt.Sprintf("games[%d]", i), g); err != nil {
-			return err
+		if _, preserved := body.preservedEntries[g.ID]; !preserved {
+			if err := validateGameAtomFields(fmt.Sprintf("games[%d]", i), g); err != nil {
+				return err
+			}
 		}
 		versionKey := g.Game + "\x00" + g.Cabinet
 		if _, ok := seenVersions[versionKey]; ok {
@@ -374,6 +382,10 @@ func materializeUpdateGameDelta(txApp core.App, delta UpdateArcadeGameDeltaBody)
 		reserved[id] = struct{}{}
 	}
 
+	full.preservedEntries = make(map[string]struct{}, len(indexByEntry))
+	for id := range indexByEntry {
+		full.preservedEntries[id] = struct{}{}
+	}
 	changedEntries := 0
 	for i := range delta.Modify {
 		g := delta.Modify[i]
@@ -399,6 +411,7 @@ func materializeUpdateGameDelta(txApp core.App, delta UpdateArcadeGameDeltaBody)
 		if revisionChanged(previousByEntry[g.ID], g) {
 			changedEntries++
 		}
+		delete(full.preservedEntries, g.ID)
 		full.Games[entryIndex] = g
 	}
 
@@ -451,6 +464,9 @@ func materializeUpdateGameDelta(txApp core.App, delta UpdateArcadeGameDeltaBody)
 func validateGameAtomReferences(app core.App, body UpdateArcadeGameBody) error {
 	for i := range body.Games {
 		g := body.Games[i]
+		if _, preserved := body.preservedEntries[g.ID]; preserved {
+			continue
+		}
 		seriesID, err := versionSeries(app, g.Game)
 		if err != nil || seriesID == "" {
 			return fmt.Errorf("games[%d].game not found", i)
@@ -563,20 +579,25 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 	logItems := make([]map[string]any, 0, len(body.Games))
 	for i, g := range body.Games {
 		entryID := strings.TrimSpace(g.ID)
-		versionSeriesID, seriesErr := versionSeries(txApp, g.Game)
-		if seriesErr != nil || versionSeriesID == "" {
-			return "", fmt.Errorf("games[%d].game not found", i)
-		}
-		if g.Cabinet != "" {
-			if _, cabinetErr := txApp.FindRecordById(arcadeinternal.CollectionGameCabinet, g.Cabinet); cabinetErr != nil {
-				return "", fmt.Errorf("games[%d].cabinet not found", i)
+		_, preserved := body.preservedEntries[entryID]
+		var versionSeriesID string
+		var seriesErr error
+		if !preserved {
+			versionSeriesID, seriesErr = versionSeries(txApp, g.Game)
+			if seriesErr != nil || versionSeriesID == "" {
+				return "", fmt.Errorf("games[%d].game not found", i)
 			}
-			if _, compatibilityErr := txApp.FindFirstRecordByFilter(
-				arcadeinternal.CollectionGameSeriesVersionCabinet,
-				"version={:version} && cabinet={:cabinet}",
-				dbx.Params{"version": g.Game, "cabinet": g.Cabinet},
-			); compatibilityErr != nil {
-				return "", fmt.Errorf("games[%d].cabinet is not supported by game version", i)
+			if g.Cabinet != "" {
+				if _, cabinetErr := txApp.FindRecordById(arcadeinternal.CollectionGameCabinet, g.Cabinet); cabinetErr != nil {
+					return "", fmt.Errorf("games[%d].cabinet not found", i)
+				}
+				if _, compatibilityErr := txApp.FindFirstRecordByFilter(
+					arcadeinternal.CollectionGameSeriesVersionCabinet,
+					"version={:version} && cabinet={:cabinet}",
+					dbx.Params{"version": g.Game, "cabinet": g.Cabinet},
+				); compatibilityErr != nil {
+					return "", fmt.Errorf("games[%d].cabinet is not supported by game version", i)
+				}
 			}
 		}
 		var entry *core.Record
@@ -608,7 +629,7 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 			if entry.GetString("arcade") != body.Arcade {
 				return "", fmt.Errorf("games[%d].id does not belong to arcade", i)
 			}
-			if entry.GetString("series") != versionSeriesID {
+			if !preserved && entry.GetString("series") != versionSeriesID {
 				return "", fmt.Errorf("games[%d].game must remain in the entry series", i)
 			}
 		}

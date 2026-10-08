@@ -619,3 +619,13 @@ Full can decorate new visit records and supply a trusted, server-owned aggregate
 condition for visit-derived rankings and counts; Core defaults to unrestricted visits.
 
 Community post media accepts up to eight ordered JPEG/PNG/WebP/GIF files, each at most 10 MiB, through bounded multipart POST/PUT. Active profile achievement galleries apply author/flair/has_images filters before count and pagination; media has public originals and thumbnails, while translations continue to cache text only.
+
+`price.list[].title` accepts a string or number, including numeric credit counts.
+Game mutations preserve numeric titles in existing revisions and new requests.
+Historical revisions remain immutable; an untouched numeric title does not count
+as a changed entry for changelog or XP.
+
+Delta mutations validate fields and catalog references only for submitted add/modify
+items. Untouched active revisions are copied without revalidating their price,
+tags, or cabinet compatibility. The resulting list still enforces durable-entry
+and version/cabinet uniqueness, and base-state concurrency checks remain required.

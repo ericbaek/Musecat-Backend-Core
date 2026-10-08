@@ -56,6 +56,122 @@ func TestUpdateArcadeGameDelta_ModifyKeepsOtherActiveGames(t *testing.T) {
 	conflict.Body.Close()
 }
 
+func TestUpdateArcadeGameDelta_ModifyWithNumericPriceTitle(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Legacy Price Arcade", Address: "Legacy Street", Location: location{Lat: 37.5, Lon: 127}})
+	versionA := seedGameSeriesVersion(t, app)
+	versionB := seedGameSeriesVersion(t, app)
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	initial := postGameDelta(t, app, headers, gameDeltaRequest(t, arcadeID, "", []map[string]any{
+		testGameObject(versionA, "", "1F", 500, ""),
+		testGameObject(versionB, "", "2F", 500, ""),
+	}, nil, nil))
+	stateID := gameStateID(t, initial)
+	entryA := gameEntryForVersion(t, gameItems(t, initial), versionA)
+	entryB := gameEntryForVersion(t, gameItems(t, initial), versionB)
+	// Simulate a pre-existing legacy revision, not a new API request.
+	legacyPrice := `{"currency":"KRW","type":"credit","list":[{"title":2,"value":500}],"accept":["Cash"]}`
+	if _, err := app.DB().NewQuery("UPDATE arcade_game_history SET price={:price} WHERE batch={:batch} AND entry={:entry}").Bind(dbx.Params{"price": legacyPrice, "batch": stateID, "entry": entryB}).Execute(); err != nil {
+		t.Fatal(err)
+	}
+	updated := postGameDelta(t, app, headers, gameDeltaRequest(t, arcadeID, stateID, nil, []map[string]any{
+		testGameObject(versionA, entryA, "3F", 500, ""),
+	}, nil))
+	if len(gameItems(t, updated)) != 2 {
+		t.Fatal("unmodified game must remain active")
+	}
+	for _, state := range []struct {
+		id    string
+		title any
+	}{{stateID, float64(2)}, {gameStateID(t, updated), float64(2)}} {
+		revision, err := app.FindFirstRecordByFilter("arcade_game_history", "batch={:batch} && entry={:entry}", dbx.Params{"batch": state.id, "entry": entryB})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(revision.Get("price"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var price map[string]any
+		if err := json.Unmarshal(encoded, &price); err != nil {
+			t.Fatal(err)
+		}
+		row := price["list"].([]any)[0].(map[string]any)
+		if row["title"] != state.title || row["value"] != float64(500) {
+			t.Fatalf("unexpected price in state %s: %#v", state.id, price)
+		}
+	}
+	changes := loadChangelogRecords(t, app, arcadeID, "game")
+	log := decodeLogObject(t, changes[0].Get("log"))
+	for _, raw := range log["items"].([]any) {
+		item := raw.(map[string]any)
+		if item["entry_id"] == entryB && item["change_type"] != "unchanged" {
+			t.Fatalf("preserved numeric title must not count as an edit: %#v", item)
+		}
+	}
+	valid := testGameObject(versionB, entryB, "2F", 500, "")
+	valid["price"] = map[string]any{"currency": "KRW", "type": "credit", "list": []map[string]any{{"title": 2, "value": 500}}, "accept": []string{"Cash"}}
+	accepted := postGameDelta(t, app, headers, gameDeltaRequest(t, arcadeID, gameStateID(t, updated), nil, []map[string]any{valid}, nil))
+	invalid := testGameObject(versionB, entryB, "2F", 500, "")
+	invalid["price"] = map[string]any{"currency": "KRW", "type": "credit", "list": []map[string]any{{"title": true, "value": 500}}, "accept": []string{"Cash"}}
+	response := executeJSONRequest(t, app, http.MethodPut, "/arcade/game", gameDeltaRequest(t, arcadeID, gameStateID(t, accepted), nil, []map[string]any{invalid}, nil), headers)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("boolean title requests must remain invalid, got %d", response.StatusCode)
+	}
+}
+
+func TestUpdateArcadeGameDelta_DoesNotValidateUntouchedFieldsOrCatalogLinks(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Preserved Arcade", Address: "Preserved Street", Location: location{Lat: 37.5, Lon: 127}})
+	versionA := seedGameSeriesVersion(t, app)
+	versionB := seedGameSeriesVersion(t, app)
+	cabinet := seedGameCabinet(t, app, "Preserved Cabinet")
+	linkVersionCabinet(t, app, versionB, cabinet)
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	initial := postGameDelta(t, app, headers, gameDeltaRequest(t, arcadeID, "", []map[string]any{
+		testGameObject(versionA, "", "1F", 500, ""),
+		testGameObject(versionB, "", "2F", 500, cabinet),
+	}, nil, nil))
+	stateID := gameStateID(t, initial)
+	entryA := gameEntryForVersion(t, gameItems(t, initial), versionA)
+	entryB := gameEntryForVersion(t, gameItems(t, initial), versionB)
+	// Existing data and a catalog link may no longer meet current edit validation.
+	price := `{"currency":"KRW","type":"legacy","list":[{"title":true,"value":500}],"accept":["Cash"]}`
+	if _, err := app.DB().NewQuery("UPDATE arcade_game_history SET price={:price} WHERE batch={:batch} AND entry={:entry}").Bind(dbx.Params{"price": price, "batch": stateID, "entry": entryB}).Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.DB().NewQuery("DELETE FROM game_series_version_cabinet WHERE version={:version} AND cabinet={:cabinet}").Bind(dbx.Params{"version": versionB, "cabinet": cabinet}).Execute(); err != nil {
+		t.Fatal(err)
+	}
+	updated := postGameDelta(t, app, headers, gameDeltaRequest(t, arcadeID, stateID, nil, []map[string]any{
+		testGameObject(versionA, entryA, "3F", 500, ""),
+	}, nil))
+	revision, err := app.FindFirstRecordByFilter("arcade_game_history", "batch={:batch} && entry={:entry}", dbx.Params{"batch": gameStateID(t, updated), "entry": entryB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actual map[string]any
+	encoded, err := json.Marshal(revision.Get("price"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &actual); err != nil {
+		t.Fatal(err)
+	}
+	if actual["type"] != "legacy" || actual["list"].([]any)[0].(map[string]any)["title"] != true {
+		t.Fatalf("untouched price was changed: %#v", actual)
+	}
+	// The same unsupported cabinet must be rejected when that game is submitted.
+	response := executeJSONRequest(t, app, http.MethodPut, "/arcade/game", gameDeltaRequest(t, arcadeID, gameStateID(t, updated), nil, []map[string]any{testGameObject(versionB, entryB, "2F", 500, cabinet)}, nil), headers)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("submitted unsupported cabinet must return 400, got %d", response.StatusCode)
+	}
+}
+
 func TestUpdateArcadeGameDelta_MixesAddModifyRemove(t *testing.T) {
 	app := newArcadeTestApp(t)
 	token, user := createAuthUser(t, app)
