@@ -12,6 +12,7 @@ import (
 	"github.com/pocketbase/pocketbase/tests"
 
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
+	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
 func TestArcadeAnalyticsProtectedFieldsByRole(t *testing.T) {
@@ -164,6 +165,51 @@ func TestArcadeAnalyticsProtectedFieldsByRole(t *testing.T) {
 			token, _ := createAuthUserWithTags(t, app, []string{role})
 			assertAnalyticsShape(t, map[string]string{"Authorization": "Bearer " + token}, true)
 		})
+	}
+}
+
+func TestArcadeAnalyticsLevelBreakdowns(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, creator := createAuthUser(t, app)
+	arcadeID, _ := seedPublicArcade(t, app, creator.Id, arcadeSeed{
+		Name: "Level Analytics", Address: "1 Level Street", Location: location{Lat: 37.5665, Lon: 126.9780},
+	})
+	for i := 0; i < 1000; i++ {
+		arcadeanalytics.RecordPageView(app, arcadeID, "direct", nil)
+	}
+	for _, views := range []int{1000, 1001} {
+		if views == 1001 {
+			arcadeanalytics.RecordPageView(app, arcadeID, "direct", nil)
+		}
+		for _, level := range []int{14, 15, 16} {
+			t.Run(fmt.Sprintf("views-%d-level-%d", views, level), func(t *testing.T) {
+				token, user := createAuthUser(t, app)
+				seedUserLevelExp(t, app, user.Id, userhandler.LevelBaseExp(level))
+				res := executeJSONRequest(t, app, http.MethodGet, "/arcade/analytics?arcade="+arcadeID, "", map[string]string{"Authorization": "Bearer " + token})
+				defer res.Body.Close()
+				if res.StatusCode != http.StatusOK {
+					t.Fatalf("status=%d", res.StatusCode)
+				}
+				var payload map[string]any
+				if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+					t.Fatal(err)
+				}
+				if payload["page_views"] != float64(views) {
+					t.Fatalf("unexpected views: %#v", payload)
+				}
+				for _, field := range []string{"page_views_by_source", "series_filter_entries"} {
+					_, exists := payload[field]
+					if exists != (level >= 15 && views > 1000) {
+						t.Fatalf("field %s presence=%v: %#v", field, exists, payload)
+					}
+				}
+				for _, field := range []string{"direction_clicks", "visit_verifications", "distinct_visitors"} {
+					if _, exists := payload[field]; exists {
+						t.Fatalf("staff field %s leaked: %#v", field, payload)
+					}
+				}
+			})
+		}
 	}
 }
 

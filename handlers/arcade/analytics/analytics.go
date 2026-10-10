@@ -64,8 +64,8 @@ var anonymousAnalyticsEvents = struct {
 }{byClient: map[string]analyticsClientEvents{}}
 
 // GetArcadeAnalytics returns public aggregate metrics. Detailed acquisition,
-// direction, and visit metrics are included only for an official arcade owner
-// or a developer/moderator.
+// series breakdowns are also available to level-15 users above 1,000 views.
+// Direction and visit metrics remain restricted to official owners and staff.
 func GetArcadeAnalytics(re *core.RequestEvent) error {
 	arcadeID := strings.TrimSpace(re.Request.URL.Query().Get("arcade"))
 	if arcadeID == "" {
@@ -89,16 +89,27 @@ func GetArcadeAnalytics(re *core.RequestEvent) error {
 		"edit_count":    base.EditCount,
 	}
 
-	if hasRestrictedAccess(re.Auth, arcadeID) {
+	privileged := hasRestrictedAccess(re.Auth, arcadeID)
+	canViewBreakdown := privileged
+	if !canViewBreakdown && re.Auth != nil && base.PageViews > 1000 {
+		exp, err := userhandler.LoadCurrentExp(re.App, re.Auth.Id)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load user level"})
+		}
+		canViewBreakdown = userhandler.LevelFromExp(exp) >= 15
+	}
+	if canViewBreakdown {
 		restricted, err := loadRestrictedStats(re.App, arcadeID)
 		if err != nil {
 			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load restricted arcade analytics", "details": err.Error()})
 		}
 		out["page_views_by_source"] = restricted.PageViewsBySource
 		out["series_filter_entries"] = restricted.SeriesFilterEntries
-		out["direction_clicks"] = restricted.DirectionClicks
-		out["visit_verifications"] = restricted.VisitVerifications
-		out["distinct_visitors"] = restricted.DistinctVisitors
+		if privileged {
+			out["direction_clicks"] = restricted.DirectionClicks
+			out["visit_verifications"] = restricted.VisitVerifications
+			out["distinct_visitors"] = restricted.DistinctVisitors
+		}
 	}
 
 	return re.JSON(http.StatusOK, out)

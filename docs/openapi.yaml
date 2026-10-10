@@ -987,12 +987,12 @@ components:
           description: All immutable changelog rows for the arcade.
         page_views_by_source:
           type: array
-          description: Returned only to an official arcade owner or developer/moderator.
+          description: Returned to an official arcade owner or developer/moderator, or a level-15+ user when page_views exceeds 1000.
           items:
             $ref: '#/components/schemas/ArcadeAnalyticsCount'
         series_filter_entries:
           type: array
-          description: Returned only to an official arcade owner or developer/moderator.
+          description: Returned to an official arcade owner or developer/moderator, or a level-15+ user when page_views exceeds 1000.
           items:
             $ref: '#/components/schemas/ArcadeAnalyticsCount'
         direction_clicks:
@@ -3028,6 +3028,25 @@ components:
         review_note: {type: string}
         created: {type: string}
         updated: {type: string}
+    ArcadeModerationRequest:
+      type: object
+      required: [id, kind, arcade, changelog, reported_editor, urgency, message, status, createdBy]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [general, edit_report, rollback_report]}
+        arcade: {type: string}
+        changelog: {type: string}
+        reported_editor: {type: string}
+        urgency: {type: string, enum: [high, medium, low]}
+        message: {type: string}
+        status: {type: string, enum: [waiting, approved, rejected, processing, done]}
+        createdBy: {type: string}
+        reviewed_by: {type: string}
+        reviewed_at: {type: string}
+        review_outcome: {type: string, enum: [upheld, dismissed, actioned]}
+        review_note: {type: string}
+        created: {type: string}
+        updated: {type: string}
 paths:
   /search:
     get:
@@ -3247,8 +3266,10 @@ paths:
       summary: /arcade/analytics
       description: |
         Returns cumulative analytics for a public, open arcade. Anonymous and ordinary
-        contributors receive only `page_views`, `fault_reports`, and `edit_count`.
-        `page_views_by_source`, `series_filter_entries`, `direction_clicks`,
+        contributors below level 15 receive only `page_views`, `fault_reports`, and `edit_count`.
+        Level-15+ users additionally receive `page_views_by_source` and `series_filter_entries`
+        when `page_views` exceeds 1000. These breakdowns remain available to privileged users.
+        `direction_clicks`,
         `visit_verifications`, and `distinct_visitors` are omitted unless the bearer
         user has both the `arcade_owner` tag and the arcade ID in `owns`, or has the
         `developer` or `moderator` tag. The `createdBy` relation alone is insufficient.
