@@ -277,6 +277,10 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	supporterReview.GET("/requests", arcadeadmin.ListSupporterRequests)
 	supporterReview.GET("/request", arcadeadmin.GetSupporterRequest)
 	supporterReview.PUT("/request", arcadeadmin.ReviewSupporterRequest)
+	reviewQueue.GET("/requests", arcadeadmin.ListModerationRequests)
+	reviewQueue.PUT("/request", arcadeadmin.ReviewModerationRequest)
+	reviewQueue.GET("/status", arcadeadmin.GetArcadeStatus)
+	reviewQueue.PUT("/status", arcadeadmin.UpdateArcadeStatus)
 	reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
 	reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
 

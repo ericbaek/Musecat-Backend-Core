@@ -5625,6 +5625,106 @@ paths:
         '404': {description: Application not found}
         '409': {description: Already reviewed or applicant withdrawn or missing}
         '502': {description: Save failed; application and tags are both unchanged}
+  /moderation/arcade/requests:
+    get:
+      tags: [Support]
+      summary: List all arcade inquiries and edit reports (strict reviewer only)
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Newest-first requests from all creators
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ArcadeModerationRequest'}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+  /moderation/arcade/request:
+    put:
+      tags: [Support]
+      summary: Resolve an arcade inquiry or report (strict reviewer only)
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewArcadeEditReportRequest'}
+      responses:
+        '200':
+          description: Resolved request including review actor, timestamp, outcome and note
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeModerationRequest'}
+        '400': {description: Invalid input}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Request not found}
+        '409': {description: Already resolved}
+  /moderation/arcade/status:
+    get:
+      tags: [Arcade]
+      summary: Read arcade admin settings (strict reviewer only)
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Arcade visibility, closure, country and timezone
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, public, closed, country, timezone]
+                properties:
+                  arcade: {type: string}
+                  public: {type: boolean}
+                  closed: {type: boolean}
+                  country: {type: string, description: ISO 3166-1 alpha-2 code; trimmed and uppercased}
+                  timezone: {type: string, description: Valid IANA timezone name; Local is rejected}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Arcade not found}
+    put:
+      tags: [Arcade]
+      summary: Set arcade admin settings (strict reviewer only; no XP)
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, public, closed, country, timezone]
+              properties:
+                arcade: {type: string, minLength: 15, maxLength: 15}
+                public: {type: boolean}
+                closed: {type: boolean}
+                country: {type: string, description: ISO 3166-1 alpha-2 code; trimmed and uppercased}
+                timezone: {type: string, description: Valid IANA timezone name; Local is rejected}
+      responses:
+        '200':
+          description: Updated arcade admin settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  arcade: {type: string}
+                  public: {type: boolean}
+                  closed: {type: boolean}
+                  country: {type: string, description: ISO 3166-1 alpha-2 code; trimmed and uppercased}
+                  timezone: {type: string, description: Valid IANA timezone name; Local is rejected}
+        '400': {description: Invalid input}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Arcade not found}
   /moderation/arcade/edit-reports:
     get:
       tags: [Moderator]

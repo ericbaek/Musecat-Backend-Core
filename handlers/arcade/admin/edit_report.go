@@ -192,6 +192,14 @@ func ListArcadeEditReports(re *core.RequestEvent) error {
 }
 
 func ReviewArcadeEditReport(re *core.RequestEvent) error {
+	return reviewArcadeRequest(re, false)
+}
+
+func ReviewModerationRequest(re *core.RequestEvent) error {
+	return reviewArcadeRequest(re, true)
+}
+
+func reviewArcadeRequest(re *core.RequestEvent, includeGeneral bool) error {
 	var body ReviewArcadeEditReportBody
 	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
@@ -216,7 +224,7 @@ func ReviewArcadeEditReport(re *core.RequestEvent) error {
 		if err != nil {
 			return errEditReportNotFound
 		}
-		if report.GetString("kind") != editReportKind && report.GetString("kind") != rollbackReportKind {
+		if !includeGeneral && report.GetString("kind") != editReportKind && report.GetString("kind") != rollbackReportKind {
 			return errEditReportNotFound
 		}
 		if report.GetString("status") == adminRequestDoneStatus {

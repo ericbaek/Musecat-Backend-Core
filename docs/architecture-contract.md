@@ -651,3 +651,23 @@ Delta mutations validate fields and catalog references only for submitted add/mo
 items. Untouched active revisions are copied without revalidating their price,
 tags, or cabinet compatibility. The resulting list still enforces durable-entry
 and version/cabinet uniqueness, and base-state concurrency checks remain required.
+
+## Arcade moderation tools
+
+`GET /moderation/arcade/requests` lists all `arcade_request_admin` records,
+including general inquiries, edit reports and rollback reports. Active users with
+`developer` or `moderator` tags may resolve a request through
+`PUT /moderation/arcade/request` with `id`, `outcome=upheld|dismissed|actioned`
+and an optional note (up to 1200 characters). Resolution atomically records
+`status=done`, reviewer, review time, outcome and note; repeated resolution is 409.
+The existing own-request endpoint and edit-report-only queue retain their scopes.
+
+`GET|PUT /moderation/arcade/status` reads or updates `public`, `closed`, `country` and `timezone` for
+any arcade, including private or closed records. The same strict active reviewer
+guard applies. PUT requires both boolean flags, an ISO 3166-1 alpha-2 country
+code and a valid IANA timezone name (excluding `Local`), and persists all four
+settings in a transaction. Country is trimmed and uppercased; timezone is trimmed.
+Existing aggregate hooks invalidate discovery caches after commit. This operator
+status correction does not award publication/edit XP or create a content revision
+or arcade changelog row; public-conversion requirements apply to the creator's
+publication workflow, not this administrative correction.
