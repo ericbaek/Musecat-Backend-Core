@@ -1838,6 +1838,7 @@ components:
           type: string
         arcade_id:
           type: string
+          description: Related arcade for edits, publication, photos, verified visits, and fault activity when its source record still exists.
         arcade_name:
           type: string
         target_id:
@@ -1846,6 +1847,34 @@ components:
           type: string
         detail:
           $ref: '#/components/schemas/SupporterLedgerDetail'
+    SupporterReviewRequest:
+      type: object
+      required: [id, user, status, created, score_total, decision_reason]
+      properties:
+        id: {type: string}
+        user: {type: string}
+        status: {type: string, enum: [pending, approved, rejected]}
+        created: {type: string}
+        score_total: {type: integer}
+        decision_reason: {type: string}
+    SupporterReviewDetail:
+      allOf:
+        - $ref: '#/components/schemas/SupporterReviewRequest'
+        - type: object
+          required: [joined, edit_count, arcades, score]
+          properties:
+            joined: {type: string}
+            edit_count: {type: integer}
+            arcades:
+              type: array
+              items:
+                type: object
+                required: [id, name, edit_count]
+                properties:
+                  id: {type: string}
+                  name: {type: string}
+                  edit_count: {type: integer}
+            score: {$ref: '#/components/schemas/SupporterScoreResponse'}
     SupporterLatestRequest:
       type: object
       required: [id, status, exp_total, qualified, created]
@@ -5530,6 +5559,72 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /moderation/supporter/requests:
+    get:
+      tags: [Support]
+      summary: List supporter applications (active developer or moderator only)
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Newest-first applications from all users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/SupporterReviewRequest'}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+  /moderation/supporter/request:
+    get:
+      tags: [Support]
+      summary: Read applicant contribution counts and XP ledger (strict reviewer only)
+      security: [{bearerAuth: []}]
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Application, joined date, current XP ledger and all authored arcade changes grouped by arcade
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SupporterReviewDetail'}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Application or applicant not found}
+    put:
+      tags: [Support]
+      summary: Approve or reject a pending supporter application
+      description: Approval atomically appends founding_supporter to user.tags without removing existing tags. Rejection does not change tags. Already decided applications return 409.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, status, reason]
+              properties:
+                id: {type: string, minLength: 15, maxLength: 15}
+                status: {type: string, enum: [approved, rejected]}
+                reason: {type: string, maxLength: 1200}
+      responses:
+        '200':
+          description: Saved decision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SupporterReviewRequest'}
+        '400': {description: Invalid input}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Application not found}
+        '409': {description: Already reviewed or applicant withdrawn or missing}
+        '502': {description: Save failed; application and tags are both unchanged}
   /moderation/arcade/edit-reports:
     get:
       tags: [Moderator]

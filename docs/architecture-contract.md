@@ -75,6 +75,28 @@ same byte ceiling before parsing the body. Creation includes `created` and
 `updated` timestamps, matching the feedback mapper. Raw collection capacity is
 not the public upload contract. The strict reviewer-only GET queue is unchanged.
 
+## Supporter application review
+
+`GET /moderation/supporter/requests`, `GET /moderation/supporter/request?id=...`,
+and `PUT /moderation/supporter/request` require an active developer or moderator.
+Supporter roles alone cannot read applicant ledgers or make decisions. Detail
+reads include the applicant's joined date, current XP ledger, actual authored
+changelog count, and edits grouped by arcade, including private venues visible
+to strict reviewers. Edit counts are not XP grant counts and retain rate-limited
+contributions. The saved `score_total` remains the application-time snapshot.
+Ledger entries resolve verified visit records to their arcade ID and name, so
+reviewers can include visit grants in per-arcade earned XP. Missing source records
+keep their XP in the ledger without inventing an arcade association.
+
+A decision changes only a pending application to approved or rejected and stores
+`decision_reason`. Approval appends `founding_supporter` to `user.tags`, preserving
+existing tags and avoiding duplicates. Both saves run in one transaction; a tag
+capacity or persistence failure leaves the application pending. Rejection does
+not grant or remove roles. Repeated decisions return 409; missing or withdrawn
+applicants cannot be approved. These are user-role/application mutations, so no
+arcade changelog row is written. Core adds no production migration: the fields
+and role value already exist in the shared schema.
+
 ## Geocoding cache identity
 
 Geocoding caches encode query, region, and mode as separate components. Forward

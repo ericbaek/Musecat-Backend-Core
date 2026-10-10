@@ -140,6 +140,47 @@ func TestGetSupporterScore_BreakdownAndExclusion(t *testing.T) {
 	scenario.Test(t)
 }
 
+func TestGetSupporterScore_VisitArcadeAssociation(t *testing.T) {
+	app := newArcadeTestApp(t)
+	defer app.Cleanup()
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Visited arcade", Address: "Visit street", Location: location{Lat: 37.5665, Lon: 126.978}})
+	collection, err := app.FindCollectionByNameOrId("arcade_visit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	visit := core.NewRecord(collection)
+	visit.Set("user", user.Id)
+	visit.Set("arcade", arcadeID)
+	visit.Set("visit_day", "2026-10-11")
+	visit.Set("visited_at", "2026-10-11T00:00:00Z")
+	visit.Set("gained_exp", 10)
+	if err := app.Save(visit); err != nil {
+		t.Fatal(err)
+	}
+	seedUserLevelExp(t, app, user.Id, 15)
+	seedSupporterLedgerEntry(t, app, user.Id, "xp:arcade-visit:"+visit.Id, 0, 10, time.Now().Add(-time.Minute))
+	seedSupporterLedgerEntry(t, app, user.Id, "xp:arcade-visit:missing_visit", 10, 15, time.Now())
+	response := executeJSONRequest(t, app, http.MethodGet, "/supporter/score", "", map[string]string{"Authorization": "Bearer " + token})
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected score, got %d", response.StatusCode)
+	}
+	var payload struct {
+		Entries []struct {
+			ArcadeID   string `json:"arcade_id"`
+			ArcadeName string `json:"arcade_name"`
+			Exp        int    `json:"exp"`
+		} `json:"entries"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Entries) != 2 || payload.Entries[0].ArcadeID != "" || payload.Entries[0].Exp != 5 || payload.Entries[1].ArcadeID != arcadeID || payload.Entries[1].ArcadeName != "Visited arcade" || payload.Entries[1].Exp != 10 {
+		t.Fatalf("unexpected visit XP associations: %+v", payload.Entries)
+	}
+}
+
 func TestCreateSupporterRequest_RejectedBelowThreshold(t *testing.T) {
 	headers := map[string]string{}
 

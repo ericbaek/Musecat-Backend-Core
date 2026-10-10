@@ -89,6 +89,7 @@ ORDER BY created DESC, id DESC
 	arcadeIDs := map[string]struct{}{}
 	flagIDs := map[string]struct{}{}
 	reactionIDs := map[string]struct{}{}
+	visitIDs := map[string]struct{}{}
 
 	for rows.Next() {
 		var row supporterLogRow
@@ -112,6 +113,10 @@ ORDER BY created DESC, id DESC
 			if targetID != "" {
 				reactionIDs[targetID] = struct{}{}
 			}
+		case "visit":
+			if targetID != "" {
+				visitIDs[targetID] = struct{}{}
+			}
 		}
 		if action == "photo_submission" && arcadeID != "" {
 			arcadeIDs[arcadeID] = struct{}{}
@@ -130,6 +135,10 @@ ORDER BY created DESC, id DESC
 		return nil, err
 	}
 	reactionArcadeByID, err := loadReactionArcadeRefs(app, keysOfSet(reactionIDs))
+	if err != nil {
+		return nil, err
+	}
+	visitArcadeByID, err := loadVisitArcadeRefs(app, keysOfSet(visitIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +174,12 @@ ORDER BY created DESC, id DESC
 		case "flag_reaction":
 			entry.TargetID = targetID
 			if ref, ok := reactionArcadeByID[targetID]; ok {
+				entry.ArcadeID = ref.ArcadeID
+				entry.ArcadeName = ref.ArcadeName
+			}
+		case "visit":
+			entry.TargetID = targetID
+			if ref, ok := visitArcadeByID[targetID]; ok {
 				entry.ArcadeID = ref.ArcadeID
 				entry.ArcadeName = ref.ArcadeName
 			}
@@ -206,6 +221,36 @@ ORDER BY created DESC, id DESC
 type arcadeRef struct {
 	ArcadeID   string
 	ArcadeName string
+}
+
+func loadVisitArcadeRefs(app core.App, visitIDs []string) (map[string]arcadeRef, error) {
+	out := map[string]arcadeRef{}
+	if len(visitIDs) == 0 {
+		return out, nil
+	}
+	var visits []struct {
+		ID       string `db:"id"`
+		ArcadeID string `db:"arcade"`
+	}
+	values := make([]any, len(visitIDs))
+	for i, id := range visitIDs {
+		values[i] = id
+	}
+	if err := app.DB().Select("id", "arcade").From("arcade_visit").Where(dbx.In("id", values...)).All(&visits); err != nil {
+		return nil, fmt.Errorf("query visit arcade refs failed: %w", err)
+	}
+	ids := make([]string, 0, len(visits))
+	for _, visit := range visits {
+		ids = append(ids, visit.ArcadeID)
+	}
+	names, err := loadArcadeNames(app, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, visit := range visits {
+		out[visit.ID] = arcadeRef{ArcadeID: visit.ArcadeID, ArcadeName: names[visit.ArcadeID]}
+	}
+	return out, nil
 }
 
 func parseSupporterLedgerKind(kind string) (source, action, arcadeID, targetID string, detail map[string]any) {

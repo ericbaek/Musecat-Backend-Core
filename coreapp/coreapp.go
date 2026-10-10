@@ -269,6 +269,14 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireStrictReviewerAccess(),
 	)
+	supporterReview := se.Router.Group("/moderation/supporter").Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireStrictReviewerAccess(),
+	)
+	supporterReview.GET("/requests", arcadeadmin.ListSupporterRequests)
+	supporterReview.GET("/request", arcadeadmin.GetSupporterRequest)
+	supporterReview.PUT("/request", arcadeadmin.ReviewSupporterRequest)
 	reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
 	reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
 
