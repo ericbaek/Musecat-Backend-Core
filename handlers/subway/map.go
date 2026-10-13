@@ -86,6 +86,45 @@ func GetMap(re *core.RequestEvent) error {
 	return re.JSON(http.StatusOK, buildMapPayload(records[0]))
 }
 
+// ListMapHistory returns past subway map versions, optionally filtered by region.
+func ListMapHistory(re *core.RequestEvent) error {
+	region := strings.TrimSpace(re.Request.URL.Query().Get("region"))
+	filter := ""
+	params := dbx.Params{}
+	if region != "" {
+		if !isSupportedRegion(region) {
+			return validationError(re, "region must be one of center or busan")
+		}
+		filter = "region = {:region}"
+		params["region"] = region
+	}
+
+	records, err := re.App.FindRecordsByFilter(
+		collectionSubwayMap,
+		filter,
+		"-releaseDate,-created",
+		0,
+		0,
+		params,
+	)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to load subway map history",
+			"details": err.Error(),
+		})
+	}
+
+	items := make([]mapPayload, 0, len(records))
+	for _, record := range records {
+		items = append(items, buildMapPayload(record))
+	}
+
+	return re.JSON(http.StatusOK, map[string]any{
+		"items": items,
+		"total": len(items),
+	})
+}
+
 // CreateMap creates a new version without replacing older regional versions.
 func CreateMap(re *core.RequestEvent) error {
 	input, err := parseMapMutationInput(re)

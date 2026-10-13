@@ -456,3 +456,53 @@ func pngFixture() []byte {
 func pdfFixture() []byte {
 	return []byte("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n")
 }
+
+func TestSubwayMapHistory(t *testing.T) {
+	app := newSubwayTestApp(t)
+
+	token, _ := createSubwayAuthUser(t, app, []string{"developer"})
+
+	seedSubwayMap(t, app, "center", "2026-01-01", "lightSVG", "map.svg", svgFixture("c1"), []string{"v1"})
+	seedSubwayMap(t, app, "center", "2026-06-01", "lightSVG", "map.svg", svgFixture("c2"), []string{"v2"})
+	seedSubwayMap(t, app, "busan", "2026-03-01", "lightSVG", "map.svg", svgFixture("b1"), []string{"b1"})
+
+	res := subwayRequest(t, app, http.MethodGet, "/subway/map/history", nil, "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for anonymous, got %d", res.StatusCode)
+	}
+
+	res = subwayRequest(t, app, http.MethodGet, "/subway/map/history", nil, "", token)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+	var all struct {
+		Items []subwayMapResponse `json:"items"`
+		Total int                 `json:"total"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&all); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if all.Total != 3 || len(all.Items) != 3 {
+		t.Fatalf("expected 3 items, got %d", all.Total)
+	}
+
+	res = subwayRequest(t, app, http.MethodGet, "/subway/map/history?region=center", nil, "", token)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+	var center struct {
+		Items []subwayMapResponse `json:"items"`
+		Total int                 `json:"total"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&center); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if center.Total != 2 || len(center.Items) != 2 {
+		t.Fatalf("expected 2 items for center, got %d", center.Total)
+	}
+	if center.Items[0].ReleaseDate != "2026-06-01" {
+		t.Fatalf("expected newest version first, got %s", center.Items[0].ReleaseDate)
+	}
+}

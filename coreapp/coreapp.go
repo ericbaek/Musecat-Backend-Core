@@ -127,6 +127,11 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
+	se.Router.GET("/subway/map/history", subwayhandler.ListMapHistory).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireAdminAccess(),
+	)
 	// Public read endpoint: returns current relation ids for the arcade
 	se.Router.GET("/arcade", arcadequery.GetArcadeValues)
 	se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)

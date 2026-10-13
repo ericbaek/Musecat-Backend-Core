@@ -7215,6 +7215,33 @@ paths:
         '403': {description: Active user lacks administrator access.}
         '404': {description: Map version was not found.}
         '502': {description: Map deletion failed.}
+  /subway/map/history:
+    get:
+      tags: [Moderator]
+      summary: Get subway map version history
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: region
+          in: query
+          required: false
+          schema: {type: string, enum: [center, busan]}
+      responses:
+        '200':
+          description: List of subway map versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/SubwayMap'}
+                  total: {type: integer}
+        '400': {description: Unsupported region.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '502': {description: Map lookup failed.}
   /subway/map/file:
     get:
       tags: [Meta]
