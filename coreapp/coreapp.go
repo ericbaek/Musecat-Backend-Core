@@ -138,6 +138,7 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	// Public read endpoint: list all arcades with basic info + gameSeries ids
 	se.Router.GET("/arcades", arcadequery.ListArcades)
 	se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
+	se.Router.GET("/arcades/updates/history", arcadequery.ListArcadeUpdateHistory).Bind(apis.RequireAuth("user"))
 	se.Router.GET("/campaigns", arcadecampaign.ListCampaigns)
 	se.Router.GET("/campaign", arcadecampaign.GetCampaign)
 	se.Router.GET("/campaign/photo", arcadecampaign.ListPhotoCampaign)

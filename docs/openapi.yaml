@@ -290,7 +290,7 @@ components:
           type: string
     StatsResponse:
       type: object
-      required: [arcade_count, changelog_count, flag_count]
+      required: [arcade_count, changelog_count, flag_count, flag_reaction_count, ongoing_flag_count, solved_flag_count, visit_count, page_view_count, page_views]
       properties:
         arcade_count:
           type: integer
@@ -301,6 +301,20 @@ components:
         flag_count:
           type: integer
           format: int64
+        flag_reaction_count: {type: integer, format: int64, description: Total reactions on public arcade fault reports.}
+        ongoing_flag_count: {type: integer, format: int64}
+        solved_flag_count: {type: integer, format: int64}
+        visit_count: {type: integer, format: int64, description: Verified visits respecting deployment aggregate policy.}
+        page_view_count: {type: integer, format: int64}
+        page_views:
+          type: array
+          description: Daily UTC cumulative distinct page-view event groups since 2026-09-30, including zero-activity days through today. Public arcades only, including closed venues.
+          items:
+            type: object
+            required: [date, count]
+            properties:
+              date: {type: string, format: date}
+              count: {type: integer, format: int64}
     RankingProfile:
       type: object
       required: [id, nickname, username, avatar, primary_country, level, tags]
@@ -1041,6 +1055,9 @@ components:
         - type: object
           required: [updated, block_started_at, block_ended_at, changes, updated_parts]
           properties:
+            update_id:
+              type: string
+              description: Activity block identity; id remains the arcade identity.
             updated:
               type: string
             block_started_at:
@@ -3640,51 +3657,56 @@ paths:
   /arcades/updates:
     get:
       tags: [Arcades]
-      summary: /arcades/updates
-      parameters:
-        - $ref: '#/components/parameters/LimitQuery'
-        - $ref: '#/components/parameters/CountryQuery'
+      summary: Fixed public dashboard summary
+      description: Returns at most six latest blocks from distinct public open arcades. If a non-KR arcade has history, at least one is included, replacing the sixth KR entry when necessary. Results remain newest first. Query parameters, including page and limit, are rejected.
       responses:
         '200':
-          description: Latest update block per arcade, newest first.
+          description: Fixed summary array.
           content:
             application/json:
               schema:
                 type: array
-                items:
-                  $ref: '#/components/schemas/ArcadeUpdateSummary'
-              example:
-                - id: arcade_123
-                  country: AU
-                  name: Sydney Arcade
-                  address: 123 George St, Sydney NSW
-                  location:
-                    lat: -33.8708
-                    lon: 151.2062
-                  game_series: [series_1]
-                  updated: "2026-04-10 09:00:00.000Z"
-                  block_started_at: "2026-04-10 09:00:00.000Z"
-                  block_ended_at: "2026-04-10 08:58:00.000Z"
-                  updated_parts: [basic, hour, flag, flag_reaction]
-                  changes:
-                    - part: hour
-                      by: user_123
-                      created: "2026-04-10 09:00:00.000Z"
-                    - part: flag
-                      by: user_123
-                      created: "2026-04-10 08:59:30.000Z"
-                    - part: flag_reaction
-                      by: user_123
-                      created: "2026-04-10 08:59:00.000Z"
-                    - part: basic
-                      by: user_123
-                      created: "2026-04-10 08:58:00.000Z"
+                maxItems: 6
+                items: {$ref: '#/components/schemas/ArcadeUpdateSummary'}
         '400':
-          description: Invalid limit.
+          description: Query parameters are not supported.
+  /arcades/updates/history:
+    get:
+      tags: [Arcades]
+      summary: Authenticated recent change history
+      security:
+        - bearerAuth: []
+      description: Historical public open arcade activity, excluding passport verifications before block grouping and pagination. Requires a user session.
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CountryQuery'
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 1000000, default: 1}
+      responses:
+        '200':
+          description: Historical block pagination envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, per_page, last_page, total]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ArcadeUpdateSummary'}
+                  page: {type: integer}
+                  per_page: {type: integer}
+                  last_page: {type: integer}
+                  total: {type: integer}
+        '400':
+          description: Invalid limit or page.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: User authentication required.
         '502':
           description: Failed to build update list.
           content:

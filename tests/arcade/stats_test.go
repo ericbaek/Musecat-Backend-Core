@@ -31,11 +31,15 @@ func TestGetStats_Default(t *testing.T) {
 	var baseArcadeCount int64
 	var baseChangelogCount int64
 	var baseFlagCount int64
+	var baseReactionCount int64
 
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
 		tb.Helper()
 
 		baseArcadeCount, baseChangelogCount, baseFlagCount = loadPublicStatsCounts(tb, app)
+		if err := app.DB().NewQuery(`SELECT COUNT(*) FROM arcade_flag_reaction r JOIN arcade_flag f ON f.id=r.flag JOIN arcade a ON a.id=f.arcade WHERE a.public=1`).Row(&baseReactionCount); err != nil {
+			tb.Fatal(err)
+		}
 
 		_, user := createAuthUser(tb, app)
 		arcade1, _ := seedArcade(tb, app, user.Id, arcadeSeed{
@@ -124,6 +128,7 @@ func TestGetStats_Default(t *testing.T) {
 		assertInt64(tb, payload["arcade_count"], baseArcadeCount+1)
 		assertInt64(tb, payload["changelog_count"], baseChangelogCount+3)
 		assertInt64(tb, payload["flag_count"], baseFlagCount+3)
+		assertInt64(tb, payload["flag_reaction_count"], baseReactionCount+2)
 	}
 
 	scenario.Test(t)
@@ -187,6 +192,11 @@ func insertStatsRecord(tb testing.TB, app *tests.TestApp, collectionName string,
 
 	var query string
 	switch collectionName {
+	case "arcade_analytics_event":
+		query = `INSERT INTO arcade_analytics_event (arcade, event_group, event_type, source, created) VALUES ({:arcade}, {:event_group}, {:event_type}, {:source}, {:created})`
+		for _, key := range []string{"arcade", "event_group", "event_type", "source"} {
+			params[key] = stringField(fields, key)
+		}
 	case "arcade_changelog":
 		query = `
 INSERT INTO arcade_changelog (arcade, "by", changed, created, "from", "to")
@@ -273,4 +283,56 @@ func stringField(fields map[string]any, key string) string {
 func boolField(fields map[string]any, key string) bool {
 	value, _ := fields[key].(bool)
 	return value
+}
+
+func TestGetStats_CumulativeViewsAndReportStatus(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	public, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Public stats", Address: "A", Location: location{Lat: 37, Lon: 127}})
+	private, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Private stats", Address: "B", Location: location{Lat: 37, Lon: 127}})
+	setArcadeVisibility(t, app, public, true, true)
+	setArcadeVisibility(t, app, private, false, false)
+	start := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	for _, event := range []struct {
+		Arcade, Group, Type string
+		At                  time.Time
+	}{
+		{public, "samegroup", "page_view", start},
+		{public, "samegroup", "page_view", start},
+		{public, "latergroup", "page_view", start.AddDate(0, 0, 2)},
+		{private, "privategroup", "page_view", start},
+		{public, "oldgroup", "page_view", start.AddDate(0, 0, -1)},
+		{public, "directiongroup", "direction_click", start},
+	} {
+		insertStatsRecord(t, app, "arcade_analytics_event", map[string]any{"arcade": event.Arcade, "event_group": event.Group, "event_type": event.Type, "source": "direct"}, event.At)
+	}
+	for _, flag := range []struct {
+		Arcade string
+		Solved bool
+	}{{public, false}, {public, true}, {private, false}} {
+		insertStatsRecord(t, app, "arcade_flag", map[string]any{"arcade": flag.Arcade, "createdBy": user.Id, "disruption": "major", "message": "test", "solved": flag.Solved}, start)
+	}
+	res := executeJSONRequest(t, app, http.MethodGet, "/stats", "", nil)
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	var payload struct {
+		Views   int64 `json:"page_view_count"`
+		Ongoing int64 `json:"ongoing_flag_count"`
+		Solved  int64 `json:"solved_flag_count"`
+		Days    []struct {
+			Date  string `json:"date"`
+			Count int64  `json:"count"`
+		} `json:"page_views"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Views != 2 || payload.Ongoing != 1 || payload.Solved != 1 {
+		t.Fatalf("unexpected stats: %+v", payload)
+	}
+	if len(payload.Days) < 3 || payload.Days[0].Date != "2026-09-30" || payload.Days[0].Count != 1 || payload.Days[1].Count != 1 || payload.Days[2].Count != 2 {
+		t.Fatalf("unexpected cumulative series: %+v", payload.Days)
+	}
 }

@@ -672,3 +672,28 @@ Existing aggregate hooks invalidate discovery caches after commit. This operator
 status correction does not award publication/edit XP or create a content revision
 or arcade changelog row; public-conversion requirements apply to the creator's
 publication workflow, not this administrative correction.
+
+## Home dashboard aggregates and history
+
+`GET /stats` retains legacy `flag_count` (reports plus reactions) and adds
+open/resolved report counts, verified visits respecting
+deployment aggregate policy, and cumulative page views. All totals exclude private
+arcades and include public closed venues. Page views deduplicate `event_group`
+across game-series rows and provide a daily UTC cumulative series from September
+30, 2026 through today, carrying the previous total through inactive days.
+
+`GET /arcades/updates` is the public Summary API: no query parameters are
+accepted, and at most six latest distinct-arcade blocks are returned. If the six
+newest are all KR and a non-KR arcade has history, the newest non-KR block replaces
+the sixth entry. Results remain in descending activity order. Fewer are returned
+when fewer eligible arcades exist; no foreign entry is invented if none exists.
+
+`GET /arcades/updates/history` requires user authentication and returns `items`,
+`page`, `per_page`, `last_page`, `total` across chronological blocks, including
+older blocks for the same arcade. Passport verifications are excluded before
+block grouping and pagination. Both endpoints exclude private and closed arcades.
+Blocks retain `id` as the arcade ID and expose `update_id` for activity identity.
+The public endpoint cannot expose additional history through page/limit overrides.
+
+`flag_reaction_count` separately counts reactions on public arcade reports while
+`flag_count` continues to include both reports and reactions.

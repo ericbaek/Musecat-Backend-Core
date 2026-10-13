@@ -2,6 +2,8 @@ package arcade_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -116,11 +118,11 @@ func TestListArcadeUpdates_DefaultLimitAndGrouping(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(payload) != 5 {
-		t.Fatalf("expected 5 arcade update entries, got %d", len(payload))
+	if len(payload) != 6 {
+		t.Fatalf("expected 6 arcade update entries, got %d", len(payload))
 	}
 
-	expectedOrder := []string{"Arcade A", "Arcade B", "Arcade C", "Arcade D", "Arcade E"}
+	expectedOrder := []string{"Arcade A", "Arcade B", "Arcade C", "Arcade D", "Arcade E", "Arcade F"}
 	for i, expectedName := range expectedOrder {
 		if got := payload[i]["name"]; got != expectedName {
 			t.Fatalf("expected payload[%d].name=%q, got %v", i, expectedName, got)
@@ -164,7 +166,7 @@ func TestListArcadeUpdates_DefaultLimitAndGrouping(t *testing.T) {
 
 	for _, entry := range payload {
 		name, _ := entry["name"].(string)
-		if name == "Arcade Private" || name == "Arcade Closed" || name == "Arcade F" || name == "Arcade G" {
+		if name == "Arcade Private" || name == "Arcade Closed" || name == "Arcade G" {
 			t.Fatalf("unexpected arcade in default limit response: %s", name)
 		}
 	}
@@ -173,7 +175,7 @@ func TestListArcadeUpdates_DefaultLimitAndGrouping(t *testing.T) {
 func TestListArcadeUpdates_CountryFilterAndCustomLimit(t *testing.T) {
 	app := newArcadeTestApp(t)
 
-	_, user1 := createAuthUser(t, app)
+	token, user1 := createAuthUser(t, app)
 	_, user2 := createAuthUser(t, app)
 
 	base := time.Date(2030, 3, 25, 9, 0, 0, 0, time.UTC)
@@ -213,18 +215,21 @@ func TestListArcadeUpdates_CountryFilterAndCustomLimit(t *testing.T) {
 	seedArcadeChangelog(t, app, jp1, "photo", user1.Id, base.Add(-2*time.Minute))
 	seedArcadeChangelog(t, app, kr3, "sns", user2.Id, base.Add(-3*time.Minute))
 
-	res := executeJSONRequest(t, app, http.MethodGet, "/arcades/updates?country=KR&limit=2", "", nil)
+	res := executeJSONRequest(t, app, http.MethodGet, "/arcades/updates/history?country=KR&limit=2", "", map[string]string{"Authorization": "Bearer " + token})
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", res.StatusCode)
 	}
 
-	var payload []map[string]any
-	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+	var envelope struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&envelope); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
+	payload := envelope.Items
 	if len(payload) != 2 {
 		t.Fatalf("expected 2 KR entries, got %d", len(payload))
 	}
@@ -255,7 +260,7 @@ func TestListArcadeUpdates_InvalidLimit(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if got := payload["error"]; got != "invalid 'limit' value; expected positive integer" {
+	if got := payload["error"]; got != "summary does not accept query parameters" {
 		t.Fatalf("unexpected error payload: %v", payload)
 	}
 }
@@ -456,5 +461,123 @@ func assertChangeRow(tb testing.TB, row map[string]any, part, by string) {
 	}
 	if _, ok := row["created"].(string); !ok {
 		tb.Fatalf("expected change created string, got %T", row["created"])
+	}
+}
+
+func TestListArcadeUpdates_HistoricalPagination(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	base := time.Date(2030, 3, 24, 20, 0, 0, 0, time.UTC)
+	a, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "History A", Address: "A", Location: location{Lat: 37, Lon: 127}, Country: "KR"})
+	b, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "History B", Address: "B", Location: location{Lat: 37, Lon: 127}, Country: "KR"})
+	private, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Private", Address: "P", Location: location{Lat: 37, Lon: 127}, Country: "KR"})
+	setArcadeVisibilityAndUpdated(t, app, a, true, false, base)
+	setArcadeVisibilityAndUpdated(t, app, b, true, false, base)
+	setArcadeVisibilityAndUpdated(t, app, private, false, false, base)
+	seedArcadeChangelog(t, app, a, "basic", user.Id, base)
+	seedArcadeChangelog(t, app, b, "hour", user.Id, base.Add(-time.Minute))
+	seedArcadeChangelog(t, app, a, "sns", user.Id, base.Add(-2*time.Minute))
+	seedArcadeChangelog(t, app, private, "basic", user.Id, base.Add(time.Minute))
+	seedArcadeVisit(t, app, user.Id, b, base.Add(time.Minute))
+	for page, expected := range []string{a, b, a} {
+		res := executeJSONRequest(t, app, http.MethodGet, fmt.Sprintf("/arcades/updates/history?page=%d&limit=1&country=KR", page+1), "", map[string]string{"Authorization": "Bearer " + token})
+		raw, readErr := io.ReadAll(res.Body)
+		res.Body.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if res.StatusCode != 200 {
+			t.Fatalf("response: %d %s", res.StatusCode, string(raw))
+		}
+		var payload struct {
+			Items []struct {
+				ID       string `json:"id"`
+				UpdateID string `json:"update_id"`
+				Changes  []struct {
+					Part string `json:"part"`
+				} `json:"changes"`
+			} `json:"items"`
+			Total    int `json:"total"`
+			LastPage int `json:"last_page"`
+		}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Total != 3 || payload.LastPage != 3 || len(payload.Items) != 1 || payload.Items[0].ID != expected || payload.Items[0].UpdateID == "" {
+			t.Fatalf("unexpected page: %s", string(raw))
+		}
+		if page == 2 && payload.Items[0].Changes[0].Part != "sns" {
+			t.Fatalf("old block missing: %s", string(raw))
+		}
+	}
+	for _, page := range []string{"0", "-1", "abc", "1000001"} {
+		res := executeJSONRequest(t, app, http.MethodGet, "/arcades/updates/history?page="+page, "", map[string]string{"Authorization": "Bearer " + token})
+		_, readErr := io.ReadAll(res.Body)
+		res.Body.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if res.StatusCode != 400 {
+			t.Fatalf("page %s: %d", page, res.StatusCode)
+		}
+	}
+}
+
+func TestListArcadeUpdates_SummaryGuaranteesForeignArcade(t *testing.T) {
+	for _, foreignPosition := range []int{-1, 2, 7} {
+		t.Run(fmt.Sprint(foreignPosition), func(t *testing.T) {
+			app := newArcadeTestApp(t)
+			_, user := createAuthUser(t, app)
+			base := time.Date(2030, 4, 1, 0, 0, 0, 0, time.UTC)
+			for i := 0; i < 8; i++ {
+				country := "KR"
+				if i == foreignPosition {
+					country = "AU"
+				}
+				id, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: fmt.Sprint(i), Address: "A", Country: country, Location: location{Lat: 37, Lon: 127}})
+				setArcadeVisibilityAndUpdated(t, app, id, true, false, base)
+				seedArcadeChangelog(t, app, id, "basic", user.Id, base.Add(-time.Duration(i)*time.Minute))
+			}
+			res := executeJSONRequest(t, app, http.MethodGet, "/arcades/updates", "", nil)
+			defer res.Body.Close()
+			var items []map[string]any
+			if err := json.NewDecoder(res.Body).Decode(&items); err != nil {
+				t.Fatal(err)
+			}
+			if res.StatusCode != 200 || len(items) != 6 {
+				t.Fatalf("unexpected summary: %v", items)
+			}
+			for i, item := range items {
+				expected := i
+				if i == 5 && foreignPosition == 7 {
+					expected = 7
+				}
+				if item["name"] != fmt.Sprint(expected) {
+					t.Fatalf("unexpected order: %v", items)
+				}
+			}
+		})
+	}
+}
+
+func TestListArcadeUpdates_ProtectsHistory(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, _ := createAuthUser(t, app)
+	for _, test := range []struct {
+		url, token string
+		status     int
+	}{
+		{"/arcades/updates?page=1", "", 400},
+		{"/arcades/updates?page=2", token, 400},
+		{"/arcades/updates?limit=50", "", 400},
+		{"/arcades/updates?country=KR", "", 400},
+		{"/arcades/updates/history", "", 401},
+		{"/arcades/updates/history?page=2", "invalid", 401},
+	} {
+		res := executeJSONRequest(t, app, http.MethodGet, test.url, "", map[string]string{"Authorization": "Bearer " + test.token})
+		res.Body.Close()
+		if res.StatusCode != test.status {
+			t.Fatalf("%s: expected %d, got %d", test.url, test.status, res.StatusCode)
+		}
 	}
 }

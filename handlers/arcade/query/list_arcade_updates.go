@@ -24,9 +24,22 @@ type arcadeUpdateBlockRow struct {
 
 // ListArcadeUpdates handles GET /arcades/updates.
 func ListArcadeUpdates(re *core.RequestEvent) error {
+	if len(re.Request.URL.Query()) > 0 {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "summary does not accept query parameters"})
+	}
+	return listArcadeUpdates(re, false)
+}
+
+// ListArcadeUpdateHistory handles authenticated GET /arcades/updates/history.
+func ListArcadeUpdateHistory(re *core.RequestEvent) error {
+	re.Response.Header().Set("Cache-Control", "private, no-store")
+	return listArcadeUpdates(re, true)
+}
+
+func listArcadeUpdates(re *core.RequestEvent, history bool) error {
 	q := re.Request.URL.Query()
 
-	limit := 5
+	limit := 6
 	if rawLimit := strings.TrimSpace(q.Get("limit")); rawLimit != "" {
 		parsed, err := strconv.Atoi(rawLimit)
 		if err != nil || parsed <= 0 {
@@ -42,19 +55,57 @@ func ListArcadeUpdates(re *core.RequestEvent) error {
 		limit = parsed
 	}
 
+	page := 0
+	if history {
+		page = 1
+	}
+	if rawPage := strings.TrimSpace(q.Get("page")); rawPage != "" {
+		parsed, err := strconv.Atoi(rawPage)
+		if err != nil || parsed < 1 || parsed > 1000000 {
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid page"})
+		}
+		page = parsed
+	}
 	country := strings.TrimSpace(q.Get("country"))
 	filterParts := []string{
 		"a.public = 1",
 		"a.closed = 0",
 	}
 	params := dbx.Params{
-		"limit": limit,
+		"limit": limit, "offset": max(0, page-1) * limit,
 	}
 	if country != "" {
 		filterParts = append(filterParts, "a.country = {:country}")
 		params["country"] = country
 	}
 
+	visitFilter := strings.Join(filterParts, " AND ") + " AND ui.visit_visibility IN ('summary', 'full')"
+	if history {
+		visitFilter += " AND 0 = 1"
+	}
+	selection := `selected_blocks AS (
+	SELECT block_id, arcade, block_started_at, block_ended_at
+	FROM latest_block_per_arcade
+	ORDER BY block_started_at DESC, block_id ASC
+	LIMIT {:limit} OFFSET {:offset}
+)`
+	if !history {
+		selection = `summary_candidates AS (
+	SELECT l.*, a.country,
+		ROW_NUMBER() OVER (ORDER BY block_started_at DESC, block_id ASC) AS summary_rank
+	FROM latest_block_per_arcade l JOIN arcade a ON a.id = l.arcade
+	WHERE arcade_rank = 1
+),
+selected_blocks AS (
+	SELECT block_id, arcade, block_started_at, block_ended_at
+	FROM summary_candidates
+	WHERE summary_rank <= 6 OR (
+		country <> 'KR' AND summary_rank = (
+			SELECT MIN(summary_rank) FROM summary_candidates WHERE country <> 'KR'
+		)
+	)
+)`
+	}
 	sql := fmt.Sprintf(`
 WITH filtered AS (
 	SELECT
@@ -151,17 +202,7 @@ latest_block_per_arcade AS (
 		) AS arcade_rank
 	FROM block_ranges
 ),
-selected_blocks AS (
-	SELECT
-		block_id,
-		arcade,
-		block_started_at,
-		block_ended_at
-	FROM latest_block_per_arcade
-	WHERE arcade_rank = 1
-	ORDER BY block_started_at DESC, block_id ASC
-	LIMIT {:limit}
-)
+%s
 SELECT
 	b.arcade,
 	b.changed,
@@ -169,12 +210,20 @@ SELECT
 	b.created,
 	b.bulk_id,
 	s.block_started_at,
-	s.block_ended_at
+	s.block_ended_at,
+ s.block_id
 FROM blocks b
 INNER JOIN selected_blocks s ON s.block_id = b.block_id
 ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
-	`, strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND ")+" AND ui.visit_visibility IN ('summary', 'full')")
+	`, strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), visitFilter, selection)
 
+	var total int64
+	if page > 0 {
+		countSQL := sql[:strings.Index(sql, ",\nselected_blocks AS (")] + " SELECT COUNT(*) FROM block_ranges"
+		if err := re.App.DB().NewQuery(countSQL).Bind(params).Row(&total); err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count arcade updates"})
+		}
+	}
 	rows, err := re.App.DB().NewQuery(sql).Bind(params).Rows()
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
@@ -214,7 +263,8 @@ ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 			continue
 		}
 
-		entry, ok := entryByArcade[row.ArcadeID]
+		entryKey := row.ArcadeID + ":" + nullStringMapValue(raw, "block_id")
+		entry, ok := entryByArcade[entryKey]
 		if !ok {
 			arcadeRec, err := re.App.FindRecordById("arcade", row.ArcadeID)
 			if err != nil {
@@ -229,6 +279,7 @@ ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 				continue
 			}
 			payload["updated"] = arcadeRec.Get("updated")
+			payload["update_id"] = row.ArcadeID + ":" + row.BlockStartedAt
 			payload["block_started_at"] = row.BlockStartedAt
 			payload["block_ended_at"] = row.BlockEndedAt
 			payload["changes"] = []map[string]any{}
@@ -237,7 +288,7 @@ ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 				payload: payload,
 				partSet: map[string]struct{}{},
 			}
-			entryByArcade[row.ArcadeID] = entry
+			entryByArcade[entryKey] = entry
 			entries = append(entries, entry)
 		}
 
@@ -258,6 +309,15 @@ ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 		out = append(out, entry.payload)
 	}
 
+	if !history && len(out) > 6 {
+		out = append(out[:5], out[6])
+	}
+	if page > 0 {
+		return re.JSON(http.StatusOK, map[string]any{
+			"items": out, "page": page, "per_page": limit,
+			"total": total, "last_page": max(1, (total+int64(limit)-1)/int64(limit)),
+		})
+	}
 	return re.JSON(http.StatusOK, out)
 }
 
