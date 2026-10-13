@@ -3,6 +3,7 @@ package user
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -412,4 +413,151 @@ func buildBanAuthResponse(banRec *core.Record) map[string]any {
 		"until":     until,
 		"permanent": permanent,
 	}
+}
+
+func ListUserBans(re *core.RequestEvent) error {
+	recs, err := re.App.FindRecordsByFilter(
+		CollectionUserBan,
+		"",
+		"-created",
+		0,
+		0,
+	)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to list user bans",
+			"details": err.Error(),
+		})
+	}
+
+	items := make([]map[string]any, 0, len(recs))
+	for _, rec := range recs {
+		until := strings.TrimSpace(rec.GetString("until"))
+		username := ""
+		if user, err := re.App.FindRecordById(CollectionUser, rec.Id); err == nil && user != nil {
+			username = user.GetString("username")
+		}
+		items = append(items, map[string]any{
+			"id":        rec.Id,
+			"user":      rec.Id,
+			"username":  username,
+			"reason":    rec.GetString("reason"),
+			"until":     until,
+			"permanent": until == "",
+			"created":   rec.GetString("created"),
+			"updated":   rec.GetString("updated"),
+		})
+	}
+
+	return re.JSON(http.StatusOK, map[string]any{
+		"items": items,
+		"total": len(items),
+	})
+}
+
+type BanMutationBody struct {
+	User   string `json:"user"`
+	Reason string `json:"reason"`
+	Until  string `json:"until"`
+}
+
+func CreateOrUpdateUserBan(re *core.RequestEvent) error {
+	var body BanMutationBody
+	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "invalid JSON body",
+			"details": err.Error(),
+		})
+	}
+	body.User = strings.TrimSpace(body.User)
+	body.Reason = strings.TrimSpace(body.Reason)
+	body.Until = strings.TrimSpace(body.Until)
+	if len(body.User) != 15 {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "validation failed",
+			"details": "user must be a valid user id",
+		})
+	}
+	if body.Reason == "" {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "validation failed",
+			"details": "reason is required",
+		})
+	}
+
+	var untilTime time.Time
+	if body.Until != "" {
+		var err error
+		untilTime, err = time.Parse(time.RFC3339, body.Until)
+		if err != nil || !untilTime.After(userBanNow()) {
+			return re.JSON(http.StatusBadRequest, map[string]any{
+				"error":   "validation failed",
+				"details": "until must be a future RFC3339 timestamp",
+			})
+		}
+	}
+
+	user, err := re.App.FindRecordById(CollectionUser, body.User)
+	if err != nil {
+		return re.JSON(http.StatusNotFound, map[string]any{
+			"error": "user not found",
+		})
+	}
+
+	hashedEmail := hashNormalizedEmail(user.Email())
+	banRec, err := upsertUserBanByUserID(re.App, body.User, hashedEmail, body.Reason, untilTime)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to save user ban",
+			"details": err.Error(),
+		})
+	}
+
+	until := strings.TrimSpace(banRec.GetString("until"))
+	return re.JSON(http.StatusOK, map[string]any{
+		"id":        banRec.Id,
+		"user":      banRec.Id,
+		"username":  user.GetString("username"),
+		"reason":    banRec.GetString("reason"),
+		"until":     until,
+		"permanent": until == "",
+		"created":   banRec.GetString("created"),
+		"updated":   banRec.GetString("updated"),
+	})
+}
+
+func DeleteUserBan(re *core.RequestEvent) error {
+	userID := strings.TrimSpace(re.Request.URL.Query().Get("user"))
+	if userID == "" {
+		var body struct {
+			User string `json:"user"`
+		}
+		_ = json.NewDecoder(re.Request.Body).Decode(&body)
+		userID = strings.TrimSpace(body.User)
+	}
+	if len(userID) != 15 {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "validation failed",
+			"details": "user must be a valid user id",
+		})
+	}
+
+	banRec, err := findBanByUserID(re.App, userID)
+	if err != nil || banRec == nil {
+		return re.JSON(http.StatusNotFound, map[string]any{
+			"error": "user ban not found",
+		})
+	}
+
+	if err := re.App.Delete(banRec); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to delete user ban",
+			"details": err.Error(),
+		})
+	}
+
+	return re.JSON(http.StatusOK, map[string]any{
+		"user":    userID,
+		"deleted": true,
+	})
 }

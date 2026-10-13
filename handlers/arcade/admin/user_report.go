@@ -138,3 +138,99 @@ func ListUserReport(re *core.RequestEvent) error {
 		"total": len(items),
 	})
 }
+
+func ListAllUserReports(re *core.RequestEvent) error {
+	status := strings.TrimSpace(re.Request.URL.Query().Get("status"))
+	filter := ""
+	params := dbx.Params{}
+	if status != "" {
+		filter = "status = {:status}"
+		params["status"] = status
+	}
+
+	recs, err := re.App.FindRecordsByFilter(
+		collectionUserReport,
+		filter,
+		"-created",
+		0,
+		0,
+		params,
+	)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to list user_report",
+			"details": err.Error(),
+		})
+	}
+
+	items := make([]map[string]any, 0, len(recs))
+	for _, rec := range recs {
+		items = append(items, map[string]any{
+			"id":        rec.Id,
+			"user":      rec.GetString("user"),
+			"reason":    rec.GetString("reason"),
+			"status":    rec.GetString("status"),
+			"createdBy": rec.GetString("createdBy"),
+			"created":   rec.GetString("created"),
+			"updated":   rec.GetString("updated"),
+		})
+	}
+
+	return re.JSON(http.StatusOK, map[string]any{
+		"items": items,
+		"total": len(items),
+	})
+}
+
+type ReviewUserReportBody struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+func ReviewUserReport(re *core.RequestEvent) error {
+	var body ReviewUserReportBody
+	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "invalid JSON body",
+			"details": err.Error(),
+		})
+	}
+	body.ID = strings.TrimSpace(body.ID)
+	body.Status = strings.ToLower(strings.TrimSpace(body.Status))
+	if len(body.ID) != 15 {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "validation failed",
+			"details": "id must be a valid user report id",
+		})
+	}
+	if body.Status != "waiting" && body.Status != "processing" && body.Status != "done" {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "validation failed",
+			"details": "status must be waiting, processing, or done",
+		})
+	}
+
+	record, err := re.App.FindRecordById(collectionUserReport, body.ID)
+	if err != nil {
+		return re.JSON(http.StatusNotFound, map[string]any{
+			"error": "user report not found",
+		})
+	}
+	record.Set("status", body.Status)
+	if err := re.App.Save(record); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to update user report",
+			"details": err.Error(),
+		})
+	}
+
+	return re.JSON(http.StatusOK, map[string]any{
+		"id":        record.Id,
+		"user":      record.GetString("user"),
+		"reason":    record.GetString("reason"),
+		"status":    record.GetString("status"),
+		"createdBy": record.GetString("createdBy"),
+		"created":   record.GetString("created"),
+		"updated":   record.GetString("updated"),
+	})
+}

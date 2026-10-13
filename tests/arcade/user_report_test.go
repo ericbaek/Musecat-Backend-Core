@@ -249,3 +249,79 @@ func seedUserReport(
 	}
 	return rec.Id
 }
+
+func TestListAllUserReports(t *testing.T) {
+	headers := map[string]string{}
+
+	scenario := tests.ApiScenario{
+		Name:           "GET /moderation/user/reports lists all reports for moderator",
+		Method:         http.MethodGet,
+		URL:            "/moderation/user/reports",
+		Headers:        headers,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"items":`,
+			`"total":2`,
+		},
+		TestAppFactory: func(tb testing.TB) *tests.TestApp {
+			return newArcadeTestApp(tb)
+		},
+	}
+
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		tb.Helper()
+		token, _ := createAuthUserWithTags(tb, app, []string{"moderator"})
+		headers["Authorization"] = "Bearer " + token
+		_, userA := createAuthUser(tb, app)
+		_, userB := createAuthUser(tb, app)
+		seedUserReport(tb, app, userA.Id, userB.Id, "reason 1", "waiting")
+		seedUserReport(tb, app, userB.Id, userA.Id, "reason 2", "done")
+	}
+
+	scenario.Test(t)
+}
+
+func TestReviewUserReport(t *testing.T) {
+	headers := map[string]string{}
+	var reportID string
+
+	scenario := tests.ApiScenario{
+		Name:           "PUT /moderation/user/report updates status",
+		Method:         http.MethodPut,
+		URL:            "/moderation/user/report",
+		Headers:        headers,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"status":"done"`,
+		},
+		TestAppFactory: func(tb testing.TB) *tests.TestApp {
+			return newArcadeTestApp(tb)
+		},
+	}
+
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		tb.Helper()
+		token, _ := createAuthUserWithTags(tb, app, []string{"developer"})
+		headers["Authorization"] = "Bearer " + token
+		headers["Content-Type"] = "application/json"
+		_, userA := createAuthUser(tb, app)
+		_, userB := createAuthUser(tb, app)
+		reportID = seedUserReport(tb, app, userA.Id, userB.Id, "spam", "waiting")
+		scenario.Body = strings.NewReader(fmt.Sprintf(`{"id":%q,"status":"done"}`, reportID))
+	}
+
+	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
+		tb.Helper()
+		defer res.Body.Close()
+
+		rec, err := app.FindRecordById("user_report", reportID)
+		if err != nil {
+			tb.Fatalf("failed to find user_report: %v", err)
+		}
+		if rec.GetString("status") != "done" {
+			tb.Fatalf("expected status done, got %s", rec.GetString("status"))
+		}
+	}
+
+	scenario.Test(t)
+}

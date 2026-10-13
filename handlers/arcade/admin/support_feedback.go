@@ -189,3 +189,61 @@ func listSupportFeedback(re *core.RequestEvent, createdByID string) error {
 		"total": len(items),
 	})
 }
+
+type ReviewSupportFeedbackBody struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+func ReviewSupportFeedback(re *core.RequestEvent) error {
+	var body ReviewSupportFeedbackBody
+	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "invalid JSON body",
+			"details": err.Error(),
+		})
+	}
+	body.ID = strings.TrimSpace(body.ID)
+	body.Status = strings.ToLower(strings.TrimSpace(body.Status))
+	if len(body.ID) != 15 {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "validation failed",
+			"details": "id must be a valid support feedback id",
+		})
+	}
+	if body.Status == "done" || body.Status == "completed" {
+		body.Status = "solved"
+	} else if body.Status == "processing" {
+		body.Status = "recognised"
+	}
+	if body.Status != "waiting" && body.Status != "recognised" && body.Status != "solved" {
+		return re.JSON(http.StatusBadRequest, map[string]any{
+			"error":   "validation failed",
+			"details": "status must be waiting, recognised, or solved",
+		})
+	}
+
+	record, err := re.App.FindRecordById(arcadeinternal.CollectionSupportFeedback, body.ID)
+	if err != nil {
+		return re.JSON(http.StatusNotFound, map[string]any{
+			"error": "support_feedback not found",
+		})
+	}
+	record.Set("status", body.Status)
+	if err := re.App.Save(record); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error":   "failed to update support_feedback",
+			"details": err.Error(),
+		})
+	}
+
+	return re.JSON(http.StatusOK, map[string]any{
+		"id":        record.Id,
+		"message":   record.GetString("message"),
+		"status":    record.GetString("status"),
+		"createdBy": record.GetString("createdBy"),
+		"photos":    append([]string{}, record.GetStringSlice("photos")...),
+		"created":   record.GetString("created"),
+		"updated":   record.GetString("updated"),
+	})
+}

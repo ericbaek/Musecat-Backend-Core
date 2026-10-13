@@ -393,3 +393,47 @@ func buildSupportFeedbackMultipart(
 
 	return buf.Bytes(), writer.FormDataContentType()
 }
+
+func TestReviewSupportFeedback(t *testing.T) {
+	headers := map[string]string{}
+	var targetID string
+
+	scenario := tests.ApiScenario{
+		Name:           "PUT /support_feedback updates status",
+		Method:         http.MethodPut,
+		URL:            "/support_feedback",
+		Headers:        headers,
+		ExpectedStatus: http.StatusOK,
+		ExpectedContent: []string{
+			`"status":"solved"`,
+		},
+		TestAppFactory: func(tb testing.TB) *tests.TestApp {
+			return newArcadeTestApp(tb)
+		},
+	}
+
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		tb.Helper()
+		token, _ := createAuthUserWithTags(tb, app, []string{"moderator"})
+		headers["Authorization"] = "Bearer " + token
+		headers["Content-Type"] = "application/json"
+		_, userA := createAuthUser(tb, app)
+		targetID = seedSupportFeedback(tb, app, userA.Id, "feedback-review", "waiting")
+		scenario.Body = strings.NewReader(fmt.Sprintf(`{"id":%q,"status":"solved"}`, targetID))
+	}
+
+	scenario.AfterTestFunc = func(tb testing.TB, app *tests.TestApp, res *http.Response) {
+		tb.Helper()
+		defer res.Body.Close()
+
+		saved, err := app.FindRecordById("support_feedback", targetID)
+		if err != nil {
+			tb.Fatalf("failed to load updated support feedback: %v", err)
+		}
+		if saved.GetString("status") != "solved" {
+			tb.Fatalf("expected status solved, got %s", saved.GetString("status"))
+		}
+	}
+
+	scenario.Test(t)
+}

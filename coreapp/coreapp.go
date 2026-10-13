@@ -204,6 +204,11 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireStrictReviewerAccess(),
 	)
+	se.Router.PUT("/support_feedback", arcadeadmin.ReviewSupportFeedback).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireStrictReviewerAccess(),
+	)
 	se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback).Bind(apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
 	communityhandler.RegisterRoutes(se)
 
@@ -284,6 +289,17 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	reviewQueue.PUT("/status", arcadeadmin.UpdateArcadeStatus)
 	reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
 	reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
+
+	userReview := se.Router.Group("/moderation/user").Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireStrictReviewerAccess(),
+	)
+	userReview.GET("/reports", arcadeadmin.ListAllUserReports)
+	userReview.PUT("/report", arcadeadmin.ReviewUserReport)
+	userReview.GET("/bans", userhandler.ListUserBans)
+	userReview.POST("/ban", userhandler.CreateOrUpdateUserBan)
+	userReview.DELETE("/ban", userhandler.DeleteUserBan)
 
 	authSupporter := se.Router.Group("/supporter").Bind(
 		apis.RequireAuth("user"),
