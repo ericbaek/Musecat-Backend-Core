@@ -326,6 +326,13 @@ func passportAudience(re *core.RequestEvent) (string, string, int, error) {
 	}
 	visibility := visitVisibility(info.GetString("visit_visibility"))
 	if visibility == "private" {
+		isStaff, err := hasActiveStaffAccess(re.App, re.Auth)
+		if err != nil {
+			return "", "", 502, errors.New("failed to verify account restriction")
+		}
+		if isStaff {
+			return id, "full", 0, nil
+		}
 		return "", "", 404, errors.New("passport not found")
 	}
 	return id, visibility, 0, nil

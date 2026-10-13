@@ -4045,6 +4045,7 @@ paths:
     get:
       tags: [Users]
       summary: /user
+      description: Public profile by ID or username. Active developers and moderators receive owner-level fields with private, no-store caching. Restricted staff receive the public projection.
       parameters:
         - $ref: '#/components/parameters/UserIdQuery'
         - $ref: '#/components/parameters/UsernameQuery'
@@ -7800,7 +7801,7 @@ paths:
     get:
       tags: [User]
       summary: Owner or shared passport
-      description: Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; private or withdrawn profiles return 404. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
+      description: Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; withdrawn profiles return 404. Private profiles return 404 except for active developers and moderators, who receive full visit dates. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
       security: [{bearerAuth: []}, {}]
       parameters:
         - in: query
@@ -7825,7 +7826,7 @@ paths:
     get:
       tags: [User]
       summary: Owner or shared passport
-      description: Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; private or withdrawn profiles return 404. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
+      description: Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; withdrawn profiles return 404. Private profiles return 404 except for active developers and moderators, who receive full visit dates. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
       security: [{bearerAuth: []}, {}]
       parameters:
         - in: query

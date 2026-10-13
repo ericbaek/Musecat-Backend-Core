@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/pocketbase/pocketbase/core"
@@ -170,5 +171,66 @@ func TestPublicPassportSummaryRedactsEveryDateAndPrivateIsNotFound(t *testing.T)
 		if res.StatusCode != 404 {
 			t.Fatalf("private status %d", res.StatusCode)
 		}
+	}
+
+	// Moderator can view private passport
+	staffToken, staffUser := createAuthUser(t, app, true)
+	staffUser.Set("tags", []string{"moderator"})
+	if err := app.Save(staffUser); err != nil {
+		t.Fatal(err)
+	}
+	staffHeaders := map[string]string{"Authorization": "Bearer " + staffToken}
+	for _, path := range []string{"/user/passport?user=", "/user/passport/stamps?user="} {
+		res := doUserRequest(t, app, http.MethodGet, path+u.Id, staffHeaders, "")
+		if res.StatusCode != 200 {
+			t.Fatalf("expected staff to access private passport, got %d", res.StatusCode)
+		}
+	}
+}
+
+func TestPrivatePassportDoesNotAllowRestrictedStaff(t *testing.T) {
+	app := newUserFetchTestApp(t)
+	_, owner := createAuthUser(t, app, true)
+	info, err := app.FindRecordById("user_info", owner.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info.Set("visit_visibility", "private")
+	if err := app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"moderator", "banned", "withdrawn", "supporter"} {
+		t.Run(kind, func(t *testing.T) {
+			_, staff := createAuthUser(t, app, true)
+			tags := []string{"moderator"}
+			if kind == "supporter" {
+				tags = []string{"supporter"}
+			}
+			staff.Set("tags", tags)
+			if kind == "withdrawn" {
+				staff.Set("withdrawn", true)
+			}
+			if err := app.Save(staff); err != nil {
+				t.Fatal(err)
+			}
+			token, err := staff.NewAuthToken()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "banned" {
+				seedUserBanForUserTest(t, app, staff.Id, hashNormalizedEmailForUserTest(staff.Email()), "restricted", time.Time{})
+			}
+			expected := http.StatusNotFound
+			if kind == "moderator" {
+				expected = http.StatusOK
+			}
+			for _, path := range []string{"/user/passport?user=", "/user/passport/stamps?user="} {
+				res := doUserRequest(t, app, http.MethodGet, path+owner.Id, map[string]string{"Authorization": "Bearer " + token}, "")
+				defer res.Body.Close()
+				if res.StatusCode != expected {
+					t.Fatalf("%s: got %d want %d", path, res.StatusCode, expected)
+				}
+			}
+		})
 	}
 }

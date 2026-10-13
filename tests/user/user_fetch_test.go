@@ -1440,3 +1440,52 @@ func pngFixtureBytes() []byte {
 		0x00, 0x00, 0x00, 0x01,
 	}
 }
+
+func TestGetUserPrivateProfileRequiresActiveStaff(t *testing.T) {
+	app := newUserFetchTestApp(t)
+	_, target := createAuthUser(t, app, true)
+	series := seedGameSeries(t, app, 3, "Hidden Mix", "히든 믹스", "ヒドゥンミックス")
+	info := ensureUserInfo(t, app, target.Id)
+	info.Set("series_public", false)
+	info.Set("series", []string{series.Id})
+	if err := app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"moderator", "banned", "withdrawn", "supporter"} {
+		t.Run(kind, func(t *testing.T) {
+			_, staff := createAuthUser(t, app, true)
+			tags := []string{"moderator"}
+			if kind == "supporter" {
+				tags = []string{"supporter"}
+			}
+			staff.Set("tags", tags)
+			if kind == "withdrawn" {
+				staff.Set("withdrawn", true)
+			}
+			if err := app.Save(staff); err != nil {
+				t.Fatal(err)
+			}
+			token, err := staff.NewAuthToken()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind == "banned" {
+				seedUserBanForUserTest(t, app, staff.Id, hashNormalizedEmailForUserTest(staff.Email()), "restricted", time.Time{})
+			}
+			for _, url := range []string{"/user?id=" + target.Id, "/user?username=" + target.GetString("username")} {
+				res := doUserRequest(t, app, http.MethodGet, url, map[string]string{"Authorization": "Bearer " + token}, "")
+				if res.StatusCode != 200 {
+					t.Fatalf("%s status %d", url, res.StatusCode)
+				}
+				if kind == "moderator" && res.Header.Get("Cache-Control") != "private, no-store" {
+					t.Fatal("staff profile must not use public caches")
+				}
+				payload := decodeJSON(t, res)
+				_, hasPrivateSeries := payload["series"]
+				if hasPrivateSeries != (kind == "moderator") {
+					t.Fatalf("%s private series present = %v", kind, hasPrivateSeries)
+				}
+			}
+		})
+	}
+}

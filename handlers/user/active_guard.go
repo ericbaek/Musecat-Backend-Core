@@ -2,6 +2,7 @@ package user
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
@@ -36,4 +37,31 @@ func RequireActiveUser() *hook.Handler[*core.RequestEvent] {
 			return re.Next()
 		},
 	}
+}
+
+var staffAccessTags = map[string]struct{}{
+	"developer": {},
+	"moderator": {},
+}
+
+func HasStaffAccess(auth *core.Record) bool {
+	if auth == nil {
+		return false
+	}
+	for _, tags := range [][]string{auth.GetStringSlice("tag"), auth.GetStringSlice("tags")} {
+		for _, tag := range tags {
+			if _, ok := staffAccessTags[strings.ToLower(strings.TrimSpace(tag))]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasActiveStaffAccess(app core.App, auth *core.Record) (bool, error) {
+	if !HasStaffAccess(auth) || auth.Collection().Name != CollectionUser {
+		return false, nil
+	}
+	_, code, err := checkAccountRestrictionWithBan(app, auth, userBanNow())
+	return err == nil && code == "", err
 }

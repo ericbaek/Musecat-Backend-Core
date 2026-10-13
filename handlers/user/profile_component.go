@@ -95,6 +95,10 @@ func fetchMergedProfile(app core.App, userID string, includePrivateSeries bool) 
 }
 
 func FetchMergedProfileByUsername(app core.App, username string) (*Profile, error) {
+	return fetchMergedProfileByUsername(app, username, false)
+}
+
+func fetchMergedProfileByUsername(app core.App, username string, includePrivateSeries bool) (*Profile, error) {
 	userRec, err := app.FindFirstRecordByFilter(
 		CollectionUser,
 		"username = {:username}",
@@ -104,7 +108,7 @@ func FetchMergedProfileByUsername(app core.App, username string) (*Profile, erro
 		return nil, err
 	}
 
-	return mergeProfileFromRecords(app, userRec, findUserInfoRecord(app, userRec.Id), false), nil
+	return mergeProfileFromRecords(app, userRec, findUserInfoRecord(app, userRec.Id), includePrivateSeries), nil
 }
 
 func BuildProfileFromAuth(app core.App, auth *core.Record) (*Profile, error) {

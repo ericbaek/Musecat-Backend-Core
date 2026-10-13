@@ -45,6 +45,10 @@ func GetMe(re *core.RequestEvent) error {
 func GetUserByID(re *core.RequestEvent) error {
 	id := strings.TrimSpace(re.Request.URL.Query().Get("id"))
 	username := strings.TrimSpace(re.Request.URL.Query().Get("username"))
+	isStaff, staffErr := hasActiveStaffAccess(re.App, re.Auth)
+	if staffErr != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to verify account restriction"})
+	}
 
 	var (
 		profile *Profile
@@ -52,9 +56,9 @@ func GetUserByID(re *core.RequestEvent) error {
 	)
 	switch {
 	case id != "":
-		profile, err = FetchMergedProfile(re.App, id)
+		profile, err = fetchMergedProfile(re.App, id, isStaff)
 	case username != "":
-		profile, err = FetchMergedProfileByUsername(re.App, username)
+		profile, err = fetchMergedProfileByUsername(re.App, username, isStaff)
 	default:
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error": "missing required query param 'id' or 'username'",
@@ -74,6 +78,9 @@ func GetUserByID(re *core.RequestEvent) error {
 		})
 	}
 
+	if isStaff {
+		re.Response.Header().Set("Cache-Control", "private, no-store")
+	}
 	return re.JSON(http.StatusOK, profile)
 }
 

@@ -561,7 +561,11 @@ anonymous reading according to that user's visibility. Both APIs are no-store an
 use `LoadPassport`, as does legacy public `visit_stats`. Only current public arcades,
 including closed venues, are included. Private venues disappear from every aggregate.
 
-`private` returns 404 to other viewers. `summary` exposes totals, country/city maps,
+`private` returns 404 to other viewers except active developers and moderators,
+who receive the `full` projection. Banned and withdrawn staff have no override.
+Active developers and moderators may also read the owner-level profile fields
+(private series, favorites, visit statistics and settings) through `GET /user`
+by ID or username. These responses are private and no-store. `summary` exposes totals, country/city maps,
 period statistics, filters and venue stamps, but omits first/latest visit dates and
 all per-venue date arrays from both APIs (including top venues) and legacy profile
 stats. `full` additionally exposes first/latest dates and every selected-period local
@@ -709,3 +713,16 @@ hostname identifies Google (including country domains), Naver, or Bing and
 passes the resolved source to both page-view and direction-click recording.
 Missing, malformed, or unrecognized referrers remain `direct`. Raw referrers
 and search terms are not stored, and historical `direct` events are not reclassified.
+
+## User and support moderation
+
+Active developers and moderators can list all user reports with
+`GET /moderation/user/reports`, update their `waiting|processing|done` status
+with `PUT /moderation/user/report`, and list/create/update/delete bans with
+`GET /moderation/user/bans` and `POST|DELETE /moderation/user/ban`.
+Bans use the user's ID and normalized email hash, preserving auth restrictions.
+An omitted expiry is permanent; a supplied expiry must be a future RFC3339 timestamp.
+`PUT /support_feedback` updates feedback status to `waiting|recognised|solved`.
+These administrative mutations do not grant XP or write arcade content history.
+`GET /subway/map/history` uses the existing active administrator guard and lists
+all versions, optionally restricted to `center|busan`, newest release first.
