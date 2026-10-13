@@ -319,3 +319,46 @@ func seedAnalyticsVisit(tb testing.TB, app *tests.TestApp, arcadeID, userID, day
 		tb.Fatalf("save arcade_visit: %v", err)
 	}
 }
+
+func TestArcadeAnalyticsCampaignAndSearchSources(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, creator := createAuthUserWithTags(t, app, []string{"developer"})
+	arcadeID, _ := seedPublicArcade(t, app, creator.Id, arcadeSeed{
+		Name: "Acquisition Analytics", Address: "1 Source Street", Location: location{Lat: 37.5665, Lon: 126.9780},
+	})
+	sources := []string{"poster", "google", "naver", "bing", "unknown"}
+	for _, source := range sources {
+		res := executeJSONRequest(t, app, http.MethodGet, "/arcade?id="+arcadeID+"&source="+source, "", nil)
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("detail source %s status=%d", source, res.StatusCode)
+		}
+	}
+	res := executeJSONRequest(t, app, http.MethodGet, "/arcade/analytics?arcade="+arcadeID, "", map[string]string{"Authorization": "Bearer " + token})
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("analytics status=%d", res.StatusCode)
+	}
+	var payload struct {
+		PageViews int `json:"page_views"`
+		Sources   []struct {
+			Source string `json:"source"`
+			Count  int    `json:"count"`
+		} `json:"page_views_by_source"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, item := range payload.Sources {
+		counts[item.Source] = item.Count
+	}
+	if payload.PageViews != len(sources) || len(counts) != len(sources) {
+		t.Fatalf("unexpected acquisition totals: %#v", payload)
+	}
+	for _, source := range []string{"poster", "google", "naver", "bing", "direct"} {
+		if counts[source] != 1 {
+			t.Fatalf("source %s count=%d, want 1", source, counts[source])
+		}
+	}
+}

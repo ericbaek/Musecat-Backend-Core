@@ -1032,7 +1032,7 @@ components:
           enum: [direction_click]
         source:
           type: string
-          enum: [direct, search, nearby, other]
+          enum: [direct, search, nearby, other, poster, google, naver, bing]
         game_series:
           type: array
           maxItems: 10
@@ -3152,9 +3152,9 @@ paths:
           in: query
           schema:
             type: string
-            enum: [direct, search, nearby, other]
+            enum: [direct, search, nearby, other, poster, google, naver, bing]
             default: direct
-          description: Optional acquisition source recorded with the page view.
+          description: Optional acquisition source recorded with the page view. search is internal site search; poster is poster QR; google, naver, and bing are external search referrals. Missing or unknown values use direct.
         - name: game_series
           in: query
           description: Optional repeated or comma-separated series IDs used to reach the arcade.

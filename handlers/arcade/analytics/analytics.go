@@ -35,6 +35,10 @@ var analyticsSources = map[string]struct{}{
 	"search": {},
 	"nearby": {},
 	"other":  {},
+	"poster": {},
+	"google": {},
+	"naver":  {},
+	"bing":   {},
 }
 
 type directionClickRequest struct {

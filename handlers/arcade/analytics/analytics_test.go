@@ -24,3 +24,19 @@ func TestAnonymousAnalyticsEventRollingLimit(t *testing.T) {
 		t.Fatalf("retryAfter=%s, want positive duration", retryAfter)
 	}
 }
+
+func TestNormalizeAcquisitionSource(t *testing.T) {
+	for _, source := range []string{"direct", "search", "nearby", "other", "poster", "google", "naver", "bing"} {
+		if got := normalizeSource(source); got != source {
+			t.Errorf("normalizeSource(%q)=%q", source, got)
+		}
+	}
+	if got := normalizeSource(" Poster "); got != "poster" {
+		t.Errorf("normalized campaign source=%q", got)
+	}
+	for _, source := range []string{"", "unknown"} {
+		if got := normalizeSource(source); got != "direct" {
+			t.Errorf("unknown source %q=%q, want direct", source, got)
+		}
+	}
+}

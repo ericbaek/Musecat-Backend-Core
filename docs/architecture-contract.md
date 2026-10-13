@@ -697,3 +697,15 @@ The public endpoint cannot expose additional history through page/limit override
 
 `flag_reaction_count` separately counts reactions on public arcade reports while
 `flag_count` continues to include both reports and reactions.
+
+## Arcade analytics acquisition sources
+
+Page views and direction clicks accept `direct`, `search` (site search),
+`nearby`, `other`, `poster`, `google`, `naver`, and `bing`. Values are trimmed
+and lowercased; missing or unrecognized values fall back to `direct`.
+The web arcade-detail route prioritizes an explicit `source` query parameter
+(e.g. `source=poster` for poster QR codes). Without it, the incoming Referer
+hostname identifies Google (including country domains), Naver, or Bing and
+passes the resolved source to both page-view and direction-click recording.
+Missing, malformed, or unrecognized referrers remain `direct`. Raw referrers
+and search terms are not stored, and historical `direct` events are not reclassified.
