@@ -2864,6 +2864,8 @@ components:
       properties:
         password:
           type: string
+          writeOnly: true
+          description: Required for password accounts and all official arcade accounts. For official arcade accounts, the exact password including whitespace must match.
         reason:
           type: string
     ArcadeSummaryPage:
@@ -7759,10 +7761,45 @@ paths:
           description: The account has not initialized user_info.
         '502':
           description: Failed to save profile countries.
+  /user/arcade-account/credentials:
+    put:
+      tags: [Users]
+      summary: Change the authenticated official arcade account email or password
+      description: Active arcade_owner accounts only. Requires the exact current password and at least one changed credential. Revokes every existing session on success; email changes clear email verification and visibility. Does not change username, roles, ownership, or arcade content.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword]
+              properties:
+                currentPassword: {type: string, writeOnly: true}
+                email: {type: string, format: email, maxLength: 254}
+                newPassword: {type: string, minLength: 8, maxLength: 71, writeOnly: true}
+      responses:
+        '200':
+          description: Credentials updated atomically. All prior session tokens are invalid; sign in again.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success: {type: boolean}
+        '400': {description: Invalid input or no changes (code invalid_input or no_changes).}
+        '401': {description: Missing auth or incorrect current password (code invalid_password).}
+        '403': {description: Restricted or non-official account (code not_official_account).}
+        '409': {description: Email already in use (code duplicate_email).}
+        '413': {description: Body exceeds 16 KiB.}
+        '502': {description: Failed to update credentials.}
   /user/withdraw:
     post:
       tags: [Users]
       summary: /user/withdraw
+      description: Official arcade accounts require their exact current password even when an OAuth provider is linked. Successful official withdrawal removes arcade_owner and clears owns so the arcade is no longer officially managed by the withdrawn account.
       security:
         - bearerAuth: []
       requestBody:

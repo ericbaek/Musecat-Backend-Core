@@ -52,9 +52,12 @@ func Withdraw(re *core.RequestEvent) error {
 	}
 
 	password := strings.TrimSpace(body.Password)
+	if isOfficialArcadeAccount(re.Auth) {
+		password = body.Password
+	}
 	isOAuthAccount := len(externalAuths) > 0
 
-	if password == "" && !isOAuthAccount {
+	if password == "" && (!isOAuthAccount || isOfficialArcadeAccount(re.Auth)) {
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error": "password is required for password accounts",
 		})
@@ -63,6 +66,7 @@ func Withdraw(re *core.RequestEvent) error {
 	if password != "" && !re.Auth.ValidatePassword(password) {
 		return re.JSON(http.StatusUnauthorized, map[string]any{
 			"error": "invalid credentials",
+			"code":  "invalid_password",
 		})
 	}
 
@@ -75,6 +79,9 @@ func Withdraw(re *core.RequestEvent) error {
 		}
 		if userRec.GetBool("withdrawn") {
 			return fmt.Errorf("already_withdrawn")
+		}
+		if isOfficialArcadeAccount(userRec) && !userRec.ValidatePassword(password) {
+			return fmt.Errorf("invalid_password")
 		}
 
 		hashedEmail := hashNormalizedEmail(userRec.Email())
@@ -108,6 +115,16 @@ func Withdraw(re *core.RequestEvent) error {
 		}
 		userRec.SetRandomPassword()
 		userRec.RefreshTokenKey()
+		if isOfficialArcadeAccount(userRec) {
+			userRec.Set("owns", []string{})
+			tags := []string{}
+			for _, tag := range userRec.GetStringSlice("tags") {
+				if !strings.EqualFold(strings.TrimSpace(tag), "arcade_owner") {
+					tags = append(tags, tag)
+				}
+			}
+			userRec.Set("tags", tags)
+		}
 
 		if err := txApp.Save(userRec); err != nil {
 			return fmt.Errorf("failed to update user: %w", err)
@@ -147,6 +164,9 @@ func Withdraw(re *core.RequestEvent) error {
 		return nil
 	})
 	if err != nil {
+		if err.Error() == "invalid_password" {
+			return re.JSON(http.StatusUnauthorized, map[string]any{"error": "invalid credentials", "code": "invalid_password"})
+		}
 		if err.Error() == "already_withdrawn" {
 			return re.JSON(http.StatusConflict, map[string]any{
 				"error": "account already withdrawn",

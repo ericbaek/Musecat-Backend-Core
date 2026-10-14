@@ -765,3 +765,25 @@ content, award XP, or append arcade changelog rows.
 Password authentication accepts email or username. Web official-account sign-in uses the
 username identity and validates the resulting official role and arcade ownership before
 issuing its session cookie. Normal web user sign-in continues to use Google OAuth.
+
+
+## Official arcade account credential management
+
+`PUT /user/arcade-account/credentials` is available only to active users tagged
+`arcade_owner`, including accounts whose assigned arcade was removed. It accepts
+`currentPassword` and an optional `email` and/or `newPassword`; at least one must
+actually change. Current and new passwords preserve whitespace. Email follows the
+same normalization and uniqueness rules as account creation. The fresh user role,
+restriction, current password, duplicate-email lookup and credential writes are
+checked together in one transaction. Incorrect passwords return 401, duplicate
+email 409, and invalid/no-op requests 400. Email changes clear verification and
+email visibility. Both changes rotate the token key, invalidating all prior
+sessions; no token, email or password is returned. The web client clears its session
+cookie only after success and returns to official-account sign-in.
+
+`POST /user/withdraw` requires the exact current password for official accounts,
+even if they also have an OAuth link. The existing anonymization and 30-day
+re-registration policy remains in effect. Official withdrawal clears `owns` and
+removes `arcade_owner` atomically, releasing official management without deleting
+arcades or contributions. Ordinary OAuth withdrawal retains its password-free flow.
+These account operations do not award XP or write arcade content history.

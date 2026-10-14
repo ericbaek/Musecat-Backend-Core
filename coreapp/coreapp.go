@@ -275,6 +275,7 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())
 	authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(userhandler.RequireActiveUser())
 	authUser.POST("/withdraw", userhandler.Withdraw)
+	authUser.PUT("/arcade-account/credentials", userhandler.UpdateArcadeCredentials).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(16<<10))
 	authUser.GET("/report", arcadeadmin.ListUserReport).Bind(userhandler.RequireActiveUser())
 	authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(userhandler.RequireActiveUser())
 
