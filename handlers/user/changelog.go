@@ -1,7 +1,6 @@
 package user
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -9,9 +8,6 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
-
-	memoDiff "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo/diff"
-	photo "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo/read"
 )
 
 const (
@@ -32,8 +28,8 @@ var userChangelogCategorySet = map[string]struct{}{
 // GetUserChangelog handles GET /user/changelog?user=<userId>.
 //
 // This endpoint is intentionally separate from /arcade/changelog. It exposes
-// only the rows authored by the requested user and applies the same arcade
-// visibility boundary as the arcade-scoped history endpoint. Public arcades
+// only arcade/category summaries authored by the requested user and applies
+// the same arcade visibility boundary as the arcade-scoped history endpoint. Public arcades
 // are readable anonymously; a caller may additionally read their own private
 // arcade history, while strict reviewers may read all rows.
 func GetUserChangelog(re *core.RequestEvent) error {
@@ -78,14 +74,8 @@ WHERE %s
 SELECT
 	c.id,
 	c.arcade,
-	a.basic,
 	COALESCE(ab.name, '') AS arcade_name,
-	c.changed,
-	c."from",
-	c."to",
-	c."by",
-	c.created,
-	c.log
+	c.changed
 FROM arcade_changelog c
 INNER JOIN arcade a ON a.id = c.arcade
 LEFT JOIN arcade_basic ab ON ab.id = a.basic
@@ -115,15 +105,6 @@ LIMIT {:limit} OFFSET {:offset}
 			"arcade":      userChangelogString(raw, "arcade"),
 			"arcade_name": userChangelogString(raw, "arcade_name"),
 			"changed":     userChangelogString(raw, "changed"),
-			"from":        userChangelogString(raw, "from"),
-			"to":          userChangelogString(raw, "to"),
-			"by":          userChangelogString(raw, "by"),
-			"created":     userChangelogString(raw, "created"),
-			"updated":     nil,
-			"log":         decodeUserChangelogJSON(userChangelogString(raw, "log")),
-		}
-		if item["changed"] == "memo" {
-			item["memo"] = memoDiff.Build(re.App, userChangelogString(raw, "arcade"), userChangelogString(raw, "from"), userChangelogString(raw, "to"))
 		}
 		items = append(items, item)
 	}
@@ -134,9 +115,6 @@ LIMIT {:limit} OFFSET {:offset}
 		})
 	}
 
-	if err := photo.ExpandChangelogAssets(re, items); err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load changelog photos"})
-	}
 	lastPage := int64(0)
 	if total > 0 {
 		lastPage = (total + int64(perPage) - 1) / int64(perPage)
@@ -224,17 +202,6 @@ func userChangelogString(raw dbx.NullStringMap, key string) string {
 		return ""
 	}
 	return value.String
-}
-
-func decodeUserChangelogJSON(raw string) any {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	var value any
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return raw
-	}
-	return value
 }
 
 func hasStrictReviewerAccess(auth *core.Record) bool {

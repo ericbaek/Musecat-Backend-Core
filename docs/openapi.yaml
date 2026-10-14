@@ -2955,9 +2955,12 @@ components:
           items: {$ref: '#/components/schemas/ArcadeChangelogItem'}
     UserChangelogItem:
       type: object
-      required: [id, arcade, arcade_name, changed, by, created, updated]
+      additionalProperties: false
+      required: [id, arcade, arcade_name, changed]
       properties:
-        id: {type: string}
+        id:
+          type: string
+          description: Opaque row identity for pagination; no revision details are exposed.
         arcade: {type: string}
         arcade_name:
           type: string
@@ -2965,17 +2968,6 @@ components:
         changed:
           type: string
           enum: [basic, game, hour, sns, gtk, photo, memo]
-        from: {}
-        to: {}
-        by: {type: string}
-        log: {}
-        memo: {$ref: '#/components/schemas/ChangelogMemoSnapshots'}
-        photo_assets:
-          type: array
-          items: {$ref: '#/components/schemas/ChangelogPhotoAsset'}
-        created: {type: string}
-        updated:
-          type: [string, 'null']
     UserChangelogPage:
       type: object
       required: [page, per_page, last_page, total, items]
@@ -3532,7 +3524,9 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcade/changelog
-      description: Public changelog timeline for public open/closed arcades. Private history is available only to the creator or a developer/moderator with a valid token.
+      description: Detailed changelog requires an active authenticated user, including for public open/closed arcades. Private history is available only to the creator or a developer/moderator.
+      security:
+        - bearerAuth: []
       parameters:
         - name: arcade
           in: query
@@ -3561,6 +3555,10 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid user authentication.
+        '403':
+          description: User is inactive.
         '404':
           description: Arcade does not exist or private history is inaccessible.
           content:
@@ -4342,12 +4340,14 @@ paths:
       tags: [Users]
       summary: /user/changelog
       description: |
-        Returns the requested user's authored arcade changelog rows in reverse
+        Returns only arcade and changed-category summaries of the user's edits in reverse
         chronological order. Anonymous callers receive rows from public
         arcades only. An authenticated caller may additionally receive rows
         from private arcades they own; `developer` and `moderator` callers may
         audit private rows. The endpoint never exposes flags, visits, or legacy
         tickets; those remain activity aggregates rather than changelog rows.
+        Every caller receives only id, arcade, arcade_name, and changed. Revision
+        pointers, logs, timestamps, memo snapshots, and photo assets are omitted.
         Rows whose arcade aggregate was deleted are omitted, and withdrawn
         users receive an empty page.
       parameters:

@@ -72,6 +72,13 @@ func TestChangelogPhotoAssets_BothTimelinesRespectCurrentAccessAndArcadeOwnershi
 						headers["Authorization"] = "Bearer " + actor.token
 					}
 					res := executeJSONRequest(t, app, http.MethodGet, url, "", headers)
+					if scope == "arcade" && actor.token == "" {
+						defer res.Body.Close()
+						if res.StatusCode != http.StatusUnauthorized {
+							t.Fatalf("anonymous history leaked: %d", res.StatusCode)
+						}
+						return
+					}
 					if !state.public && !actor.privateAccess && scope == "arcade" {
 						defer res.Body.Close()
 						if res.StatusCode != http.StatusNotFound {
@@ -92,6 +99,13 @@ func TestChangelogPhotoAssets_BothTimelinesRespectCurrentAccessAndArcadeOwnershi
 					}
 					if len(items) != 1 {
 						t.Fatalf("expected one row, got %#v", items)
+					}
+					if scope == "user" {
+						item := items[0].(map[string]any)
+						if len(item) != 4 {
+							t.Fatalf("profile photo details leaked: %#v", item)
+						}
+						return
 					}
 					assets := items[0].(map[string]any)["photo_assets"].([]any)
 					want := map[string]bool{published: true}
@@ -157,8 +171,8 @@ func TestChangelogMemoSnapshots_DistinguishAbsentMissingAndForeignRevisions(t *t
 			t.Fatal(err)
 		}
 	}
-	for _, url := range []string{"/arcade/changelog?arcade=" + arcadeID, "/user/changelog?user=" + owner.Id} {
-		res := executeJSONRequest(t, app, http.MethodGet, url, "", nil)
+	for _, url := range []string{"/arcade/changelog?arcade=" + arcadeID} {
+		res := executeJSONRequest(t, app, http.MethodGet, url, "", map[string]string{"Authorization": "Bearer " + token})
 		payload := decodeJSONMap(t, res)
 		for _, value := range payload["items"].([]any) {
 			row := value.(map[string]any)

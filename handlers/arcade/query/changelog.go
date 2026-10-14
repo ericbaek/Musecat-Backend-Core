@@ -32,6 +32,9 @@ var changelogCategorySet = map[string]struct{}{
 // ListArcadeChangelog is the only supported wire API for arcade history.
 // Changelog rows are immutable and are never edited or deleted by clients.
 func ListArcadeChangelog(re *core.RequestEvent) error {
+	if re.Auth == nil || re.Auth.Collection().Name != "user" {
+		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+	}
 	arcadeID := strings.TrimSpace(re.Request.URL.Query().Get("arcade"))
 	if arcadeID == "" {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "arcade is required"})

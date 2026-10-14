@@ -136,8 +136,11 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	se.Router.GET("/arcade", arcadequery.GetArcadeValues)
 	se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
 	se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
-	// Public changelog rows are exposed only through this custom API.
-	se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog)
+	// Detailed changelog rows require an active user through this custom API.
+	se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+	)
 	se.Router.GET("/arcade/memo", arcadememo.GetArcadeMemo)
 	se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
 	// Public read endpoint: list all arcades with basic info + gameSeries ids

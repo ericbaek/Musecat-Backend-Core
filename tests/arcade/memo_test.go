@@ -92,7 +92,7 @@ func TestArcadeMemo_AuthenticatedUserKeepsImmutableHistory(t *testing.T) {
 		t.Fatalf("expected memo payload to include arcade id %q, got %v", arcadeID, readMemo["arcade"])
 	}
 
-	changelogResponse := executeJSONRequest(t, app, http.MethodGet, "/arcade/changelog?arcade="+arcadeID+"&changed=memo", "", nil)
+	changelogResponse := executeJSONRequest(t, app, http.MethodGet, "/arcade/changelog?arcade="+arcadeID+"&changed=memo", "", map[string]string{"Authorization": "Bearer " + authToken})
 	if changelogResponse.StatusCode != http.StatusOK {
 		t.Fatalf("expected memo changelog filter to succeed, got %d", changelogResponse.StatusCode)
 	}

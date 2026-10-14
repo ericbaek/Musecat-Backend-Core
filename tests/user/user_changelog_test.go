@@ -51,6 +51,10 @@ func TestGetUserChangelog_PublicPrivateVisibilityAndCategoryFilter(t *testing.T)
 		if item["arcade_name"] != "Public Arcade" {
 			tb.Fatalf("expected arcade_name, got %#v", item["arcade_name"])
 		}
+		if len(item) != 4 {
+			tb.Fatalf("detailed profile history leaked: %#v", item)
+		}
+
 		if _, exists := item["primary_country"]; exists {
 			tb.Fatalf("changelog item must not expose a country badge field: %#v", item)
 		}
@@ -78,15 +82,17 @@ func TestGetUserChangelog_OwnerCanReadPrivateRows(t *testing.T) {
 		scenario.Headers = map[string]string{"Authorization": "Bearer " + ownerToken}
 	}
 
+	scenario.AfterTestFunc = assertUserChangelogSummary
+
 	scenario.Test(t)
 }
 
 func TestGetUserChangelog_DefaultIncludesMemo(t *testing.T) {
 	scenario := tests.ApiScenario{
-		Name:            "default user history includes memo and its snapshot status",
+		Name:            "default user history includes only memo category summary",
 		Method:          http.MethodGet,
 		ExpectedStatus:  http.StatusOK,
-		ExpectedContent: []string{`"changed":"memo"`, `"before_status":"unavailable"`, `"after_status":"unavailable"`, `"total":1`},
+		ExpectedContent: []string{`"changed":"memo"`, `"total":1`},
 		TestAppFactory:  func(tb testing.TB) *tests.TestApp { return newUserFetchTestApp(tb) },
 	}
 	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
@@ -95,6 +101,8 @@ func TestGetUserChangelog_DefaultIncludesMemo(t *testing.T) {
 		seedUserChangelog(tb, app, arcade, "memo", user.Id)
 		scenario.URL = "/user/changelog?user=" + user.Id
 	}
+	scenario.AfterTestFunc = assertUserChangelogSummary
+
 	scenario.Test(t)
 }
 
@@ -119,6 +127,8 @@ func TestGetUserChangelog_ReviewerCanReadPrivateRows(t *testing.T) {
 		scenario.URL = "/user/changelog?user=" + user.Id
 		scenario.Headers = map[string]string{"Authorization": "Bearer " + reviewerToken}
 	}
+
+	scenario.AfterTestFunc = assertUserChangelogSummary
 
 	scenario.Test(t)
 }
@@ -210,4 +220,20 @@ func seedUserChangelog(tb testing.TB, app *tests.TestApp, arcadeID, changed, by 
 		tb.Fatalf("failed to save changelog: %v", err)
 	}
 	return rec.Id
+}
+
+func assertUserChangelogSummary(tb testing.TB, _ *tests.TestApp, res *http.Response) {
+	tb.Helper()
+	payload := decodeJSON(tb, res)
+	for _, value := range payload["items"].([]any) {
+		item := value.(map[string]any)
+		if len(item) != 4 {
+			tb.Fatalf("profile history must only expose summary fields: %#v", item)
+		}
+		for _, key := range []string{"id", "arcade", "arcade_name", "changed"} {
+			if _, exists := item[key]; !exists {
+				tb.Fatalf("missing %s: %#v", key, item)
+			}
+		}
+	}
 }
