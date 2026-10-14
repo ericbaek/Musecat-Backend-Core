@@ -794,3 +794,41 @@ Arcade detail and authorized draft detail include `admin.officialAccountIds`, an
 ordered list of non-withdrawn `arcade_owner` users whose `owns` relation includes
 the arcade. Creation authorship alone does not establish official ownership.
 Profile details continue to use the public `/user` projection.
+
+## External account connections
+
+External game accounts use a separate connection ledger, not PocketBase sign-in external auths.
+`external_account_connection` has unique `(issuer, subject)` and `(user, issuer)` identities;
+`external_service_connection` attaches multiple separately authorized game services to one account.
+Names, emails and game-specific service IDs never replace the verified issuer/subject identity.
+New and reauthorized game grants are private with no public fields. This phase has no public
+play-data API, visibility mutation, or permission to act on Musecat on a partner's behalf.
+
+`GET /integrations/providers` exposes only safe configured provider metadata. Active-user-only
+`GET /user/connections`, `POST /user/connections/start`, `POST /user/connections/complete`, and
+`DELETE /user/connections/{id}` manage owned connections. Raw REST for all connection collections
+is locked, and subject/credential/state/session/verifier fields are hidden. Responses never expose
+tokens or external subjects. Local disconnect works independently of provider availability and
+removes credentials, game grants and pending attempts atomically; remote token revocation is not
+part of this phase. Withdrawal performs that cleanup within its account transaction.
+
+Requests expire after five minutes, are bound to the exact initiating Musecat token, and use
+hashed state plus encrypted PKCE verifier. A single pending-to-exchanging claim clears the verifier
+before network I/O. Completion rechecks the current token, account restrictions, live claim,
+expiry, configured issuer and identity uniqueness in a second transaction. Disconnect, withdrawal,
+cleanup and newer attempts invalidate in-flight results. Subject conflicts return 409 without
+transferring or replacing an identity. Provider failures cannot be replayed with the same request.
+
+Only trusted executable-injected HTTPS providers are used; no public endpoint accepts URLs,
+credentials or external account IDs. Providers require distinct callback URIs, explicit client
+authentication and issuer checks. The adapter obtains a stable string subject through authenticated
+OAuth user-info; it does not implement ID-token-based OIDC verification. A changed issuer requires
+reconnection or a separately reviewed verified migration, including rhythm.info account unification.
+
+Core configuration performs no environment reads or scheduling. Executables select providers,
+require a base64 32-byte AES-GCM key, and schedule expired-request cleanup every five minutes.
+Runtime rate limits add 10 start and 20 complete requests per client IP per 600 seconds across
+both audiences without replacing existing operator rules. Full owns its independent guarded
+forward schema migration; Core migrations remain fresh-bootstrap only. These operations do not
+award XP or append arcade changelog history. See [external connections](external-connections.md)
+for configuration, reauthorization semantics, race handling and integration limitations.

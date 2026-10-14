@@ -7,6 +7,7 @@ import (
 
 	"github.com/pocketbase/pocketbase"
 
+	"github.com/ericbaek/musecat-backend-core/connections"
 	"github.com/ericbaek/musecat-backend-core/coreapp"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
@@ -34,11 +35,17 @@ func configureRuntime(app *pocketbase.PocketBase) error {
 			return fmt.Errorf("configure community translation: %w", err)
 		}
 	}
+	externalConnections, err := connections.ParseConfig(os.Getenv("MUSECAT_EXTERNAL_PROVIDERS"), os.Getenv("MUSECAT_CONNECTION_ENCRYPTION_KEY"))
+	if err != nil {
+		return fmt.Errorf("configure external connections: %w", err)
+	}
 	coreapp.Configure(app, coreapp.Config{
+		Connections:           externalConnections,
 		ClientIPForwardSecret: strings.TrimSpace(os.Getenv("MUSECAT_IP_FORWARD_SECRET")),
 		GeoResolver:           resolver,
 		Documentation:         documentationConfig(),
 	})
+	connections.RegisterRequestCleanupCron(app)
 	arcadeflag.RegisterAutoSolveCron(app)
 	community.RegisterTranslationCron(app, translator)
 	return nil

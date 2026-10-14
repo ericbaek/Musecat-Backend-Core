@@ -9,6 +9,7 @@ import (
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 
+	"github.com/ericbaek/musecat-backend-core/connections"
 	"github.com/ericbaek/musecat-backend-core/docs"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	"github.com/ericbaek/musecat-backend-core/handlers"
@@ -28,6 +29,7 @@ import (
 	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
 	communityhandler "github.com/ericbaek/musecat-backend-core/handlers/community"
+	connectionhandler "github.com/ericbaek/musecat-backend-core/handlers/connections"
 	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
@@ -40,6 +42,7 @@ import (
 // environment variables, registers migrations, or starts scheduled jobs.
 // A nil GeoResolver deliberately disables geographic lookup (fail closed).
 type Config struct {
+	Connections           *connections.Manager
 	GeoResolver           *geo.OfflineResolver
 	Documentation         DocumentationConfig
 	ClientIPForwardSecret string
@@ -65,7 +68,7 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		se.Router.Bind(clientIPForwarding(config.ClientIPForwardSecret))
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
-		RegisterAPIRoutes(se)
+		RegisterAPIRoutes(se, config.Connections)
 		return se.Next()
 	})
 }
@@ -77,6 +80,8 @@ func configureDefaultRateLimits(app core.App) {
 	settings := app.Settings()
 	settings.RateLimits.Enabled = true
 	defaults := []core.RateLimitRule{
+		{Label: "POST /user/connections/start", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /user/connections/complete", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /reverse_geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geo", MaxRequests: 60, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
@@ -99,7 +104,12 @@ func configureDefaultRateLimits(app core.App) {
 // RegisterAPIRoutes binds all application API routes to the ServeEvent router.
 // It is exported so test applications and integration suites can wire the exact
 // same routing table without duplicating it.
-func RegisterAPIRoutes(se *core.ServeEvent) {
+func RegisterAPIRoutes(se *core.ServeEvent, managers ...*connections.Manager) {
+	var manager *connections.Manager
+	if len(managers) > 0 {
+		manager = managers[0]
+	}
+	connectionhandler.RegisterRoutes(se, manager)
 	se.Router.GET("/hello", handlers.HelloHandler)
 	se.Router.GET("/geo", handlers.GeoLookupHandler)
 	se.Router.GET("/geocode", handlers.GeocodeHandler)

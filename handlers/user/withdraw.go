@@ -3,6 +3,7 @@ package user
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/connections"
 	"net/http"
 	"strings"
 	"time"
@@ -145,6 +146,10 @@ func Withdraw(re *core.RequestEvent) error {
 		userInfoRec.Set("avatar", []string{})
 		if err := txApp.Save(userInfoRec); err != nil {
 			return fmt.Errorf("failed to update user_info: %w", err)
+		}
+
+		if err := connections.DeleteUserData(txApp, userRec.Id); err != nil {
+			return fmt.Errorf("failed to unlink external accounts: %w", err)
 		}
 
 		// Unlink all OAuth providers so the same external account can sign up again later.

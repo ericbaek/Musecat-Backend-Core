@@ -16,6 +16,8 @@ When adding or changing an endpoint:
 4. Load `/docs/` and confirm the endpoint renders correctly.
 5. Keep request and response examples aligned with actual behavior.
 
+- External account linking: [`external-connections.md`](external-connections.md).
+
 ## Local Usage
 - OpenAPI spec: `/openapi.yaml`
 - Stoplight docs page: `/docs/`
