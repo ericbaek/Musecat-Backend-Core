@@ -6919,6 +6919,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /moderation/user/test-account:
+    post:
+      tags: [Moderator]
+      summary: Create an ordinary test account and profile
+      description: Active developer or moderator only. Does not change collection-wide password authentication or verify email.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, username, password, nickname]
+              properties:
+                email: {type: string, format: email, maxLength: 254}
+                username: {type: string, minLength: 4, maxLength: 15, pattern: '^[A-Za-z0-9]+$'}
+                password: {type: string, minLength: 8, maxLength: 71, writeOnly: true}
+                nickname: {type: string, minLength: 1, maxLength: 25}
+      responses:
+        '201':
+          description: Account and profile created; no session token or password returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, username, nickname]
+                properties:
+                  id: {type: string}
+                  email: {type: string, format: email}
+                  username: {type: string}
+                  nickname: {type: string}
+        '400':
+          description: Invalid input (code invalid_input).
+        '401':
+          description: Authentication required.
+        '403':
+          description: Active developer or moderator required.
+        '409':
+          description: Email or case-insensitive username exists (code duplicate_identity).
+        '413':
+          description: Body exceeds 16 KiB.
+        '502':
+          description: Transaction or authorization lookup failed.
   /user/signup:
     post:
       tags: [Users]

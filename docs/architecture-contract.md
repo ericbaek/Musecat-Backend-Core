@@ -17,6 +17,11 @@ API v2 is a deliberate breaking cutover. Existing frontend calls to PocketBase c
 4. Every cross-record arcade mutation MUST use a transaction. External HTTP, notification delivery, and unbounded work MUST NOT occur inside that transaction.
 5. Core owns reusable schema and API semantics. Full owns deployment-only migration execution and operational notification delivery.
 
+The fresh Core bootstrap enables password authentication for the `user` auth
+collection with email as its identity. This is a collection-wide authentication
+setting; the test-account endpoint does not change it. Full keeps existing
+installations aligned through its guarded forward migration.
+
 ## Product and deployment composition
 
 | Concern | Core | Full (deployment application) |
@@ -726,3 +731,13 @@ An omitted expiry is permanent; a supplied expiry must be a future RFC3339 times
 These administrative mutations do not grant XP or write arcade content history.
 `GET /subway/map/history` uses the existing active administrator guard and lists
 all versions, optionally restricted to `center|busan`, newest release first.
+
+## Test account creation
+
+`POST /moderation/user/test-account` requires an active developer or moderator.
+It accepts email, username (4–15 ASCII letters/digits), password (8–71
+characters), and nickname (1–25 characters, no flag emoji). The user and matching
+user_info are saved atomically with ordinary roles and standard profile visibility.
+Email and case-insensitive username duplicates return 409. No password or new
+session token is returned; the caller keeps their session. The endpoint does not
+change collection-wide password authentication or verify the supplied email.

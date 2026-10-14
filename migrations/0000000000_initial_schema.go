@@ -806,7 +806,7 @@ func init() {
 					"length": 8
 				},
 				"passwordAuth": {
-					"enabled": false,
+					"enabled": true,
 					"identityFields": [
 						"email"
 					]

@@ -300,6 +300,7 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireStrictReviewerAccess(),
 	)
+	userReview.POST("/test-account", userhandler.CreateTestAccount).Bind(apis.BodyLimit(16 << 10))
 	userReview.GET("/reports", arcadeadmin.ListAllUserReports)
 	userReview.PUT("/report", arcadeadmin.ReviewUserReport)
 	userReview.GET("/bans", userhandler.ListUserBans)
