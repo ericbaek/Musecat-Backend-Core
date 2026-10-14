@@ -787,3 +787,10 @@ re-registration policy remains in effect. Official withdrawal clears `owns` and
 removes `arcade_owner` atomically, releasing official management without deleting
 arcades or contributions. Ordinary OAuth withdrawal retains its password-free flow.
 These account operations do not award XP or write arcade content history.
+
+## Official arcade profiles
+
+Arcade detail and authorized draft detail include `admin.officialAccountIds`, an
+ordered list of non-withdrawn `arcade_owner` users whose `owns` relation includes
+the arcade. Creation authorship alone does not establish official ownership.
+Profile details continue to use the public `/user` projection.

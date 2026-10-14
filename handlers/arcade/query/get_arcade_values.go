@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 
@@ -73,6 +74,18 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 		_ = arcadeanalytics.RecordPageView(re.App, rec.Id, q.Get("source"), q["game_series"])
 	}
 
+	officialAccounts, err := re.App.FindRecordsByFilter("user", "owns ~ {:arcade} && tags ~ 'arcade_owner' && withdrawn = false", "created,id", 0, 0, dbx.Params{"arcade": rec.Id})
+	if err != nil {
+		return re.InternalServerError("Failed to load official arcade accounts", err)
+	}
+	officialAccountIDs := make([]string, 0, len(officialAccounts))
+	for _, account := range officialAccounts {
+		if !slices.Contains(account.GetStringSlice("owns"), rec.Id) || !slices.Contains(account.GetStringSlice("tags"), "arcade_owner") {
+			continue
+		}
+		officialAccountIDs = append(officialAccountIDs, account.Id)
+	}
+
 	// Always include relation ids and selected arcade admin metadata.
 	basicId, _ := arcadeinternal.AsString(rec.Get("basic"))
 	hourId, _ := arcadeinternal.AsString(rec.Get("hour"))
@@ -81,14 +94,15 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 	gameId, _ := arcadeinternal.AsString(rec.Get("game_v2"))
 	photoId, _ := arcadeinternal.AsString(rec.Get("photo"))
 	admin := map[string]any{
-		"id":        rec.Id,
-		"public":    rec.GetBool("public"),
-		"closed":    rec.GetBool("closed"),
-		"country":   rec.GetString("country"),
-		"timezone":  rec.GetString("timezone"),
-		"createdBy": rec.GetString("createdBy"),
-		"created":   rec.Get("created"),
-		"updated":   rec.Get("updated"),
+		"officialAccountIds": officialAccountIDs,
+		"id":                 rec.Id,
+		"public":             rec.GetBool("public"),
+		"closed":             rec.GetBool("closed"),
+		"country":            rec.GetString("country"),
+		"timezone":           rec.GetString("timezone"),
+		"createdBy":          rec.GetString("createdBy"),
+		"created":            rec.Get("created"),
+		"updated":            rec.Get("updated"),
 	}
 
 	// expand can be: "none" (default), "all", or a comma list like "basic,hour"

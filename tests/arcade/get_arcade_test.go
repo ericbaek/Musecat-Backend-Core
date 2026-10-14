@@ -415,8 +415,8 @@ func TestGetArcadeValues_Default(t *testing.T) {
 		if _, ok := admin["updated"]; !ok {
 			tb.Fatalf("expected admin.updated to exist")
 		}
-		if len(admin) != 8 {
-			tb.Fatalf("expected admin to have only 8 keys, got %d (%v)", len(admin), admin)
+		if len(admin) != 9 {
+			tb.Fatalf("expected admin to have only 9 keys, got %d (%v)", len(admin), admin)
 		}
 	}
 
@@ -722,4 +722,37 @@ func TestGetArcadeValues_ExpandPhoto(t *testing.T) {
 	}
 
 	scenario.Test(t)
+}
+
+func TestGetArcadeValues_OfficialAccounts(t *testing.T) {
+	for _, state := range []string{"official", "unrelated", "regular", "withdrawn"} {
+		t.Run(state, func(t *testing.T) {
+			scenario := tests.ApiScenario{Method: http.MethodGet, ExpectedStatus: http.StatusOK, TestAppFactory: newArcadeTestApp}
+			scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+				_, creator := createAuthUser(tb, app)
+				arcadeID, _ := seedPublicArcade(tb, app, creator.Id, arcadeSeed{Name: "Official Arcade"})
+				creator.Set("tags", []string{"arcade_owner"})
+				creator.Set("owns", []string{arcadeID})
+				if state == "unrelated" {
+					creator.Set("owns", []string{})
+				}
+				if state == "regular" {
+					creator.Set("tags", []string{})
+				}
+				if state == "withdrawn" {
+					creator.Set("withdrawn", true)
+				}
+				if err := app.Save(creator); err != nil {
+					tb.Fatal(err)
+				}
+				scenario.URL = fmt.Sprintf("/arcade?id=%s", arcadeID)
+				if state == "official" {
+					scenario.ExpectedContent = []string{fmt.Sprintf(`"officialAccountIds":["%s"]`, creator.Id)}
+				} else {
+					scenario.ExpectedContent = []string{`"officialAccountIds":[]`}
+				}
+			}
+			scenario.Test(t)
+		})
+	}
 }

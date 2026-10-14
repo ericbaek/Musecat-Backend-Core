@@ -488,6 +488,10 @@ components:
           type: string
         createdBy:
           type: string
+        officialAccountIds:
+          type: array
+          items: {type: string}
+          description: Non-withdrawn arcade_owner accounts whose owns relation includes this arcade. Ordered by creation date and ID.
         created:
           type: string
         updated:
