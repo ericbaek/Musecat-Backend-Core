@@ -2668,17 +2668,37 @@ components:
     Price:
       type: object
       required: [currency, type, list, accept]
+      allOf:
+        - if:
+            properties:
+              type: {enum: [gamemode, credit, song, time, free, custom_v1]}
+          then:
+            properties:
+              list:
+                items:
+                  $ref: '#/components/schemas/PriceItem'
+                minItems: 1
+        - if:
+            properties:
+              type: {const: custom_v2}
+          then:
+            properties:
+              list:
+                items: {type: string, minLength: 1}
       properties:
         currency:
           type: string
           enum: [KRW, JPY, USD]
         type:
           type: string
-          enum: [gamemode, credit, song, time, free, custom]
+          enum: [gamemode, credit, song, time, free, custom, custom_v1, custom_v2]
         list:
           type: array
-          items:
-            $ref: '#/components/schemas/PriceItem'
+          description: custom_v1 uses named numeric PriceItem objects with currency conversion. custom_v2 uses literal strings, one per line (empty array means unknown). Legacy custom accepts either shape without rewriting existing data.
+          anyOf:
+            - items: {type: string, minLength: 1}
+            - items:
+                $ref: '#/components/schemas/PriceItem'
         accept:
           type: array
           items:

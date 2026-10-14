@@ -35,7 +35,7 @@ func TestUpdateArcadeGame_PriceValidation(t *testing.T) {
 		{
 			name:   "invalid type enum",
 			price:  `{"currency":"KRW","type":"package","list":[{"value":500}],"accept":[]}`,
-			detail: `"details":"add[0].price.type must be one of gamemode, credit, song, time, free, custom"`,
+			detail: `"details":"add[0].price.type must be one of gamemode, credit, song, time, free, custom, custom_v1, custom_v2"`,
 		},
 		{
 			name:   "list validation kept",

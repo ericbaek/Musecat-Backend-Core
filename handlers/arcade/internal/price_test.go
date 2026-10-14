@@ -1,6 +1,7 @@
 package arcadeinternal_test
 
 import (
+	"reflect"
 	"testing"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
@@ -112,4 +113,12 @@ func TestRedactGuestPrice(t *testing.T) {
 			t.Errorf("unexpected fallback item: %#v", list[0])
 		}
 	})
+}
+
+func TestGuestCustomTextPreservesFirstLine(t *testing.T) {
+	raw := map[string]any{"type": "custom", "currency": "IDR", "list": []string{"7 Chips / 1 Credit", "Wednesday 3.5 Chips"}, "accept": []string{"Cash"}}
+	result := arcadeinternal.RedactGuestPrice(raw).(map[string]any)
+	if !reflect.DeepEqual(result["list"], []any{"7 Chips / 1 Credit"}) || result["hasHiddenPrices"] != true || result["accept"] != nil {
+		t.Fatalf("incorrect guest custom: %#v", result)
+	}
 }

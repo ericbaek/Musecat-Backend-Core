@@ -25,10 +25,53 @@ type PriceItem struct {
 	Represent *bool    `json:"represent,omitempty"`
 }
 type Price struct {
-	Currency string      `json:"currency"`
-	Type     string      `json:"type"`
-	List     []PriceItem `json:"list"`
-	Accept   []string    `json:"accept"`
+	Currency   string      `json:"currency"`
+	Type       string      `json:"type"`
+	List       []PriceItem `json:"list"`
+	Accept     []string    `json:"accept"`
+	CustomList []string    `json:"-"`
+}
+
+// CustomList is the current custom wire format; List retains legacy object
+// prices so historical snapshots and rollback keep their original shape.
+func (p Price) MarshalJSON() ([]byte, error) {
+	type alias Price
+	if p.CustomList == nil {
+		return json.Marshal(alias(p))
+	}
+	return json.Marshal(struct {
+		Currency string   `json:"currency"`
+		Type     string   `json:"type"`
+		List     []string `json:"list"`
+		Accept   []string `json:"accept"`
+	}{p.Currency, p.Type, p.CustomList, p.Accept})
+}
+
+func (p *Price) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Currency string          `json:"currency"`
+		Type     string          `json:"type"`
+		List     json.RawMessage `json:"list"`
+		Accept   []string        `json:"accept"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*p = Price{Currency: wire.Currency, Type: wire.Type, Accept: wire.Accept}
+	if string(wire.List) == "null" || len(wire.List) == 0 {
+		return nil
+	}
+	var lines []string
+	if err := json.Unmarshal(wire.List, &lines); err == nil {
+		if wire.Type != "custom" && wire.Type != "custom_v2" && len(lines) > 0 {
+			return fmt.Errorf("only custom prices accept strings")
+		}
+		if wire.Type == "custom" || wire.Type == "custom_v2" {
+			p.CustomList = lines
+			return nil
+		}
+	}
+	return json.Unmarshal(wire.List, &p.List)
 }
 
 // ID is an arcade_game_id id. It is intentionally stable across revisions.
@@ -122,6 +165,15 @@ func NormalizePriceForRead(p Price) Price {
 func NormalizePriceForStorage(p Price) Price {
 	p.Currency = strings.TrimSpace(p.Currency)
 	p.Type = strings.TrimSpace(p.Type)
+	if p.CustomList != nil {
+		lines := make([]string, 0, len(p.CustomList))
+		for _, line := range p.CustomList {
+			if line = strings.TrimSpace(line); line != "" {
+				lines = append(lines, line)
+			}
+		}
+		p.CustomList = lines
+	}
 	for i := range p.List {
 		if title, ok := p.List[i].Title.(string); ok {
 			p.List[i].Title = strings.TrimSpace(title)
@@ -196,6 +248,20 @@ func validatePrice(p Price) error {
 	}
 	if err := ValidatePriceType(p.Type); err != nil {
 		return err
+	}
+	if p.CustomList != nil {
+		if p.Type != "custom" && p.Type != "custom_v2" {
+			return fmt.Errorf("only custom prices accept strings")
+		}
+		for i, line := range p.CustomList {
+			if strings.TrimSpace(line) == "" {
+				return fmt.Errorf("price.list[%d] must not be blank", i)
+			}
+		}
+		return ValidatePriceAccept(p.Accept)
+	}
+	if p.Type == "custom_v2" {
+		return fmt.Errorf("custom_v2 price.list must be a string array")
 	}
 	if len(p.List) == 0 {
 		return fmt.Errorf("price.list must have at least 1 item")

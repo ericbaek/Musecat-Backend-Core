@@ -397,3 +397,17 @@ Existing aggregate hooks invalidate discovery caches after commit. This operator
 status correction does not award publication/edit XP or create a content revision
 or arcade changelog row; public-conversion requirements apply to the creator's
 publication workflow, not this administrative correction.
+
+## Custom game prices
+
+`custom_v1` uses the existing named numeric `PriceItem[]` contract, including
+currency, payment methods and representative flags. `custom_v2` uses literal
+`string[]`, one price or condition per line in order; `[]` means no information.
+Strings have no numeric interpretation or exchange-rate conversion. The UI shows
+both as Custom and chooses the input mode inside the price editor.
+Legacy `custom` accepts both shapes for unchanged round trips and historical
+rollback. No migration rewrites stored prices, revisions or changelog rows.
+Untouched revisions and rollback retain their original raw price JSON. New
+edits may have a legacy price in `before` and a versioned price in `after`.
+Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
+retains the existing representative-item policy.
