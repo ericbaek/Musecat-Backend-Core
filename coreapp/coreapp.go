@@ -309,6 +309,11 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	userReview.GET("/bans", userhandler.ListUserBans)
 	userReview.POST("/ban", userhandler.CreateOrUpdateUserBan)
 	userReview.DELETE("/ban", userhandler.DeleteUserBan)
+	arcadeAccountCreation := se.Router.Group("/moderation/user").Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+	)
+	arcadeAccountCreation.POST("/arcade-account", userhandler.CreateArcadeAccount).Bind(apis.BodyLimit(16 << 10))
 
 	authSupporter := se.Router.Group("/supporter").Bind(
 		apis.RequireAuth("user"),

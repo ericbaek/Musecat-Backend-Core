@@ -6963,6 +6963,54 @@ paths:
           description: Body exceeds 16 KiB.
         '502':
           description: Transaction or authorization lookup failed.
+  /moderation/user/arcade-account:
+    post:
+      tags: [Moderator]
+      summary: Create an official arcade account and linked profile
+      description: Active developer, moderator, or designer only. Atomically sets arcade_owner and owns for an existing public arcade. Does not verify email or replace the caller session.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, username, password, nickname, arcadeId]
+              properties:
+                arcadeId: {type: string, minLength: 1}
+                email: {type: string, format: email, maxLength: 254}
+                username: {type: string, minLength: 4, maxLength: 15, pattern: '^[A-Za-z0-9]+$'}
+                password: {type: string, minLength: 8, maxLength: 71, writeOnly: true}
+                nickname: {type: string, minLength: 1, maxLength: 25}
+      responses:
+        '201':
+          description: Account and profile created; no session token or password returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, username, nickname, arcadeId]
+                properties:
+                  arcadeId: {type: string}
+                  id: {type: string}
+                  email: {type: string, format: email}
+                  username: {type: string}
+                  nickname: {type: string}
+        '400':
+          description: Invalid input (code invalid_input).
+        '401':
+          description: Authentication required.
+        '403':
+          description: Active developer, moderator, or designer required.
+        '404':
+          description: Public arcade not found (code arcade_not_found).
+        '409':
+          description: Email or case-insensitive username exists (code duplicate_identity).
+        '413':
+          description: Body exceeds 16 KiB.
+        '502':
+          description: Transaction or authorization lookup failed.
   /user/signup:
     post:
       tags: [Users]

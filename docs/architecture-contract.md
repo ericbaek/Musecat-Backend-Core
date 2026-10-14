@@ -18,8 +18,8 @@ API v2 is a deliberate breaking cutover. Existing frontend calls to PocketBase c
 5. Core owns reusable schema and API semantics. Full owns deployment-only migration execution and operational notification delivery.
 
 The fresh Core bootstrap enables password authentication for the `user` auth
-collection with email as its identity. This is a collection-wide authentication
-setting; the test-account endpoint does not change it. Full keeps existing
+collection with email and username as its identities. This is a collection-wide
+authentication setting; the test-account endpoint does not change it. Full keeps existing
 installations aligned through its guarded forward migration.
 
 ## Product and deployment composition
@@ -748,3 +748,20 @@ user_info are saved atomically with ordinary roles and standard profile visibili
 Email and case-insensitive username duplicates return 409. No password or new
 session token is returned; the caller keeps their session. The endpoint does not
 change collection-wide password authentication or verify the supplied email.
+
+## Official arcade account creation
+
+`POST /moderation/user/arcade-account` requires an active developer, moderator, or designer.
+The designer role grants this provisioning capability only; strict reviewer routes remain
+restricted to developers and moderators. The input follows the test-account fields and
+adds a required `arcadeId` identifying an existing public arcade (open or closed).
+Creation atomically saves the user, profile, `tags=["arcade_owner"]`, and `owns=[arcadeId]`.
+Missing/private arcades return 404; duplicate email or username returns 409.
+Client-supplied tags, ownership arrays, verification flags, and extra privileges are ignored.
+The response contains id, email, username, nickname, and arcadeId, never a password or
+session token; the caller keeps their session. This user provisioning does not edit arcade
+content, award XP, or append arcade changelog rows.
+
+Password authentication accepts email or username. Web official-account sign-in uses the
+username identity and validates the resulting official role and arcade ownership before
+issuing its session cookie. Normal web user sign-in continues to use Google OAuth.

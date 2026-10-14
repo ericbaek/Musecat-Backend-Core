@@ -753,7 +753,8 @@ func init() {
 							"moderator",
 							"supporter",
 							"founding_supporter",
-							"arcade_owner"
+							"arcade_owner",
+							"designer"
 						]
 					},
 					{
@@ -808,7 +809,8 @@ func init() {
 				"passwordAuth": {
 					"enabled": true,
 					"identityFields": [
-						"email"
+						"email",
+						"username"
 					]
 				},
 				"passwordResetToken": {

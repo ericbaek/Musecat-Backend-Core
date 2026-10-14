@@ -14,11 +14,32 @@ import (
 
 // CreateTestAccount creates an ordinary account and its profile atomically.
 func CreateTestAccount(re *core.RequestEvent) error {
+	return createManagedAccount(re, false)
+}
+
+// CreateArcadeAccount provisions an official account linked to an existing arcade.
+func CreateArcadeAccount(re *core.RequestEvent) error {
+	return createManagedAccount(re, true)
+}
+
+func createManagedAccount(re *core.RequestEvent, official bool) error {
 	allowed, err := hasActiveStaffAccess(re.App, re.Auth)
+	if official && !allowed && err == nil && re.Auth != nil && re.Auth.Collection().Name == CollectionUser {
+		for _, tag := range re.Auth.GetStringSlice("tags") {
+			if strings.EqualFold(strings.TrimSpace(tag), "designer") {
+				_, code, restrictionErr := checkAccountRestrictionWithBan(re.App, re.Auth, userBanNow())
+				allowed, err = code == "", restrictionErr
+				break
+			}
+		}
+	}
 	if err != nil {
 		return re.JSON(502, map[string]any{"error": "failed to verify staff access"})
 	}
 	if !allowed {
+		if official {
+			return re.JSON(403, map[string]any{"error": "developer, moderator or designer access required"})
+		}
 		return re.JSON(403, map[string]any{"error": "developer or moderator access required"})
 	}
 	var input struct {
@@ -26,6 +47,7 @@ func CreateTestAccount(re *core.RequestEvent) error {
 		Username string `json:"username"`
 		Password string `json:"password"`
 		Nickname string `json:"nickname"`
+		ArcadeID string `json:"arcadeId"`
 	}
 	if err := json.NewDecoder(re.Request.Body).Decode(&input); err != nil {
 		return re.JSON(400, map[string]any{"error": "invalid JSON body", "code": "invalid_input"})
@@ -33,6 +55,7 @@ func CreateTestAccount(re *core.RequestEvent) error {
 	input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 	input.Username = strings.TrimSpace(input.Username)
 	input.Nickname = strings.TrimSpace(input.Nickname)
+	input.ArcadeID = strings.TrimSpace(input.ArcadeID)
 	passwordLength := utf8.RuneCountInString(input.Password)
 	address, emailErr := mail.ParseAddress(input.Email)
 	if emailErr != nil || address.Address != input.Email || len(input.Email) > 254 ||
@@ -45,9 +68,22 @@ func CreateTestAccount(re *core.RequestEvent) error {
 			return re.JSON(400, map[string]any{"error": "nickname cannot contain flag emoji", "code": "invalid_input"})
 		}
 	}
+	if official && input.ArcadeID == "" {
+		return re.JSON(400, map[string]any{"error": "arcadeId is required", "code": "invalid_input"})
+	}
 	duplicate := errors.New("duplicate identity")
+	arcadeNotFound := errors.New("arcade not found")
 	var result map[string]string
 	err = re.App.RunInTransaction(func(app core.App) error {
+		if official {
+			arcade, err := app.FindRecordById("arcade", input.ArcadeID)
+			if isNotFoundError(err) || (err == nil && !arcade.GetBool("public")) {
+				return arcadeNotFound
+			}
+			if err != nil {
+				return err
+			}
+		}
 		existing, err := app.FindFirstRecordByFilter(CollectionUser, "email = {:email} || username:lower = {:username}", dbx.Params{"email": input.Email, "username": strings.ToLower(input.Username)})
 		if err != nil && !isNotFoundError(err) {
 			return err
@@ -63,6 +99,10 @@ func CreateTestAccount(re *core.RequestEvent) error {
 		account.SetEmail(input.Email)
 		account.SetPassword(input.Password)
 		account.Set("username", input.Username)
+		if official {
+			account.Set("tags", []string{"arcade_owner"})
+			account.Set("owns", []string{input.ArcadeID})
+		}
 		if err := app.Save(account); err != nil {
 			if isTestAccountIdentityUniqueConstraintError(err) {
 				return duplicate
@@ -87,13 +127,19 @@ func CreateTestAccount(re *core.RequestEvent) error {
 			return err
 		}
 		result = map[string]string{"id": account.Id, "email": account.Email(), "username": input.Username, "nickname": input.Nickname}
+		if official {
+			result["arcadeId"] = input.ArcadeID
+		}
 		return nil
 	})
+	if errors.Is(err, arcadeNotFound) {
+		return re.JSON(404, map[string]any{"error": "public arcade not found", "code": "arcade_not_found"})
+	}
 	if errors.Is(err, duplicate) {
 		return re.JSON(409, map[string]any{"error": "email or username already taken", "code": "duplicate_identity"})
 	}
 	if err != nil {
-		return re.JSON(502, map[string]any{"error": "failed to create test account"})
+		return re.JSON(502, map[string]any{"error": "failed to create account"})
 	}
 	return re.JSON(http.StatusCreated, result)
 }
