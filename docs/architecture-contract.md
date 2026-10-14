@@ -856,8 +856,10 @@ to the fixed Musecat consent application. The first authenticated consent read b
 the current user and exact session token. The decision repeats active-account/session validation
 inside the transaction and accepts only a nonempty subset of requested permissions. Denial leaves
 an existing approval unchanged; approval replaces scopes and invalidates the previous grant generation.
-The consent UI/BFF is not part of this backend release and must implement explicit user approval,
-same-origin CSRF protection, no-referrer and frame protection before clients are enabled.
+WebCore owns the consent UI/BFF at `/{locale}/oauth/authorize`, with explicit permission selection,
+same-origin CSRF protection, no-referrer, no-store and frame/analytics protection. Deploy and configure
+that HTTPS page before enabling clients. The API parses a bounded JSON snapshot because PocketBase's
+rewindable HTTP body can return data and EOF together; strict trailing-data checks must not reread it.
 
 Code redemption and refresh are atomic claims. Codes bind client, callback, S256 verifier and grant
 generation, and expire after 90 seconds. Access tokens last at most ten minutes; refresh rotation

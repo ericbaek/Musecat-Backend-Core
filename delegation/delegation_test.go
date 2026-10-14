@@ -622,3 +622,52 @@ func TestTokenEndpointRejectsAmbiguousOrWrongClientCredentials(t *testing.T) {
 	check(t, w, 401)
 	f.exchange(code, verifier, 200)
 }
+
+// Real net/http request bodies can return (n, io.EOF) together, unlike the
+// strings.Reader used by direct recorder tests. PocketBase rewinds on that EOF.
+func TestConsentDecisionOverRealHTTP(t *testing.T) {
+	f := newFixture(t)
+	server := httptest.NewServer(f.mux)
+	defer server.Close()
+	for _, tc := range []struct {
+		name, suffix string
+		status       int
+	}{
+		{"single JSON document", "", 200},
+		{"trailing JSON is rejected", "{}", 400},
+		{"body limit remains enforced", strings.Repeat(" ", 17000), 413},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handle := f.begin("chuniinfo", callback, "profile:read")
+			f.read(handle, f.token, 200)
+			body, err := json.Marshal(delegation.Decision{Request: handle, Approve: true, Scopes: []string{"profile:read"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req, err := http.NewRequest("POST", server.URL+"/oauth/consent", strings.NewReader(string(body)+tc.suffix))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+f.token)
+			response, err := server.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != tc.status {
+				t.Fatalf("HTTP decision returned %d, want %d", response.StatusCode, tc.status)
+			}
+			if tc.status == 200 {
+				var out map[string]string
+				if err = json.NewDecoder(response.Body).Decode(&out); err != nil {
+					t.Fatal(err)
+				}
+				target, err := url.Parse(out["redirect_uri"])
+				if err != nil || target.Query().Get("code") == "" || target.Query().Get("state") != "our-client-state" {
+					t.Fatal("missing validated callback")
+				}
+			}
+		})
+	}
+}

@@ -1,6 +1,7 @@
 package delegation
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -69,7 +70,16 @@ func bearer(r *http.Request) string {
 	return p[1]
 }
 func strictJSON(re *core.RequestEvent, v any) error {
-	d := json.NewDecoder(re.Request.Body)
+	// PocketBase rewinds request bodies on EOF. Decode a bounded snapshot so
+	// a final (n, EOF) read cannot make the trailing-data check replay the body.
+	raw, err := io.ReadAll(io.LimitReader(re.Request.Body, 16385))
+	if err != nil {
+		return err
+	}
+	if len(raw) > 16384 {
+		return apis.ErrRequestEntityTooLarge
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
 		return e

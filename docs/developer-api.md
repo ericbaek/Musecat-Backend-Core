@@ -33,8 +33,10 @@ Do not copy grants from a predecessor client when services merge into rhythm.inf
    identity and requested permission descriptions, and binds the attempt to that user/session.
    The UI must render those server-returned permissions, require an explicit decision,
    protect its mutation with same-origin CSRF checks, prevent framing and send no referrers.
-   The consent frontend is a separate implementation; configure its real URL before enabling
-   OAuth clients. This backend release does not supply that page.
+   The WebCore consent frontend lives at `/{locale}/oauth/authorize` (for example,
+   `https://musecat.app/kr/oauth/authorize`) and reuses Musecat's Google sign-in popup.
+   Configure that deployed HTTPS URL before enabling OAuth clients. Core serves the API,
+   while WebCore supplies the login/consent page and same-origin BFF.
 5. The consent application posts `{request, approve, scopes}` to `/oauth/consent` with the same
    session token. Approved scopes must be a nonempty subset of the request. Denial leaves the
    existing grant unchanged. Approval replaces that app's consent and invalidates its old tokens.
