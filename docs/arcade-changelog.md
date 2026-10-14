@@ -397,3 +397,12 @@ Existing aggregate hooks invalidate discovery caches after commit. This operator
 status correction does not award publication/edit XP or create a content revision
 or arcade changelog row; public-conversion requirements apply to the creator's
 publication workflow, not this administrative correction.
+
+## Delegated developer requests
+
+The `/developer/v1/arcade/flag`, `/developer/v1/arcade/flag/reaction` and
+`/developer/v1/campaign/check` endpoints apply an OAuth scope boundary and then call the existing
+domain handlers with the verified Musecat user. They preserve the same transaction, XP and history
+behavior. Delegation itself creates no arcade changelog row. Campaign responses retain the existing
+game-change rows and GPS/eligibility rules; report/reaction activity remains outside the changelog
+category set. The OAuth client is never substituted for `by` or supplied as a caller-selected user ID.

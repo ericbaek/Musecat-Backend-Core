@@ -10,6 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 
 	"github.com/ericbaek/musecat-backend-core/connections"
+	"github.com/ericbaek/musecat-backend-core/delegation"
 	"github.com/ericbaek/musecat-backend-core/docs"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	"github.com/ericbaek/musecat-backend-core/handlers"
@@ -30,6 +31,7 @@ import (
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
 	communityhandler "github.com/ericbaek/musecat-backend-core/handlers/community"
 	connectionhandler "github.com/ericbaek/musecat-backend-core/handlers/connections"
+	delegationhandler "github.com/ericbaek/musecat-backend-core/handlers/delegation"
 	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
@@ -42,6 +44,7 @@ import (
 // environment variables, registers migrations, or starts scheduled jobs.
 // A nil GeoResolver deliberately disables geographic lookup (fail closed).
 type Config struct {
+	Delegation            *delegation.Manager
 	Connections           *connections.Manager
 	GeoResolver           *geo.OfflineResolver
 	Documentation         DocumentationConfig
@@ -69,6 +72,10 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se, config.Connections)
+		if err := delegation.SynchronizeClients(se.App, config.Delegation); err != nil {
+			return err
+		}
+		delegationhandler.RegisterRoutes(se, config.Delegation)
 		return se.Next()
 	})
 }
@@ -80,6 +87,12 @@ func configureDefaultRateLimits(app core.App) {
 	settings := app.Settings()
 	settings.RateLimits.Enabled = true
 	defaults := []core.RateLimitRule{
+		{Label: "GET /oauth/authorize", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /oauth/token", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /oauth/consent", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "GET /oauth/consent", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /oauth/revoke", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "/developer/v1/", MaxRequests: 120, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/connections/start", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/connections/complete", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
@@ -101,7 +114,8 @@ func configureDefaultRateLimits(app core.App) {
 	}
 }
 
-// RegisterAPIRoutes binds all application API routes to the ServeEvent router.
+// RegisterAPIRoutes binds first-party application API routes. Configure also
+// registers the independent public OAuth/developer routing table.
 // It is exported so test applications and integration suites can wire the exact
 // same routing table without duplicating it.
 func RegisterAPIRoutes(se *core.ServeEvent, managers ...*connections.Manager) {

@@ -9,9 +9,11 @@ import (
 
 	"github.com/ericbaek/musecat-backend-core/connections"
 	"github.com/ericbaek/musecat-backend-core/coreapp"
+	"github.com/ericbaek/musecat-backend-core/delegation"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	"github.com/ericbaek/musecat-backend-core/handlers/community"
+	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 )
 
 // configureRuntime is the composition root: select resources and scheduled jobs
@@ -39,13 +41,19 @@ func configureRuntime(app *pocketbase.PocketBase) error {
 	if err != nil {
 		return fmt.Errorf("configure external connections: %w", err)
 	}
+	oauthServer, err := delegation.ParseConfig(os.Getenv("MUSECAT_OAUTH_CLIENTS"), strings.TrimSpace(os.Getenv("MUSECAT_OAUTH_ISSUER")), strings.TrimSpace(os.Getenv("MUSECAT_OAUTH_CONSENT_URL")), userhandler.CheckActiveUser)
+	if err != nil {
+		return fmt.Errorf("configure OAuth delegation: %w", err)
+	}
 	coreapp.Configure(app, coreapp.Config{
+		Delegation:            oauthServer,
 		Connections:           externalConnections,
 		ClientIPForwardSecret: strings.TrimSpace(os.Getenv("MUSECAT_IP_FORWARD_SECRET")),
 		GeoResolver:           resolver,
 		Documentation:         documentationConfig(),
 	})
 	connections.RegisterRequestCleanupCron(app)
+	delegation.RegisterCleanupCron(app)
 	arcadeflag.RegisterAutoSolveCron(app)
 	community.RegisterTranslationCron(app, translator)
 	return nil

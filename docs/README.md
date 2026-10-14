@@ -27,3 +27,11 @@ When adding or changing an endpoint:
 - Arcade game Delta API handoff: `/arcade-game-delta-api.md`
 - Supporter API notes: `/supporter-api.md`
 - Community translation prototype: `/community-translation-prototype.md`
+
+## Public integration documentation
+
+- Developer portal: `/developer` (public; contains only the delegated integration surface).
+- Developer OpenAPI: `/developer/openapi.yaml`, embedded from `developer-openapi.yaml`.
+- Integration guide: `/developer/guide.md`, embedded from [`developer-api.md`](developer-api.md).
+- OAuth metadata: `/.well-known/oauth-authorization-server` when configured.
+- Internal/operational API docs retain their existing optional authentication policy.

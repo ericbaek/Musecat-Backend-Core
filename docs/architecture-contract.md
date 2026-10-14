@@ -832,3 +832,51 @@ both audiences without replacing existing operator rules. Full owns its independ
 forward schema migration; Core migrations remain fresh-bootstrap only. These operations do not
 award XP or append arcade changelog history. See [external connections](external-connections.md)
 for configuration, reauthorization semantics, race handling and integration limitations.
+
+## Public developer API and OAuth delegation
+
+Musecat's OAuth authorization server is separate from `connections` (where Musecat is an OAuth
+client). `delegation` owns registered client epochs, five-minute authorization requests, grants,
+one-use PKCE codes and opaque access/refresh tokens. `handlers/delegation` exposes the public
+OAuth protocol and `/developer/v1/*` routes. `docs/developer-openapi.yaml` and
+`docs/developer-api.md` are the external developer contract, served independently of protected
+internal documentation at `/developer`.
+
+The executable injects trusted confidential-client configuration, issuer, consent application URL,
+and the existing `user.CheckActiveUser` policy. Core reads no environment variables. Registration
+is operator-controlled; no partner or external account merger is hardcoded. At startup, registered
+client configuration is synchronized transactionally into a locked registration table. Each change,
+removal or re-enablement changes its persisted epoch, so restoring an earlier configuration cannot
+resurrect pre-change tokens or pending approvals. Enabled registrations are capped at 128; startup
+work is bounded. All instances must deploy the same client registry. Missing configuration disables
+new OAuth operations, while user-owned grant listing and revocation remain available.
+
+Authorization validates the exact HTTPS callback, scopes, state and S256 challenge before redirecting
+to the fixed Musecat consent application. The first authenticated consent read binds the attempt to
+the current user and exact session token. The decision repeats active-account/session validation
+inside the transaction and accepts only a nonempty subset of requested permissions. Denial leaves
+an existing approval unchanged; approval replaces scopes and invalidates the previous grant generation.
+The consent UI/BFF is not part of this backend release and must implement explicit user approval,
+same-origin CSRF protection, no-referrer and frame protection before clients are enabled.
+
+Code redemption and refresh are atomic claims. Codes bind client, callback, S256 verifier and grant
+generation, and expire after 90 seconds. Access tokens last at most ten minutes; refresh rotation
+preserves a fixed 30-day family expiry. Reuse of a consumed code or refresh token revokes the current
+grant in a committed transaction. An older approval's replay cannot revoke a newer approval. Secrets,
+raw tokens and PKCE verifiers are never stored. Personal, OAuth and resource responses use no-store
+and no-referrer, including early middleware errors. OAuth/resource queries and referrers are redacted
+before PocketBase activity logging; ingress logs require corresponding operator redaction.
+
+Delegated bearer tokens work only on the explicitly mapped `/developer/v1/*` surface. The resource
+boundary resolves the current grant, registration epoch, expiry, account token-key fingerprint,
+active account and required scope before assigning the verified actor to an existing domain handler.
+No delegated token is converted to a Musecat JWT. Public/closed/private visibility, ownership, staff
+checks, GPS eligibility, immutable history and XP rules remain in those handlers. In-flight accepted
+requests can finish after revocation; subsequent requests fail. Basic profile reads expose only the
+client-specific stable subject, username and nickname, without email, credentials or roles.
+
+Users revoke only their own grants, including apps absent from current configuration. Revocation
+also cancels their bound pending requests. Withdrawal deletes grants, codes, tokens and bound requests
+in its existing transaction; a password/account-key reset invalidates every old delegated token.
+Core's migration creates only fresh schema. Full must apply its independent guarded forward migration
+to existing installations and pin this Core revision. Both executables register bounded expiry cleanup.

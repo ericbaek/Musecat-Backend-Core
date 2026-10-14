@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/ericbaek/musecat-backend-core/connections"
+	"github.com/ericbaek/musecat-backend-core/delegation"
 	"net/http"
 	"strings"
 	"time"
@@ -150,6 +151,10 @@ func Withdraw(re *core.RequestEvent) error {
 
 		if err := connections.DeleteUserData(txApp, userRec.Id); err != nil {
 			return fmt.Errorf("failed to unlink external accounts: %w", err)
+		}
+
+		if err := delegation.DeleteUserData(txApp, userRec.Id); err != nil {
+			return fmt.Errorf("failed to revoke delegated apps: %w", err)
 		}
 
 		// Unlink all OAuth providers so the same external account can sign up again later.
