@@ -2986,7 +2986,7 @@ components:
       properties:
         id:
           type: string
-          description: Opaque row identity for pagination; no revision details are exposed.
+          description: Opaque row identity.
         arcade: {type: string}
         arcade_name:
           type: string
@@ -2994,6 +2994,22 @@ components:
         changed:
           type: string
           enum: [basic, game, hour, sns, gtk, photo, memo]
+        from:
+          description: Authenticated, authorized rows only.
+        to:
+          description: Authenticated, authorized rows only.
+        by:
+          type: string
+          description: Authenticated, authorized rows only.
+        log:
+          description: Authenticated, authorized rows only.
+        created:
+          type: string
+          description: Authenticated, authorized rows only.
+        memo: {$ref: '#/components/schemas/ChangelogMemoSnapshots'}
+        photo_assets:
+          type: array
+          items: {$ref: '#/components/schemas/ChangelogPhotoAsset'}
     UserChangelogPage:
       type: object
       required: [page, per_page, last_page, total, items]
@@ -4366,14 +4382,15 @@ paths:
       tags: [Users]
       summary: /user/changelog
       description: |
-        Returns only arcade and changed-category summaries of the user's edits in reverse
-        chronological order. Anonymous callers receive rows from public
+        Returns the user's edits in reverse chronological order. Anonymous callers
+        receive only arcade and changed-category summaries from public
         arcades only. An authenticated caller may additionally receive rows
         from private arcades they own; `developer` and `moderator` callers may
         audit private rows. The endpoint never exposes flags, visits, or legacy
         tickets; those remain activity aggregates rather than changelog rows.
-        Every caller receives only id, arcade, arcade_name, and changed. Revision
-        pointers, logs, timestamps, memo snapshots, and photo assets are omitted.
+        Authenticated user accounts receive revision detail only for rows allowed
+        by the existing arcade visibility filter. Responses use private, no-store
+        caching. Invalid bearer credentials receive 401.
         Rows whose arcade aggregate was deleted are omitted, and withdrawn
         users receive an empty page.
       parameters:
@@ -4402,6 +4419,11 @@ paths:
               schema: {$ref: '#/components/schemas/UserChangelogPage'}
         '400':
           description: Missing user id, invalid pagination, or unsupported changed category.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Invalid bearer credentials.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

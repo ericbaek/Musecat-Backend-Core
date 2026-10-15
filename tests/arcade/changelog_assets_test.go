@@ -100,10 +100,10 @@ func TestChangelogPhotoAssets_BothTimelinesRespectCurrentAccessAndArcadeOwnershi
 					if len(items) != 1 {
 						t.Fatalf("expected one row, got %#v", items)
 					}
-					if scope == "user" {
+					if scope == "user" && actor.token == "" {
 						item := items[0].(map[string]any)
 						if len(item) != 4 {
-							t.Fatalf("profile photo details leaked: %#v", item)
+							t.Fatalf("anonymous profile photo details leaked: %#v", item)
 						}
 						return
 					}
@@ -171,7 +171,10 @@ func TestChangelogMemoSnapshots_DistinguishAbsentMissingAndForeignRevisions(t *t
 			t.Fatal(err)
 		}
 	}
-	for _, url := range []string{"/arcade/changelog?arcade=" + arcadeID} {
+	for _, url := range []string{
+		"/arcade/changelog?arcade=" + arcadeID,
+		"/user/changelog?user=" + owner.Id,
+	} {
 		res := executeJSONRequest(t, app, http.MethodGet, url, "", map[string]string{"Authorization": "Bearer " + token})
 		payload := decodeJSONMap(t, res)
 		for _, value := range payload["items"].([]any) {

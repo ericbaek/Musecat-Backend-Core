@@ -9,8 +9,9 @@ The important rule is simple:
 
 Rows are immutable. API v2 serves arcade timelines through `GET /arcade/changelog`
 with active user authentication. `GET /user/changelog` returns only arcade/category
-summaries (`id`, `arcade`, `arcade_name`, `changed`) for every caller; it never
-returns revision pointers, logs, timestamps, memo snapshots, or photo assets. Clients must not use
+summaries (`id`, `arcade`, `arcade_name`, `changed`) for guests. Active authenticated
+users also receive revision details for rows allowed by the existing arcade visibility
+filter. Both variants use private, no-store caching. Clients must not use
 PocketBase collection REST to read or mutate them. A report cites an existing
 changelog id and derives the reported editor from the row's server-written `by`
 value.

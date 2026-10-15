@@ -159,8 +159,8 @@ Definitions:
 | Public/open detail, search, notices | allow | allow | allow | allow |
 | Public/closed detail, search, notices | allow | allow | allow | allow |
 | `/arcade/changelog` detailed public history | deny | allow | allow | allow |
-| `/user/changelog` summaries from public arcades | allow | allow | allow | allow |
-| `/user/changelog` rows from a private arcade | deny | deny | rows in own arcades | allow |
+| `/user/changelog` public arcade rows | summaries | details | details | details |
+| `/user/changelog` private arcade rows | deny | deny | details in own arcades | details |
 | `/rankings` leaderboard | top 100; `viewer=null` | top 100 plus own eligible rank | top 100 plus own eligible rank | top 100 plus own eligible rank |
 | `/arcades` operating list | public/open only | public/open only | public/open only | public/open only |
 | Nearby, updates, visit, visit stats | public/open only | public/open only | public/open only | public/open only |
@@ -349,12 +349,13 @@ boolean facility atoms and accept only the shared `note` field; they do not use
 Rollback is a normal, immediate wiki action. When `report=true`, `POST /arcade/rollback` MUST atomically create the rollback changelog entry and a `rollback_report` linked to the cited prior changelog. A standalone `POST /arcade/edit_report` creates `edit_report`. Neither path bans a user nor performs an automatic rollback beyond the contributor's explicit rollback request.
 
 Profile edit activity (`/user/changelog`) returns only `id`, `arcade`,
-`arcade_name`, and `changed` for every caller, including creators and reviewers.
-The ID is pagination metadata. Revision pointers, logs, editor IDs, timestamps,
-memo snapshots and photo assets are never returned by this endpoint. Detailed
-arcade history requires an active user token, even for public or closed arcades.
+`arcade_name`, and `changed` to anonymous callers. An active authenticated user
+also receives detailed evidence for rows allowed by the same arcade visibility
+filter: public arcades, their own private arcades, or private arcades for strict
+reviewers. An invalid bearer token cannot request details. Responses are private
+and non-cacheable. The ID alone is pagination metadata.
 
-Only the authenticated `/arcade/changelog` endpoint enriches immutable evidence
+Authenticated `/arcade/changelog` and `/user/changelog` responses enrich immutable evidence
 with scoped memo snapshots and currently accessible `photo_assets` references. Snapshot lookup
 must verify the referenced record belongs to the changelog's arcade. Photo
 references use the same current authorization as `/arcade/photo/file`; gallery
