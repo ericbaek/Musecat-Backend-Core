@@ -4917,7 +4917,13 @@ paths:
     get:
       tags: [Geo]
       summary: /geo
-      description: Default per-client-IP limit is 60 requests per 60 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults.
+      description: >-
+        Resolves the original coordinate using offline country and timezone boundaries.
+        A country miss may use a unique exterior boundary within 1000 metres to
+        tolerate coastline approximation; ambiguous countries and missing or ambiguous
+        timezones still fail. The coordinate is not moved. Default per-client-IP limit
+        is 60 requests per 60 seconds, shared by anonymous and authenticated users.
+        Operator-configured limits and PocketBase exemptions may override the defaults.
       parameters:
         - name: lat
           in: query
@@ -4950,7 +4956,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '502':
-          description: Upstream lookup failure.
+          description: Country or timezone lookup failure, including missing or ambiguous offline boundaries.
           content:
             application/json:
               schema:

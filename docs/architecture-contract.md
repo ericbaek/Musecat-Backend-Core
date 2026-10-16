@@ -490,6 +490,12 @@ deterministically. This deliberately favours a populated Passport over an
 unclassified venue; the country boundary still prevents cross-country labels.
 Offline results do not enter the external HTTP cache; they are read from the
 immutable in-memory bundle on every request.
+An exact country match takes precedence. If no country contains the coordinate,
+one country exterior boundary within 1,000 metres may resolve a coastline
+approximation gap. Multiple nearby country features, overlapping matches,
+polygon holes, and more distant points remain failures. Timezone and city
+containment continue to use the original coordinate; the request never moves
+the arcade location or falls back to an external provider.
 
 ### Cache, XP, and notifications
 

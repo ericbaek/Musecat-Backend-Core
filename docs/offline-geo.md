@@ -22,7 +22,13 @@ The exact source URLs, release information, and SHA-256 hashes are recorded in
 refresh so a deployed binary can be reproduced and attributed.
 
 Only `Polygon` and `MultiPolygon` geometries are accepted. A coordinate must
-match exactly one country and one timezone polygon. The resolver validates that
+match exactly one country and one timezone polygon. When no country contains
+the coordinate, a single country exterior boundary within 1,000 metres may
+resolve a coastline approximation gap. Distances use a local equirectangular
+projection with antimeridian-aware segments. Multiple nearby country features,
+overlapping country matches, polygon holes, and more distant points still fail.
+Timezone and city containment use the original coordinate without snapping;
+missing or ambiguous timezones still fail. The resolver validates that
 the timezone is an installed IANA location and returns a failure when either
 boundary is missing or ambiguous.
 
