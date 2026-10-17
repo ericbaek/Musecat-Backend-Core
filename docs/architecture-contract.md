@@ -833,3 +833,107 @@ Untouched revisions and rollback retain their original raw price JSON. New
 edits may have a legacy price in `before` and a versioned price in `after`.
 Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
 retains the existing representative-item policy.
+
+
+## First-party native sessions (local validation)
+
+`nativeauth/` owns opaque first-party device sessions, separate from PocketBase
+web JWTs and confidential partner delegation. `coreapp.Config.NativeAuthClients`
+is an exact client/callback allowlist; an empty list registers no native routes.
+The current executable enables only `app.musecat.native.dev` with
+`musecat-dev://auth/callback` when `MUSECAT_NATIVE_AUTH_DEV=1`. This switch is
+for loopback development only and must remain unset in production.
+
+A browser-authenticated active user requests `/native/session/code`; code
+exchange binds client, callback and PKCE S256. Codes expire after 120 seconds
+and are atomically consumed. Access expires after 10 minutes. Refresh rotates
+and retains consumed hashes to detect replay throughout the 30-day absolute
+family lifetime. Replay revokes that family only. Password/token-key reset,
+withdrawal and the existing active-account guard invalidate access. Logout
+revokes only the presented family, independently of partner grants and web login.
+
+The private SQL ledger contains only SHA-256 credential hashes and is not a
+PocketBase collection REST surface. Core's fresh bootstrap and Full's separate
+forward migration call the shared additive schema helper; Full never imports
+Core migrations. The native domain routes reuse existing user/favorite/visit
+handlers and deployment policies. They reject web JWTs and partner credentials;
+standard web and partner routes do not accept native credentials. Visibility,
+100 m visit radius, 150 m maximum GPS accuracy, timezone day idempotency and XP
+transactions remain the existing handler contract. No arcade history changes.
+
+Production enablement still requires an HTTPS Universal Link association,
+registered client/callback, server deployment and a pinned Core release in Full.
+Native credentials, authorization codes and GPS must never be logged.
+
+## Native basic editing v1
+
+`GET|PATCH /native/v1/arcades/{id}/basic` requires an active first-party native
+session and the same arcade write permission as the web. GET returns one immutable
+basic revision and its values together, `contract_version=1`, and
+`required_capabilities=["basic.patch.v1"]`. Clients ignore unknown optional response
+members and refuse editing if the version or a required capability is unsupported.
+This is a fixed native form contract, not downloaded executable UI.
+
+PATCH takes `{revision, changes}` (maximum 4096 encoded bytes). Only changed
+`name`, `address`, `direction`, `nickname`, `subway_line`, and `location` are sent.
+Omission preserves existing values; null is rejected. Empty strings/lists clear
+optional fields. Name and address cannot be cleared. Location is a complete
+`{lat, lon}` pair. Unknown request fields are rejected. City is server-owned and
+is retained except when address/location changes invoke the existing geo policy.
+The revision is mandatory, checked before geo work and again in the transaction.
+Stale writes return 409, including repeated requests after a successful save.
+Clients retain drafts, never silently rebase or blindly overwrite after conflict.
+
+The adapter calls the existing basic mutation pipeline: permissions, level-based
+location limits, geo resolution, immutable revisions, changelog and XP remain
+shared. No schema migration is needed. Failed/stale saves create no history or XP.
+The v1 success fields `arcade`, `basic`, `changed`, `city_id`, and `xp_feedback`
+retain their existing meanings independently of web API evolution.
+
+Future changes must be additive within v1. New fields must have server defaults
+or preserve the current value when omitted; update the shared revision copier and
+add an old-client omission test for each new persisted field. Do not introduce a
+new required input or change field types/meaning in v1: publish v2 alongside v1.
+Keep v1 until an explicitly reviewed retirement based on deployed client usage;
+forced upgrades are not a substitute for compatibility. Release checks run native
+contract tests with old request fixtures plus web mutation tests before Full pins
+the tested Core revision. Full owns deployment and any future data migrations.
+
+## Native contacts and hours v1
+
+`GET|PATCH /native/v1/arcades/{id}/contacts` and `/hours` require an active native
+session and arcade write access. Both GET snapshots bind their values to one
+immutable revision. An absent relation returns `revision=""`; PATCH requires the
+revision key even for that first save. Required capabilities are respectively
+`contacts.delta.v1` and `hours.patch.v1`, with `contract_version=1`. Unknown
+optional response fields are ignored; unknown required capabilities block editing.
+
+Contacts PATCH accepts explicit `add`, `update`, `remove` operations. Updates
+identify an atom from the base revision and change only `link` and/or `name`.
+Existing types are immutable; a type change is an explicit remove/add. Removing
+an item requires its explicit ID, never omission from a submitted list. Unknown
+or duplicate target IDs, overlapping update/remove operations, null values and
+unknown fields are rejected. New/changed links follow web type/host rules;
+phone values use existing Core normalization. Untouched future contact types and
+server-only molecule/atom fields are copied into the new revision, without
+revalidation or coercion. An updated name does not normalize the untouched link.
+Native changelog identity uses explicit source IDs, including duplicate types.
+
+Hours PATCH accepts `changes` with only supplied weekday keys (`Monday` through
+`Sunday`) and/or lowercase `note`. Omitted days/note and additional stored fields
+survive. Explicit null means unknown, 499 means closed, and `{start,end}` uses the
+existing HHMM validation, overnight and 24-hour rules. An empty note clears it.
+An open-hours object updates start/end while retaining additional server-owned
+members of that day. Explicit null/499 deliberately replaces the whole day.
+Unknown future day shapes are returned unchanged and read-only in older apps;
+they are not coerced to unknown or included in "apply to all" operations.
+
+Both adapters enforce 409 revision checks inside the existing mutation
+transaction before any record/history/XP changes. No-op writes return 400 without
+history or XP. Successful writes return only `{arcade, revision, xp_feedback}`;
+clients fetch a new snapshot before subsequent edits (contact atom IDs change).
+The existing web replacement APIs and response shapes remain unchanged. Both use
+the shared Core immutable revision, audit, XP and cache-invalidation pipelines;
+Full adds no alternate implementation or schema migration. Request ceiling remains
+4096 encoded bytes. Core publishes the versioned contract before Full pins it;
+breaking behavior changes require a new version alongside v1.

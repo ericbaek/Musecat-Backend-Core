@@ -34,12 +34,14 @@ import (
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
 	subwayhandler "github.com/ericbaek/musecat-backend-core/handlers/subway"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/nativeauth"
 )
 
 // Config contains dependencies selected by the executable. Configure never reads
 // environment variables, registers migrations, or starts scheduled jobs.
 // A nil GeoResolver deliberately disables geographic lookup (fail closed).
 type Config struct {
+	NativeAuthClients     []nativeauth.Client
 	GeoResolver           *geo.OfflineResolver
 	Documentation         DocumentationConfig
 	ClientIPForwardSecret string
@@ -66,6 +68,7 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se)
+		nativeauth.RegisterRoutes(se, config.NativeAuthClients)
 		return se.Next()
 	})
 }

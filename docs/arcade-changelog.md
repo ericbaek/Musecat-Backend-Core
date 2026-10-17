@@ -412,3 +412,21 @@ Untouched revisions and rollback retain their original raw price JSON. New
 edits may have a legacy price in `before` and a versioned price in `after`.
 Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
 retains the existing representative-item policy.
+
+### Native basic v1 adapter
+
+`PATCH /native/v1/arcades/{id}/basic` uses the same `basic_diff` writer as
+`PUT /arcade/basic`. It requires a base revision and applies only changed fields.
+Each successful changed request creates one immutable basic revision and history
+row. Rejected stale requests create neither history nor XP. Omitted fields are
+preserved; city recalculation on an address/location edit follows the web policy.
+
+### Native contacts and hours v1
+
+Native contacts deltas reuse `sns_diff`; source atom IDs determine matches so
+same-type contacts cannot exchange attribution. Explicit removals create deleted
+items. Unknown untouched items remain unchanged. Native hours patches reuse
+`hour_diff` with only the supplied day/note fields marked provided. Both create
+one immutable section revision and one changelog row for a successful change.
+Stale, invalid and no-op requests create no revisions, history or XP. Web PUT
+replacement behavior remains unchanged.

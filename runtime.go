@@ -11,6 +11,7 @@ import (
 	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	"github.com/ericbaek/musecat-backend-core/handlers/community"
+	"github.com/ericbaek/musecat-backend-core/nativeauth"
 )
 
 // configureRuntime is the composition root: select resources and scheduled jobs
@@ -35,6 +36,7 @@ func configureRuntime(app *pocketbase.PocketBase) error {
 		}
 	}
 	coreapp.Configure(app, coreapp.Config{
+		NativeAuthClients:     nativeAuthClients(),
 		ClientIPForwardSecret: strings.TrimSpace(os.Getenv("MUSECAT_IP_FORWARD_SECRET")),
 		GeoResolver:           resolver,
 		Documentation:         documentationConfig(),
@@ -73,4 +75,12 @@ func translationConfig() community.TranslationConfig {
 		Model:    strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_MODEL")),
 		Glossary: strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_GLOSSARY")),
 	}
+}
+
+// Development is explicit; production Universal Link registration is a deployment step.
+func nativeAuthClients() []nativeauth.Client {
+	if os.Getenv("MUSECAT_NATIVE_AUTH_DEV") == "1" {
+		return []nativeauth.Client{{ID: "app.musecat.native.dev", Callback: "musecat-dev://auth/callback"}}
+	}
+	return nil
 }

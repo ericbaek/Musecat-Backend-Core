@@ -175,6 +175,11 @@ func UpdateArcadeHour(re *core.RequestEvent) error {
 			"details": err.Error(),
 		})
 	}
+	return updateArcadeHour(re, body, nil)
+}
+
+func updateArcadeHour(re *core.RequestEvent, body UpdateArcadeHourBody, patch *nativeHourPatch) error {
+
 	if err := validateUpdateHourBody(body); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error":   "validation failed",
@@ -193,6 +198,9 @@ func UpdateArcadeHour(re *core.RequestEvent) error {
 		}
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
+		}
+		if patch != nil && arcadeRec.GetString("hour") != *patch.Revision {
+			return &arcadeinternal.NativeEditError{Status: 409, Code: "revision_conflict"}
 		}
 		var prevHourRec *core.Record
 		oldHourID := strings.TrimSpace(arcadeRec.GetString("hour"))
@@ -227,16 +235,22 @@ func UpdateArcadeHour(re *core.RequestEvent) error {
 				hourRec.Set(field, map[string]int{"start": *d.Start, "end": *d.End})
 			}
 		}
-		setDay("Monday", body.Monday)
-		setDay("Tuesday", body.Tuesday)
-		setDay("Wednesday", body.Wednesday)
-		setDay("Thursday", body.Thursday)
-		setDay("Friday", body.Friday)
-		setDay("Saturday", body.Saturday)
-		setDay("Sunday", body.Sunday)
-		if body.Note != "" {
-			hourRec.Set("Note", body.Note)
-			hourRec.Set("note", body.Note)
+		if patch == nil {
+			setDay("Monday", body.Monday)
+			setDay("Tuesday", body.Tuesday)
+			setDay("Wednesday", body.Wednesday)
+			setDay("Thursday", body.Thursday)
+			setDay("Friday", body.Friday)
+			setDay("Saturday", body.Saturday)
+			setDay("Sunday", body.Sunday)
+			if body.Note != "" {
+				hourRec.Set("Note", body.Note)
+				hourRec.Set("note", body.Note)
+			}
+		} else {
+			if err := applyNativeHours(hourRec, prevHourRec, *patch); err != nil {
+				return err
+			}
 		}
 		hourRec.Set("createdBy", re.Auth.Id)
 
@@ -248,6 +262,16 @@ func UpdateArcadeHour(re *core.RequestEvent) error {
 		prevSnapshot := buildHourSnapshotFromRecord(prevHourRec)
 		nextSnapshot := buildHourSnapshotFromBody(body)
 		providedFields := buildHourProvidedFieldSet(body)
+		if patch != nil {
+			nextSnapshot = buildHourSnapshotFromRecord(hourRec)
+			providedFields = map[string]bool{}
+			for key := range patch.Changes {
+				if key == "note" {
+					key = "Note"
+				}
+				providedFields[key] = true
+			}
+		}
 		hourChangeLog := arcadeinternal.BuildChangelogEnvelope("hour", []hourDiffLogItem{
 			buildHourDiffLogItem(prevSnapshot, nextSnapshot, providedFields, prevHourRec != nil),
 		})
@@ -272,6 +296,10 @@ func UpdateArcadeHour(re *core.RequestEvent) error {
 		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
+		var nativeErr *arcadeinternal.NativeEditError
+		if errors.As(err, &nativeErr) {
+			return re.JSON(nativeErr.Status, map[string]string{"error": nativeErr.Code})
+		}
 		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
 			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
 		}
@@ -279,6 +307,10 @@ func UpdateArcadeHour(re *core.RequestEvent) error {
 			"error":   "transaction failed",
 			"details": err.Error(),
 		})
+	}
+
+	if patch != nil {
+		return re.JSON(http.StatusOK, map[string]any{"arcade": body.Arcade, "revision": hourValue["id"], "xp_feedback": xpFeedback})
 	}
 
 	return re.JSON(http.StatusOK, map[string]any{

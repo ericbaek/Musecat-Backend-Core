@@ -22,9 +22,11 @@ type UpdateArcadeSNSBody struct {
 
 // SNSAtomInput represents a single SNS atom to be saved under a SNS molecule.
 type SNSAtomInput struct {
-	Type string `json:"type"`           // required
-	Link string `json:"link"`           // required
-	Name string `json:"name,omitempty"` // optional
+	source       *core.Record
+	nativeFields map[string]bool
+	Type         string `json:"type"`           // required
+	Link         string `json:"link"`           // required
+	Name         string `json:"name,omitempty"` // optional
 }
 
 func parseUpdateSNSBody(re *core.RequestEvent) (UpdateArcadeSNSBody, error) {
@@ -63,6 +65,11 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 		})
 	}
 
+	return updateArcadeSNS(re, body, nil)
+}
+
+func updateArcadeSNS(re *core.RequestEvent, body UpdateArcadeSNSBody, patch *nativeSNSPatch) error {
+
 	if err := validateUpdateSNSBody(body); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error":   "validation failed",
@@ -85,9 +92,18 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
 		}
+		if patch != nil && arcadeRec.GetString("sns") != *patch.Revision {
+			return &arcadeinternal.NativeEditError{Status: 409, Code: "revision_conflict"}
+		}
 		prevAtoms, err := loadCurrentSNSAtoms(txApp, body.Arcade, strings.TrimSpace(arcadeRec.GetString("sns")))
 		if err != nil {
 			return err
+		}
+		if patch != nil {
+			body.SNS, err = mergeNativeSNS(txApp, prevAtoms, *patch)
+			if err != nil {
+				return err
+			}
 		}
 		baseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
@@ -101,6 +117,13 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 			return fmt.Errorf("failed to find arcade_sns: %w", err)
 		}
 		snsRec := core.NewRecord(snsColl)
+		if patch != nil && *patch.Revision != "" {
+			previous, err := txApp.FindRecordById(arcadeinternal.CollectionArcadeSNS, *patch.Revision)
+			if err != nil {
+				return err
+			}
+			arcadeinternal.CopyRevisionContent(snsRec, previous)
+		}
 		snsRec.Set("arcade", body.Arcade)
 		snsRec.Set("createdBy", re.Auth.Id)
 		if err := txApp.Save(snsRec); err != nil {
@@ -128,17 +151,24 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 			}
 			atom := core.NewRecord(atomColl)
 			atom.Set("molecule", newSNSId)
-			atom.Set("type", a.Type)
-			if arcadeinternal.IsPhoneSNSType(a.Type) {
-				atom.Set("link", "")
-				atom.Set("phone", phoneValue)
+			if a.source != nil {
+				arcadeinternal.CopyRevisionContent(atom, a.source)
 			} else {
-				atom.Set("link", a.Link)
-				atom.Set("phone", "")
+				atom.Set("type", a.Type)
 			}
-			if a.Name != "" {
+			if a.source == nil || a.nativeFields["link"] {
+				if arcadeinternal.IsPhoneSNSType(a.Type) {
+					atom.Set("link", "")
+					atom.Set("phone", phoneValue)
+				} else {
+					atom.Set("link", a.Link)
+					atom.Set("phone", "")
+				}
+			}
+			if a.source == nil || a.nativeFields["name"] {
 				atom.Set("name", a.Name)
 			}
+
 			atom.Set("createdBy", re.Auth.Id)
 
 			if err := txApp.Save(atom); err != nil {
@@ -159,6 +189,19 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 
 		// 4) Compare old and new atoms so the changelog records added / updated / deleted entries.
 		matches := matchSNSAtoms(prevAtoms, nextAtoms)
+		if patch != nil {
+			matches = map[int]int{}
+			for nextIdx, a := range body.SNS {
+				if a.source != nil {
+					for prevIdx, prev := range prevAtoms {
+						if prev.AtomID == a.source.Id {
+							matches[nextIdx] = prevIdx
+							break
+						}
+					}
+				}
+			}
+		}
 		snsLogItems := make([]snsDiffLogItem, 0, len(nextAtoms)+len(prevAtoms))
 		referencedPrev := map[int]struct{}{}
 		for nextIdx, nextAtom := range nextAtoms {
@@ -199,6 +242,10 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
+		var nativeErr *arcadeinternal.NativeEditError
+		if errors.As(err, &nativeErr) {
+			return re.JSON(nativeErr.Status, map[string]string{"error": nativeErr.Code})
+		}
 		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
 			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
 		}
@@ -206,6 +253,10 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 			"error":   "transaction failed",
 			"details": err.Error(),
 		})
+	}
+
+	if patch != nil {
+		return re.JSON(http.StatusOK, map[string]any{"arcade": body.Arcade, "revision": newSNSId, "xp_feedback": xpFeedback})
 	}
 
 	return re.JSON(http.StatusOK, map[string]any{

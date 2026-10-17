@@ -213,6 +213,12 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		})
 	}
 
+	return updateArcadeBasic(re, body)
+}
+
+// Shared mutation pipeline for the web and versioned native adapters.
+func updateArcadeBasic(re *core.RequestEvent, body UpdateArcadeBasicBody) error {
+
 	// 2) validate basic constraints
 	if err := validateUpdateBasicBody(body); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{
@@ -228,6 +234,10 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 	}
 	if !arcadeinternal.CanWriteArcade(re.Auth, arcade) {
 		return re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
+	}
+
+	if body.BaseBasicID != nil && arcade.GetString("basic") != *body.BaseBasicID {
+		return re.JSON(409, map[string]any{"error": errStaleBasic.Error()})
 	}
 
 	// 3) load current state
