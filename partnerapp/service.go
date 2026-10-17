@@ -685,6 +685,7 @@ func (s *Service) Providers(app core.App) ([]connections.Provider, error) {
 			AuthorizationURL: f.DirectionB.AuthorizationURL, TokenURL: f.DirectionB.TokenURL, UserInfoURL: f.DirectionB.UserInfoURL,
 			SubjectField: "sub", ClientID: c.ClientID, ClientSecret: c.ClientSecret, RedirectURI: s.redirectURI(f.PartnerID),
 			ClientAuthMethod: "client_secret_basic", RequireIssuer: true, Scopes: []string{f.DirectionB.IdentityScope}, Services: services,
+			RecordsURL: f.DirectionB.RecordsURL,
 		})
 	}
 	return out, nil

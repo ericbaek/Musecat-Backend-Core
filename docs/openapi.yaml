@@ -3254,6 +3254,70 @@ components:
       type: object
       properties:
         note: {type: string, maxLength: 2000}
+    ExternalRecordLabel:
+      type: object
+      required: [en]
+      properties: {ko: {type: string}, en: {type: string}, ja: {type: string}}
+    ExternalRecordEnvelope:
+      type: object
+      description: Validated musecat-records/v1 envelope. The partner subject is removed before storage.
+      required: [spec, service, visibility, updated_at, source, fields, sections]
+      properties:
+        spec: {type: string, enum: [musecat-records/v1]}
+        service: {type: string}
+        visibility: {type: string, enum: [public, private]}
+        updated_at: {type: string, format: date-time}
+        source: {type: object, required: [name], properties: {name: {type: string}, url: {type: string, format: uri}}}
+        player: {type: object, properties: {name: {type: string}, title: {type: string}, level: {type: integer}, team: {type: string}}}
+        fields:
+          type: array
+          maxItems: 24
+          items:
+            type: object
+            required: [key, label, type, value]
+            properties:
+              key: {type: string}
+              label: {$ref: '#/components/schemas/ExternalRecordLabel'}
+              type: {type: string, enum: [integer, decimal, string, percent, datetime, date, rank]}
+              value: {}
+              precision: {type: integer, minimum: 0, maximum: 6}
+        sections:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [key, label, columns, rows]
+            properties:
+              key: {type: string}
+              label: {$ref: '#/components/schemas/ExternalRecordLabel'}
+              columns: {type: array, maxItems: 8, items: {type: object, required: [key, label, type], properties: {key: {type: string}, label: {$ref: '#/components/schemas/ExternalRecordLabel'}, type: {type: string}}}}
+              rows: {type: array, maxItems: 50, items: {type: array, items: {}}}
+              total: {type: integer}
+              more_url: {type: string, format: uri}
+    ExternalRecordView:
+      type: object
+      required: [connection, provider, service, status, fetched_at, updated_at, payload]
+      properties:
+        connection: {type: string}
+        provider: {type: string}
+        service: {type: string}
+        status: {type: string, enum: [ok, private, unavailable, unsupported]}
+        error: {type: string, description: Machine code such as token_refresh, unauthorized, forbidden, not_found, rate_limited, invalid_envelope, provider_disabled, network, never_fetched.}
+        fetched_at: {type: [string, 'null'], format: date-time}
+        updated_at: {type: [string, 'null'], format: date-time}
+        payload:
+          oneOf: [{$ref: '#/components/schemas/ExternalRecordEnvelope'}, {type: 'null'}]
+    ExternalPublicRecord:
+      type: object
+      required: [provider, provider_name, service, service_name, fetched_at, updated_at, payload]
+      properties:
+        provider: {type: string}
+        provider_name: {type: string}
+        service: {type: string}
+        service_name: {type: string}
+        fetched_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        payload: {$ref: '#/components/schemas/ExternalRecordEnvelope'}
 paths:
   /search:
     get:
@@ -8259,6 +8323,41 @@ paths:
         '429': {description: Request rate limit exceeded.}
         '500': {description: Connection storage failure.}
         '503': {description: Linking is disabled or the provider is not configured.}
+  /user/records:
+    get:
+      tags: [Users]
+      summary: Public game records a user has published
+      description: Anonymous. Returns only services the user set public in Musecat whose cached partner envelope also reports public visibility and status ok. Served from cache (refreshed hourly for published records); never triggers a partner request. Cache-Control public, max-age=300.
+      parameters: [{name: user, in: query, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Published records., content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/ExternalPublicRecord'}}}}}}}
+        '400': {description: Missing user id.}
+        '404': {description: Unknown or withdrawn user.}
+  /user/connections/{id}/records/{service}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: service, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [Users]
+      summary: Owner view of one cached game record, fetching when stale
+      security: [{bearerAuth: []}]
+      description: Fetches from the partner when no cache exists or it is older than 24 hours; refresh=true forces a fetch unless one ran within the last minute. An expired access token is refreshed once and re-sealed. Partner records_private or a private envelope yields status private with no payload; the partner subject is validated against the connection and never returned.
+      parameters: [{name: refresh, in: query, required: false, schema: {type: boolean}}]
+      responses:
+        '200': {description: Record view. Cache-Control is no-store., content: {application/json: {schema: {$ref: '#/components/schemas/ExternalRecordView'}}}}
+        '401': {description: Missing, invalid or changed session.}
+        '403': {description: Withdrawn or banned account.}
+        '404': {description: Missing connection, another user's connection, or service not granted.}
+  /user/connections/{id}/services/{service}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: service, in: path, required: true, schema: {type: string}}]
+    put:
+      tags: [Users]
+      summary: Set the Musecat-side publication switch for one game service
+      security: [{bearerAuth: []}]
+      description: public shows the service on the public profile only when the partner envelope is also public. Default is private. Never changes partner data.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [visibility], properties: {visibility: {type: string, enum: [public, private]}}}}}}
+      responses:
+        '200': {description: Updated grant., content: {application/json: {schema: {$ref: '#/components/schemas/ExternalServiceConnection'}}}}
+        '400': {description: Invalid visibility.}
+        '404': {description: Missing connection or service.}
   /user/connections/complete:
     post:
       tags: [Users]

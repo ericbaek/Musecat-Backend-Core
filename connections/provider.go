@@ -45,6 +45,9 @@ type Provider struct {
 	RequireIssuer    bool      `json:"require_issuer"`
 	Scopes           []string  `json:"scopes"`
 	Services         []Service `json:"services"`
+	// RecordsURL is the base of the musecat-records/v1 API (spec section 3.4). Optional;
+	// providers without it have identity linking only.
+	RecordsURL string `json:"records_url,omitempty"`
 }
 
 type ProviderInfo struct {
@@ -193,7 +196,11 @@ func buildProviders(static, dynamic []Provider) (map[string]Provider, error) {
 		if _, ok := out[p.ID]; ok || issuers[p.Issuer] || callbacks[p.RedirectURI] {
 			return nil, fmt.Errorf("external providers must have unique IDs, issuers and callback URLs")
 		}
-		for _, endpoint := range []string{p.Issuer, p.AuthorizationURL, p.TokenURL, p.UserInfoURL, p.RedirectURI} {
+		endpoints := []string{p.Issuer, p.AuthorizationURL, p.TokenURL, p.UserInfoURL, p.RedirectURI}
+		if p.RecordsURL != "" {
+			endpoints = append(endpoints, strings.TrimSuffix(p.RecordsURL, "/"))
+		}
+		for _, endpoint := range endpoints {
 			u, err := url.Parse(endpoint)
 			if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.RawQuery != "" {
 				return nil, fmt.Errorf("external provider endpoints must be fixed HTTPS URLs without queries or fragments")
@@ -217,6 +224,7 @@ func buildProviders(static, dynamic []Provider) (map[string]Provider, error) {
 		var cloned Provider
 		_ = json.Unmarshal(data, &cloned)
 		p = cloned
+		p.RecordsURL = strings.TrimSuffix(p.RecordsURL, "/")
 		for i := range p.Services {
 			if p.Services[i].Scopes == nil {
 				p.Services[i].Scopes = []string{}

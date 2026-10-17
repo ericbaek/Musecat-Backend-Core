@@ -492,7 +492,7 @@ Musecat implementation status:
 | --- | --- |
 | 2 Direction A | Implemented (`delegation`, `/developer/v1/account/*`) |
 | 3.1–3.3 Direction B adapter | Implemented (`connections`); `subject_field` is configured to `sub` per this spec |
-| 3.4 Records fetch, cache and profile rendering | Not started |
+| 3.4 Records fetch, cache, publication switch and public read | Implemented (`connections/records.go`); profile rendering in WebCore |
 | 4 Server-to-server auth | Not started |
 | 5 Joint protocol | Ledger and coordinator implemented (`connections.JointManager`); HTTP endpoints, consent-page wiring and code issuance not started |
 | 6 Bilateral revocation | Not started |

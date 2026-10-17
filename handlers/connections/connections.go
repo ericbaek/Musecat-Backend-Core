@@ -20,6 +20,23 @@ func RegisterRoutes(se *core.ServeEvent, manager *connections.Manager) {
 		re.Response.Header().Set("Cache-Control", "no-store")
 		return re.JSON(http.StatusOK, map[string]any{"items": manager.Providers()})
 	})
+	// Public profile records: only services the user published and the partner marks public.
+	se.Router.GET("/user/records", func(re *core.RequestEvent) error {
+		userID := re.Request.URL.Query().Get("user")
+		if len(userID) != 15 {
+			return re.BadRequestError("Missing user id.", nil)
+		}
+		target, err := re.App.FindRecordById("user", userID)
+		if err != nil || target.GetBool("withdrawn") {
+			return re.NotFoundError("User not found.", nil)
+		}
+		items, err := manager.PublicRecords(re.App, userID)
+		if err != nil {
+			return respondError(re, err)
+		}
+		re.Response.Header().Set("Cache-Control", "public, max-age=300")
+		return re.JSON(http.StatusOK, map[string]any{"items": items})
+	})
 	routes := se.Router.Group("/user/connections").Bind(apis.RequireAuth("user"), user.RequireActiveUser())
 	routes.GET("", func(re *core.RequestEvent) error {
 		items, err := connections.List(re.App, re.Auth.Id)
@@ -53,6 +70,29 @@ func RegisterRoutes(se *core.ServeEvent, manager *connections.Manager) {
 		re.Response.Header().Set("Cache-Control", "no-store")
 		return re.JSON(http.StatusOK, result)
 	}).Bind(apis.BodyLimit(16384))
+	routes.GET("/{id}/records/{service}", func(re *core.RequestEvent) error {
+		refresh := re.Request.URL.Query().Get("refresh") == "true"
+		view, err := manager.ReadRecord(re.Request.Context(), re.App, actor(re), re.Request.PathValue("id"), re.Request.PathValue("service"), refresh)
+		if err != nil {
+			return respondError(re, err)
+		}
+		re.Response.Header().Set("Cache-Control", "no-store")
+		return re.JSON(http.StatusOK, view)
+	})
+	routes.PUT("/{id}/services/{service}", func(re *core.RequestEvent) error {
+		var input struct {
+			Visibility string `json:"visibility"`
+		}
+		if err := decode(re, &input); err != nil {
+			return err
+		}
+		item, err := connections.SetServiceVisibility(re.App, actor(re), re.Request.PathValue("id"), re.Request.PathValue("service"), input.Visibility)
+		if err != nil {
+			return respondError(re, err)
+		}
+		re.Response.Header().Set("Cache-Control", "no-store")
+		return re.JSON(http.StatusOK, item)
+	}).Bind(apis.BodyLimit(1024))
 	routes.DELETE("/{id}", func(re *core.RequestEvent) error {
 		if err := connections.Disconnect(re.App, actor(re), re.Request.PathValue("id")); err != nil {
 			return respondError(re, err)

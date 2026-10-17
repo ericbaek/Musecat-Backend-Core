@@ -149,6 +149,25 @@ fresh disposable synthetic existing installation. No production database is need
 The flow follows [OAuth security guidance](https://datatracker.ietf.org/doc/html/rfc9700) and
 [authorization-server issuer identification](https://www.rfc-editor.org/info/rfc9207/).
 
+## Game records (musecat-records/v1)
+
+Providers with a `records_url` expose `GET {records_url}/{service_id}` per
+[`partner-integration-spec.md`](partner-integration-spec.md) section 3.4. `connections.ParseEnvelope`
+enforces the spec limits (24 typed fields, 4 sections of at most 50 rows and 8 columns, 256 KiB,
+HTTPS links, `en` labels) and requires `sub` to equal the connection's verified subject before the
+subject is dropped. Results are cached in the locked `external_service_record` collection, one row
+per connection and service, with status `ok`, `private` (partner-side), `unavailable` (with a
+machine error code) or `unsupported` (no `records_url`).
+
+Owners read `GET /user/connections/{id}/records/{service}`; the cache refreshes after 24 hours or
+on `refresh=true` at most once per minute. An expired access token is refreshed once through the
+provider token endpoint and the new family is re-sealed; a failed refresh yields `token_refresh`.
+Publication needs two switches: the Musecat user sets a service public with
+`PUT /user/connections/{id}/services/{service}`, and the partner envelope must report `public`.
+Only then does `GET /user/records?user=` (anonymous, cached) include it. Executables schedule
+`Manager.RegisterRecordRefreshCron` to keep published records fresh in bounded hourly batches.
+Records cascade with their connection and are removed on disconnect and withdrawal.
+
 ## Reciprocal one-step preparation
 
 The proposed [joint connection](joint-connections.md) coordinates this reverse account ledger with

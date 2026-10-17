@@ -42,10 +42,12 @@ type fixture struct {
 	fail           bool
 	subject        string
 	identityIssuer string
+	refreshes      int
+	records        func(*http.Request) *http.Response
 }
 
 func provider(id string) connections.Provider {
-	return connections.Provider{ID: id, Name: id, Issuer: "https://" + id + ".example", AuthorizationURL: "https://" + id + ".example/authorize", TokenURL: "https://" + id + ".example/token", UserInfoURL: "https://" + id + ".example/userinfo", SubjectField: "sub", ClientID: "musecat", ClientSecret: "client-secret", ClientAuthMethod: "client_secret_basic", RedirectURI: "https://musecat.example/callback/" + id, RequireIssuer: true, Scopes: []string{"profile"}, Services: []connections.Service{{ID: "chunithm", Name: "CHUNITHM", Scopes: []string{"chuni:read"}}, {ID: "sdvx", Name: "SOUND VOLTEX", Scopes: []string{"sdvx:read"}}}}
+	return connections.Provider{ID: id, Name: id, Issuer: "https://" + id + ".example", AuthorizationURL: "https://" + id + ".example/authorize", TokenURL: "https://" + id + ".example/token", UserInfoURL: "https://" + id + ".example/userinfo", SubjectField: "sub", ClientID: "musecat", ClientSecret: "client-secret", ClientAuthMethod: "client_secret_basic", RedirectURI: "https://musecat.example/callback/" + id, RequireIssuer: true, Scopes: []string{"profile"}, Services: []connections.Service{{ID: "chunithm", Name: "CHUNITHM", Scopes: []string{"chuni:read"}}, {ID: "sdvx", Name: "SOUND VOLTEX", Scopes: []string{"sdvx:read"}}}, RecordsURL: "https://" + id + ".example/records"}
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -73,6 +75,15 @@ func newFixture(t *testing.T) *fixture {
 			if !ok || id != "musecat" || secret != "client-secret" {
 				t.Error("missing client authentication")
 			}
+			if r.Form.Get("grant_type") == "refresh_token" {
+				f.mu.Lock()
+				f.refreshes++
+				f.mu.Unlock()
+				if r.Form.Get("refresh_token") != "secret-refresh" {
+					return &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":"invalid_grant"}`))}, nil
+				}
+				return jsonResponse(map[string]any{"access_token": "secret-access-2", "refresh_token": "secret-refresh-2", "token_type": "Bearer", "expires_in": 3600}), nil
+			}
 			if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") == "" {
 				t.Error("invalid code exchange")
 			}
@@ -96,6 +107,14 @@ func newFixture(t *testing.T) *fixture {
 				body["iss"] = f.identityIssuer
 			}
 			return jsonResponse(body), nil
+		}
+		f.mu.Lock()
+		records := f.records
+		f.mu.Unlock()
+		if records != nil && strings.HasPrefix(r.URL.Path, "/records/") {
+			if res := records(r); res != nil {
+				return res, nil
+			}
 		}
 		t.Errorf("unexpected external URL: %s", r.URL)
 		return nil, fmt.Errorf("unexpected request")
