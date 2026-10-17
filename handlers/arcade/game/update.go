@@ -582,6 +582,30 @@ func gameRevisionSnapshot(revision *core.Record) map[string]any {
 	}
 }
 
+// knownGameRevisionFields are the arcade_game_history columns this pipeline
+// writes (or deliberately resets) itself. Every other column is a server
+// addition this code predates and is copied forward from the entry's previous
+// revision, so neither a web full-object modify nor a native changes-only
+// update can drop it.
+var knownGameRevisionFields = map[string]struct{}{
+	"id": {}, "created": {}, "updated": {}, "batch": {}, "entry": {},
+	"version": {}, "cabinet": {}, "location": {}, "quantity": {}, "price": {}, "tag": {},
+	"last_modified_at": {}, "last_modified_by": {}, "legacy_imported": {},
+}
+
+func copyGameRevisionExtras(dst, src *core.Record) {
+	if src == nil {
+		return
+	}
+	for _, f := range dst.Collection().Fields {
+		name := f.GetName()
+		if _, known := knownGameRevisionFields[name]; known {
+			continue
+		}
+		dst.Set(name, src.Get(name))
+	}
+}
+
 func versionSeries(app core.App, versionID string) (string, error) {
 	rec, err := app.FindRecordById(arcadeinternal.CollectionGameSeriesVersion, versionID)
 	if err != nil {
@@ -702,6 +726,7 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		reservedEntryIDs[entryID] = struct{}{}
 		previous := previousByEntry[entryID]
 		revision := core.NewRecord(revisionColl)
+		copyGameRevisionExtras(revision, previous)
 		revision.Set("batch", batch.Id)
 		revision.Set("entry", entryID)
 		revision.Set("version", g.Game)

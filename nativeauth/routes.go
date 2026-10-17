@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
+	"github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
 	"github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
 	"github.com/ericbaek/musecat-backend-core/handlers/arcade/hour"
 	"github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
@@ -102,6 +103,8 @@ func RegisterRoutes(se *core.ServeEvent, clients []Client) {
 	secured.PATCH("/v1/arcades/{id}/hours", hour.PatchNativeHourV1)
 	secured.GET("/v1/arcades/{id}/gtk", gtk.GetNativeGTKV1)
 	secured.PATCH("/v1/arcades/{id}/gtk", gtk.PatchNativeGTKV1)
+	secured.GET("/v1/arcades/{id}/games", game.GetNativeGamesV1)
+	secured.PATCH("/v1/arcades/{id}/games", game.PatchNativeGamesV1)
 	secured.GET("/user/me", user.GetMe)
 	secured.GET("/user/visits", user.GetMyVisits)
 	secured.GET("/user/passport", user.GetMyPassport)

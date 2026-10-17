@@ -96,6 +96,34 @@ components:
         options: {nullable: true, type: array, uniqueItems: true, items: {type: string, enum: [free_parking_lot, paid_parking_lot, free_street_parking, paid_street_parking]}}
         ev_charging: {nullable: true, type: boolean}
         gov_parking: {nullable: true, type: boolean, description: Settable only when the arcade country is Korean; null clears anywhere.}
+    NativeGamePrice:
+      type: object
+      additionalProperties: false
+      required: [currency, type, list, accept]
+      description: Full price object (web policy, replaces the stored price wholesale). For type custom or custom_v2 `list` is an array of non-blank strings; for every other type it is an array with at least one row object. custom_v2 requires the string list; mixed lists are rejected. Unknown members here or inside a row are `unsupported_field`; any policy violation is `invalid_price`.
+      properties:
+        currency: {type: string, description: Non-empty; web sends uppercase ISO codes.}
+        type: {type: string, enum: [gamemode, credit, song, time, free, custom, custom_v1, custom_v2]}
+        list:
+          type: array
+          items:
+            oneOf:
+              - {type: string}
+              - type: object
+                additionalProperties: false
+                properties:
+                  title: {description: String or number.}
+                  value: {type: number, nullable: true, exclusiveMinimum: 0}
+                  mode_key: {type: string}
+                  represent: {type: boolean}
+        accept: {type: array, items: {type: string, enum: [Credit Card, Prepaid Card, Cash]}}
+    NativeGameTag:
+      type: object
+      additionalProperties: false
+      required: [category, note]
+      properties:
+        category: {type: string, enum: [케비넷 타입, 로테이션 버전, 모니터, 스위치, 사운드, 녹화방송, 기타]}
+        note: {type: string, description: Non-blank.}
     NativeCredentials:
       type: object
       required: [access_token, refresh_token, expires_in, user_id]
@@ -8415,6 +8443,150 @@ paths:
         '413': {description: Request exceeds 4096 encoded bytes.}
         '502':
           description: Aggregate load or persistence failure, including a base revision that does not belong to this arcade (`gtk_unavailable`).
+  /native/v1/arcades/{id}/games:
+    parameters:
+      - {in: path, name: id, required: true, schema: {type: string}}
+    get:
+      tags: [Arcade Mutations]
+      summary: Native v1 game inventory edit snapshot
+      security: [{nativeBearer: []}]
+      description: Active native session and arcade write permission required. `revision` is the current immutable game state (`arcade.game_v2`); empty denotes no game state yet. Items are the entries of exactly that revision in stored order. Unlike contacts/GTK atoms, `id` is the durable `arcade_game_id` and stays stable across saves. `price` and `tag` are the stored JSON values as-is so legacy and unknown members survive; a client renders anything outside the documented shape read-only. `catalog` is a read-only display convenience and is never sent back. Unknown optional members are tolerated; unsupported required capabilities block editing. Detailed rules are in docs/native-games-v1.md.
+      responses:
+        '200':
+          description: Immutable edit snapshot; no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contract_version, required_capabilities, arcade, revision, items]
+                properties:
+                  contract_version: {type: integer, enum: [1]}
+                  required_capabilities: {type: array, items: {type: string}, example: [games.delta.v1]}
+                  arcade: {type: string}
+                  revision: {type: string, description: Current arcade_game_history_batch id, or empty before the first save.}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, series, game, cabinet, location, quantity, price, tag, updated, catalog]
+                      properties:
+                        id: {type: string, description: Durable arcade_game_id; stable across saves.}
+                        series: {type: string, description: game_series id; an entry never changes series.}
+                        game: {type: string, description: game_series_version id.}
+                        cabinet: {type: string, description: game_cabinet id, or empty for an unverified cabinet.}
+                        location: {type: string}
+                        quantity: {type: integer, minimum: 1}
+                        price: {nullable: true, description: Stored price JSON as-is (object), or null.}
+                        tag: {type: array, items: {type: object}, description: Stored tag JSON as-is (legacy quantity member stripped).}
+                        updated: {type: string, description: last_modified_at, may be empty.}
+                        catalog:
+                          type: object
+                          description: Read-only catalog bundle; each member is null when the record is missing.
+                          properties:
+                            version: {nullable: true, type: object}
+                            series: {nullable: true, type: object}
+                            cabinet: {nullable: true, type: object}
+        '401': {description: Native session required.}
+        '403':
+          description: Account or arcade write access denied (`arcade_write_forbidden`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade not found (`arcade_not_found`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: Game revision unavailable, including a batch that does not belong to this arcade (`games_unavailable`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    patch:
+      tags: [Arcade Mutations]
+      summary: Native v1 conditional game inventory edit
+      security: [{nativeBearer: []}]
+      description: Maximum 4096 encoded bytes (about nine realistic single additions per request; clients split larger inventories). Explicit add/update/remove operations against one base revision; omission never deletes, and untouched entries, their raw price/tag JSON and stored columns this contract does not know are copied verbatim into the new revision. `changes` carries only the provided keys (`game`, `cabinet`, `location`, `quantity`, `price`, `tag`); omitted keys keep their stored value, a provided `price` or `tag` replaces that value wholesale, and null is never accepted (clear cabinet/location with an empty string, tags with an empty array). IDs must be active in the base revision and may occur in only one operation. Series is immutable (`series_mismatch`); a series change is remove plus add. A non-empty cabinet must exist and be linked to the resulting version. The resulting list must not repeat a version+cabinet pair (`duplicate_game`); `add` may re-create a pair the same request removes. Apply order is remove, update, add (web parity). Validation of an updated entry runs on the merged full object with the existing web price/tag policy; untouched entries are never revalidated. Revision is checked atomically inside the shared game mutation transaction; entry ids stay stable after a save, so the client may keep its list and only replace `revision`, but a fresh GET picks up server normalization. Every 400 uses the ErrorResponse envelope with a stable code in `error`. Detailed rules are in docs/native-games-v1.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [revision]
+              properties:
+                revision: {type: string, description: Must be present; empty only for the first save.}
+                add:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [game, quantity, price]
+                    properties:
+                      game: {type: string, description: game_series_version id.}
+                      cabinet: {type: string, description: game_cabinet id; omit or empty for unverified.}
+                      location: {type: string, maxLength: 500}
+                      quantity: {type: integer, minimum: 1}
+                      price: {$ref: '#/components/schemas/NativeGamePrice'}
+                      tag: {type: array, items: {$ref: '#/components/schemas/NativeGameTag'}}
+                update:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [id, changes]
+                    properties:
+                      id: {type: string}
+                      changes:
+                        type: object
+                        additionalProperties: false
+                        minProperties: 1
+                        properties:
+                          game: {type: string, description: Version of the same series.}
+                          cabinet: {type: string, description: Cabinet id or empty for unverified.}
+                          location: {type: string, maxLength: 500}
+                          quantity: {type: integer, minimum: 1}
+                          price: {$ref: '#/components/schemas/NativeGamePrice'}
+                          tag: {type: array, items: {$ref: '#/components/schemas/NativeGameTag'}, description: Full replacement; empty array clears.}
+                remove: {type: array, uniqueItems: true, items: {type: string}}
+      responses:
+        '200':
+          description: Saved atomically with the existing game_diff v2 history and game XP policy.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, revision, count, xp_feedback]
+                properties:
+                  arcade: {type: string}
+                  revision: {type: string, description: New immutable batch id; use as the next revision.}
+                  count: {type: integer, description: Active entries after the save.}
+                  xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
+        '400':
+          description: Invalid input or no effective changes. `error` is one of invalid_patch, revision_and_operations_required, unsupported_field, invalid_game_id, invalid_game_version, series_mismatch, invalid_cabinet, cabinet_not_supported, invalid_location, invalid_quantity, invalid_price, invalid_tag, duplicate_game, no_changes.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401': {description: Native session required.}
+        '403':
+          description: Account or arcade write access denied (`arcade_write_forbidden`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade not found (`arcade_not_found`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Stale revision (`revision_conflict`); preserve draft and explicitly reload.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '413': {description: Request exceeds 4096 encoded bytes.}
+        '502':
+          description: Aggregate load or persistence failure, including a base revision that does not belong to this arcade (`games_unavailable`).
   /native/v1/arcades/{id}/basic:
     parameters:
       - {in: path, name: id, required: true, schema: {type: string}}

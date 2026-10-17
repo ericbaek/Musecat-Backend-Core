@@ -984,3 +984,38 @@ envelope with no revision, history or XP; the full code table and examples are
 in [`native-gtk-v1.md`](native-gtk-v1.md). Success returns
 `{arcade, revision, xp_feedback}`; atom IDs change on every save, so clients
 fetch a fresh snapshot before the next edit.
+
+## Native game inventory v1
+
+`GET|PATCH /native/v1/arcades/{id}/games` follows the same session, write-access,
+revision, 4096-byte and error-envelope rules as the other native v1 adapters,
+with `contract_version=1` and `required_capabilities=["games.delta.v1"]`. GET
+binds the entries of the current immutable game state (`arcade.game_v2`) to that
+revision: `id` is the durable `arcade_game_id` and, unlike contacts/GTK atom ids,
+stays stable across saves; `series`, `game`, `cabinet`, `location`, `quantity`,
+raw `price` and `tag` JSON and `updated` are returned as stored, plus a read-only
+`catalog` bundle that is never sent back. A revision that cannot be loaded or
+belongs to another arcade is never exposed (`games_unavailable`).
+
+PATCH is an explicit `add`/`update`/`remove` delta merged onto the stored
+revision and then pushed through the shared web game pipeline
+(`materializeUpdateGameDelta`, `UpdateArcadeGameTx`, game XP) inside one
+transaction. Omission never deletes and never flattens: untouched entries, their
+raw price/tag JSON (including members this contract does not know) and
+`arcade_game_history` columns this pipeline does not know are copied verbatim
+into the new batch (`copyGameRevisionExtras`, which also protects the web
+full-object modify). `changes` carries only the provided keys; a provided
+`price` or `tag` replaces that stored value wholesale, and null is never
+accepted. Series is immutable; cabinet, version, duplicate and price/tag policy
+are the existing web rules with no new business rules, and untouched entries are
+never revalidated. Decoding is strict and every failure before or inside the
+transaction returns one `{"error": code}` envelope with no revision, history or
+XP; the full code table and examples are in [`native-games-v1.md`](native-games-v1.md).
+Success returns `{arcade, revision, count, xp_feedback}`; because entry ids are
+stable the client may keep its list and replace `revision`, but a fresh GET picks
+up server normalization. The body ceiling stays at the shared 4096 bytes (about
+nine realistic single additions per request); a route-specific larger limit would
+be a documented v1-compatible addition, not a silent widening. v1 is additive
+only: new response members may appear and must be ignored, new server columns and
+unknown price/tag members survive old-client saves, and a breaking change
+publishes v2 alongside v1.

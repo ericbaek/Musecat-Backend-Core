@@ -445,3 +445,19 @@ request logs one `deleted` and one `added` item. Each successful change creates
 one immutable `arcade_gtk` revision, copies every kept atom into it, writes one
 changelog row and grants the existing `gtk` edit XP for public arcades. Stale,
 invalid and no-op requests create no revisions, history or XP.
+
+### Native game inventory v1
+
+`PATCH /native/v1/arcades/{id}/games` reuses the existing `game_diff` version 2
+envelope through the shared immutable game-state batch flow; no new history shape
+exists. Explicit operations are merged onto the base revision and materialized
+exactly like `PUT /arcade/game`: untouched entries log `unchanged` (copied
+verbatim, including raw price/tag JSON and history columns the pipeline does not
+know), `update` logs `updated` with before/after snapshots, `add` logs `added`
+and explicit removals log `deleted`. Entry ids are the durable `arcade_game_id`
+and survive the save. Each successful change creates one immutable
+`arcade_game_history_batch` plus one `arcade_game_history` row per active entry,
+repoints `arcade.game_v2`, writes one changelog row and grants the existing
+rolling seven-day game edit XP for public arcades. Stale, invalid and no-op
+requests create no batches, history or XP (the web API would still create an
+`unchanged` batch for a no-op; native rejects it with 400 `no_changes`).
