@@ -76,7 +76,7 @@ func NewJointManager(c *Manager, d *delegation.Manager, partners []JointPartner)
 	}
 	m := &JointManager{c, d, map[string]JointPartner{}}
 	for _, p := range partners {
-		provider, ok := c.providers[p.Provider]
+		provider, ok := c.lookup(p.Provider)
 		if !ok || !identifier.MatchString(p.ID) || !d.AccountClient(p.ClientID) || len(p.Services) == 0 || len(p.Services) > 16 {
 			return nil, ErrInvalid
 		}
@@ -113,7 +113,7 @@ func (m *JointManager) config(app core.App, partner string) (JointPartner, Provi
 		return JointPartner{}, Provider{}, "", ErrUnavailable
 	}
 	p, ok := m.partners[partner]
-	provider, exists := m.connections.providers[p.Provider]
+	provider, exists := m.connections.lookup(p.Provider)
 	if !ok || !exists || !m.delegation.AccountClient(p.ClientID) {
 		return p, provider, "", ErrUnavailable
 	}

@@ -24,7 +24,44 @@ const (
 
 var statuses = []string{StatusDraft, StatusSubmitted, StatusApproved, StatusRejected, StatusSuspended}
 
-var eventKinds = []string{"created", "updated", "submitted", "approved", "rejected", "suspended", "reinstated", "secret_generated"}
+var eventKinds = []string{"created", "updated", "submitted", "approved", "rejected", "suspended", "reinstated", "secret_generated", "credentials_set", "credentials_cleared"}
+
+// directionBCredentialsField stores the partner-issued Musecat client credentials,
+// AES-GCM sealed with the connection key. Never projected.
+func directionBCredentialsField() core.Field {
+	return &core.TextField{Name: "direction_b_credentials", Hidden: true, Max: 4096}
+}
+
+// EnsureDirectionBColumn adds the credentials field and new event kinds to an
+// installation created before Direction B activation existed. Idempotent; shared by
+// Core's fresh bootstrap and Full's guarded forward migration.
+func EnsureDirectionBColumn(app core.App) error {
+	return app.RunInTransaction(func(tx core.App) error {
+		apps, err := tx.FindCollectionByNameOrId(Applications)
+		if err != nil {
+			return err
+		}
+		if apps.Fields.GetByName("direction_b_credentials") == nil {
+			apps.Fields.Add(directionBCredentialsField())
+			if err := tx.Save(apps); err != nil {
+				return err
+			}
+		}
+		events, err := tx.FindCollectionByNameOrId(Events)
+		if err != nil {
+			return err
+		}
+		kind, ok := events.Fields.GetByName("kind").(*core.SelectField)
+		if !ok {
+			return fmt.Errorf("%s.kind must be a select field", Events)
+		}
+		if len(kind.Values) != len(eventKinds) {
+			kind.Values = append([]string(nil), eventKinds...)
+			return tx.Save(events)
+		}
+		return nil
+	})
+}
 
 // EnsureSchema creates the locked Developer Center collections on a fresh
 // database or verifies compatibility. Full owns the guarded forward migration
@@ -50,6 +87,7 @@ func EnsureSchema(app core.App) error {
 			&core.DateField{Name: "approved_at"},
 			&core.TextField{Name: "review_note", Max: 2000},
 			&core.TextField{Name: "secret_hash", Hidden: true, Max: 64},
+			directionBCredentialsField(),
 			&core.AutodateField{Name: "created", OnCreate: true},
 			&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 		)

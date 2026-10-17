@@ -83,16 +83,17 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		RegisterAPIRoutes(se, config.Connections)
 		partnerApps := config.PartnerApps
 		if partnerApps == nil {
-			partnerApps = partnerapp.NewService(config.Delegation)
+			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, "")
 		}
 		// Load approved Developer Center clients on top of the static set, then
 		// synchronize registration epochs (disabling anything no longer configured).
-		if config.Delegation != nil {
-			if err := partnerApps.Sync(se.App); err != nil {
+		if err := partnerApps.Sync(se.App); err != nil {
+			return err
+		}
+		if config.Delegation == nil {
+			if err := delegation.SynchronizeClients(se.App, nil); err != nil {
 				return err
 			}
-		} else if err := delegation.SynchronizeClients(se.App, nil); err != nil {
-			return err
 		}
 		partnerapphandler.RegisterRoutes(se, partnerApps)
 		delegationhandler.RegisterRoutes(se, config.Delegation)

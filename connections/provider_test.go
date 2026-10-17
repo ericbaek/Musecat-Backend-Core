@@ -47,6 +47,33 @@ func TestProviderConfigurationFailsClosed(t *testing.T) {
 	if manager, err := connections.ParseConfig("", ""); manager != nil || err != nil {
 		t.Fatal("empty configuration must disable linking")
 	}
+	// A key alone keeps dynamic (Developer Center) activation possible with no static providers.
+	keyOnly, err := connections.ParseConfig("", base64.StdEncoding.EncodeToString(key))
+	if err != nil || keyOnly == nil || len(keyOnly.Providers()) != 0 {
+		t.Fatal("key-only configuration must construct an empty manager", err)
+	}
+	if err := keyOnly.Reload([]connections.Provider{a}); err != nil || len(keyOnly.Providers()) != 1 {
+		t.Fatal("dynamic provider reload", err)
+	}
+	dup := a
+	dup.ID = "other"
+	if err := keyOnly.Check([]connections.Provider{a, dup}); err == nil {
+		t.Fatal("duplicate issuer across dynamic providers accepted")
+	}
+	if err := keyOnly.Reload(nil); err != nil || len(keyOnly.Providers()) != 0 {
+		t.Fatal("dynamic providers must be removable", err)
+	}
+	var sealed struct{ Secret string }
+	ciphertext, err := keyOnly.Seal(map[string]string{"Secret": "s3"}, "purpose:a")
+	if err != nil || strings.Contains(ciphertext, "s3") {
+		t.Fatal("seal", err)
+	}
+	if err := keyOnly.Open(ciphertext, "purpose:b", &sealed); err == nil {
+		t.Fatal("purpose binding ignored")
+	}
+	if err := keyOnly.Open(ciphertext, "purpose:a", &sealed); err != nil || sealed.Secret != "s3" {
+		t.Fatal("open", err)
+	}
 	if _, err := connections.ParseConfig(`[{"client_secret":"secret-value","typo":true}]`, base64.StdEncoding.EncodeToString(key)); err == nil || strings.Contains(err.Error(), "secret-value") {
 		t.Fatal("invalid config accepted or secrets leaked")
 	}

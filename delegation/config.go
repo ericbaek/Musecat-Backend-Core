@@ -90,6 +90,19 @@ type ClientInfo struct {
 	RedirectURIs, Scopes  []string
 }
 
+// ConsentOrigin is the HTTPS origin of the configured consent application, i.e. the
+// Musecat web deployment. Executables may use it to derive callback URLs.
+func (m *Manager) ConsentOrigin() string {
+	if m == nil {
+		return ""
+	}
+	u, err := url.Parse(m.consentURL)
+	if err != nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
 func (m *Manager) Client(id string) (ClientInfo, bool) {
 	if m == nil {
 		return ClientInfo{}, false

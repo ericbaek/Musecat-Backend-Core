@@ -23,6 +23,21 @@ var ServiceRegistry = []string{
 	"polaris_chord", "ddr", "jubeat", "popn", "nostalgia", "gitadora", "museca",
 }
 
+var serviceNames = map[string]string{
+	"chunithm": "CHUNITHM", "maimai": "maimai でらっくす", "ongeki": "オンゲキ", "sdvx": "SOUND VOLTEX",
+	"iidx": "beatmania IIDX", "taiko": "太鼓の達人", "wacca": "WACCA", "arcaea": "Arcaea",
+	"polaris_chord": "ポラリスコード", "ddr": "DanceDanceRevolution", "jubeat": "jubeat", "popn": "pop'n music",
+	"nostalgia": "ノスタルジア", "gitadora": "GITADORA", "museca": "MÚSECA",
+}
+
+// ServiceName returns the canonical display title for a registry service ID.
+func ServiceName(id string) string {
+	if n, ok := serviceNames[id]; ok {
+		return n
+	}
+	return id
+}
+
 type Localized struct {
 	Ko string `json:"ko"`
 	En string `json:"en"`

@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -53,25 +54,93 @@ type ProviderInfo struct {
 	Services []Service `json:"services"`
 }
 
+// Manager holds the static provider set from the executable configuration plus a
+// dynamic set supplied through Reload (Developer Center). Lookups are lock-protected
+// so approved partners activate without a restart.
 type Manager struct {
+	static    []Provider
+	mu        sync.RWMutex
 	providers map[string]Provider
 	aead      cipher.AEAD
 	client    *http.Client
 }
 
+func (m *Manager) lookup(id string) (Provider, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.providers[id]
+	return p, ok
+}
+func (m *Manager) snapshot() []Provider {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Provider, 0, len(m.providers))
+	for _, p := range m.providers {
+		out = append(out, p)
+	}
+	return out
+}
+
+// Reload replaces the dynamic provider set, keeping the static executable set. The
+// merged registry is validated before the swap; existing connections keep their stored
+// configuration fingerprint, so a changed provider invalidates in-flight requests.
+func (m *Manager) Reload(dynamic []Provider) error {
+	if m == nil {
+		return ErrUnavailable
+	}
+	built, err := buildProviders(m.static, dynamic)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.providers = built
+	m.mu.Unlock()
+	return nil
+}
+
+// Check validates a prospective dynamic set without swapping.
+func (m *Manager) Check(dynamic []Provider) error {
+	if m == nil {
+		return ErrUnavailable
+	}
+	_, err := buildProviders(m.static, dynamic)
+	return err
+}
+
+// Seal encrypts a value with the connection key for storage; purpose binds the
+// ciphertext to its use so it cannot be replayed into another field or record.
+func (m *Manager) Seal(value any, purpose string) (string, error) {
+	if m == nil {
+		return "", ErrUnavailable
+	}
+	return m.seal(value, purpose)
+}
+
+// Open decrypts a value produced by Seal with the same purpose.
+func (m *Manager) Open(value, purpose string, target any) error {
+	if m == nil {
+		return ErrUnavailable
+	}
+	return m.open(value, purpose, target)
+}
+
 // ParseConfig parses executable-supplied configuration without reading the environment.
+// An encryption key without static providers still constructs a manager so that
+// Developer Center partners can be activated dynamically; no key disables linking.
 func ParseConfig(raw, encodedKey string) (*Manager, error) {
-	if strings.TrimSpace(raw) == "" {
+	if strings.TrimSpace(raw) == "" && strings.TrimSpace(encodedKey) == "" {
 		return nil, nil
 	}
 	var providers []Provider
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&providers); err != nil {
-		return nil, fmt.Errorf("invalid external provider configuration")
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return nil, fmt.Errorf("invalid external provider configuration")
+	if strings.TrimSpace(raw) != "" {
+		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&providers); err != nil {
+			return nil, fmt.Errorf("invalid external provider configuration")
+		}
+		if err := decoder.Decode(new(any)); err != io.EOF {
+			return nil, fmt.Errorf("invalid external provider configuration")
+		}
 	}
 	key, err := base64.StdEncoding.DecodeString(encodedKey)
 	if err != nil {
@@ -94,7 +163,7 @@ func NewManager(providers []Provider, key []byte, client *http.Client) (*Manager
 	if err != nil {
 		return nil, err
 	}
-	m := &Manager{providers: map[string]Provider{}, aead: aead}
+	m := &Manager{static: append([]Provider(nil), providers...), aead: aead}
 	if client == nil {
 		client = &http.Client{}
 	}
@@ -103,15 +172,25 @@ func NewManager(providers []Provider, key []byte, client *http.Client) (*Manager
 	copyClient.Timeout = 10 * time.Second
 	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	m.client = &copyClient
+	built, err := buildProviders(providers, nil)
+	if err != nil {
+		return nil, err
+	}
+	m.providers = built
+	return m, nil
+}
+
+func buildProviders(static, dynamic []Provider) (map[string]Provider, error) {
+	out := map[string]Provider{}
 	issuers, callbacks := map[string]bool{}, map[string]bool{}
-	for _, p := range providers {
+	for _, p := range append(append([]Provider(nil), static...), dynamic...) {
 		if !identifier.MatchString(p.ID) || p.Name == "" || p.ClientID == "" || p.ClientSecret == "" || len(p.Services) == 0 || p.SubjectField == "" {
 			return nil, fmt.Errorf("incomplete external provider configuration")
 		}
 		if p.ClientAuthMethod != "client_secret_basic" && p.ClientAuthMethod != "client_secret_post" {
 			return nil, fmt.Errorf("external provider requires an explicit client authentication method")
 		}
-		if _, ok := m.providers[p.ID]; ok || issuers[p.Issuer] || callbacks[p.RedirectURI] {
+		if _, ok := out[p.ID]; ok || issuers[p.Issuer] || callbacks[p.RedirectURI] {
 			return nil, fmt.Errorf("external providers must have unique IDs, issuers and callback URLs")
 		}
 		for _, endpoint := range []string{p.Issuer, p.AuthorizationURL, p.TokenURL, p.UserInfoURL, p.RedirectURI} {
@@ -143,11 +222,11 @@ func NewManager(providers []Provider, key []byte, client *http.Client) (*Manager
 				p.Services[i].Scopes = []string{}
 			}
 		}
-		m.providers[p.ID] = p
+		out[p.ID] = p
 		issuers[p.Issuer] = true
 		callbacks[p.RedirectURI] = true
 	}
-	return m, nil
+	return out, nil
 }
 
 func validScopes(scopes []string) bool {
@@ -164,7 +243,7 @@ func (m *Manager) Providers() []ProviderInfo {
 	if m == nil {
 		return out
 	}
-	for _, p := range m.providers {
+	for _, p := range m.snapshot() {
 		services := slices.Clone(p.Services)
 		for i := range services {
 			services[i].Scopes = slices.Clone(services[i].Scopes)

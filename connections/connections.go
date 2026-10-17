@@ -68,7 +68,7 @@ func (m *Manager) Start(app core.App, actor Actor, input StartInput) (StartResul
 	if m == nil {
 		return StartResult{}, ErrUnavailable
 	}
-	p, ok := m.providers[input.Provider]
+	p, ok := m.lookup(input.Provider)
 	if !ok {
 		return StartResult{}, ErrUnavailable
 	}
@@ -138,7 +138,7 @@ func (m *Manager) Complete(ctx context.Context, app core.App, actor Actor, input
 	if m == nil {
 		return Connection{}, ErrUnavailable
 	}
-	p, ok := m.providers[input.Provider]
+	p, ok := m.lookup(input.Provider)
 	if !ok {
 		return Connection{}, ErrUnavailable
 	}

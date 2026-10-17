@@ -35,7 +35,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := partnerapp.NewService(f.manager)
+	service := partnerapp.NewService(f.manager, nil, "")
 	if err := service.Sync(f.app); err != nil {
 		t.Fatal(err)
 	}

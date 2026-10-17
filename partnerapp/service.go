@@ -15,6 +15,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 
+	"github.com/ericbaek/musecat-backend-core/connections"
 	"github.com/ericbaek/musecat-backend-core/delegation"
 )
 
@@ -23,7 +24,20 @@ var (
 	ErrConflict    = errors.New("partner_id already registered")
 	ErrState       = errors.New("operation not allowed in the current status")
 	ErrUnavailable = errors.New("OAuth delegation is not configured")
+	// ErrNoConnectionKey means MUSECAT_CONNECTION_ENCRYPTION_KEY is unset, so partner
+	// credentials cannot be stored and Direction B cannot activate.
+	ErrNoConnectionKey = errors.New("external connections are not configured")
 )
+
+// CallbackPath is the WebCore BFF callback for Direction B; partners register
+// <web origin> + CallbackPath + "/" + partner_id at their authorization server.
+const CallbackPath = "/api/user/connections/callback"
+
+// Credentials are issued by the partner for Musecat's Direction-B client.
+type Credentials struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
+}
 
 // Application is the safe projection returned to owners and operators. It never
 // includes secret material; HasSecret only reports that one has been generated.
@@ -39,10 +53,16 @@ type Application struct {
 	Submitted    *Form     `json:"submitted_form"`
 	Approved     *Form     `json:"approved_form"`
 	HasSecret    bool      `json:"has_secret"`
-	ReviewNote   string    `json:"review_note"`
-	ApprovedAt   string    `json:"approved_at,omitempty"`
-	Created      string    `json:"created"`
-	Updated      string    `json:"updated"`
+	// Direction B: declared in the approved form, credentials entered, and therefore
+	// registered as a live external provider.
+	DirectionBDeclared       bool   `json:"direction_b_declared"`
+	HasDirectionBCredentials bool   `json:"has_direction_b_credentials"`
+	DirectionBLive           bool   `json:"direction_b_live"`
+	MusecatRedirectURI       string `json:"musecat_redirect_uri,omitempty"`
+	ReviewNote               string `json:"review_note"`
+	ApprovedAt               string `json:"approved_at,omitempty"`
+	Created                  string `json:"created"`
+	Updated                  string `json:"updated"`
 }
 
 type Event struct {
@@ -53,13 +73,39 @@ type Event struct {
 	Created string `json:"created"`
 }
 
-// Service wraps the live delegation manager so approvals activate immediately.
-// A nil manager keeps registration available while activation returns ErrUnavailable.
+// Service wraps the live delegation and connection managers so approvals activate
+// immediately. A nil delegation manager keeps registration available while activation
+// returns ErrUnavailable; a nil connections manager disables Direction B only.
 type Service struct {
-	manager *delegation.Manager
+	manager     *delegation.Manager
+	connections *connections.Manager
+	webOrigin   string
 }
 
-func NewService(manager *delegation.Manager) *Service { return &Service{manager: manager} }
+// NewService builds the Developer Center service. webOrigin is the HTTPS origin of
+// the Musecat web deployment used for Direction-B callback URLs; when empty it is
+// derived from the OAuth consent URL.
+func NewService(manager *delegation.Manager, conns *connections.Manager, webOrigin string) *Service {
+	origin := strings.TrimRight(strings.TrimSpace(webOrigin), "/")
+	if origin == "" {
+		origin = manager.ConsentOrigin()
+	}
+	return &Service{manager: manager, connections: conns, webOrigin: origin}
+}
+
+func (s *Service) redirectURI(partnerID string) string {
+	if s.webOrigin == "" {
+		return ""
+	}
+	return s.webOrigin + CallbackPath + "/" + partnerID
+}
+
+func credentialPurpose(id string) string { return "partner_application:" + id + ":direction_b" }
+
+func (s *Service) directionBLive(r *core.Record) bool {
+	f := formOf(r, "approved_form")
+	return f != nil && f.DirectionB != nil && r.GetString("status") != StatusSuspended && r.GetString("direction_b_credentials") != "" && s.connections != nil && s.webOrigin != ""
+}
 
 func hashSecret(v string) string { s := sha256.Sum256([]byte(v)); return hex.EncodeToString(s[:]) }
 
@@ -86,12 +132,19 @@ func isLive(r *core.Record) bool {
 	return formOf(r, "approved_form") != nil && r.GetString("status") != StatusSuspended && r.GetString("secret_hash") != ""
 }
 
-func project(r *core.Record, includeContact bool) Application {
+func (s *Service) project(r *core.Record, includeContact bool) Application {
 	submitted := formOf(r, "submitted_form")
+	approved := formOf(r, "approved_form")
 	a := Application{
 		ID: r.Id, PartnerID: r.GetString("partner_id"), Owner: r.GetString("owner"), Status: r.GetString("status"),
-		Live: isLive(r), Submitted: submitted, Approved: formOf(r, "approved_form"), HasSecret: r.GetString("secret_hash") != "",
-		ReviewNote: r.GetString("review_note"), Created: r.GetDateTime("created").Time().Format(time.RFC3339), Updated: r.GetDateTime("updated").Time().Format(time.RFC3339),
+		Live: isLive(r), Submitted: submitted, Approved: approved, HasSecret: r.GetString("secret_hash") != "",
+		DirectionBDeclared:       (approved != nil && approved.DirectionB != nil) || (submitted != nil && submitted.DirectionB != nil),
+		HasDirectionBCredentials: r.GetString("direction_b_credentials") != "",
+		DirectionBLive:           s.directionBLive(r),
+		ReviewNote:               r.GetString("review_note"), Created: r.GetDateTime("created").Time().Format(time.RFC3339), Updated: r.GetDateTime("updated").Time().Format(time.RFC3339),
+	}
+	if a.DirectionBDeclared {
+		a.MusecatRedirectURI = s.redirectURI(a.PartnerID)
 	}
 	if submitted != nil {
 		a.DisplayName, a.Description = submitted.DisplayName, submitted.Description
@@ -196,7 +249,7 @@ func (s *Service) Create(app core.App, ownerID string, form Form) (Application, 
 		if err := logEvent(tx, r.Id, ownerID, "created", ""); err != nil {
 			return err
 		}
-		out = project(r, true)
+		out = s.project(r, true)
 		return nil
 	})
 	return out, err
@@ -209,7 +262,7 @@ func (s *Service) List(app core.App, ownerID string) ([]Application, error) {
 	}
 	out := make([]Application, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, project(r, true))
+		out = append(out, s.project(r, true))
 	}
 	return out, nil
 }
@@ -219,7 +272,7 @@ func (s *Service) Get(app core.App, ownerID, id string) (Application, error) {
 	if err != nil {
 		return Application{}, err
 	}
-	return project(r, true), nil
+	return s.project(r, true), nil
 }
 
 // Update replaces the submitted form. partner_id is immutable once approved. An
@@ -259,7 +312,7 @@ func (s *Service) Update(app core.App, ownerID, id string, form Form) (Applicati
 		if err := logEvent(tx, r.Id, ownerID, "updated", ""); err != nil {
 			return err
 		}
-		out = project(r, true)
+		out = s.project(r, true)
 		return nil
 	})
 	return out, err
@@ -290,7 +343,7 @@ func (s *Service) Submit(app core.App, ownerID, id string) (Application, error) 
 		if err := logEvent(tx, r.Id, ownerID, "submitted", ""); err != nil {
 			return err
 		}
-		out = project(r, true)
+		out = s.project(r, true)
 		return nil
 	})
 	return out, err
@@ -348,6 +401,83 @@ func (s *Service) OwnerEvents(app core.App, ownerID, id string) ([]Event, error)
 	return s.EventsFor(app, id)
 }
 
+// SetCredentials stores the partner-issued Musecat client credentials for Direction B.
+// They are sealed with the connection key and bound to this application; the plaintext
+// is never returned. Direction B activates immediately when the approved form declares it.
+func (s *Service) SetCredentials(app core.App, ownerID, id string, c Credentials) (Application, error) {
+	if s.connections == nil {
+		return Application{}, ErrNoConnectionKey
+	}
+	c.ClientID, c.ClientSecret = strings.TrimSpace(c.ClientID), strings.TrimSpace(c.ClientSecret)
+	if c.ClientID == "" || len(c.ClientID) > 256 || len(c.ClientSecret) < 16 || len(c.ClientSecret) > 512 || strings.ContainsAny(c.ClientID+c.ClientSecret, " \t\r\n") {
+		return Application{}, FieldErrors{"credentials": "invalid"}
+	}
+	var out Application
+	err := app.RunInTransaction(func(tx core.App) error {
+		r, err := owned(tx, ownerID, id)
+		if err != nil {
+			return err
+		}
+		if r.GetString("status") == StatusSuspended {
+			return ErrState
+		}
+		approved, submitted := formOf(r, "approved_form"), formOf(r, "submitted_form")
+		if (approved == nil || approved.DirectionB == nil) && (submitted == nil || submitted.DirectionB == nil) {
+			return ErrState
+		}
+		sealed, err := s.connections.Seal(c, credentialPurpose(r.Id))
+		if err != nil {
+			return err
+		}
+		r.Set("direction_b_credentials", sealed)
+		if err := tx.Save(r); err != nil {
+			return err
+		}
+		if approved != nil && approved.DirectionB != nil {
+			providers, err := s.Providers(tx)
+			if err != nil {
+				return err
+			}
+			if err := s.connections.Check(providers); err != nil {
+				return ErrConflict
+			}
+		}
+		if err := logEvent(tx, r.Id, ownerID, "credentials_set", ""); err != nil {
+			return err
+		}
+		out = s.project(r, true)
+		return nil
+	})
+	if err != nil {
+		return Application{}, err
+	}
+	return out, s.Sync(app)
+}
+
+// ClearCredentials removes the stored credentials and deactivates Direction B.
+func (s *Service) ClearCredentials(app core.App, ownerID, id string) (Application, error) {
+	var out Application
+	err := app.RunInTransaction(func(tx core.App) error {
+		r, err := owned(tx, ownerID, id)
+		if err != nil {
+			return err
+		}
+		r.Set("direction_b_credentials", "")
+		if err := tx.Save(r); err != nil {
+			return err
+		}
+		if err := logEvent(tx, r.Id, ownerID, "credentials_cleared", ""); err != nil {
+			return err
+		}
+		out = s.project(r, true)
+		return nil
+	})
+	if err != nil {
+		return Application{}, err
+	}
+	return out, s.Sync(app)
+}
+
 // --- Operator operations ---
 
 func (s *Service) Queue(app core.App, status string) ([]Application, error) {
@@ -361,7 +491,7 @@ func (s *Service) Queue(app core.App, status string) ([]Application, error) {
 	}
 	out := make([]Application, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, project(r, true))
+		out = append(out, s.project(r, true))
 	}
 	return out, nil
 }
@@ -371,7 +501,7 @@ func (s *Service) Inspect(app core.App, id string) (Application, error) {
 	if err != nil {
 		return Application{}, err
 	}
-	return project(r, true), nil
+	return s.project(r, true), nil
 }
 
 // Approve makes the submitted form live. The merged registry is validated before
@@ -420,10 +550,19 @@ func (s *Service) Approve(app core.App, operatorID, id, note string) (Applicatio
 		if err := s.manager.Check(clients); err != nil {
 			return ErrConflict
 		}
+		if s.connections != nil {
+			providers, err := s.Providers(tx)
+			if err != nil {
+				return err
+			}
+			if err := s.connections.Check(providers); err != nil {
+				return ErrConflict
+			}
+		}
 		if err := logEvent(tx, r.Id, operatorID, "approved", note); err != nil {
 			return err
 		}
-		out = project(r, true)
+		out = s.project(r, true)
 		return nil
 	})
 	if err != nil {
@@ -455,16 +594,13 @@ func (s *Service) transition(app core.App, operatorID, id, note, from, to, kind 
 		if err := logEvent(tx, r.Id, operatorID, kind, note); err != nil {
 			return err
 		}
-		out = project(r, true)
+		out = s.project(r, true)
 		return nil
 	})
 	if err != nil {
 		return Application{}, err
 	}
-	if s.manager != nil {
-		err = s.Sync(app)
-	}
-	return out, err
+	return out, s.Sync(app)
 }
 
 func (s *Service) Reject(app core.App, operatorID, id, note string) (Application, error) {
@@ -520,29 +656,74 @@ func (s *Service) Clients(app core.App) ([]delegation.Client, error) {
 	return out, nil
 }
 
+// Providers maps live Direction-B applications to external provider registrations.
+func (s *Service) Providers(app core.App) ([]connections.Provider, error) {
+	if s.connections == nil || s.webOrigin == "" {
+		return nil, nil
+	}
+	rows, err := app.FindRecordsByFilter(Applications, "approved_form != '' && status != {:s} && direction_b_credentials != ''", "partner_id", 129, 0, dbx.Params{"s": StatusSuspended})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]connections.Provider, 0, len(rows))
+	for _, r := range rows {
+		f := formOf(r, "approved_form")
+		if f == nil || f.DirectionB == nil {
+			continue
+		}
+		var c Credentials
+		if err := s.connections.Open(r.GetString("direction_b_credentials"), credentialPurpose(r.Id), &c); err != nil {
+			// A key rotation leaves stale ciphertext; skip rather than fail every partner.
+			continue
+		}
+		services := make([]connections.Service, 0, len(f.DirectionB.Services))
+		for _, svc := range f.DirectionB.Services {
+			services = append(services, connections.Service{ID: svc.ID, Name: ServiceName(svc.ID), Scopes: []string{svc.Scope}})
+		}
+		out = append(out, connections.Provider{
+			ID: f.PartnerID, Name: f.DisplayName.En, Issuer: f.DirectionB.Issuer,
+			AuthorizationURL: f.DirectionB.AuthorizationURL, TokenURL: f.DirectionB.TokenURL, UserInfoURL: f.DirectionB.UserInfoURL,
+			SubjectField: "sub", ClientID: c.ClientID, ClientSecret: c.ClientSecret, RedirectURI: s.redirectURI(f.PartnerID),
+			ClientAuthMethod: "client_secret_basic", RequireIssuer: true, Scopes: []string{f.DirectionB.IdentityScope}, Services: services,
+		})
+	}
+	return out, nil
+}
+
 // Version changes whenever the live registry would change; cheap enough to poll.
 func (s *Service) Version(app core.App) (string, error) {
-	rows, err := liveRows(app)
+	rows, err := app.FindRecordsByFilter(Applications, "approved_form != '' && status != {:s}", "partner_id", 300, 0, dbx.Params{"s": StatusSuspended})
 	if err != nil {
 		return "", err
 	}
 	h := sha256.New()
 	for _, r := range rows {
-		h.Write([]byte(r.GetString("partner_id") + "|" + r.GetString("approved_hash") + "|" + r.GetString("secret_hash") + "\n"))
+		h.Write([]byte(r.GetString("partner_id") + "|" + r.GetString("approved_hash") + "|" + r.GetString("secret_hash") + "|" + hashSecret(r.GetString("direction_b_credentials")) + "\n"))
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// Sync reloads the delegation manager from the live registry.
+// Sync reloads both live registries from the database.
 func (s *Service) Sync(app core.App) error {
-	if s.manager == nil {
-		return nil
+	if s.manager != nil {
+		clients, err := s.Clients(app)
+		if err != nil {
+			return err
+		}
+		if err := s.manager.Reload(app, clients); err != nil {
+			return err
+		}
 	}
-	clients, err := s.Clients(app)
-	if err != nil {
-		return err
+	if s.connections != nil {
+		providers, err := s.Providers(app)
+		if err != nil {
+			return err
+		}
+		if err := s.connections.Reload(providers); err != nil {
+			return err
+		}
 	}
-	return s.manager.Reload(app, clients)
+	return nil
 }
 
 // RegisterSyncCron keeps every instance within one minute of an approval made on

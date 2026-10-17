@@ -10,6 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 
+	"github.com/ericbaek/musecat-backend-core/connections"
 	"github.com/ericbaek/musecat-backend-core/delegation"
 	"github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/ericbaek/musecat-backend-core/partnerapp"
@@ -34,7 +35,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.service = partnerapp.NewService(f.manager)
+	f.service = partnerapp.NewService(f.manager, nil, "")
 	if err := f.service.Sync(f.app); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +232,7 @@ func TestLifecycleActivatesClientWithoutRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := partnerapp.NewService(other).Sync(f.app); err != nil {
+	if err := partnerapp.NewService(other, nil, "").Sync(f.app); err != nil {
 		t.Fatal(err)
 	}
 	if err := other.AuthenticateClient("rhythm_info", rotated); err != nil {
@@ -277,7 +278,7 @@ func TestConflictsAndLimits(t *testing.T) {
 
 func TestDisabledOAuthStillAllowsRegistration(t *testing.T) {
 	f := newFixture(t)
-	service := partnerapp.NewService(nil)
+	service := partnerapp.NewService(nil, nil, "")
 	app, err := service.Create(f.app, f.owner.Id, validForm("later"))
 	if err != nil {
 		t.Fatal(err)
@@ -287,5 +288,93 @@ func TestDisabledOAuthStillAllowsRegistration(t *testing.T) {
 	}
 	if _, err := service.Approve(f.app, f.operator.Id, app.ID, ""); !errors.Is(err, partnerapp.ErrUnavailable) {
 		t.Fatal("approve without OAuth", err)
+	}
+}
+
+func TestDirectionBActivatesProviderWithCredentials(t *testing.T) {
+	f := newFixture(t)
+	key := []byte(strings.Repeat("k", 32))
+	conns, err := connections.NewManager(nil, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := partnerapp.NewService(f.manager, conns, "")
+	if err := service.Sync(f.app); err != nil {
+		t.Fatal(err)
+	}
+	form := validForm("rhythm_info")
+	form.DirectionB = fullB()
+	app, err := service.Create(f.app, f.owner.Id, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Redirect URI is derived from the consent application origin so partners can
+	// register it before approval.
+	if app.MusecatRedirectURI != "https://musecat.example"+partnerapp.CallbackPath+"/rhythm_info" || !app.DirectionBDeclared {
+		t.Fatal("redirect uri", app.MusecatRedirectURI)
+	}
+	creds := partnerapp.Credentials{ClientID: "musecat-at-partner", ClientSecret: strings.Repeat("p", 40)}
+	// Credentials may be entered before approval; activation waits for the approved form.
+	withCreds, err := service.SetCredentials(f.app, f.owner.Id, app.ID, creds)
+	if err != nil || !withCreds.HasDirectionBCredentials || withCreds.DirectionBLive {
+		t.Fatal("pre-approval credentials", withCreds, err)
+	}
+	if _, err := service.SetCredentials(f.app, f.owner.Id, app.ID, partnerapp.Credentials{ClientID: "x", ClientSecret: "short"}); err == nil {
+		t.Fatal("weak credentials accepted")
+	}
+	if len(conns.Providers()) != 0 {
+		t.Fatal("provider live before approval")
+	}
+	if _, err := service.Submit(f.app, f.owner.Id, app.ID); err != nil {
+		t.Fatal(err)
+	}
+	approved, err := service.Approve(f.app, f.operator.Id, app.ID, "")
+	if err != nil || !approved.DirectionBLive {
+		t.Fatal("approve", approved, err)
+	}
+	providers := conns.Providers()
+	if len(providers) != 1 || providers[0].ID != "rhythm_info" || providers[0].Issuer != "https://p.example" || providers[0].Services[0].ID != "chunithm" || providers[0].Services[0].Name != "CHUNITHM" {
+		t.Fatal("provider registration", providers)
+	}
+	// Stored ciphertext never contains the secret; projection never includes it.
+	r, err := f.app.FindRecordById(partnerapp.Applications, app.ID)
+	if err != nil || strings.Contains(r.GetString("direction_b_credentials"), "musecat-at-partner") {
+		t.Fatal("credentials stored in plaintext")
+	}
+	if detail, _ := service.Get(f.app, f.owner.Id, app.ID); strings.Contains(fmt.Sprint(detail), "musecat-at-partner") {
+		t.Fatal("projection leaks credentials")
+	}
+	// A second partner with the same issuer cannot activate.
+	other := validForm("clone_info")
+	other.DirectionB = fullB()
+	clone, err := service.Create(f.app, f.operator.Id, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SetCredentials(f.app, f.operator.Id, clone.ID, creds); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Submit(f.app, f.operator.Id, clone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Approve(f.app, f.operator.Id, clone.ID, ""); !errors.Is(err, partnerapp.ErrConflict) {
+		t.Fatal("duplicate issuer approved", err)
+	}
+	// Suspension and credential removal both deactivate the provider immediately.
+	if _, err := service.Suspend(f.app, f.operator.Id, app.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(conns.Providers()) != 0 {
+		t.Fatal("suspended provider still live")
+	}
+	if _, err := service.Reinstate(f.app, f.operator.Id, app.ID, ""); err != nil || len(conns.Providers()) != 1 {
+		t.Fatal("reinstate", err)
+	}
+	if cleared, err := service.ClearCredentials(f.app, f.owner.Id, app.ID); err != nil || cleared.DirectionBLive || len(conns.Providers()) != 0 {
+		t.Fatal("clear", cleared, err)
+	}
+	// Without a connection key, credentials cannot be stored at all.
+	if _, err := partnerapp.NewService(f.manager, nil, "").SetCredentials(f.app, f.owner.Id, app.ID, creds); !errors.Is(err, partnerapp.ErrNoConnectionKey) {
+		t.Fatal("missing key", err)
 	}
 }

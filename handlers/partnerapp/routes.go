@@ -68,6 +68,18 @@ func RegisterRoutes(se *core.ServeEvent, service *partnerapp.Service) {
 		re.Response.Header().Set("Referrer-Policy", "no-referrer")
 		return re.JSON(http.StatusOK, map[string]string{"client_id": clientID, "client_secret": secret})
 	})
+	owner.PUT("/{id}/credentials", func(re *core.RequestEvent) error {
+		var in partnerapp.Credentials
+		if err := decode(re, &in); err != nil {
+			return err
+		}
+		app, err := service.SetCredentials(re.App, re.Auth.Id, re.Request.PathValue("id"), in)
+		return respond(re, app, err)
+	}).Bind(apis.BodyLimit(8 << 10))
+	owner.DELETE("/{id}/credentials", func(re *core.RequestEvent) error {
+		app, err := service.ClearCredentials(re.App, re.Auth.Id, re.Request.PathValue("id"))
+		return respond(re, app, err)
+	})
 	owner.GET("/{id}/events", func(re *core.RequestEvent) error {
 		items, err := service.OwnerEvents(re.App, re.Auth.Id, re.Request.PathValue("id"))
 		return respond(re, map[string]any{"items": items}, err)
@@ -141,6 +153,8 @@ func respondError(re *core.RequestEvent, err error) error {
 		return re.JSON(http.StatusConflict, map[string]string{"error": "invalid_state"})
 	case errors.Is(err, partnerapp.ErrUnavailable):
 		return re.JSON(http.StatusServiceUnavailable, map[string]string{"error": "oauth_not_configured"})
+	case errors.Is(err, partnerapp.ErrNoConnectionKey):
+		return re.JSON(http.StatusServiceUnavailable, map[string]string{"error": "connections_not_configured"})
 	default:
 		var apiError *router.ApiError
 		if errors.As(err, &apiError) {

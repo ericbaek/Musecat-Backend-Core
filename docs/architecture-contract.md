@@ -910,7 +910,18 @@ unchanged: a changed approved form or rotated secret is a new fingerprint and in
 grants; suspension disables the registration row so tokens fail with 503. An application is live
 only with an approved form, a generated secret and a non-suspended status. Owners generate the
 client secret after approval; only its SHA-256 is stored and the plaintext is returned once with
-`no-store`/`no-referrer`. Direction B and joint declarations are stored but not activated yet.
+`no-store`/`no-referrer`.
+
+Direction B activates from the same record: the owner stores the partner-issued Musecat client
+credentials (`PUT /developer/apps/{id}/credentials`), which are AES-GCM sealed with the connection
+key and bound to the application ID. When the approved form declares `direction_b`, the service
+maps it to a `connections.Provider` (`subject_field` fixed to `sub`, `client_secret_basic`,
+`require_issuer`, callback `<web origin>/api/user/connections/callback/<partner_id>`) and calls
+`connections.Manager.Reload`, so the partner appears in `GET /integrations/providers` at once.
+Issuer/callback collisions with static or other live providers fail approval or credential entry
+with 409. Suspension, credential removal or a missing connection key deactivates the provider;
+existing user connections remain listed and locally disconnectable. Joint declarations are stored
+but not activated yet.
 
 `coreapp.Configure` loads live applications on serve; executables register
 `partnerapp.Service.RegisterSyncCron` so other instances converge within a minute. These routes

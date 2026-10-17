@@ -3228,6 +3228,10 @@ components:
         approved_form:
           oneOf: [{$ref: '#/components/schemas/PartnerOnboardingForm'}, {type: 'null'}]
         has_secret: {type: boolean}
+        direction_b_declared: {type: boolean}
+        has_direction_b_credentials: {type: boolean}
+        direction_b_live: {type: boolean, description: Approved form declares Direction B, credentials are stored, not suspended, and the server has a connection key. The partner then appears in GET /integrations/providers.}
+        musecat_redirect_uri: {type: string, format: uri, description: Callback the partner must register for Musecat's Direction-B client; present whenever Direction B is declared.}
         review_note: {type: string}
         approved_at: {type: string, format: date-time}
         created: {type: string, format: date-time}
@@ -3237,7 +3241,7 @@ components:
       required: [id, kind, actor, note, created]
       properties:
         id: {type: string}
-        kind: {type: string, enum: [created, updated, submitted, approved, rejected, suspended, reinstated, secret_generated]}
+        kind: {type: string, enum: [created, updated, submitted, approved, rejected, suspended, reinstated, secret_generated, credentials_set, credentials_cleared]}
         actor: {type: string}
         note: {type: string}
         created: {type: string, format: date-time}
@@ -14819,6 +14823,36 @@ paths:
         '404': {description: Missing or another user's application.}
         '409': {description: invalid_state.}
         '503': {description: oauth_not_configured.}
+  /developer/apps/{id}/credentials:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    put:
+      tags: [Developer Center]
+      summary: Store the partner-issued Musecat client credentials for Direction B
+      security: [{bearerAuth: []}]
+      description: Sealed with the connection key and bound to this application; never returned. Allowed once the submitted or approved form declares direction_b. Activates the external provider immediately when the approved form declares it; duplicate issuer/callback with another live provider returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, client_secret]
+              properties:
+                client_id: {type: string, maxLength: 256}
+                client_secret: {type: string, minLength: 16, maxLength: 512}
+      responses:
+        '200': {description: Updated projection., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '400': {description: invalid_form with fields.credentials.}
+        '404': {description: Missing or another user's application.}
+        '409': {description: invalid_state (no direction_b declared or suspended) or partner_id_conflict (issuer/callback collision).}
+        '503': {description: connections_not_configured (no MUSECAT_CONNECTION_ENCRYPTION_KEY).}
+    delete:
+      tags: [Developer Center]
+      summary: Remove stored credentials and deactivate Direction B
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Updated projection., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '404': {description: Missing or another user's application.}
   /developer/apps/{id}/events:
     parameters: [{name: id, in: path, required: true, schema: {type: string}}]
     get:
