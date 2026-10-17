@@ -920,24 +920,32 @@ maps it to a `connections.Provider` (`subject_field` fixed to `sub`, `client_sec
 `connections.Manager.Reload`, so the partner appears in `GET /integrations/providers` at once.
 Issuer/callback collisions with static or other live providers fail approval or credential entry
 with 409. Suspension, credential removal or a missing connection key deactivates the provider;
-existing user connections remain listed and locally disconnectable. Joint declarations are stored
-but not activated yet.
+existing user connections remain listed and locally disconnectable. Joint declarations activate when approved with Direction B credentials, a sealed outbound server key and a hashed inbound server key.
 
 `coreapp.Configure` loads live applications on serve; executables register
 `partnerapp.Service.RegisterSyncCron` so other instances converge within a minute. These routes
 are outside the delegated `account:access` allowlist. Core bootstraps fresh schema; Full owns the
 guarded forward migration. See [`developer-center.md`](developer-center.md) for the full design.
 
-## Reciprocal connection orchestration preparation
+## Reciprocal connection orchestration
 
-`external_joint_connection` is a locked server-only coordination ledger owned by `connections`.
-It binds a current Musecat session, trusted partner/client/provider/service mapping and already
-verified partner subject. Confirmations require a redeemed live account-access grant generation
-for that user/client and the same user's matching private external service connection revision.
-Only both verified directions yield connected metadata. Live status rechecks grant revocation,
-client epoch, account key/restrictions, configuration and connection revision; incomplete requests
-expire after five minutes. This metadata never grants resource access. Withdrawal clears it.
-`Cancel` cancels orchestration only, preserving independently approved grants. No public route,
-receipt verifier, joint consent/token issuance, automatic remote revoke or runtime wiring is enabled.
-Core supplies fresh bootstrap schema; Full owns its guarded forward migration and must pin Core.
-See [joint connections](joint-connections.md) for the proposed bilateral protocol and ship gates.
+Approved joint registrations drive `/user/joint/*` and `/partner/v1/*` through
+`connections.JointManager`. The consent summary binds a verified partner subject, requested
+services, registered callback/PKCE challenge and the exact Musecat session to `musecat-joint/v1`.
+The approve action atomically claims the attempt, issues and binds the Direction A grant/code,
+then calls the partner receipt and redeems its Direction B code outside transactions. The
+userinfo subject is checked before persistence. A consumed/ambiguous attempt cannot be approved
+again. Both redeemed live grants are required for `connected`; partial state is never success.
+
+Partner routes accept only distinct server bearer keys, including the previous hashed key until
+the declared rotation deadline. `X-Request-Id` results are stored for ten minutes, scoped to
+partner, method, path and body. Keys and raw partner subjects are never projected to settings.
+The intent is hashed for binding and sealed until the approval claim clears its encrypted copy.
+
+Joint disconnect revokes only the matching grant and connection authorization generations and
+queues a remote notification in the same transaction. A later independent authorization survives
+an older revocation. Outbox errors are bounded codes; notifications retry with backoff indefinitely
+and never restore local access. Settings distinguish pending remote revocation. One-sided unlink
+remains local-only. OAuth refresh does not replace the connection's authorization generation.
+Core supplies fresh bootstrap schema; Full owns independent guarded forward migrations and job
+registration. No deployment or real-partner interoperability is implied by mock conformance tests.

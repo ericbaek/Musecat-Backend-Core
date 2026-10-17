@@ -90,6 +90,14 @@ type ClientInfo struct {
 	RedirectURIs, Scopes  []string
 }
 
+// Issuer is the configured authorization server issuer (empty when disabled).
+func (m *Manager) Issuer() string {
+	if m == nil {
+		return ""
+	}
+	return m.issuer
+}
+
 // ConsentOrigin is the HTTPS origin of the configured consent application, i.e. the
 // Musecat web deployment. Executables may use it to derive callback URLs.
 func (m *Manager) ConsentOrigin() string {

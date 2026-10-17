@@ -8,6 +8,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ericbaek/musecat-backend-core/delegation"
@@ -15,30 +16,97 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// JointPartner is operator-supplied. It is not decoded from a browser request.
+// JointPartner is operator-supplied (environment) or derived from an approved Developer
+// Center application. It is never decoded from a browser request.
 type JointPartner struct {
 	ID       string   `json:"id"`
 	ClientID string   `json:"client_id"`
 	Provider string   `json:"provider"`
 	Services []string `json:"services"`
+	// Spec section 5: partner-hosted joint endpoints and supported manifests. Empty
+	// JointURL means the partner has no one-step capability (ledger only).
+	JointURL        string   `json:"joint_url,omitempty"`
+	ConnectStartURL string   `json:"connect_start_url,omitempty"`
+	Manifests       []string `json:"manifests,omitempty"`
+	// OutboundKey authenticates Musecat to the partner (partner-issued). InboundKeyHash is
+	// the SHA-256 of the key Musecat issued to the partner for /partner/v1/*.
+	OutboundKey               string    `json:"outbound_key,omitempty"`
+	InboundKeyHash            string    `json:"inbound_key_hash,omitempty"`
+	PreviousInboundKeyHash    string    `json:"previous_inbound_key_hash,omitempty"`
+	PreviousInboundKeyExpires time.Time `json:"previous_inbound_key_expires,omitempty"`
 }
 
-// JointManager correlates already verified grants; it does not perform OAuth or
-// trust a partner receipt. HTTP/consent wiring stays disabled until that bilateral
-// protocol is agreed and its receipt verification adapter exists.
+// JointManager coordinates the one-step reciprocal connection: it correlates both
+// directions' grants in a locked ledger and drives the spec section 5 exchange with the
+// partner through authenticated server-to-server calls. Browser input never marks a
+// leg complete; only redeemed grants and verified connections do.
 type JointManager struct {
 	connections *Manager
 	delegation  *delegation.Manager
+	static      []JointPartner
+	mu          sync.RWMutex
 	partners    map[string]JointPartner
 }
 
+func (m *JointManager) partner(id string) (JointPartner, bool) {
+	if m == nil {
+		return JointPartner{}, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.partners[id]
+	return p, ok
+}
+
+// Reload replaces the dynamic partner set (Developer Center) while keeping the static one.
+func (m *JointManager) Reload(dynamic []JointPartner) error {
+	if m == nil {
+		return ErrUnavailable
+	}
+	built, err := buildJointPartners(m.connections, m.delegation, m.static, dynamic)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.partners = built
+	m.mu.Unlock()
+	return nil
+}
+
+// Check validates a prospective dynamic set without swapping.
+func (m *JointManager) Check(dynamic []JointPartner) error {
+	if m == nil {
+		return ErrUnavailable
+	}
+	_, err := buildJointPartners(m.connections, m.delegation, m.static, dynamic)
+	return err
+}
+
+// Partners lists registered IDs with one-step capability (for UI entry points).
+func (m *JointManager) Partners() []string {
+	if m == nil {
+		return []string{}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := []string{}
+	for id, p := range m.partners {
+		if p.JointURL != "" {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 type JointStatus struct {
-	ID            string    `json:"id"`
-	Partner       string    `json:"partner"`
-	Status        string    `json:"status"`
-	MusecatAccess bool      `json:"musecat_access"`
-	PartnerAccess bool      `json:"partner_access"`
-	ExpiresAt     time.Time `json:"expires_at"`
+	RemoteRevocationPending bool      `json:"remote_revocation_pending"`
+	ID                      string    `json:"id"`
+	Partner                 string    `json:"partner"`
+	Status                  string    `json:"status"`
+	MusecatAccess           bool      `json:"musecat_access"`
+	PartnerAccess           bool      `json:"partner_access"`
+	ExpiresAt               time.Time `json:"expires_at"`
 }
 
 // ParseJointConfig decodes the operator's partner registry. An empty value keeps joint
@@ -46,7 +114,12 @@ type JointStatus struct {
 // startup rather than silently inferring either side. Errors never echo the raw value.
 func ParseJointConfig(raw string, c *Manager, d *delegation.Manager) (*JointManager, error) {
 	if strings.TrimSpace(raw) == "" {
-		return nil, nil
+		if c == nil || d == nil {
+			return nil, nil
+		}
+		// No static partners: the manager still exists so Developer Center partners can
+		// be activated dynamically.
+		return NewJointManager(c, d, nil)
 	}
 	if c == nil || d == nil {
 		return nil, fmt.Errorf("joint partners require external providers and OAuth clients")
@@ -60,9 +133,6 @@ func ParseJointConfig(raw string, c *Manager, d *delegation.Manager) (*JointMana
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return nil, fmt.Errorf("invalid joint partner configuration")
 	}
-	if len(partners) == 0 {
-		return nil, nil
-	}
 	m, err := NewJointManager(c, d, partners)
 	if err != nil {
 		return nil, fmt.Errorf("invalid joint partner configuration")
@@ -74,13 +144,23 @@ func NewJointManager(c *Manager, d *delegation.Manager, partners []JointPartner)
 	if c == nil || d == nil {
 		return nil, ErrUnavailable
 	}
-	m := &JointManager{c, d, map[string]JointPartner{}}
-	for _, p := range partners {
+	m := &JointManager{connections: c, delegation: d, static: append([]JointPartner(nil), partners...)}
+	built, err := buildJointPartners(c, d, partners, nil)
+	if err != nil {
+		return nil, err
+	}
+	m.partners = built
+	return m, nil
+}
+
+func buildJointPartners(c *Manager, d *delegation.Manager, static, dynamic []JointPartner) (map[string]JointPartner, error) {
+	out := map[string]JointPartner{}
+	for _, p := range append(append([]JointPartner(nil), static...), dynamic...) {
 		provider, ok := c.lookup(p.Provider)
 		if !ok || !identifier.MatchString(p.ID) || !d.AccountClient(p.ClientID) || len(p.Services) == 0 || len(p.Services) > 16 {
 			return nil, ErrInvalid
 		}
-		if _, exists := m.partners[p.ID]; exists {
+		if _, exists := out[p.ID]; exists {
 			return nil, ErrInvalid
 		}
 		seen := map[string]bool{}
@@ -90,11 +170,18 @@ func NewJointManager(c *Manager, d *delegation.Manager, partners []JointPartner)
 			}
 			seen[id] = true
 		}
+		if p.JointURL != "" || p.ConnectStartURL != "" || p.OutboundKey != "" || p.InboundKeyHash != "" {
+			if !httpsLink(p.JointURL) || p.JointURL == "" || !httpsLink(p.ConnectStartURL) || p.ConnectStartURL == "" || len(p.OutboundKey) < 32 || len(p.InboundKeyHash) != 64 || !slices.Contains(p.Manifests, JointManifest) {
+				return nil, ErrInvalid
+			}
+		}
 		p.Services = slices.Clone(p.Services)
 		slices.Sort(p.Services)
-		m.partners[p.ID] = p
+		p.Manifests = slices.Clone(p.Manifests)
+		p.JointURL = strings.TrimSuffix(p.JointURL, "/")
+		out[p.ID] = p
 	}
-	return m, nil
+	return out, nil
 }
 
 func jointActor(app core.App, a Actor) error {
@@ -112,7 +199,7 @@ func (m *JointManager) config(app core.App, partner string) (JointPartner, Provi
 	if m == nil {
 		return JointPartner{}, Provider{}, "", ErrUnavailable
 	}
-	p, ok := m.partners[partner]
+	p, ok := m.partner(partner)
 	provider, exists := m.connections.lookup(p.Provider)
 	if !ok || !exists || !m.delegation.AccountClient(p.ClientID) {
 		return p, provider, "", ErrUnavailable
@@ -121,7 +208,7 @@ func (m *JointManager) config(app core.App, partner string) (JointPartner, Provi
 	if err != nil {
 		return p, provider, "", ErrUnavailable
 	}
-	return p, provider, digest(p.ID + "\n" + p.ClientID + "\n" + version + "\n" + fingerprint(provider) + "\n" + strings.Join(p.Services, "\n")), nil
+	return p, provider, digest(p.ID + "\n" + p.ClientID + "\n" + version + "\n" + fingerprint(provider) + "\n" + strings.Join(p.Services, "\n") + "\n" + p.JointURL + "\n" + strings.Join(p.Manifests, ",")), nil
 }
 
 // Start requires the subject obtained by the trusted provider/receipt adapter,
@@ -179,6 +266,9 @@ func jointProjection(r *core.Record) JointStatus {
 }
 
 func (m *JointManager) owned(app core.App, a Actor, id string) (*core.Record, error) {
+	if m == nil {
+		return nil, ErrUnavailable
+	}
 	if err := jointActor(app, a); err != nil {
 		return nil, err
 	}
@@ -213,9 +303,12 @@ func (m *JointManager) accountValid(app core.App, r *core.Record, id string) boo
 			return false
 		}
 	}
-	for _, id := range p.Services {
-		service, err := app.FindFirstRecordByFilter(Services, "connection={:connection} && service={:service}", dbx.Params{"connection": c.Id, "service": id})
-		if err != nil || service.GetString("visibility") != "private" || len(service.GetStringSlice("fields")) != 0 {
+	required := r.GetStringSlice("services")
+	if len(required) == 0 {
+		required = p.Services
+	}
+	for _, id := range required {
+		if _, err := app.FindFirstRecordByFilter(Services, "connection={:connection} && service={:service}", dbx.Params{"connection": c.Id, "service": id}); err != nil {
 			return false
 		}
 		for _, s := range provider.Services {
@@ -234,6 +327,9 @@ func (m *JointManager) accountValid(app core.App, r *core.Record, id string) boo
 // Credentials use randomized authenticated encryption, so reauthorization changes
 // this revision even when two saves share the same millisecond timestamp.
 func jointConnectionRevision(c *core.Record) string {
+	if v := c.GetString("authorization_generation"); v != "" {
+		return digest(v)
+	}
 	return digest(c.GetString("credentials") + "\n" + c.GetString("updated") + "\n" + strings.Join(c.GetStringSlice("scopes"), "\n"))
 }
 
@@ -261,7 +357,7 @@ func (m *JointManager) RecordVerified(app core.App, a Actor, id, grantID, genera
 		if err != nil {
 			return err
 		}
-		if config != r.GetString("config_hash") || r.GetString("session_hash") != digest(a.Session) || r.GetString("status") == "cancelled" || !r.GetDateTime("expires").Time().After(time.Now()) {
+		if config != r.GetString("config_hash") || r.GetString("session_hash") != digest(a.Session) || !slices.Contains([]string{"pending", "approving", "partial", "connected"}, r.GetString("status")) || !r.GetDateTime("expires").Time().After(time.Now()) {
 			return ErrInvalid
 		}
 		if grantID == "" && connectionID == "" {
@@ -317,7 +413,11 @@ func (m *JointManager) Status(app core.App, a Actor, id string) (JointStatus, er
 			return err
 		}
 		out = jointProjection(r)
-		if out.Status == "cancelled" {
+		if r.GetString("correlation") != "" {
+			_, e := tx.FindFirstRecordByFilter(JointOutbox, "partner={:p} && pair_id={:id} && generation={:g} && delivered=''", dbx.Params{"p": r.GetString("partner"), "id": r.GetString("correlation"), "g": r.GetString("generation")})
+			out.RemoteRevocationPending = e == nil
+		}
+		if out.Status == "cancelled" || out.Status == "revoked" {
 			return nil
 		}
 		_, _, config, err := m.config(tx, out.Partner)
@@ -325,13 +425,22 @@ func (m *JointManager) Status(app core.App, a Actor, id string) (JointStatus, er
 			out.Status = "invalidated"
 			return nil
 		}
-		if out.Status != "connected" && !out.ExpiresAt.After(time.Now()) {
+		out.MusecatAccess, out.PartnerAccess = m.evidence(tx, r)
+		if out.Status != "connected" && !(out.MusecatAccess && out.PartnerAccess) && !out.ExpiresAt.After(time.Now()) {
 			out.Status = "expired"
 			return nil
 		}
 		out.MusecatAccess, out.PartnerAccess = m.evidence(tx, r)
 		if out.Status == "connected" && (!out.MusecatAccess || !out.PartnerAccess) {
 			out.Status = "degraded"
+		}
+		// The Musecat leg completes when the partner redeems its code; persist the upgrade.
+		if out.Status == "partial" && out.MusecatAccess && out.PartnerAccess {
+			r.Set("status", "connected")
+			if err := tx.Save(r); err != nil {
+				return err
+			}
+			out.Status = "connected"
 		}
 		return nil
 	})
@@ -346,6 +455,9 @@ func (m *JointManager) Cancel(app core.App, a Actor, id string) error {
 		if err != nil {
 			return err
 		}
+		if !slices.Contains([]string{"pending", "partial"}, r.GetString("status")) {
+			return ErrInvalid
+		}
 		r.Set("status", "cancelled")
 		return tx.Save(r)
 	})
@@ -354,7 +466,7 @@ func (m *JointManager) Cancel(app core.App, a Actor, id string) error {
 // PurgeJointAttempts retains live connected metadata and removes abandoned
 // attempts after their five-minute window. Executables opt in when wiring joint flows.
 func PurgeJointAttempts(app core.App, now time.Time) error {
-	rows, err := app.FindRecordsByFilter(JointAttempts, "expires <= {:now} && status != 'connected'", "expires,id", 100, 0, dbx.Params{"now": now.UTC().Format("2006-01-02 15:04:05.000Z")})
+	rows, err := app.FindRecordsByFilter(JointAttempts, "expires <= {:now} && (status='pending' || status='cancelled')", "expires,id", 100, 0, dbx.Params{"now": now.UTC().Format("2006-01-02 15:04:05.000Z")})
 	if err != nil {
 		return err
 	}

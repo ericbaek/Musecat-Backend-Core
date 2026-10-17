@@ -369,13 +369,13 @@ func TestJointConnectionRevisionAndEncryptionKeyAreRechecked(t *testing.T) {
 
 func TestParseJointConfig(t *testing.T) {
 	f, _, d, _ := jointFixture(t)
-	for _, raw := range []string{"", "   "} {
-		if m, err := connections.ParseJointConfig(raw, f.manager, d); err != nil || m != nil {
-			t.Fatal("empty registry must disable joint coordination", raw, err)
+	for _, raw := range []string{"", "   ", "[]"} {
+		if m, err := connections.ParseJointConfig(raw, f.manager, d); err != nil || m == nil || len(m.Partners()) != 0 {
+			t.Fatal("empty registry must yield an empty manager for dynamic partners", raw, err)
 		}
 	}
-	if m, err := connections.ParseJointConfig("[]", f.manager, d); err != nil || m != nil {
-		t.Fatal("empty array must disable joint coordination", err)
+	if m, err := connections.ParseJointConfig("", nil, d); err != nil || m != nil {
+		t.Fatal("no connection key must disable joint coordination", err)
 	}
 	valid := `[{"id":"rhythm","client_id":"chuni","provider":"rhythm","services":["chunithm"]}]`
 	if m, err := connections.ParseJointConfig(valid, f.manager, d); err != nil || m == nil {

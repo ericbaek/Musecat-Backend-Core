@@ -24,7 +24,18 @@ const (
 
 var statuses = []string{StatusDraft, StatusSubmitted, StatusApproved, StatusRejected, StatusSuspended}
 
-var eventKinds = []string{"created", "updated", "submitted", "approved", "rejected", "suspended", "reinstated", "secret_generated", "credentials_set", "credentials_cleared"}
+var eventKinds = []string{"created", "updated", "submitted", "approved", "rejected", "suspended", "reinstated", "secret_generated", "credentials_set", "credentials_cleared", "joint_key_set", "partner_key_generated"}
+
+// jointKeyFields hold the partner-issued outbound key (sealed) and the hash of the
+// Musecat-issued inbound key for spec section 4 server-to-server authentication.
+func jointKeyFields() []core.Field {
+	return []core.Field{
+		&core.TextField{Name: "joint_credentials", Hidden: true, Max: 4096},
+		&core.TextField{Name: "partner_key_hash", Hidden: true, Max: 64},
+		&core.TextField{Name: "previous_partner_key_hash", Hidden: true, Max: 64},
+		&core.DateField{Name: "previous_partner_key_expires", Hidden: true},
+	}
+}
 
 // directionBCredentialsField stores the partner-issued Musecat client credentials,
 // AES-GCM sealed with the connection key. Never projected.
@@ -41,8 +52,18 @@ func EnsureDirectionBColumn(app core.App) error {
 		if err != nil {
 			return err
 		}
+		changed := false
 		if apps.Fields.GetByName("direction_b_credentials") == nil {
 			apps.Fields.Add(directionBCredentialsField())
+			changed = true
+		}
+		for _, f := range jointKeyFields() {
+			if apps.Fields.GetByName(f.GetName()) == nil {
+				apps.Fields.Add(f)
+				changed = true
+			}
+		}
+		if changed {
 			if err := tx.Save(apps); err != nil {
 				return err
 			}
@@ -88,6 +109,9 @@ func EnsureSchema(app core.App) error {
 			&core.TextField{Name: "review_note", Max: 2000},
 			&core.TextField{Name: "secret_hash", Hidden: true, Max: 64},
 			directionBCredentialsField(),
+		)
+		apps.Fields.Add(jointKeyFields()...)
+		apps.Fields.Add(
 			&core.AutodateField{Name: "created", OnCreate: true},
 			&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 		)

@@ -13,6 +13,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
 
+	apidocs "github.com/ericbaek/musecat-backend-core/docs"
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
 	"github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/ericbaek/musecat-backend-core/partnerapp"
@@ -25,6 +26,10 @@ type reviewInput struct {
 }
 
 func RegisterRoutes(se *core.ServeEvent, service *partnerapp.Service) {
+	se.Router.GET("/developer/integration-spec.md", func(re *core.RequestEvent) error {
+		return re.Blob(http.StatusOK, "text/markdown; charset=utf-8", apidocs.PartnerIntegrationSpec())
+	})
+
 	se.Router.GET("/developer/services", func(re *core.RequestEvent) error {
 		re.Response.Header().Set("Cache-Control", "public, max-age=3600")
 		return re.JSON(http.StatusOK, map[string]any{"spec": partnerapp.FormSpec, "manifests": []string{partnerapp.JointManifest}, "services": partnerapp.ServiceRegistry})
@@ -79,6 +84,25 @@ func RegisterRoutes(se *core.ServeEvent, service *partnerapp.Service) {
 	owner.DELETE("/{id}/credentials", func(re *core.RequestEvent) error {
 		app, err := service.ClearCredentials(re.App, re.Auth.Id, re.Request.PathValue("id"))
 		return respond(re, app, err)
+	})
+	owner.PUT("/{id}/joint-key", func(re *core.RequestEvent) error {
+		var in struct {
+			Key string `json:"key"`
+		}
+		if err := decode(re, &in); err != nil {
+			return err
+		}
+		app, err := service.SetJointKey(re.App, re.Auth.Id, re.Request.PathValue("id"), in.Key)
+		return respond(re, app, err)
+	}).Bind(apis.BodyLimit(4 << 10))
+	owner.POST("/{id}/partner-key", func(re *core.RequestEvent) error {
+		partnerID, key, err := service.GeneratePartnerKey(re.App, re.Auth.Id, re.Request.PathValue("id"))
+		if err != nil {
+			return respondError(re, err)
+		}
+		re.Response.Header().Set("Cache-Control", "no-store")
+		re.Response.Header().Set("Referrer-Policy", "no-referrer")
+		return re.JSON(http.StatusOK, map[string]string{"partner_id": partnerID, "key": key})
 	})
 	owner.GET("/{id}/events", func(re *core.RequestEvent) error {
 		items, err := service.OwnerEvents(re.App, re.Auth.Id, re.Request.PathValue("id"))

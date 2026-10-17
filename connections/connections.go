@@ -43,11 +43,13 @@ type StartResult struct {
 	ExpiresAt        time.Time `json:"expires_at"`
 }
 type CompleteInput struct {
-	Provider string `json:"provider"`
-	State    string `json:"state"`
-	Code     string `json:"code"`
-	Issuer   string `json:"iss,omitempty"`
-	Error    string `json:"error,omitempty"`
+	// ExpectedSubject is supplied only by the trusted joint adapter.
+	ExpectedSubject string `json:"-"`
+	Provider        string `json:"provider"`
+	State           string `json:"state"`
+	Code            string `json:"code"`
+	Issuer          string `json:"iss,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 type ServiceConnection struct {
 	Service    string   `json:"service"`
@@ -135,6 +137,10 @@ func (m *Manager) Start(app core.App, actor Actor, input StartInput) (StartResul
 }
 
 func (m *Manager) Complete(ctx context.Context, app core.App, actor Actor, input CompleteInput) (Connection, error) {
+	return m.complete(ctx, app, actor, input, nil)
+}
+
+func (m *Manager) complete(ctx context.Context, app core.App, actor Actor, input CompleteInput, verified func(core.App, Connection) error) (Connection, error) {
 	if m == nil {
 		return Connection{}, ErrUnavailable
 	}
@@ -205,6 +211,9 @@ func (m *Manager) Complete(ctx context.Context, app core.App, actor Actor, input
 	if err != nil {
 		return Connection{}, ErrProvider
 	}
+	if input.ExpectedSubject != "" && subject != input.ExpectedSubject {
+		return Connection{}, ErrInvalid
+	}
 	var result Connection
 	err = app.RunInTransaction(func(tx core.App) error {
 		if err := actor.check(tx); err != nil {
@@ -253,6 +262,7 @@ func (m *Manager) Complete(ctx context.Context, app core.App, actor Actor, input
 		account.Set("subject", subject)
 		account.Set("scopes", granted)
 		account.Set("credentials", encrypted)
+		account.Set("authorization_generation", newUUID())
 		if err := tx.Save(account); err != nil {
 			return err
 		}
@@ -296,6 +306,9 @@ func (m *Manager) Complete(ctx context.Context, app core.App, actor Actor, input
 			return err
 		}
 		result, err = project(tx, account)
+		if err == nil && verified != nil {
+			return verified(tx, result)
+		}
 		return err
 	})
 	return result, err

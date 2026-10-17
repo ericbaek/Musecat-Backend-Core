@@ -59,10 +59,16 @@ type Application struct {
 	HasDirectionBCredentials bool   `json:"has_direction_b_credentials"`
 	DirectionBLive           bool   `json:"direction_b_live"`
 	MusecatRedirectURI       string `json:"musecat_redirect_uri,omitempty"`
-	ReviewNote               string `json:"review_note"`
-	ApprovedAt               string `json:"approved_at,omitempty"`
-	Created                  string `json:"created"`
-	Updated                  string `json:"updated"`
+	// Joint: declared, partner-issued outbound key stored, Musecat-issued inbound key
+	// generated, and therefore registered for one-step reciprocal connection.
+	JointDeclared bool   `json:"joint_declared"`
+	HasJointKey   bool   `json:"has_joint_key"`
+	HasPartnerKey bool   `json:"has_partner_key"`
+	JointLive     bool   `json:"joint_live"`
+	ReviewNote    string `json:"review_note"`
+	ApprovedAt    string `json:"approved_at,omitempty"`
+	Created       string `json:"created"`
+	Updated       string `json:"updated"`
 }
 
 type Event struct {
@@ -79,18 +85,30 @@ type Event struct {
 type Service struct {
 	manager     *delegation.Manager
 	connections *connections.Manager
+	joint       *connections.JointManager
 	webOrigin   string
 }
 
 // NewService builds the Developer Center service. webOrigin is the HTTPS origin of
 // the Musecat web deployment used for Direction-B callback URLs; when empty it is
-// derived from the OAuth consent URL.
-func NewService(manager *delegation.Manager, conns *connections.Manager, webOrigin string) *Service {
+// derived from the OAuth consent URL. joint may be nil (no one-step activation).
+func NewService(manager *delegation.Manager, conns *connections.Manager, joint *connections.JointManager, webOrigin string) *Service {
 	origin := strings.TrimRight(strings.TrimSpace(webOrigin), "/")
 	if origin == "" {
 		origin = manager.ConsentOrigin()
 	}
-	return &Service{manager: manager, connections: conns, webOrigin: origin}
+	return &Service{manager: manager, connections: conns, joint: joint, webOrigin: origin}
+}
+
+func jointPurpose(id string) string { return "partner_application:" + id + ":joint" }
+
+type jointCredentials struct {
+	OutboundKey string `json:"outbound_key"`
+}
+
+func (s *Service) jointLive(r *core.Record) bool {
+	f := formOf(r, "approved_form")
+	return s.joint != nil && s.directionBLive(r) && f.Joint != nil && f.Joint.Enabled && r.GetString("joint_credentials") != "" && r.GetString("partner_key_hash") != ""
 }
 
 func (s *Service) redirectURI(partnerID string) string {
@@ -141,6 +159,10 @@ func (s *Service) project(r *core.Record, includeContact bool) Application {
 		DirectionBDeclared:       (approved != nil && approved.DirectionB != nil) || (submitted != nil && submitted.DirectionB != nil),
 		HasDirectionBCredentials: r.GetString("direction_b_credentials") != "",
 		DirectionBLive:           s.directionBLive(r),
+		JointDeclared:            (approved != nil && approved.Joint != nil && approved.Joint.Enabled) || (submitted != nil && submitted.Joint != nil && submitted.Joint.Enabled),
+		HasJointKey:              r.GetString("joint_credentials") != "",
+		HasPartnerKey:            r.GetString("partner_key_hash") != "",
+		JointLive:                s.jointLive(r),
 		ReviewNote:               r.GetString("review_note"), Created: r.GetDateTime("created").Time().Format(time.RFC3339), Updated: r.GetDateTime("updated").Time().Format(time.RFC3339),
 	}
 	if a.DirectionBDeclared {
@@ -478,6 +500,84 @@ func (s *Service) ClearCredentials(app core.App, ownerID, id string) (Applicatio
 	return out, s.Sync(app)
 }
 
+// SetJointKey stores the partner-issued key Musecat presents on calls to the partner's
+// joint endpoints (spec section 4). Sealed; never returned.
+func (s *Service) SetJointKey(app core.App, ownerID, id, key string) (Application, error) {
+	if s.connections == nil {
+		return Application{}, ErrNoConnectionKey
+	}
+	key = strings.TrimSpace(key)
+	if len(key) < 43 || len(key) > 512 || strings.ContainsAny(key, " \t\r\n") {
+		return Application{}, FieldErrors{"joint_key": "invalid"}
+	}
+	var out Application
+	err := app.RunInTransaction(func(tx core.App) error {
+		r, err := owned(tx, ownerID, id)
+		if err != nil {
+			return err
+		}
+		approved, submitted := formOf(r, "approved_form"), formOf(r, "submitted_form")
+		declared := func(f *Form) bool { return f != nil && f.Joint != nil && f.Joint.Enabled }
+		if r.GetString("status") == StatusSuspended || (!declared(approved) && !declared(submitted)) {
+			return ErrState
+		}
+		sealed, err := s.connections.Seal(jointCredentials{OutboundKey: key}, jointPurpose(r.Id))
+		if err != nil {
+			return err
+		}
+		r.Set("joint_credentials", sealed)
+		if err := tx.Save(r); err != nil {
+			return err
+		}
+		if err := logEvent(tx, r.Id, ownerID, "joint_key_set", ""); err != nil {
+			return err
+		}
+		out = s.project(r, true)
+		return nil
+	})
+	if err != nil {
+		return Application{}, err
+	}
+	return out, s.Sync(app)
+}
+
+// GeneratePartnerKey issues the key the partner must present on /partner/v1/* calls.
+// Only the hash is stored; the plaintext is returned once. Regeneration rotates it.
+func (s *Service) GeneratePartnerKey(app core.App, ownerID, id string) (partnerID, key string, err error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", err
+	}
+	key = base64.RawURLEncoding.EncodeToString(buf)
+	err = app.RunInTransaction(func(tx core.App) error {
+		r, err := owned(tx, ownerID, id)
+		if err != nil {
+			return err
+		}
+		approved, submitted := formOf(r, "approved_form"), formOf(r, "submitted_form")
+		declared := func(f *Form) bool { return f != nil && f.Joint != nil && f.Joint.Enabled }
+		if r.GetString("status") == StatusSuspended || (!declared(approved) && !declared(submitted)) {
+			return ErrState
+		}
+		partnerID = r.GetString("partner_id")
+		hours := 24
+		if approved != nil && approved.Joint != nil {
+			hours = approved.Joint.KeyRotationWindowHours
+		}
+		r.Set("previous_partner_key_hash", r.GetString("partner_key_hash"))
+		r.Set("previous_partner_key_expires", time.Now().UTC().Add(time.Duration(hours)*time.Hour))
+		r.Set("partner_key_hash", hashSecret(key))
+		if err := tx.Save(r); err != nil {
+			return err
+		}
+		return logEvent(tx, r.Id, ownerID, "partner_key_generated", "")
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return partnerID, key, s.Sync(app)
+}
+
 // --- Operator operations ---
 
 func (s *Service) Queue(app core.App, status string) ([]Application, error) {
@@ -691,6 +791,40 @@ func (s *Service) Providers(app core.App) ([]connections.Provider, error) {
 	return out, nil
 }
 
+// JointPartners maps live applications with one-step capability to the joint registry.
+// Registration happens after the provider and client are live so Check passes.
+func (s *Service) JointPartners(app core.App) ([]connections.JointPartner, error) {
+	if s.joint == nil || s.connections == nil {
+		return nil, nil
+	}
+	rows, err := app.FindRecordsByFilter(Applications, "approved_form != '' && status != {:s} && direction_b_credentials != '' && joint_credentials != '' && partner_key_hash != '' && secret_hash != ''", "partner_id", 129, 0, dbx.Params{"s": StatusSuspended})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]connections.JointPartner, 0, len(rows))
+	for _, r := range rows {
+		f := formOf(r, "approved_form")
+		if f == nil || f.DirectionB == nil || f.Joint == nil || !f.Joint.Enabled {
+			continue
+		}
+		var jc jointCredentials
+		if err := s.connections.Open(r.GetString("joint_credentials"), jointPurpose(r.Id), &jc); err != nil {
+			continue
+		}
+		services := make([]string, 0, len(f.DirectionB.Services))
+		for _, svc := range f.DirectionB.Services {
+			services = append(services, svc.ID)
+		}
+		out = append(out, connections.JointPartner{
+			ID: f.PartnerID, ClientID: f.PartnerID, Provider: f.PartnerID, Services: services,
+			JointURL: f.Joint.JointURL, ConnectStartURL: f.Joint.ConnectStartURL, Manifests: f.Joint.Manifests,
+			OutboundKey: jc.OutboundKey, InboundKeyHash: r.GetString("partner_key_hash"),
+			PreviousInboundKeyHash: r.GetString("previous_partner_key_hash"), PreviousInboundKeyExpires: r.GetDateTime("previous_partner_key_expires").Time(),
+		})
+	}
+	return out, nil
+}
+
 // Version changes whenever the live registry would change; cheap enough to poll.
 func (s *Service) Version(app core.App) (string, error) {
 	rows, err := app.FindRecordsByFilter(Applications, "approved_form != '' && status != {:s}", "partner_id", 300, 0, dbx.Params{"s": StatusSuspended})
@@ -699,7 +833,7 @@ func (s *Service) Version(app core.App) (string, error) {
 	}
 	h := sha256.New()
 	for _, r := range rows {
-		h.Write([]byte(r.GetString("partner_id") + "|" + r.GetString("approved_hash") + "|" + r.GetString("secret_hash") + "|" + hashSecret(r.GetString("direction_b_credentials")) + "\n"))
+		h.Write([]byte(r.GetString("partner_id") + "|" + r.GetString("approved_hash") + "|" + r.GetString("secret_hash") + "|" + hashSecret(r.GetString("direction_b_credentials")) + "|" + hashSecret(r.GetString("joint_credentials")) + "|" + r.GetString("partner_key_hash") + "\n"))
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -721,6 +855,18 @@ func (s *Service) Sync(app core.App) error {
 			return err
 		}
 		if err := s.connections.Reload(providers); err != nil {
+			return err
+		}
+	}
+	if s.joint != nil {
+		partners, err := s.JointPartners(app)
+		if err != nil {
+			return err
+		}
+		// A partner whose provider/client just went away is dropped rather than failing
+		// every other partner; Check at approval time guards the common path.
+		if err := s.joint.Reload(partners); err != nil {
+			_ = s.joint.Reload(nil)
 			return err
 		}
 	}

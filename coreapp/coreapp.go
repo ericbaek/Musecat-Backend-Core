@@ -34,6 +34,7 @@ import (
 	connectionhandler "github.com/ericbaek/musecat-backend-core/handlers/connections"
 	delegationhandler "github.com/ericbaek/musecat-backend-core/handlers/delegation"
 	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
+	jointhandler "github.com/ericbaek/musecat-backend-core/handlers/joint"
 	partnerapphandler "github.com/ericbaek/musecat-backend-core/handlers/partnerapp"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
@@ -49,8 +50,7 @@ import (
 type Config struct {
 	Delegation  *delegation.Manager
 	Connections *connections.Manager
-	// Joint is the internal reciprocal-connection coordinator. Configure registers no
-	// HTTP route for it; the bilateral consent adapter is a separate, partner-gated step.
+	// Joint enables reciprocal consent for registered partners.
 	Joint *connections.JointManager
 	// PartnerApps is the Developer Center service. Executables that register its
 	// sync cron pass their instance; nil creates one bound to Delegation.
@@ -83,7 +83,7 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		RegisterAPIRoutes(se, config.Connections)
 		partnerApps := config.PartnerApps
 		if partnerApps == nil {
-			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, "")
+			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, config.Joint, "")
 		}
 		// Load approved Developer Center clients on top of the static set, then
 		// synchronize registration epochs (disabling anything no longer configured).
@@ -96,6 +96,7 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 			}
 		}
 		partnerapphandler.RegisterRoutes(se, partnerApps)
+		jointhandler.RegisterRoutes(se, config.Joint)
 		delegationhandler.RegisterRoutes(se, config.Delegation)
 		RegisterAccountDelegationRoutes(se, config.Delegation)
 		return se.Next()
@@ -123,6 +124,9 @@ func configureDefaultRateLimits(app core.App) {
 		{Label: "POST /support_feedback", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /developer/apps", MaxRequests: 30, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "PUT /developer/apps/", MaxRequests: 30, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /user/joint/lookup", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /user/joint/begin", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "/partner/v1/", MaxRequests: 120, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 	}
 	for _, rule := range defaults {
 		found := false

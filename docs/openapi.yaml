@@ -33,6 +33,7 @@ tags:
     description: Authenticated arcade editing endpoints.
 components:
   securitySchemes:
+    partnerBearer: {type: http, scheme: bearer, description: Musecat-issued server key; distinct from OAuth tokens and secrets.}
     delegatedOAuth:
       type: oauth2
       description: Musecat-issued opaque delegation tokens. Session JWTs are never accepted
@@ -59,6 +60,7 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    PartnerRequestId: {name: X-Request-Id, in: header, required: true, schema: {type: string, format: uuid}, description: Replays return the original result for ten minutes; changed requests with the same ID conflict.}
     LimitQuery:
       name: limit
       in: query
@@ -3159,6 +3161,35 @@ components:
           properties:
             error: {minLength: 1}
             code: {maxLength: 0}
+    JointConsent:
+      type: object
+      required: [id, partner, partner_name, partner_account, services, manifest, expires_at]
+      properties:
+        id: {type: string}
+        partner: {type: string}
+        partner_name: {type: string}
+        partner_account: {type: string}
+        services: {type: array, items: {type: object, properties: {id: {type: string}, name: {type: string}}}}
+        manifest: {type: string, enum: [musecat-joint/v1]}
+        expires_at: {type: string, format: date-time}
+    JointStatus:
+      type: object
+      properties:
+        id: {type: string}
+        partner: {type: string}
+        status: {type: string, enum: [pending, approving, partial, connected, degraded, cancelled, expired, invalidated, revoked]}
+        musecat_access: {type: boolean}
+        partner_access: {type: boolean}
+        remote_revocation_pending: {type: boolean}
+        expires_at: {type: string, format: date-time}
+    PartnerJointStatus:
+      type: object
+      properties:
+        correlation_id: {type: string, format: uuid}
+        status: {type: string, enum: [pending, approving, partial, connected, degraded, cancelled, expired, invalidated, revoked]}
+        generation: {type: string}
+        musecat_access: {type: boolean}
+        partner_access: {type: boolean}
     PartnerLocalized:
       type: object
       properties:
@@ -3182,7 +3213,7 @@ components:
             redirect_uris: {type: array, minItems: 1, maxItems: 8, items: {type: string, format: uri}}
         direction_b:
           type: object
-          description: Declared now, activated when the records adapter ships.
+          description: Activates after approval and partner-issued OAuth credential entry.
           required: [issuer, authorization_url, token_url, userinfo_url, revocation_url, records_url, client_auth_method, identity_scope, services]
           properties:
             issuer: {type: string, format: uri}
@@ -15052,10 +15083,122 @@ paths:
         '404': {description: Application not found.}
         '409': {description: invalid_state.}
 
+  /integrations/joint:
+    get:
+      summary: List active joint partner IDs
+      responses:
+        '200': {description: Sorted IDs, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: string}}}}}}}
+  /user/joint:
+    get:
+      summary: List own joint connections and pending remote revocations
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Own status projections, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/JointStatus'}}}}}}}
+        '401': {description: Active user session required.}
+  /user/joint/begin:
+    post:
+      summary: Start joint connection from Musecat
+      security: [{bearerAuth: []}]
+      description: return_to must match the configured consent web origin and /{locale}/connect/{partner}. Query strings and external origins are rejected.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [partner, return_to], properties: {partner: {type: string}, return_to: {type: string, format: uri}}}}}}
+      responses:
+        '200': {description: Partner start URL and new correlation UUID, content: {application/json: {schema: {type: object, properties: {start_url: {type: string, format: uri}, correlation_id: {type: string, format: uuid}}}}}}
+        '400': {description: Invalid registered return URL.}
+        '503': {description: Joint connection unavailable.}
+  /user/joint/lookup:
+    post:
+      summary: Resolve a partner intent and bind the consent to the current session
+      security: [{bearerAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [partner, intent], properties: {partner: {type: string}, intent: {type: string, minLength: 43, maxLength: 512}}}}}}
+      responses:
+        '200': {description: Consent identities and service summary, content: {application/json: {schema: {$ref: '#/components/schemas/JointConsent'}}}}
+        '400': {description: Invalid, expired, consumed or differently bound intent.}
+        '502': {description: Partner lookup failed.}
+  /user/joint/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      summary: Read the session-bound joint consent
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Consent summary, content: {application/json: {schema: {$ref: '#/components/schemas/JointConsent'}}}}
+        '404': {description: Missing or foreign attempt.}
+    delete:
+      summary: Disconnect both sides
+      security: [{bearerAuth: []}]
+      description: Locally revokes only matching generations and atomically queues remote revocation. Independent later grants survive.
+      responses:
+        '204': {description: Local access revoked; remote notification may be pending.}
+        '404': {description: Missing or foreign attempt.}
+  /user/joint/{id}/status:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      summary: Recheck both verified joint connection legs
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Live status, content: {application/json: {schema: {$ref: '#/components/schemas/JointStatus'}}}}
+  /user/joint/{id}/approve:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Approve the joint manifest once
+      security: [{bearerAuth: []}]
+      description: Claims the attempt atomically, issues the Direction A code, calls partner receipts, redeems the Direction B code and verifies its subject. Failed/ambiguous requests require a fresh attempt.
+      responses:
+        '200': {description: Registered partner callback, content: {application/json: {schema: {type: object, properties: {redirect_uri: {type: string, format: uri}}}}}}
+        '400': {description: Expired, consumed or different session.}
+        '502': {description: Partner exchange failed; partial state retained.}
+  /user/joint/{id}/deny:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Deny a pending joint connection
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Partner callback carrying access_denied, content: {application/json: {schema: {type: object, properties: {redirect_uri: {type: string, format: uri}}}}}}
+  /partner/v1/joint/{correlation_id}:
+    parameters:
+      - {name: correlation_id, in: path, required: true, schema: {type: string, format: uuid}}
+      - {$ref: '#/components/parameters/PartnerRequestId'}
+    get:
+      summary: Partner polls only its own joint attempt
+      security: [{partnerBearer: []}]
+      responses:
+        '200': {description: Verified joint state, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerJointStatus'}}}}
+        '401': {description: unauthorized_partner.}
+        '404': {description: Unknown pair.}
+  /partner/v1/revocations:
+    post:
+      summary: Revoke exactly one joint generation
+      security: [{partnerBearer: []}]
+      parameters:
+        - {$ref: '#/components/parameters/PartnerRequestId'}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [pair_id, generation, reason, revoked_at], properties: {pair_id: {type: string, format: uuid}, generation: {type: string, minLength: 1, maxLength: 64}, reason: {type: string, enum: [user, security, admin, superseded]}, revoked_at: {type: string, format: date-time}}}}}}
+      responses:
+        '200': {description: Idempotent generation-specific result, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [revoked, already_revoked, unknown_generation]}}}}}}
+        '400': {description: invalid_request.}
+        '401': {description: unauthorized_partner.}
+        '409': {description: Request ID reused with a different body.}
+  /developer/apps/{id}/joint-key:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    put:
+      summary: Store the partner-issued joint server key (sealed, write-only)
+      security: [{bearerAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [key], properties: {key: {type: string, minLength: 43, maxLength: 512, writeOnly: true}}}}}}
+      responses:
+        '200': {description: Updated activation flags, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+  /developer/apps/{id}/partner-key:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Issue or rotate the Musecat partner bearer key (revealed once)
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: New key; previous hash accepted for the registered rotation window, content: {application/json: {schema: {type: object, properties: {partner_id: {type: string}, key: {type: string}}}}}}
+
 x-musecat-joint-connection:
-  status: server-only-preparation
-  public-endpoints-enabled: false
-  description: >-
-    Reciprocal one-step consent requires a bilateral partner agreement and verified
-    intent/receipt adapters. The internal joint ledger does not create or broaden
-    OAuth grants. Existing independent OAuth/resource operations remain unchanged.
+  status: implemented
+  public-endpoints-enabled: true
+  description: Active only for operator-approved registrations with both OAuth credentials and both server keys. See /developer/integration-spec.md.

@@ -44,6 +44,7 @@ type fixture struct {
 	identityIssuer string
 	refreshes      int
 	records        func(*http.Request) *http.Response
+	joint          func(*http.Request) *http.Response
 }
 
 func provider(id string) connections.Provider {
@@ -54,6 +55,11 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{t: t, app: testutil.NewTestApp(t), providers: []connections.Provider{provider("rhythm"), provider("noslog")}, subject: "verified-subject"}
 	client := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		if f.joint != nil {
+			if response := f.joint(r); response != nil {
+				return response, nil
+			}
+		}
 		if r.URL.Path == "/token" {
 			f.mu.Lock()
 			f.exchanges++

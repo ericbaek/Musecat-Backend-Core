@@ -35,7 +35,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.service = partnerapp.NewService(f.manager, nil, "")
+	f.service = partnerapp.NewService(f.manager, nil, nil, "")
 	if err := f.service.Sync(f.app); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestLifecycleActivatesClientWithoutRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := partnerapp.NewService(other, nil, "").Sync(f.app); err != nil {
+	if err := partnerapp.NewService(other, nil, nil, "").Sync(f.app); err != nil {
 		t.Fatal(err)
 	}
 	if err := other.AuthenticateClient("rhythm_info", rotated); err != nil {
@@ -278,7 +278,7 @@ func TestConflictsAndLimits(t *testing.T) {
 
 func TestDisabledOAuthStillAllowsRegistration(t *testing.T) {
 	f := newFixture(t)
-	service := partnerapp.NewService(nil, nil, "")
+	service := partnerapp.NewService(nil, nil, nil, "")
 	app, err := service.Create(f.app, f.owner.Id, validForm("later"))
 	if err != nil {
 		t.Fatal(err)
@@ -298,7 +298,7 @@ func TestDirectionBActivatesProviderWithCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := partnerapp.NewService(f.manager, conns, "")
+	service := partnerapp.NewService(f.manager, conns, nil, "")
 	if err := service.Sync(f.app); err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,85 @@ func TestDirectionBActivatesProviderWithCredentials(t *testing.T) {
 		t.Fatal("clear", cleared, err)
 	}
 	// Without a connection key, credentials cannot be stored at all.
-	if _, err := partnerapp.NewService(f.manager, nil, "").SetCredentials(f.app, f.owner.Id, app.ID, creds); !errors.Is(err, partnerapp.ErrNoConnectionKey) {
+	if _, err := partnerapp.NewService(f.manager, nil, nil, "").SetCredentials(f.app, f.owner.Id, app.ID, creds); !errors.Is(err, partnerapp.ErrNoConnectionKey) {
 		t.Fatal("missing key", err)
+	}
+}
+
+func TestJointActivationAndInboundKeyRotation(t *testing.T) {
+	f := newFixture(t)
+	conns, err := connections.NewManager(nil, []byte(strings.Repeat("k", 32)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joint, err := connections.NewJointManager(conns, f.manager, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := partnerapp.NewService(f.manager, conns, joint, "")
+	form := validForm("joint_info")
+	form.DirectionB = fullB()
+	form.Joint = &partnerapp.Joint{Enabled: true, Manifests: []string{connections.JointManifest}, JointURL: "https://p.example/joint", ConnectStartURL: "https://p.example/start", KeyRotationWindowHours: 24}
+	app, err := service.Create(f.app, f.owner.Id, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetCredentials(f.app, f.owner.Id, app.ID, partnerapp.Credentials{ClientID: "musecat", ClientSecret: strings.Repeat("s", 40)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.SetJointKey(f.app, f.owner.Id, app.ID, strings.Repeat("o", 43)); err != nil {
+		t.Fatal(err)
+	}
+	_, key, err := service.GeneratePartnerKey(f.app, f.owner.Id, app.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(joint.Partners()) != 0 {
+		t.Fatal("joint activated before approval")
+	}
+	if _, err = service.Submit(f.app, f.owner.Id, app.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = service.GenerateSecret(f.app, f.owner.Id, app.ID); err == nil {
+		t.Fatal("unapproved OAuth secret issued")
+	}
+	if _, err = service.Approve(f.app, f.operator.Id, app.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = service.GenerateSecret(f.app, f.owner.Id, app.ID); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := joint.AuthenticatePartner(key); !ok || id != "joint_info" {
+		t.Fatal("joint key did not activate", id)
+	}
+	_, newKey, err := service.GeneratePartnerKey(f.app, f.owner.Id, app.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := joint.AuthenticatePartner(key); !ok {
+		t.Fatal("rotation dropped previous key")
+	}
+	if _, ok := joint.AuthenticatePartner(newKey); !ok {
+		t.Fatal("new key inactive")
+	}
+	row, _ := f.app.FindRecordById(partnerapp.Applications, app.ID)
+	row.Set("previous_partner_key_expires", time.Now().Add(-time.Second))
+	if err = f.app.Save(row); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.Sync(f.app); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := joint.AuthenticatePartner(key); ok {
+		t.Fatal("expired previous key accepted")
+	}
+	if strings.Contains(row.GetString("joint_credentials"), strings.Repeat("o", 43)) || row.GetString("partner_key_hash") == newKey {
+		t.Fatal("keys persisted in plaintext")
+	}
+	if _, err = service.Suspend(f.app, f.operator.Id, app.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := joint.AuthenticatePartner(newKey); ok {
+		t.Fatal("suspended partner accepted")
 	}
 }
