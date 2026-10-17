@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 )
 
 const (
@@ -44,18 +45,62 @@ type Client struct {
 	Secret       string   `json:"secret"`
 	RedirectURIs []string `json:"redirect_uris"`
 	Scopes       []string `json:"scopes"`
+	// SecretHash is the hex SHA-256 of an already generated secret. Dynamic
+	// registrations (Developer Center) supply it instead of Secret so plaintext
+	// never leaves the one-time generation response.
+	SecretHash string `json:"-"`
 }
 type registeredClient struct {
 	Client
 	secretHash  string
 	fingerprint string
 }
+
+// Manager keeps a static client set from the executable configuration plus a
+// dynamic set supplied through Reload. Lookups are lock-protected so approved
+// Developer Center applications activate without a restart.
 type Manager struct {
 	issuer     string
 	consentURL string
+	static     []Client
+	mu         sync.RWMutex
 	clients    map[string]registeredClient
 	checkUser  func(core.App, *core.Record) error
 }
+
+func (m *Manager) lookup(id string) (registeredClient, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.clients[id]
+	return c, ok
+}
+func (m *Manager) snapshot() map[string]registeredClient {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make(map[string]registeredClient, len(m.clients))
+	for k, v := range m.clients {
+		out[k] = v
+	}
+	return out
+}
+
+// ClientInfo is the public projection of a registered client; no secret material.
+type ClientInfo struct {
+	ID, Name, Description string
+	RedirectURIs, Scopes  []string
+}
+
+func (m *Manager) Client(id string) (ClientInfo, bool) {
+	if m == nil {
+		return ClientInfo{}, false
+	}
+	c, ok := m.lookup(id)
+	if !ok {
+		return ClientInfo{}, false
+	}
+	return ClientInfo{ID: c.ID, Name: c.Name, Description: c.Description, RedirectURIs: append([]string(nil), c.RedirectURIs...), Scopes: append([]string(nil), c.Scopes...)}, true
+}
+
 type OAuthError struct {
 	Code   string
 	Status int
@@ -104,9 +149,6 @@ func contains(values []string, v string) bool {
 	return false
 }
 func NewManager(issuer, consentURL string, clients []Client, check func(core.App, *core.Record) error) (*Manager, error) {
-	if len(clients) > 128 {
-		return nil, fmt.Errorf("too many OAuth clients")
-	}
 	if !validHTTPS(issuer) || !validHTTPS(consentURL) || check == nil {
 		return nil, fmt.Errorf("invalid OAuth issuer, consent URL, or account policy")
 	}
@@ -114,13 +156,60 @@ func NewManager(issuer, consentURL string, clients []Client, check func(core.App
 	if origin.Path != "" && origin.Path != "/" {
 		return nil, fmt.Errorf("OAuth issuer must be an origin")
 	}
-	m := &Manager{issuer: strings.TrimSuffix(issuer, "/"), consentURL: consentURL, clients: map[string]registeredClient{}, checkUser: check}
-	for _, c := range clients {
+	m := &Manager{issuer: strings.TrimSuffix(issuer, "/"), consentURL: consentURL, static: append([]Client(nil), clients...), checkUser: check}
+	built, err := buildClients(m.issuer, clients, nil)
+	if err != nil {
+		return nil, err
+	}
+	m.clients = built
+	return m, nil
+}
+
+// Reload replaces the dynamic client set while keeping the static executable set.
+// It validates the merged registry before swapping and then synchronizes persistent
+// registration epochs, so a changed or removed client invalidates its grants exactly as
+// a configuration change at startup does. A nil Manager (OAuth disabled) rejects reloads.
+func (m *Manager) Reload(app core.App, dynamic []Client) error {
+	if m == nil {
+		return fmt.Errorf("OAuth delegation is not configured")
+	}
+	built, err := buildClients(m.issuer, m.static, dynamic)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.clients = built
+	m.mu.Unlock()
+	return SynchronizeClients(app, m)
+}
+
+// Check validates a prospective dynamic set against the static set without swapping.
+func (m *Manager) Check(dynamic []Client) error {
+	if m == nil {
+		return fmt.Errorf("OAuth delegation is not configured")
+	}
+	_, err := buildClients(m.issuer, m.static, dynamic)
+	return err
+}
+
+func buildClients(issuer string, static, dynamic []Client) (map[string]registeredClient, error) {
+	if len(static)+len(dynamic) > 128 {
+		return nil, fmt.Errorf("too many OAuth clients")
+	}
+	out := map[string]registeredClient{}
+	for _, c := range append(append([]Client(nil), static...), dynamic...) {
 		c.RedirectURIs = append([]string(nil), c.RedirectURIs...)
-		if !identifier.MatchString(c.ID) || c.Name == "" || len(c.Name) > 128 || len(c.Description) > 1024 || len(c.Secret) < 32 || len(c.Secret) > 256 || len(c.RedirectURIs) == 0 || len(c.RedirectURIs) > 16 {
+		secretHash := c.SecretHash
+		if c.Secret != "" {
+			if len(c.Secret) < 32 || len(c.Secret) > 256 {
+				return nil, fmt.Errorf("invalid OAuth client configuration")
+			}
+			secretHash = hash(c.Secret)
+		}
+		if !identifier.MatchString(c.ID) || c.Name == "" || len(c.Name) > 128 || len(c.Description) > 1024 || len(secretHash) != 64 || len(c.RedirectURIs) == 0 || len(c.RedirectURIs) > 16 {
 			return nil, fmt.Errorf("invalid OAuth client configuration")
 		}
-		if _, ok := m.clients[c.ID]; ok {
+		if _, ok := out[c.ID]; ok {
 			return nil, fmt.Errorf("duplicate OAuth client")
 		}
 		seen := map[string]bool{}
@@ -139,15 +228,19 @@ func NewManager(issuer, consentURL string, clients []Client, check func(core.App
 			return nil, fmt.Errorf("invalid OAuth client scopes")
 		}
 		c.Scopes = scopes
+		// The fingerprint covers the secret hash rather than the plaintext so static and
+		// dynamic registrations with identical material produce identical epochs.
+		c.Secret = secretHash
+		c.SecretHash = ""
 		encoded, _ := json.Marshal(struct {
 			Issuer string
 			Client Client
-		}{m.issuer, c})
-		rc := registeredClient{Client: c, secretHash: hash(c.Secret), fingerprint: hash(string(encoded))}
+		}{issuer, c})
+		rc := registeredClient{Client: c, secretHash: secretHash, fingerprint: hash(string(encoded))}
 		rc.Secret = ""
-		m.clients[c.ID] = rc
+		out[c.ID] = rc
 	}
-	return m, nil
+	return out, nil
 }
 
 // ParseConfig is used only at executable composition roots; no ambient env reads.
@@ -174,7 +267,7 @@ func (m *Manager) AuthenticateClient(id, secret string) error {
 	if m == nil {
 		return &OAuthError{Code: "temporarily_unavailable", Status: 503}
 	}
-	c, ok := m.clients[id]
+	c, ok := m.lookup(id)
 	if !ok || !same(c.secretHash, hash(secret)) {
 		return &OAuthError{Code: "invalid_client", Status: 401}
 	}

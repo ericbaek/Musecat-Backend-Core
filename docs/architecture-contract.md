@@ -893,6 +893,30 @@ in its existing transaction; a password/account-key reset invalidates every old 
 Core's migration creates only fresh schema. Full must apply its independent guarded forward migration
 to existing installations and pin this Core revision. Both executables register bounded expiry cleanup.
 
+## Developer Center: self-service partner registration
+
+`partner_application` and `partner_application_event` are locked base collections owned by
+`partnerapp`. An active user creates up to eight drafts of the `musecat-partner-onboarding/v1`
+form (`partner_id`, localized name/description, contact, Direction-A redirect URIs, optional
+Direction-B/joint declarations validated structurally). Submit → operator (`developer`/`moderator`)
+approve/reject/suspend/reinstate through `/moderation/developer/apps/*`; every action appends an
+immutable event. The form never carries credentials.
+
+Approval copies `submitted_form` to `approved_form`, validates the merged OAuth client registry
+(static executable clients plus live applications; duplicates and executable-owned IDs fail with
+409) and then calls `delegation.Manager.Reload`, which swaps the client map under a lock and runs
+`SynchronizeClients`. The existing registration epoch/config-hash mechanism therefore applies
+unchanged: a changed approved form or rotated secret is a new fingerprint and invalidates earlier
+grants; suspension disables the registration row so tokens fail with 503. An application is live
+only with an approved form, a generated secret and a non-suspended status. Owners generate the
+client secret after approval; only its SHA-256 is stored and the plaintext is returned once with
+`no-store`/`no-referrer`. Direction B and joint declarations are stored but not activated yet.
+
+`coreapp.Configure` loads live applications on serve; executables register
+`partnerapp.Service.RegisterSyncCron` so other instances converge within a minute. These routes
+are outside the delegated `account:access` allowlist. Core bootstraps fresh schema; Full owns the
+guarded forward migration. See [`developer-center.md`](developer-center.md) for the full design.
+
 ## Reciprocal connection orchestration preparation
 
 `external_joint_connection` is a locked server-only coordination ledger owned by `connections`.

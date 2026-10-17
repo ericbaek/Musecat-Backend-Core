@@ -66,7 +66,7 @@ func (m *Manager) Begin(app core.App, in AuthorizationInput) (string, error) {
 	if m == nil {
 		return "", &OAuthError{Code: "temporarily_unavailable", Status: 503}
 	}
-	c, ok := m.clients[in.ClientID]
+	c, ok := m.lookup(in.ClientID)
 	if !ok || !contains(c.RedirectURIs, in.RedirectURI) {
 		return "", oauthError("invalid_request")
 	}
@@ -136,7 +136,7 @@ func (m *Manager) pending(app core.App, handle string) (*core.Record, registered
 		}
 		return nil, registeredClient{}, oauthError("invalid_request")
 	}
-	c, ok := m.clients[r.GetString("client")]
+	c, ok := m.lookup(r.GetString("client"))
 	fingerprint, e := m.clientHash(app, c)
 	if e != nil {
 		return nil, registeredClient{}, e
@@ -245,7 +245,7 @@ func (m *Manager) activeGrant(app core.App, row *core.Record, clientID string) (
 	if e != nil {
 		return nil, nil, oauthError("invalid_grant")
 	}
-	c, ok := m.clients[grant.GetString("client")]
+	c, ok := m.lookup(grant.GetString("client"))
 	fingerprint, e := m.clientHash(app, c)
 	if e != nil {
 		return nil, nil, oauthError("invalid_grant")

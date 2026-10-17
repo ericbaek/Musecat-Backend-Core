@@ -34,11 +34,13 @@ import (
 	connectionhandler "github.com/ericbaek/musecat-backend-core/handlers/connections"
 	delegationhandler "github.com/ericbaek/musecat-backend-core/handlers/delegation"
 	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
+	partnerapphandler "github.com/ericbaek/musecat-backend-core/handlers/partnerapp"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
 	subwayhandler "github.com/ericbaek/musecat-backend-core/handlers/subway"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/partnerapp"
 )
 
 // Config contains dependencies selected by the executable. Configure never reads
@@ -49,7 +51,10 @@ type Config struct {
 	Connections *connections.Manager
 	// Joint is the internal reciprocal-connection coordinator. Configure registers no
 	// HTTP route for it; the bilateral consent adapter is a separate, partner-gated step.
-	Joint                 *connections.JointManager
+	Joint *connections.JointManager
+	// PartnerApps is the Developer Center service. Executables that register its
+	// sync cron pass their instance; nil creates one bound to Delegation.
+	PartnerApps           *partnerapp.Service
 	GeoResolver           *geo.OfflineResolver
 	Documentation         DocumentationConfig
 	ClientIPForwardSecret string
@@ -76,9 +81,20 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se, config.Connections)
-		if err := delegation.SynchronizeClients(se.App, config.Delegation); err != nil {
+		partnerApps := config.PartnerApps
+		if partnerApps == nil {
+			partnerApps = partnerapp.NewService(config.Delegation)
+		}
+		// Load approved Developer Center clients on top of the static set, then
+		// synchronize registration epochs (disabling anything no longer configured).
+		if config.Delegation != nil {
+			if err := partnerApps.Sync(se.App); err != nil {
+				return err
+			}
+		} else if err := delegation.SynchronizeClients(se.App, nil); err != nil {
 			return err
 		}
+		partnerapphandler.RegisterRoutes(se, partnerApps)
 		delegationhandler.RegisterRoutes(se, config.Delegation)
 		RegisterAccountDelegationRoutes(se, config.Delegation)
 		return se.Next()
@@ -104,6 +120,8 @@ func configureDefaultRateLimits(app core.App) {
 		{Label: "GET /reverse_geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geo", MaxRequests: 60, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /support_feedback", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /developer/apps", MaxRequests: 30, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "PUT /developer/apps/", MaxRequests: 30, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 	}
 	for _, rule := range defaults {
 		found := false

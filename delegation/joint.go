@@ -11,7 +11,7 @@ func (m *Manager) AccountClient(clientID string) bool {
 	if m == nil {
 		return false
 	}
-	c, ok := m.clients[clientID]
+	c, ok := m.lookup(clientID)
 	return ok && contains(c.Scopes, AccountAccess)
 }
 
@@ -20,7 +20,8 @@ func (m *Manager) AccountClientVersion(app core.App, clientID string) (string, e
 	if !m.AccountClient(clientID) {
 		return "", oauthError("invalid_grant")
 	}
-	return m.clientHash(app, m.clients[clientID])
+	c, _ := m.lookup(clientID)
+	return m.clientHash(app, c)
 }
 
 // VerifyAccountGrant checks an already-approved generation for server-side joint

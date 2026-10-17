@@ -37,10 +37,10 @@ func TestConfigureDefaultRateLimitsPreservesExistingRules(t *testing.T) {
 			if !config.Enabled || !reflect.DeepEqual(config.Rules[:len(existing)], existing) {
 				t.Fatal("must enable limits and preserve existing rules")
 			}
-			if len(config.Rules) != len(existing)+11 {
-				t.Fatalf("expected eleven missing all-user rules, got %v", config.Rules)
+			if len(config.Rules) != len(existing)+13 {
+				t.Fatalf("expected thirteen missing all-user rules, got %v", config.Rules)
 			}
-			for _, label := range []string{"GET /geo", "GET /geocode", "GET /reverse_geocode", "POST /support_feedback", "POST /user/connections/start", "POST /user/connections/complete", "GET /oauth/authorize", "POST /oauth/token", "POST /oauth/consent", "GET /oauth/consent", "POST /oauth/revoke", "/developer/v1/"} {
+			for _, label := range []string{"GET /geo", "GET /geocode", "GET /reverse_geocode", "POST /support_feedback", "POST /user/connections/start", "POST /user/connections/complete", "GET /oauth/authorize", "POST /oauth/token", "POST /oauth/consent", "GET /oauth/consent", "POST /oauth/revoke", "/developer/v1/", "POST /developer/apps", "PUT /developer/apps/"} {
 				if _, ok := config.FindRateLimitRule([]string{label}, core.RateLimitRuleAudienceAll, core.RateLimitRuleAudienceAuth); !ok {
 					t.Errorf("no authenticated limit for %s", label)
 				}

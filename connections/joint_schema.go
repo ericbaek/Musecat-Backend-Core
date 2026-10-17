@@ -40,6 +40,6 @@ func EnsureJointSchema(app core.App) error {
 		)
 		c.AddIndex("idx_joint_user_partner", false, "user, partner", "")
 		c.AddIndex("idx_joint_expiry", false, "status, expires", "")
-		return ensureCollection(tx, c)
+		return EnsureLockedCollection(tx, c)
 	})
 }

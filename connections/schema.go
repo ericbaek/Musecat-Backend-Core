@@ -42,7 +42,7 @@ func EnsureSchema(app core.App) error {
 		)
 		account.AddIndex("idx_external_account_identity", true, "issuer, subject", "")
 		account.AddIndex("idx_external_account_user_issuer", true, "user, issuer", "")
-		if err := ensureCollection(tx, account); err != nil {
+		if err := EnsureLockedCollection(tx, account); err != nil {
 			return err
 		}
 		account, err = tx.FindCollectionByNameOrId(Accounts)
@@ -59,7 +59,7 @@ func EnsureSchema(app core.App) error {
 			&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 		)
 		service.AddIndex("idx_external_service_connection", true, "connection, service", "")
-		if err := ensureCollection(tx, service); err != nil {
+		if err := EnsureLockedCollection(tx, service); err != nil {
 			return err
 		}
 		request := core.NewBaseCollection(Requests)
@@ -80,11 +80,13 @@ func EnsureSchema(app core.App) error {
 		request.AddIndex("idx_external_request_state", true, "state_hash", "")
 		request.AddIndex("idx_external_request_user_issuer", true, "user, issuer", "")
 		request.AddIndex("idx_external_request_expires", false, "expires", "")
-		return ensureCollection(tx, request)
+		return EnsureLockedCollection(tx, request)
 	})
 }
 
-func ensureCollection(app core.App, want *core.Collection) error {
+// EnsureLockedCollection creates a locked base collection on a fresh database or verifies
+// that an existing one is compatible (locked rules, identical fields, indexes present).
+func EnsureLockedCollection(app core.App, want *core.Collection) error {
 	got, err := app.FindCollectionByNameOrId(want.Name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return app.Save(want)

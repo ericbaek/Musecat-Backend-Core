@@ -1,6 +1,6 @@
 # Developer Center: self-service partner registration and one-click activation
 
-Status: design, 2026-10-18. Companion to [`partner-integration-spec.md`](partner-integration-spec.md).
+Status: design, 2026-10-18; Phase 1 (Direction A, sections 3–5 minus automated checks and usage) implemented in `partnerapp`. Companion to [`partner-integration-spec.md`](partner-integration-spec.md).
 Goal: a partner that has implemented the spec registers itself, passes automated checks, and goes
 live the moment a Musecat operator presses **Approve**. No per-partner negotiation, no manual
 environment-variable editing, no redeploy.

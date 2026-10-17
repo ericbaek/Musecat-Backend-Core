@@ -183,7 +183,7 @@ func (m *Manager) ListGrants(app core.App, userID string) ([]GrantInfo, error) {
 	for _, r := range rows {
 		name := r.GetString("client")
 		if m != nil {
-			if c, ok := m.clients[name]; ok {
+			if c, ok := m.lookup(name); ok {
 				name = c.Name
 			}
 		}

@@ -11,6 +11,8 @@ servers:
   - url: http://localhost:8090
     description: Local development server
 tags:
+  - name: Developer Center
+    description: Self-service partner application registration and operator approval.
   - name: Meta
     description: Service metadata and helper endpoints.
   - name: Geo
@@ -3157,6 +3159,97 @@ components:
           properties:
             error: {minLength: 1}
             code: {maxLength: 0}
+    PartnerLocalized:
+      type: object
+      properties:
+        ko: {type: string, maxLength: 1024}
+        en: {type: string, maxLength: 1024}
+        ja: {type: string, maxLength: 1024}
+    PartnerOnboardingForm:
+      type: object
+      description: Partner-authored onboarding document (musecat-partner-onboarding/v1). Never contains credentials.
+      required: [spec, partner_id, display_name, contact_email, direction_a]
+      properties:
+        spec: {type: string, enum: [musecat-partner-onboarding/v1]}
+        partner_id: {type: string, pattern: '^[a-z][a-z0-9_-]{0,127}$', description: Immutable after approval; becomes the OAuth client ID.}
+        display_name: {$ref: '#/components/schemas/PartnerLocalized'}
+        description: {$ref: '#/components/schemas/PartnerLocalized'}
+        contact_email: {type: string, format: email}
+        direction_a:
+          type: object
+          required: [redirect_uris]
+          properties:
+            redirect_uris: {type: array, minItems: 1, maxItems: 8, items: {type: string, format: uri}}
+        direction_b:
+          type: object
+          description: Declared now, activated when the records adapter ships.
+          required: [issuer, authorization_url, token_url, userinfo_url, revocation_url, records_url, client_auth_method, identity_scope, services]
+          properties:
+            issuer: {type: string, format: uri}
+            authorization_url: {type: string, format: uri}
+            token_url: {type: string, format: uri}
+            userinfo_url: {type: string, format: uri}
+            revocation_url: {type: string, format: uri}
+            records_url: {type: string, format: uri}
+            client_auth_method: {type: string, enum: [client_secret_basic]}
+            identity_scope: {type: string}
+            services:
+              type: array
+              minItems: 1
+              maxItems: 16
+              items:
+                type: object
+                required: [id, scope]
+                properties:
+                  id: {type: string, description: Canonical service ID from GET /developer/services.}
+                  scope: {type: string}
+        joint:
+          type: object
+          properties:
+            enabled: {type: boolean}
+            manifests: {type: array, items: {type: string, enum: [musecat-joint/v1]}}
+            joint_url: {type: string, format: uri}
+            connect_start_url: {type: string, format: uri}
+            key_rotation_window_hours: {type: integer, minimum: 1, maximum: 168, default: 24}
+    PartnerApplication:
+      type: object
+      description: Safe projection; secret material is never returned. live is true only when an approved form and a generated secret exist and the application is not suspended.
+      required: [id, partner_id, owner, status, live, display_name, description, submitted_form, approved_form, has_secret, review_note, created, updated]
+      properties:
+        id: {type: string}
+        partner_id: {type: string}
+        owner: {type: string}
+        status: {type: string, enum: [draft, submitted, approved, rejected, suspended]}
+        live: {type: boolean}
+        display_name: {$ref: '#/components/schemas/PartnerLocalized'}
+        description: {$ref: '#/components/schemas/PartnerLocalized'}
+        contact_email: {type: string}
+        submitted_form: {$ref: '#/components/schemas/PartnerOnboardingForm'}
+        approved_form:
+          oneOf: [{$ref: '#/components/schemas/PartnerOnboardingForm'}, {type: 'null'}]
+        has_secret: {type: boolean}
+        review_note: {type: string}
+        approved_at: {type: string, format: date-time}
+        created: {type: string, format: date-time}
+        updated: {type: string, format: date-time}
+    PartnerApplicationEvent:
+      type: object
+      required: [id, kind, actor, note, created]
+      properties:
+        id: {type: string}
+        kind: {type: string, enum: [created, updated, submitted, approved, rejected, suspended, reinstated, secret_generated]}
+        actor: {type: string}
+        note: {type: string}
+        created: {type: string, format: date-time}
+    PartnerApplicationList:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/PartnerApplication'}}
+    PartnerReviewInput:
+      type: object
+      properties:
+        note: {type: string, maxLength: 2000}
 paths:
   /search:
     get:
@@ -14624,6 +14717,207 @@ paths:
       description: Requires account:access. Same payload, response and domain checks
         as PUT /user/visit-visibility. Management operations are excluded even for
         staff.
+
+  /developer/services:
+    get:
+      tags: [Developer Center]
+      summary: Public registry of onboarding spec, consent manifests and canonical service IDs
+      responses:
+        '200':
+          description: Registry. Cacheable for one hour.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [spec, manifests, services]
+                properties:
+                  spec: {type: string}
+                  manifests: {type: array, items: {type: string}}
+                  services: {type: array, items: {type: string}}
+  /developer/apps:
+    get:
+      tags: [Developer Center]
+      summary: List the active user's partner applications
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Owned applications. Cache-Control is no-store., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplicationList'}}}}
+        '401': {description: Missing or invalid user authentication.}
+        '403': {description: Withdrawn or banned account.}
+    post:
+      tags: [Developer Center]
+      summary: Create a draft partner application
+      security: [{bearerAuth: []}]
+      description: Validates the form structurally. At most 8 applications per owner. partner_id must not collide with another application or an executable-configured client. Runtime default limit is 30 requests per client IP per 600 seconds.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerOnboardingForm'}}}}
+      responses:
+        '201': {description: Draft created., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '400':
+          description: Malformed body or field errors.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: {type: string, enum: [invalid_form]}
+                  fields: {type: object, additionalProperties: {type: string}}
+        '401': {description: Missing or invalid user authentication.}
+        '403': {description: Withdrawn or banned account.}
+        '409': {description: partner_id_conflict, or invalid_state when the owner limit is reached.}
+        '413': {description: Body exceeds 65536 bytes.}
+        '429': {description: Request rate limit exceeded.}
+  /developer/apps/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [Developer Center]
+      summary: Read an owned partner application
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Application., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '401': {description: Missing or invalid user authentication.}
+        '404': {description: Missing or another user's application.}
+    put:
+      tags: [Developer Center]
+      summary: Replace the submitted form
+      security: [{bearerAuth: []}]
+      description: Returns the application to draft for review; an approved form stays live until the change is approved. partner_id is immutable once approved. Suspended applications cannot be edited.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerOnboardingForm'}}}}
+      responses:
+        '200': {description: Updated draft., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '400': {description: Field errors (see POST /developer/apps).}
+        '404': {description: Missing or another user's application.}
+        '409': {description: partner_id_conflict or invalid_state.}
+  /developer/apps/{id}/submit:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [Developer Center]
+      summary: Submit a draft or rejected application for operator review
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Status is now submitted., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '400': {description: Stored form no longer validates.}
+        '404': {description: Missing or another user's application.}
+        '409': {description: invalid_state.}
+  /developer/apps/{id}/secret:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [Developer Center]
+      summary: Generate (or rotate) the OAuth client secret; plaintext is returned exactly once
+      security: [{bearerAuth: []}]
+      description: Requires an approved, non-suspended application. Only the hash is stored. Rotation changes the registration fingerprint and invalidates existing grants for the client. The registration becomes live immediately on this instance and within one minute on others.
+      responses:
+        '200':
+          description: One-time secret. Cache-Control no-store, Referrer-Policy no-referrer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [client_id, client_secret]
+                properties:
+                  client_id: {type: string}
+                  client_secret: {type: string}
+        '404': {description: Missing or another user's application.}
+        '409': {description: invalid_state.}
+        '503': {description: oauth_not_configured.}
+  /developer/apps/{id}/events:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [Developer Center]
+      summary: Audit timeline of an owned application
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Newest first, at most 100.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/PartnerApplicationEvent'}}
+        '404': {description: Missing or another user's application.}
+  /moderation/developer/apps:
+    get:
+      tags: [Developer Center]
+      summary: Operator queue of partner applications
+      security: [{bearerAuth: []}]
+      description: Requires developer or moderator access. Without a status filter, drafts are excluded.
+      parameters: [{name: status, in: query, required: false, schema: {type: string, enum: [draft, submitted, approved, rejected, suspended]}}]
+      responses:
+        '200': {description: Queue, newest update first., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplicationList'}}}}
+        '401': {description: Missing or invalid user authentication.}
+        '403': {description: Operator access required.}
+  /moderation/developer/apps/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [Developer Center]
+      summary: Inspect any partner application
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Application., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '403': {description: Operator access required.}
+        '404': {description: Application not found.}
+  /moderation/developer/apps/{id}/events:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [Developer Center]
+      summary: Audit timeline of any application
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Events., content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/PartnerApplicationEvent'}}}}}}}
+        '403': {description: Operator access required.}
+  /moderation/developer/apps/{id}/approve:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [Developer Center]
+      summary: Approve the submitted form and activate the OAuth client registration
+      security: [{bearerAuth: []}]
+      description: Copies submitted_form to approved_form, validates the merged client registry before writing, then reloads the live delegation manager. The client serves tokens once the owner generates a secret. A partner_id owned by an executable-configured client cannot be approved.
+      requestBody: {required: false, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerReviewInput'}}}}
+      responses:
+        '200': {description: Approved., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '400': {description: Stored form no longer validates.}
+        '403': {description: Operator access required.}
+        '404': {description: Application not found.}
+        '409': {description: invalid_state (not submitted) or partner_id_conflict.}
+        '503': {description: oauth_not_configured.}
+  /moderation/developer/apps/{id}/reject:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [Developer Center]
+      summary: Reject a submitted application with a note
+      security: [{bearerAuth: []}]
+      requestBody: {required: false, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerReviewInput'}}}}
+      responses:
+        '200': {description: Rejected; a previously approved form stays live., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '403': {description: Operator access required.}
+        '404': {description: Application not found.}
+        '409': {description: invalid_state.}
+  /moderation/developer/apps/{id}/suspend:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [Developer Center]
+      summary: Suspend an application; its OAuth client stops immediately
+      security: [{bearerAuth: []}]
+      requestBody: {required: false, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerReviewInput'}}}}
+      responses:
+        '200': {description: Suspended. Existing tokens fail with 503 temporarily_unavailable., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '403': {description: Operator access required.}
+        '404': {description: Application not found.}
+        '409': {description: invalid_state (already suspended).}
+  /moderation/developer/apps/{id}/reinstate:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [Developer Center]
+      summary: Reinstate a suspended application without issuing a new secret
+      security: [{bearerAuth: []}]
+      description: Returns to approved, or to draft when the owner had edited the form before suspension.
+      requestBody: {required: false, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerReviewInput'}}}}
+      responses:
+        '200': {description: Reinstated., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '403': {description: Operator access required.}
+        '404': {description: Application not found.}
+        '409': {description: invalid_state.}
 
 x-musecat-joint-connection:
   status: server-only-preparation

@@ -23,7 +23,7 @@ func SynchronizeClients(app core.App, m *Manager) error {
 		for _, r := range active {
 			ok := false
 			if m != nil {
-				_, ok = m.clients[r.GetString("client")]
+				_, ok = m.lookup(r.GetString("client"))
 			}
 			if !ok {
 				r.Set("enabled", false)
@@ -36,7 +36,7 @@ func SynchronizeClients(app core.App, m *Manager) error {
 		if m == nil {
 			return nil
 		}
-		for _, c := range m.clients {
+		for _, c := range m.snapshot() {
 			r, e := find(tx, Registrations, "client={:client}", dbx.Params{"client": c.ID})
 			if errors.Is(e, sql.ErrNoRows) {
 				r, e = newRecord(tx, Registrations)
