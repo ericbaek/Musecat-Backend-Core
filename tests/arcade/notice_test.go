@@ -205,6 +205,14 @@ func TestArcadeNotice_SupporterCreateAndAuthorOnlyMutation(t *testing.T) {
 		res.Body.Close()
 	}
 
+	unchanged, err := app.FindRecordById("arcade_notice", noticeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.GetBool("delete") || noticeDocumentText(unchanged.Get("document")) != "**notice**" {
+		t.Fatal("another author changed the notice despite permission denial")
+	}
+
 	if res := executeJSONRequest(t, app, http.MethodPut, "/arcade/notice", string(updateBody), headers); res.StatusCode != http.StatusOK {
 		t.Fatalf("expected author update to succeed, got %d", res.StatusCode)
 	} else {
@@ -258,6 +266,13 @@ func TestArcadeNotice_SupporterRequiresLevel30ForMutations(t *testing.T) {
 				t.Fatalf("expected level 29 %s delete to receive 403, got %d", role, res.StatusCode)
 			}
 			res.Body.Close()
+			unchanged, err := app.FindRecordById("arcade_notice", noticeID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if unchanged.GetBool("delete") || noticeDocumentText(unchanged.Get("document")) != "**notice**" {
+				t.Fatal("ineligible author changed notice after level dropped")
+			}
 		})
 	}
 }
@@ -272,12 +287,20 @@ func TestArcadeNotice_SupporterCannotCreateForOfficialManagedArcade(t *testing.T
 
 	_, official := createAuthUserWithTags(t, app, []string{"arcade_owner"})
 	addOwnedArcade(t, app, official, arcadeID)
-	token, _ := createAuthUserWithTags(t, app, []string{"founding_supporter"})
+	token, supporter := createAuthUserWithTags(t, app, []string{"founding_supporter"})
+	setUserLevel(t, app, supporter.Id, 30)
 	res := executeJSONRequest(t, app, http.MethodPost, "/arcade/notice", string(createNoticeBody(arcadeID)), map[string]string{"Authorization": "Bearer " + token})
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected supporter create on official arcade to be forbidden, got %d", res.StatusCode)
 	}
 	res.Body.Close()
+	records, err := app.FindRecordsByFilter("arcade_notice", "arcade={:arcade}", "", 0, 0, dbx.Params{"arcade": arcadeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 0 {
+		t.Fatal("denied supporter created notice for officially managed arcade")
+	}
 }
 
 func TestArcadeNotice_ModeratorCanMutateAnotherAuthorNotice(t *testing.T) {
@@ -620,4 +643,79 @@ func buildNoticeMultipart(tb testing.TB, arcadeID, message string, files []uploa
 	}
 
 	return buf.Bytes(), writer.FormDataContentType()
+}
+
+func TestArcadeNotice_DeniedRequestsDoNotPersist(t *testing.T) {
+	for _, role := range []string{"", "arcade_owner", "supporter", "founding_supporter"} {
+		t.Run(role, func(t *testing.T) {
+			app := newArcadeTestApp(t)
+			arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{Name: "Protected notice", Address: "1 Test St", Location: location{Lat: 37.5, Lon: 127.0}})
+			tags := []string{}
+			if role != "" {
+				tags = append(tags, role)
+			}
+			token, _ := createAuthUserWithTags(t, app, tags)
+			headers := map[string]string{"Authorization": "Bearer " + token}
+			noticeID := seedNotice(t, app, arcadeID)
+			before, err := app.FindRecordById("arcade_notice", noticeID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, _ := json.Marshal(before.PublicExport())
+			for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+				body := createNoticeBody(arcadeID)
+				if method != http.MethodPost {
+					body, _ = json.Marshal(map[string]any{"id": noticeID, "document": noticeDocument("attacker replacement")})
+				}
+				res := executeJSONRequest(t, app, method, "/arcade/notice", string(body), headers)
+				res.Body.Close()
+				if res.StatusCode != http.StatusForbidden {
+					t.Fatalf("%s: expected 403, got %d", method, res.StatusCode)
+				}
+				records, err := app.FindRecordsByFilter("arcade_notice", "arcade = {:arcade}", "", 0, 0, dbx.Params{"arcade": arcadeID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(records) != 1 {
+					t.Fatalf("%s: denied request persisted a notice (count %d)", method, len(records))
+				}
+				after, _ := json.Marshal(records[0].PublicExport())
+				if !bytes.Equal(original, after) {
+					t.Fatalf("%s: denied request changed persisted notice", method)
+				}
+			}
+		})
+	}
+}
+
+func TestArcadeNotice_MalformedDocumentDoesNotPersist(t *testing.T) {
+	app := newArcadeTestApp(t)
+	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{Name: "Safe notice", Address: "1 Test St", Location: location{Lat: 37.5, Lon: 127.0}})
+	token, _ := createAuthUserWithTags(t, app, []string{"moderator"})
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	noticeID := seedNotice(t, app, arcadeID)
+	before, err := app.FindRecordById("arcade_notice", noticeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, _ := json.Marshal(before.PublicExport())
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		body, _ := json.Marshal(map[string]any{"id": noticeID, "arcade": arcadeID, "document": json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","content":{}}]}`)})
+		res := executeJSONRequest(t, app, method, "/arcade/notice", string(body), headers)
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d", method, res.StatusCode)
+		}
+		records, err := app.FindRecordsByFilter("arcade_notice", "arcade={:arcade}", "", 0, 0, dbx.Params{"arcade": arcadeID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) != 1 {
+			t.Fatalf("%s: unexpected record count %d", method, len(records))
+		}
+		after, _ := json.Marshal(records[0].PublicExport())
+		if !bytes.Equal(original, after) {
+			t.Fatalf("%s: malformed document persisted", method)
+		}
+	}
 }

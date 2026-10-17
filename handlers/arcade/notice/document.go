@@ -6,6 +6,8 @@ import (
 	"html"
 	"regexp"
 	"strings"
+
+	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 )
 
 var (
@@ -26,10 +28,8 @@ func normalizeNoticeDocument(raw json.RawMessage) (map[string]any, error) {
 	if document["type"] != "doc" {
 		return nil, fmt.Errorf("notice document type must be doc")
 	}
-	if content, ok := document["content"]; ok {
-		if _, ok := content.([]any); !ok {
-			return nil, fmt.Errorf("notice document content must be an array")
-		}
+	if err := arcadeinternal.ValidateDocument(document); err != nil {
+		return nil, err
 	}
 	return document, nil
 }

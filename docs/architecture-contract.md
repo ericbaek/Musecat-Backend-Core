@@ -469,6 +469,19 @@ single-record operations do not write arcade changelog or XP rows.
 
 New frontend code MUST NOT reintroduce collection names, PocketBase record rules, collection filters, raw REST pagination, or PocketBase file URL construction as a compatibility layer. Sitemap, changelog timeline, draft list/delete, and photo atom management migrate to these custom routes.
 
+## Rich-text validation and denied notice mutations
+
+Notice authorization denials terminate the handler before any save; the existing
+403 JSON error body is preserved. A denied create, update, or delete never changes
+persisted notice state.
+
+Memo and notice writes validate nested document nodes, marks, text, and attributes
+before persistence. Documents allow extension node names but have a maximum of
+5000 nodes, 64 nested content levels, and 128 total JSON nesting levels; heading levels are integers 1–6 and each node allows at most 32 marks.
+Malformed documents return 400 and do not create revisions or changelog entries.
+Existing immutable history is not rewritten; consumers must validate stored
+snapshots before rendering or editing them.
+
 ## State transitions and transactions
 
 ### Geo and publication

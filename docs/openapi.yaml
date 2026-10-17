@@ -2531,6 +2531,13 @@ components:
         total:
           type: integer
     ArcadeMemoDocument:
+      description: >-
+        Recursive Tiptap document. Nodes and marks require a nonempty string type;
+        text nodes require string text. Present content and marks must be arrays,
+        attrs must be objects, and heading levels must be integers 1 through 6.
+        At most 5000 nodes, 64 nested content levels, and 128 total JSON nesting levels are accepted. Each node allows at most 32 marks. Malformed
+        documents return 400 without saving notices, memo revisions, or history.
+        Extension node and mark names are preserved.
       type: object
       required: [type]
       properties:
