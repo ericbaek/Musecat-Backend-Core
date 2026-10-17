@@ -482,20 +482,25 @@ New frontend code MUST NOT reintroduce collection names, PocketBase record rules
 The lookup is served by the versioned GeoJSON boundaries embedded in the
 application binary, as described in [`docs/offline-geo.md`](offline-geo.md).
 `MUSECAT_GEO_DATA_DIR` is an optional deployment override for an unpacked
-bundle. Both paths resolve country and IANA timezone in-process and never fall
-back to an external provider; a missing or invalid bundle returns the same
+bundle. Valid country and IANA timezone boundaries resolve in-process. A missing
+or invalid country code (including the bundled France/Norway `-99` sentinel)
+uses BigDataCloud, then Nominatim, within an eight-second total budget, keeping
+the offline timezone. Each provider response must have a two-letter uppercase
+country code; invalid responses try the next provider. A missing or invalid bundle returns the same
 `503` dependency failure. City labels come from the local `passport_city`
 GeoNames catalog: after the country lookup, the nearest catalog city is chosen
 deterministically. This deliberately favours a populated Passport over an
 unclassified venue; the country boundary still prevents cross-country labels.
-Offline results do not enter the external HTTP cache; they are read from the
-immutable in-memory bundle on every request.
+Valid offline results do not enter the external HTTP cache; they are read from the
+immutable in-memory bundle on every request. Successful country fallbacks use the
+bounded 24-hour geo cache and coordinate-keyed singleflight; failures are not cached.
 An exact country match takes precedence. If no country contains the coordinate,
 one country exterior boundary within 1,000 metres may resolve a coastline
-approximation gap. Multiple nearby country features, overlapping matches,
-polygon holes, and more distant points remain failures. Timezone and city
-containment continue to use the original coordinate; the request never moves
-the arcade location or falls back to an external provider.
+approximation gap. Country misses beyond that tolerance may use the external
+country fallback. Multiple nearby country features, overlapping matches, and
+missing or ambiguous timezones remain failures. Timezone and city containment
+continue to use the original coordinate; the request never moves the arcade
+location. All external fallback calls happen before the mutation transaction.
 
 ### Cache, XP, and notifications
 

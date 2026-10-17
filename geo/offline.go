@@ -81,6 +81,7 @@ func SetOfflineResolver(resolver *OfflineResolver, required bool) {
 	offlineResolver = resolver
 	offlineRequired = required
 	offlineMu.Unlock()
+	clearLookupCache()
 }
 
 func currentOfflineResolver() (*OfflineResolver, bool, bool) {
@@ -260,6 +261,11 @@ func propertyString(properties map[string]interface{}, keys ...string) string {
 // boundary within 1km to accommodate coastline approximation. Timezone and
 // city lookups always use the original coordinate.
 func (r *OfflineResolver) Resolve(lat, lon float64) (OfflineResult, error) {
+	return r.resolve(lat, lon, false)
+}
+
+// Country misses may be repaired by the caller; timezone ambiguity still fails.
+func (r *OfflineResolver) resolve(lat, lon float64, allowCountryMiss bool) (OfflineResult, error) {
 	if r == nil {
 		return OfflineResult{}, errors.New("offline geo resolver is not configured")
 	}
@@ -279,7 +285,7 @@ func (r *OfflineResolver) Resolve(lat, lon float64) (OfflineResult, error) {
 			}
 		}
 	}
-	if len(country) != 1 {
+	if len(country) != 1 && !(allowCountryMiss && len(country) == 0) {
 		return OfflineResult{}, fmt.Errorf("offline country boundary matched %d features", len(country))
 	}
 	timezone := []boundaryFeature{}
@@ -294,7 +300,10 @@ func (r *OfflineResolver) Resolve(lat, lon float64) (OfflineResult, error) {
 	if _, err := time.LoadLocation(timezone[0].Timezone); err != nil {
 		return OfflineResult{}, fmt.Errorf("offline timezone is invalid: %w", err)
 	}
-	result := OfflineResult{Country: country[0].Country, Timezone: timezone[0].Timezone, CityStatus: "unmapped"}
+	result := OfflineResult{Timezone: timezone[0].Timezone, CityStatus: "unmapped"}
+	if len(country) == 1 {
+		result.Country = country[0].Country
+	}
 	if len(r.cities) == 0 {
 		return result, nil
 	}

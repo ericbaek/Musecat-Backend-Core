@@ -236,6 +236,8 @@ components:
       properties:
         country:
           type: string
+          pattern: '^[A-Z]{2}$'
+          description: ISO 3166-1 alpha-2 country code; missing-data sentinels such as -99 are never returned.
         timezone:
           type: string
     GeocodeCandidate:
@@ -4920,8 +4922,11 @@ paths:
       description: >-
         Resolves the original coordinate using offline country and timezone boundaries.
         A country miss may use a unique exterior boundary within 1000 metres to
-        tolerate coastline approximation; ambiguous countries and missing or ambiguous
-        timezones still fail. The coordinate is not moved. Default per-client-IP limit
+        tolerate coastline approximation. A missing or invalid country code falls back
+        to BigDataCloud, then Nominatim, within an eight-second total budget, retaining
+        the offline timezone. Only successful fallback results are cached for 24 hours.
+        Ambiguous countries, missing or ambiguous timezones, and exhausted country
+        providers still fail. The coordinate is not moved. Default per-client-IP limit
         is 60 requests per 60 seconds, shared by anonymous and authenticated users.
         Operator-configured limits and PocketBase exemptions may override the defaults.
       parameters:

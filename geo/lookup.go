@@ -82,18 +82,23 @@ func clearLookupCache() {
 // LookupCountryAndTimezone returns the ISO 3166-1 alpha-2 country code and IANA timezone name for the given coordinates.
 //
 // The configured offline resolver is used first. Core configures the resolver
-// from the vendored GeoJSON bundle by default; the legacy HTTP providers remain
-// available only to callers that explicitly leave the resolver unconfigured.
+// from the vendored GeoJSON bundle by default. Missing or invalid country codes
+// fall back to HTTP country providers while retaining the offline timezone.
 func LookupCountryAndTimezone(ctx context.Context, lat, lon float64) (Result, error) {
 	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
 		return Result{}, errors.New("invalid coordinates")
 	}
+	var offlineResult *Result
 	if resolver, required, configured := currentOfflineResolver(); configured {
-		resolved, err := resolver.Resolve(lat, lon)
+		resolved, err := resolver.resolve(lat, lon, true)
 		if err != nil {
 			return Result{}, err
 		}
-		return Result{Country: resolved.Country, Timezone: resolved.Timezone, CitySourceID: resolved.CitySourceID, CityStatus: resolved.CityStatus}, nil
+		result := Result{Country: resolved.Country, Timezone: resolved.Timezone, CitySourceID: resolved.CitySourceID, CityStatus: resolved.CityStatus}
+		if validCountryISO(result.Country) {
+			return result, nil
+		}
+		offlineResult = &result
 	} else if required {
 		return Result{}, errors.New("offline geo resolver is required but not configured")
 	}
@@ -107,7 +112,19 @@ func LookupCountryAndTimezone(ctx context.Context, lat, lon float64) (Result, er
 			return cached, nil
 		}
 
-		result, err := lookupCountryAndTimezoneUncached(ctx, lat, lon)
+		var result Result
+		var err error
+		if offlineResult != nil {
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			defer cancel()
+			result = *offlineResult
+			result.Country, err = lookupCountryISO(cctx, lat, lon)
+		} else {
+			result, err = lookupCountryAndTimezoneUncached(ctx, lat, lon)
+		}
 		if err != nil {
 			return Result{}, err
 		}
@@ -144,7 +161,7 @@ func lookupCountryAndTimezoneUncached(ctx context.Context, lat, lon float64) (Re
 	}
 
 	iso, tz = normalizeCountryAndTimezone(iso, tz)
-	if len(iso) != 2 {
+	if !validCountryISO(iso) {
 		return Result{}, errors.New("invalid country result")
 	}
 
@@ -228,7 +245,11 @@ func LookupTimezone(ctx context.Context, lat, lon float64) (string, error) {
 	return tz, nil
 }
 
-// lookupCountryISO queries BigDataCloud reverse-geocode-client for the countryCode.
+func validCountryISO(country string) bool {
+	return len(country) == 2 && country[0] >= 'A' && country[0] <= 'Z' && country[1] >= 'A' && country[1] <= 'Z'
+}
+
+// lookupCountryISO tries BigDataCloud, then Nominatim for a valid country code.
 func lookupCountryISO(ctx context.Context, lat, lon float64) (string, error) {
 	iso, err := lookupCountryISOFromBigDataCloud(ctx, lat, lon)
 	if err == nil {
@@ -274,8 +295,8 @@ func lookupCountryISOFromBigDataCloud(ctx context.Context, lat, lon float64) (st
 		return "", err
 	}
 	iso := strings.ToUpper(strings.TrimSpace(data.CountryCode))
-	if iso == "" {
-		return "", errors.New("countryCode not found")
+	if !validCountryISO(iso) {
+		return "", errors.New("valid countryCode not found")
 	}
 	return iso, nil
 }
@@ -316,7 +337,7 @@ func lookupCountryISOFromNominatim(ctx context.Context, lat, lon float64) (strin
 		return "", err
 	}
 	iso := strings.ToUpper(strings.TrimSpace(data.Address.CountryCode))
-	if iso == "" {
+	if !validCountryISO(iso) {
 		if strings.TrimSpace(data.Error) != "" {
 			return "", fmt.Errorf("country not found: %s", data.Error)
 		}
