@@ -922,11 +922,30 @@ Native changelog identity uses explicit source IDs, including duplicate types.
 Hours PATCH accepts `changes` with only supplied weekday keys (`Monday` through
 `Sunday`) and/or lowercase `note`. Omitted days/note and additional stored fields
 survive. Explicit null means unknown, 499 means closed, and `{start,end}` uses the
-existing HHMM validation, overnight and 24-hour rules. An empty note clears it.
+existing HHMM validation, overnight and 24-hour rules. The note is trimmed before
+comparison and storage, so a whitespace-only edit is a no-op; an empty note clears it.
 An open-hours object updates start/end while retaining additional server-owned
-members of that day. Explicit null/499 deliberately replaces the whole day.
-Unknown future day shapes are returned unchanged and read-only in older apps;
-they are not coerced to unknown or included in "apply to all" operations.
+members of that day only when the stored day is null, 499, or already carries
+numeric `start` and `end`. If the stored day is any other shape, an open-hours
+patch for that day returns 400 `unsupported_day_shape` and writes nothing: v1
+never produces a hybrid object and never silently replaces a shape it cannot
+read. Explicit null/499 deliberately replaces the whole day, including a future
+shape. Unknown future day shapes are returned unchanged and read-only in older
+apps; they are not coerced to unknown or included in "apply to all" operations.
+
+The hours GET and the native hours PATCH verify that the `arcade.hour` revision
+belongs to the requested arcade before exposing or copying it; a mispointed
+relation returns 500 on GET and 502 `hours_unavailable` on PATCH without creating
+a revision. Contacts apply the same ownership check through the shared molecule
+loader.
+
+Every native v1 400 response, including decode and shape failures before the
+transaction, uses the `ErrorResponse` envelope `{"error": code}` so clients read
+one field. Codes are stable identifiers such as `invalid_patch`,
+`revision_and_changes_required`, `revision_and_operations_required`,
+`unsupported_field`, `invalid_note`, `invalid_day_hours`, `unsupported_day_shape`,
+`invalid_contact_id`, `invalid_contact_value`, `invalid_contact_link`,
+`unsupported_contact_type`, and `no_changes`.
 
 Both adapters enforce 409 revision checks inside the existing mutation
 transaction before any record/history/XP changes. No-op writes return 400 without
@@ -937,3 +956,31 @@ the shared Core immutable revision, audit, XP and cache-invalidation pipelines;
 Full adds no alternate implementation or schema migration. Request ceiling remains
 4096 encoded bytes. Core publishes the versioned contract before Full pins it;
 breaking behavior changes require a new version alongside v1.
+
+## Native facility (GTK) v1
+
+`GET|PATCH /native/v1/arcades/{id}/gtk` follows the same session, write-access,
+revision, 4096-byte and error-envelope rules as contacts and hours, with
+`contract_version=1` and `required_capabilities=["gtk.delta.v1"]`. GET binds the
+atoms of the current `arcade.gtk` revision (`id`, `type`, `bool`, `note`, raw
+`meta`) to that revision; atoms whose type is outside the v1 catalog are
+returned unchanged and are read-only in the app. A revision that cannot be
+loaded or belongs to another arcade is never exposed (`gtk_unavailable`).
+
+PATCH is an explicit `add`/`update`/`remove` delta. Omission never deletes:
+untouched atoms, molecule/atom columns this contract does not know, unknown GTK
+types and unknown `meta` members (including inside `geo`) are copied verbatim
+into the new revision. `type` is immutable and unique after removals; an
+unknown type can be kept or explicitly removed but not added or updated.
+`meta` is accepted only for `Parking` and patches only the provided known
+members; `meta: null` clears the whole object and a null member clears that
+member. A stored `meta`/`geo` that is not an object rejects member patches with
+`unsupported_meta_shape` rather than merging or replacing it. Parking values use
+the same catalog, 300 m entrance rule (only when the entrance changes) and
+Korean-only `gov_parking` rule as the web editor and `PUT /arcade/gtk`.
+`bool: false` does not implicitly drop note or meta. Decoding is strict and
+every failure before or inside the transaction returns one `{"error": code}`
+envelope with no revision, history or XP; the full code table and examples are
+in [`native-gtk-v1.md`](native-gtk-v1.md). Success returns
+`{arcade, revision, xp_feedback}`; atom IDs change on every save, so clients
+fetch a fresh snapshot before the next edit.

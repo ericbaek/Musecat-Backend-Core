@@ -41,17 +41,18 @@ func GetNativeSNSV1(e *core.RequestEvent) error {
 
 func PatchNativeSNSV1(e *core.RequestEvent) error {
 	var patch nativeSNSPatch
+	// Decode failures are written exactly once here and never reach the update.
 	if err := arcadeinternal.DecodeNativeEdit(e, &patch); err != nil {
-		return err
+		return arcadeinternal.RespondNativeEditError(e, err)
 	}
 	if patch.Revision == nil || len(patch.Add)+len(patch.Update)+len(patch.Remove) == 0 {
-		return e.BadRequestError("revision_and_operations_required", nil)
+		return arcadeinternal.RespondNativeEditError(e, arcadeinternal.NativeBadRequest("revision_and_operations_required"))
 	}
 	return updateArcadeSNS(e, UpdateArcadeSNSBody{Arcade: e.Request.PathValue("id")}, &patch)
 }
 
 func mergeNativeSNS(app core.App, previous []snsAtomState, patch nativeSNSPatch) ([]SNSAtomInput, error) {
-	invalid := func(code string) error { return &arcadeinternal.NativeEditError{Status: 400, Code: code} }
+	invalid := func(code string) error { return arcadeinternal.NativeBadRequest(code) }
 	indexes := map[string]int{}
 	result := make([]SNSAtomInput, 0, len(previous)+len(patch.Add))
 	for i, a := range previous {
@@ -132,7 +133,7 @@ func mergeNativeSNS(app core.App, previous []snsAtomState, patch nativeSNSPatch)
 // Canonical type/host rules match the web editor; untouched legacy/future types
 // are never revalidated or removed by another contact's edit.
 func normalizeNativeContact(kind, value string) (string, error) {
-	invalid := &arcadeinternal.NativeEditError{Status: 400, Code: "invalid_contact_link"}
+	invalid := arcadeinternal.NativeBadRequest("invalid_contact_link")
 	if kind == "phone" {
 		normalized := arcadeinternal.NormalizePhoneValue(value)
 		digits := strings.TrimPrefix(normalized, "+")
@@ -148,7 +149,7 @@ func normalizeNativeContact(kind, value string) (string, error) {
 	}
 	allowed, ok := hosts[kind]
 	if !ok {
-		return "", &arcadeinternal.NativeEditError{Status: 400, Code: "unsupported_contact_type"}
+		return "", arcadeinternal.NativeBadRequest("unsupported_contact_type")
 	}
 	u, err := url.Parse(value)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || !strings.Contains(u.Hostname(), ".") || u.User != nil {

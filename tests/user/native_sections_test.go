@@ -51,7 +51,9 @@ func TestNativeContactsAndHoursV1(t *testing.T) {
 	request := func(section, method string, body any, status int) map[string]any {
 		t.Helper()
 		var encoded []byte
-		if body != nil {
+		if raw, ok := body.([]byte); ok {
+			encoded = raw
+		} else if body != nil {
 			encoded, _ = json.Marshal(body)
 		}
 		req, err := http.NewRequest(method, server.URL+"/native/v1/arcades/"+arcade.Id+"/"+section, strings.NewReader(string(encoded)))
@@ -69,8 +71,12 @@ func TestNativeContactsAndHoursV1(t *testing.T) {
 		if response.StatusCode != status {
 			t.Fatalf("%s %s got %d want %d: %s", method, section, response.StatusCode, status, data)
 		}
+		// Exactly one JSON document: a handler that keeps running after writing an
+		// error would append a second body here.
 		var out map[string]any
-		_ = json.Unmarshal(data, &out)
+		if err := json.Unmarshal(data, &out); err != nil {
+			t.Fatalf("%s %s %d returned a non-JSON body: %s", method, section, status, data)
+		}
 		return out
 	}
 	patch := func(revision any, changes any) map[string]any {
@@ -83,20 +89,46 @@ func TestNativeContactsAndHoursV1(t *testing.T) {
 		}
 		return n
 	}
+	// Every native 400 uses the documented {error} envelope, including decode failures.
+	rejected := func(section string, body any, code string) {
+		t.Helper()
+		if got := request(section, "PATCH", body, 400)["error"]; got != code {
+			t.Fatalf("%s PATCH error %v want %s", section, got, code)
+		}
+	}
 	// Empty relation tokens are explicit and permit a first save only once.
 	empty := request("hours", "GET", nil, 200)
 	if empty["revision"] != "" {
 		t.Fatal(empty)
 	}
-	request("hours", "PATCH", map[string]any{"changes": map[string]any{"Monday": 499}}, 400)
+	hours, logs, xp := count("arcade_hour"), count("arcade_changelog"), count("user_level_log")
+	rejected("hours", map[string]any{"changes": map[string]any{"Monday": 499}}, "revision_and_changes_required")
+	rejected("hours", patch("", map[string]any{}), "revision_and_changes_required")
+	rejected("hours", []byte(`{"revision":"","changes":{"Monday":499}} {}`), "invalid_patch")
+	rejected("hours", []byte(`{"revision":"","changes":{"Monday":499},"extra":1}`), "invalid_patch")
+	rejected("hours", []byte(`{"revision":"","changes":{"Monday":499}`), "invalid_patch")
+	rejected("hours", []byte(`not json`), "invalid_patch")
+	rejected("hours", patch("", map[string]any{"Monday": 499, "Funday": 499}), "unsupported_field")
+	for _, note := range []any{nil, 5, true, []string{"x"}, map[string]any{"text": "x"}} {
+		rejected("hours", patch("", map[string]any{"note": note}), "invalid_note")
+	}
 	for _, value := range []any{500, map[string]any{"start": 900}, map[string]any{"start": 1260, "end": 2100}, map[string]any{"start": 900, "end": 900}, map[string]any{"start": 900, "end": 2100, "typo": true}} {
-		request("hours", "PATCH", patch("", map[string]any{"Monday": value}), 400)
+		rejected("hours", patch("", map[string]any{"Monday": value}), "invalid_day_hours")
+	}
+	if count("arcade_hour") != hours || count("arcade_changelog") != logs || count("user_level_log") != xp {
+		t.Fatal("rejected hours request wrote state")
 	}
 	request("hours", "PATCH", patch("", map[string]any{"Monday": map[string]int{"start": 2200, "end": 200}, "Tuesday": 499, "Wednesday": nil, "Thursday": map[string]int{"start": 0, "end": 2400}, "note": "Keep this note"}), 200)
 	first := request("hours", "GET", nil, 200)
 	values := first["values"].(map[string]any)
 	if values["Tuesday"] != float64(499) || values["Wednesday"] != nil || first["timezone"] != "Asia/Seoul" {
 		t.Fatal(first)
+	}
+	// A whitespace-only note edit is a no-op: no revision, history, or XP.
+	logs, xp = count("arcade_changelog"), count("user_level_log")
+	rejected("hours", patch(first["revision"], map[string]any{"note": " Keep this note \n"}), "no_changes")
+	if count("arcade_changelog") != logs || count("user_level_log") != xp || request("hours", "GET", nil, 200)["revision"] != first["revision"] {
+		t.Fatal("whitespace-only note edit changed revision/history/XP")
 	}
 	// Simulate server fields and a future day representation unknown to this client.
 	collection, _ := app.FindCollectionByNameOrId("arcade_hour")
@@ -123,17 +155,61 @@ func TestNativeContactsAndHoursV1(t *testing.T) {
 	if current.GetString("future_policy") != "preserve" {
 		t.Fatal("lost future column")
 	}
-	logs, xp := count("arcade_changelog"), count("user_level_log")
-	request("hours", "PATCH", patch(first["revision"], map[string]any{"Friday": nil}), 409)
-	request("hours", "PATCH", patch(after["revision"], map[string]any{"Friday": 499}), 400)
+	logs, xp = count("arcade_changelog"), count("user_level_log")
+	if got := request("hours", "PATCH", patch(first["revision"], map[string]any{"Friday": nil}), 409)["error"]; got != "revision_conflict" {
+		t.Fatal(got)
+	}
+	rejected("hours", patch(after["revision"], map[string]any{"Friday": 499}), "no_changes")
+	// An open-time patch on a future day shape fails closed: neither a hybrid
+	// object nor a silent replacement. Explicit null/499 remain deliberate replacements.
+	rejected("hours", patch(after["revision"], map[string]any{"Sunday": map[string]int{"start": 1000, "end": 1800}}), "unsupported_day_shape")
+	rejected("hours", patch(after["revision"], map[string]any{"Sunday": map[string]int{"start": 1000, "end": 1800}, "Friday": nil}), "unsupported_day_shape")
 	if count("arcade_changelog") != logs || count("user_level_log") != xp {
 		t.Fatal("failed hours write changed history/XP")
 	}
-	request("hours", "PATCH", patch(after["revision"], map[string]any{"Monday": map[string]int{"start": 2100, "end": 200}, "Tuesday": nil, "note": ""}), 200)
+	if got := request("hours", "GET", nil, 200)["values"].(map[string]any)["Sunday"].(map[string]any); got["start"] != nil || got["intervals"] == nil {
+		t.Fatal("future day shape was altered by a rejected patch")
+	}
+	request("hours", "PATCH", patch(after["revision"], map[string]any{"Monday": map[string]int{"start": 2100, "end": 200}, "Tuesday": nil, "Sunday": 499, "note": ""}), 200)
 	after = request("hours", "GET", nil, 200)
 	values = after["values"].(map[string]any)
-	if values["note"] != "" || values["Tuesday"] != nil || values["Monday"].(map[string]any)["breaks"] == nil {
+	if values["note"] != "" || values["Tuesday"] != nil || values["Sunday"] != float64(499) || values["Monday"].(map[string]any)["breaks"] == nil {
 		t.Fatal("clear/forward-compatible object patch failed")
+	}
+	request("hours", "PATCH", patch(after["revision"], map[string]any{"Sunday": map[string]int{"start": 1000, "end": 1800}, "note": "  Trimmed note \t"}), 200)
+	after = request("hours", "GET", nil, 200)
+	values = after["values"].(map[string]any)
+	if values["note"] != "Trimmed note" || !reflect.DeepEqual(values["Sunday"], map[string]any{"start": float64(1000), "end": float64(1800)}) {
+		t.Fatal("closed day reopen or note trim failed")
+	}
+	// A hour revision pointing at another arcade is neither exposed nor copied.
+	other := seedVisitArcade(t, app, "Asia/Seoul")
+	foreign := core.NewRecord(collection)
+	foreign.Set("arcade", other.Id)
+	foreign.Set("Monday", 499)
+	foreign.Set("Note", "foreign")
+	if err = app.Save(foreign); err != nil {
+		t.Fatal(err)
+	}
+	arcade, _ = app.FindRecordById("arcade", arcade.Id)
+	arcade.Set("hour", foreign.Id)
+	if err = app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+	hours, logs, xp = count("arcade_hour"), count("arcade_changelog"), count("user_level_log")
+	request("hours", "GET", nil, 500)
+	if got := request("hours", "PATCH", patch(foreign.Id, map[string]any{"Friday": 499}), 502)["error"]; got != "hours_unavailable" {
+		t.Fatal(got)
+	}
+	if count("arcade_changelog") != logs || count("user_level_log") != xp || count("arcade_hour") != hours {
+		t.Fatal("mispointed hour revision was copied into a new revision")
+	}
+	arcade.Set("hour", after["revision"])
+	if err = app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+	if request("hours", "GET", nil, 200)["revision"] != after["revision"] {
+		t.Fatal("hour relation restore failed")
 	}
 	// Contacts use explicit identities and operations, never an entire replacement list.
 	request("contacts", "PATCH", map[string]any{"revision": "", "add": []any{map[string]any{"type": "phone", "link": "+82 (10) 1234-5678", "name": "Main"}, map[string]any{"type": "website", "link": "https://example.com", "name": "Site"}}}, 200)
@@ -190,13 +266,44 @@ func TestNativeContactsAndHoursV1(t *testing.T) {
 			t.Fatal("future contact lost")
 		}
 	}
-	logs, xp = count("arcade_changelog"), count("user_level_log")
-	request("contacts", "PATCH", map[string]any{"revision": revision, "remove": []string{phoneID}}, 409)
-	for _, change := range []map[string]any{{"link": "javascript:alert(1)"}, {"link": nil}, {"type": "website"}} {
-		request("contacts", "PATCH", map[string]any{"revision": contacts["revision"], "update": []any{map[string]any{"id": phoneID, "changes": change}}}, 400)
+	// A phone link update stores the normalized phone value and clears link.
+	request("contacts", "PATCH", map[string]any{"revision": contacts["revision"], "update": []any{map[string]any{"id": phoneID, "changes": map[string]any{"link": " +82 (10) 9999-8888 "}}}}, 200)
+	contacts = request("contacts", "GET", nil, 200)
+	phoneSeen := false
+	for _, raw := range contacts["items"].([]any) {
+		item := raw.(map[string]any)
+		if item["type"] != "phone" {
+			continue
+		}
+		phoneSeen = true
+		phoneID = item["id"].(string)
+		rec, _ := app.FindRecordById("arcade_sns_atoms", phoneID)
+		if item["link"] != "+821099998888" || item["name"] != "Renamed" || rec.GetString("phone") != "+821099998888" || rec.GetString("link") != "" || rec.GetString("future_policy") != "phone metadata" {
+			t.Fatalf("phone link update failed: %v phone=%q link=%q", item, rec.GetString("phone"), rec.GetString("link"))
+		}
 	}
-	request("contacts", "PATCH", map[string]any{"revision": contacts["revision"], "remove": []string{phoneID, phoneID}}, 400)
-	if count("arcade_changelog") != logs || count("user_level_log") != xp {
+	if !phoneSeen || len(contacts["items"].([]any)) != 3 {
+		t.Fatal(contacts)
+	}
+	logs, xp = count("arcade_changelog"), count("user_level_log")
+	if got := request("contacts", "PATCH", map[string]any{"revision": revision, "remove": []string{phoneID}}, 409)["error"]; got != "revision_conflict" {
+		t.Fatal(got)
+	}
+	for change, code := range map[string]string{`{"link":"javascript:alert(1)"}`: "invalid_contact_link", `{"link":"12345"}`: "invalid_contact_link", `{"link":null}`: "invalid_contact_value", `{"name":7}`: "invalid_contact_value", `{"type":"website"}`: "unsupported_field", `{}`: "invalid_contact_id"} {
+		rejected("contacts", []byte(`{"revision":"`+contacts["revision"].(string)+`","update":[{"id":"`+phoneID+`","changes":`+change+`}]}`), code)
+	}
+	rejected("contacts", map[string]any{"revision": contacts["revision"], "remove": []string{phoneID, phoneID}}, "invalid_contact_id")
+	rejected("contacts", map[string]any{"revision": contacts["revision"], "remove": []string{"missing"}}, "invalid_contact_id")
+	rejected("contacts", map[string]any{"revision": contacts["revision"]}, "revision_and_operations_required")
+	rejected("contacts", map[string]any{"add": []any{map[string]any{"type": "website", "link": "https://example.org"}}}, "revision_and_operations_required")
+	rejected("contacts", []byte(`{"revision":"`+contacts["revision"].(string)+`","remove":["`+phoneID+`"]} {}`), "invalid_patch")
+	rejected("contacts", []byte(`{"revision":"`+contacts["revision"].(string)+`","add":[{"type":"website","link":"https://example.org","extra":1}]}`), "invalid_patch")
+	rejected("contacts", []byte(`{"revision":"`+contacts["revision"].(string)+`","remove":["`+phoneID+`"]`), "invalid_patch")
+	// Native v1 cannot create a type it does not know, even when the schema already allows it.
+	rejected("contacts", map[string]any{"revision": contacts["revision"], "add": []any{map[string]any{"type": "future_messenger", "link": "https://future.example.com"}}}, "unsupported_contact_type")
+	rejected("contacts", map[string]any{"revision": contacts["revision"], "add": []any{map[string]any{"type": "instagram", "link": "https://example.com/profile"}}}, "invalid_contact_link")
+	rejected("contacts", map[string]any{"revision": contacts["revision"], "add": []any{map[string]any{"type": "phone", "link": "12"}}}, "invalid_contact_link")
+	if count("arcade_changelog") != logs || count("user_level_log") != xp || request("contacts", "GET", nil, 200)["revision"] != contacts["revision"] {
 		t.Fatal("failed contact write changed history/XP")
 	}
 	request("contacts", "PATCH", map[string]any{"revision": contacts["revision"], "remove": []string{phoneID}}, 200)

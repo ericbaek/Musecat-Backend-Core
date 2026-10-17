@@ -78,6 +78,24 @@ components:
             start: {type: integer, minimum: 0, maximum: 2359}
             end: {type: integer, minimum: 0, maximum: 2400}
       description: Minutes must be less than 60. Overnight start greater than end is valid; equal nonzero times are invalid. 00:00–00:00 and 00:00–24:00 mean all day.
+    NativeGTKParkingMetaPatch:
+      nullable: true
+      type: object
+      additionalProperties: false
+      description: Parking-only metadata delta. Only provided members change; omitted and unknown stored members (including inside geo) are preserved. The whole value null clears every member; a null member clears that member.
+      properties:
+        geo:
+          nullable: true
+          type: object
+          additionalProperties: false
+          required: [lat, lon]
+          properties:
+            lat: {type: number, minimum: -90, maximum: 90}
+            lon: {type: number, minimum: -180, maximum: 180}
+        availability: {nullable: true, type: string, enum: [always_plenty, somewhat_plenty, somewhat_difficult, difficult]}
+        options: {nullable: true, type: array, uniqueItems: true, items: {type: string, enum: [free_parking_lot, paid_parking_lot, free_street_parking, paid_street_parking]}}
+        ev_charging: {nullable: true, type: boolean}
+        gov_parking: {nullable: true, type: boolean, description: Settable only when the arcade country is Korean; null clears anywhere.}
     NativeCredentials:
       type: object
       required: [access_token, refresh_token, expires_in, user_id]
@@ -8119,7 +8137,7 @@ paths:
       tags: [Arcade Mutations]
       summary: Native v1 conditional contacts edit
       security: [{nativeBearer: []}]
-      description: Maximum 4096 encoded bytes. Explicit add/update/remove operations; untouched items and unknown stored fields survive. IDs must belong to the base revision and may occur in only one operation. New/changed links use web type/host rules. At least one operation is required. Revision is checked atomically; a successful save requires a fresh GET before the next edit.
+      description: Maximum 4096 encoded bytes. Explicit add/update/remove operations; untouched items and unknown stored fields survive. IDs must belong to the base revision and may occur in only one operation. New/changed links use web type/host rules; a new item with a type outside the v1 enum is rejected with unsupported_contact_type. At least one operation is required. Revision is checked atomically; a successful save requires a fresh GET before the next edit. Every 400 uses the ErrorResponse envelope with a stable code in `error`.
       requestBody:
         required: true
         content:
@@ -8168,12 +8186,17 @@ paths:
                   arcade: {type: string}
                   revision: {type: string}
                   xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
-        '400': {description: Invalid input or no effective changes.}
+        '400':
+          description: Invalid input or no effective changes. `error` is one of invalid_patch, revision_and_operations_required, invalid_contact_id, unsupported_field, invalid_contact_value, invalid_contact_link, unsupported_contact_type, no_changes.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '401': {description: Native session required.}
         '403': {description: Account or arcade write access denied.}
         '409': {description: Stale revision; preserve draft and explicitly reload.}
         '413': {description: Request exceeds 4096 encoded bytes.}
-        '502': {description: Aggregate load or persistence failure.}
+        '502':
+          description: Aggregate load or persistence failure, including a base revision that does not belong to this arcade.
   /native/v1/arcades/{id}/hours:
     parameters:
       - {in: path, name: id, required: true, schema: {type: string}}
@@ -8212,12 +8235,13 @@ paths:
         '401': {description: Native session required.}
         '403': {description: Account or arcade write access denied.}
         '404': {description: Arcade not found.}
-        '500': {description: Section revision unavailable.}
+        '500':
+          description: Section revision unavailable, including a revision that does not belong to this arcade.
     patch:
       tags: [Arcade Mutations]
       summary: Native v1 conditional hours edit
       security: [{nativeBearer: []}]
-      description: Maximum 4096 encoded bytes. Only supplied days/note change. Null means unknown; 499 means closed; start/end are HHMM with overnight support. Empty note clears. Omitted and future fields survive; an open-hours object preserves extra existing members. Null/499 intentionally replace the entire day. Revision is checked atomically; a successful save requires a fresh GET before the next edit.
+      description: Maximum 4096 encoded bytes. Only supplied days/note change. Null means unknown; 499 means closed; start/end are HHMM with overnight support. Note is trimmed; a whitespace-only change is a no-op and empty note clears. Omitted and future fields survive. An open-hours object preserves extra existing members only when the stored day is null, 499, or already has numeric start/end; any other stored shape rejects an open-hours patch with unsupported_day_shape instead of merging or replacing it. Null/499 intentionally replace the entire day. Revision is checked atomically; a successful save requires a fresh GET before the next edit. Every 400 uses the ErrorResponse envelope with a stable code in `error`.
       requestBody:
         required: true
         content:
@@ -8253,12 +8277,144 @@ paths:
                   arcade: {type: string}
                   revision: {type: string}
                   xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
-        '400': {description: Invalid input or no effective changes.}
+        '400':
+          description: Invalid input or no effective changes. `error` is one of invalid_patch, revision_and_changes_required, unsupported_field, invalid_note, invalid_day_hours, unsupported_day_shape, no_changes.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '401': {description: Native session required.}
         '403': {description: Account or arcade write access denied.}
         '409': {description: Stale revision; preserve draft and explicitly reload.}
         '413': {description: Request exceeds 4096 encoded bytes.}
-        '502': {description: Aggregate load or persistence failure.}
+        '502':
+          description: Aggregate load or persistence failure, including a base revision that does not belong to this arcade (`hours_unavailable`).
+  /native/v1/arcades/{id}/gtk:
+    parameters:
+      - {in: path, name: id, required: true, schema: {type: string}}
+    get:
+      tags: [Arcade Mutations]
+      summary: Native v1 facility (GTK) edit snapshot
+      security: [{nativeBearer: []}]
+      description: Active native session and arcade write permission required. Empty revision denotes an absent section. Items are the atoms of exactly that revision; `meta` is the stored JSON value as-is (object or null) so unknown members survive. Items with a type outside the v1 catalog are returned unchanged and must be rendered read-only. Unknown optional members are tolerated; unsupported required capabilities block editing. Detailed rules are in docs/native-gtk-v1.md.
+      responses:
+        '200':
+          description: Immutable edit snapshot; no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [contract_version, required_capabilities, arcade, revision, items]
+                properties:
+                  contract_version: {type: integer, enum: [1]}
+                  required_capabilities: {type: array, items: {type: string}, example: [gtk.delta.v1]}
+                  arcade: {type: string}
+                  revision: {type: string}
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, type, bool, note, meta]
+                      properties:
+                        id: {type: string, description: Atom ID in this immutable revision; changes on every save.}
+                        type: {type: string}
+                        bool: {type: boolean}
+                        note: {type: string}
+                        meta: {nullable: true, description: Stored Parking metadata object as-is, or null.}
+        '401': {description: Native session required.}
+        '403':
+          description: Account or arcade write access denied (`arcade_write_forbidden`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade not found (`arcade_not_found`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: Section revision unavailable, including a revision that does not belong to this arcade (`gtk_unavailable`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    patch:
+      tags: [Arcade Mutations]
+      summary: Native v1 conditional facility (GTK) edit
+      security: [{nativeBearer: []}]
+      description: Maximum 4096 encoded bytes. Explicit add/update/remove operations; omission never deletes, and untouched atoms, unknown stored columns, unknown GTK types and unknown `meta` members (including inside `geo`) survive. IDs must belong to the base revision and may occur in only one operation. Type is immutable; a type change is remove plus add, and `add` may re-create a type the same request removes. A type that would still exist after removals, or a type repeated inside `add`, is `duplicate_gtk_type`. `meta` is allowed only for `Parking` and patches only the provided known members (`geo`, `availability`, `options`, `ev_charging`, `gov_parking`); a null `meta` clears the whole object and a null member clears that member. A changed entrance must be within 300 m of the arcade's basic location; `gov_parking` is settable only for Korean arcades. Setting `bool` to false does not implicitly drop note or meta. Revision is checked atomically; a successful save requires a fresh GET before the next edit because atom IDs change. Every 400 uses the ErrorResponse envelope with a stable code in `error`. Detailed rules are in docs/native-gtk-v1.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [revision]
+              properties:
+                revision: {type: string, description: Must be present; empty only for first save.}
+                add:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [type, bool]
+                    properties:
+                      type: {type: string, enum: [Basket, FreeGloves, FreeSlipper, FreeWater, FreeDrumStick, FreeBachi, FreeWifi, Locker, Toilet, AC, Fan, Refrigerator, PowerOutlet, SellGloves, SellDrumStick, SellBachi, SellSlipper, SellDrink, SellFood, SellAmusementIC, SellAMPASS, Parking, SmokingRoom, ATM, SeatingArea]}
+                      bool: {type: boolean}
+                      note: {type: string, description: Trimmed before storage.}
+                      meta: {$ref: '#/components/schemas/NativeGTKParkingMetaPatch'}
+                update:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [id, changes]
+                    properties:
+                      id: {type: string}
+                      changes:
+                        type: object
+                        additionalProperties: false
+                        minProperties: 1
+                        properties:
+                          bool: {type: boolean}
+                          note: {type: string, description: Trimmed; empty string clears.}
+                          meta: {$ref: '#/components/schemas/NativeGTKParkingMetaPatch'}
+                remove: {type: array, uniqueItems: true, items: {type: string}}
+      responses:
+        '200':
+          description: Saved atomically with the existing gtk_diff history and XP policy.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, revision, xp_feedback]
+                properties:
+                  arcade: {type: string}
+                  revision: {type: string}
+                  xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
+        '400':
+          description: Invalid input or no effective changes. `error` is one of invalid_patch, revision_and_operations_required, unsupported_gtk_type, duplicate_gtk_type, invalid_gtk_id, unsupported_field, invalid_gtk_value, meta_not_allowed, invalid_parking_geo, invalid_parking_availability, invalid_parking_options, invalid_parking_flag, gov_parking_not_available, parking_geo_too_far, unsupported_meta_shape, no_changes.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401': {description: Native session required.}
+        '403':
+          description: Account or arcade write access denied (`arcade_write_forbidden`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade not found (`arcade_not_found`).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Stale revision (`revision_conflict`); preserve draft and explicitly reload.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '413': {description: Request exceeds 4096 encoded bytes.}
+        '502':
+          description: Aggregate load or persistence failure, including a base revision that does not belong to this arcade (`gtk_unavailable`).
   /native/v1/arcades/{id}/basic:
     parameters:
       - {in: path, name: id, required: true, schema: {type: string}}

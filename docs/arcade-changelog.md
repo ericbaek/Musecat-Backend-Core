@@ -426,7 +426,22 @@ preserved; city recalculation on an address/location edit follows the web policy
 Native contacts deltas reuse `sns_diff`; source atom IDs determine matches so
 same-type contacts cannot exchange attribution. Explicit removals create deleted
 items. Unknown untouched items remain unchanged. Native hours patches reuse
-`hour_diff` with only the supplied day/note fields marked provided. Both create
-one immutable section revision and one changelog row for a successful change.
-Stale, invalid and no-op requests create no revisions, history or XP. Web PUT
-replacement behavior remains unchanged.
+`hour_diff` with only the supplied day/note fields marked provided. The native
+note is trimmed before comparison, matching the snapshot writer, so a
+whitespace-only note edit is a no-op rather than an "unchanged" history row.
+An open-hours patch on a stored day shape without numeric start/end is rejected
+before any write. Both create one immutable section revision and one changelog
+row for a successful change. Stale, invalid and no-op requests create no
+revisions, history or XP. Web PUT replacement behavior remains unchanged.
+
+### Native facility (GTK) v1
+
+`PATCH /native/v1/arcades/{id}/gtk` reuses `gtk_diff` through the shared
+`arcade.gtk` repoint. Items are matched by explicit source atom ID: untouched
+atoms (including unknown types and columns) log `unchanged`, updates log
+`updated` with `prev_id`, adds log `added`, and explicit removals log `deleted`
+with the previous value embedded. A remove plus add of the same type in one
+request logs one `deleted` and one `added` item. Each successful change creates
+one immutable `arcade_gtk` revision, copies every kept atom into it, writes one
+changelog row and grants the existing `gtk` edit XP for public arcades. Stale,
+invalid and no-op requests create no revisions, history or XP.

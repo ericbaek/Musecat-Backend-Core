@@ -209,6 +209,11 @@ func updateArcadeHour(re *core.RequestEvent, body UpdateArcadeHourBody, patch *n
 			if err != nil {
 				return fmt.Errorf("failed to load previous arcade_hour: %w", err)
 			}
+			// The native patch copies the whole previous revision, so a mispointed
+			// relation must never be used as its source.
+			if patch != nil && prevHourRec.GetString("arcade") != arcadeRec.Id {
+				return &arcadeinternal.NativeEditError{Status: http.StatusBadGateway, Code: "hours_unavailable"}
+			}
 		}
 
 		// 새 arcade_hour 레코드를 생성한다. 이 레코드가 이번 요청의 결과값이 된다.
