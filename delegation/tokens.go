@@ -133,7 +133,7 @@ func (m *Manager) ResolveAccess(app core.App, raw, scope string) (*core.Record, 
 	if e != nil {
 		return nil, "", invalid
 	}
-	if !contains(row.GetStringSlice("scopes"), scope) {
+	if !contains(row.GetStringSlice("scopes"), scope) && !contains(row.GetStringSlice("scopes"), AccountAccess) {
 		return nil, "", &OAuthError{Code: "insufficient_scope", Status: 403}
 	}
 	return u, grant.GetString("subject"), nil

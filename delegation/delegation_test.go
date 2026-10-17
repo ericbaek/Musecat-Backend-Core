@@ -41,7 +41,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{t: t, app: testutil.NewTestApp(t)}
 	var e error
-	f.m, e = delegation.NewManager("https://api.musecat.example", "https://musecat.example/oauth/authorize", []delegation.Client{{ID: "chuniinfo", Name: "CHUNITHM Info", Secret: secret, RedirectURIs: []string{callback}, Scopes: allScopes}, {ID: "noslog", Name: "NosLog", Secret: secret + "2", RedirectURIs: []string{"https://noslog.example/callback"}, Scopes: allScopes}}, user.CheckActiveUser)
+	f.m, e = delegation.NewManager("https://api.musecat.example", "https://musecat.example/oauth/authorize", []delegation.Client{{ID: "chuniinfo", Name: "CHUNITHM Info", Secret: secret, RedirectURIs: []string{callback}, Scopes: allScopes}, {ID: "noslog", Name: "NosLog", Secret: secret + "2", RedirectURIs: []string{"https://noslog.example/callback"}, Scopes: allScopes}, {ID: "accountapp", Name: "Account App", Secret: secret + "3", RedirectURIs: []string{callback}, Scopes: []string{delegation.AccountAccess}}}, user.CheckActiveUser)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -55,6 +55,7 @@ func newFixture(t *testing.T) *fixture {
 	se := &core.ServeEvent{App: f.app, Router: r}
 	coreapp.RegisterAPIRoutes(se)
 	dh.RegisterRoutes(se, f.m)
+	coreapp.RegisterAccountDelegationRoutes(se, f.m)
 	f.mux, e = r.BuildMux()
 	if e != nil {
 		t.Fatal(e)

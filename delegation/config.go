@@ -24,9 +24,11 @@ const (
 	Codes         = "oauth_authorization_code"
 	Tokens        = "oauth_delegated_token"
 	AccessSeconds = 600
+	AccountAccess = "account:access"
 )
 
 var scopeLabels = map[string]string{
+	AccountAccess:  "Connect your account for general user features; management and security settings excluded",
 	"profile:read": "Read your basic profile", "arcade:read": "Read public arcade information",
 	"arcade:report:create": "Create arcade fault reports", "arcade:report:react": "React to arcade fault reports",
 	"campaign:read": "Read arcade campaigns", "campaign:respond": "Submit location-based campaign responses",

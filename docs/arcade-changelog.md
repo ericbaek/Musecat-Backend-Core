@@ -406,3 +406,9 @@ domain handlers with the verified Musecat user. They preserve the same transacti
 behavior. Delegation itself creates no arcade changelog row. Campaign responses retain the existing
 game-change rows and GPS/eligibility rules; report/reaction activity remains outside the changelog
 category set. The OAuth client is never substituted for `by` or supplied as a caller-selected user ID.
+
+The `account:access` transport at `/developer/v1/account` reuses the original general-user mutation
+handlers, including information edits, photo upload/application and rollback. The same atomic aggregate,
+immutable changelog, XP and cache-invalidation rules apply; no separate partner history or XP path exists.
+Management operations remain excluded even for connected staff accounts. Request-attempt logs include
+the verified user and app-specific delegation subject, but do not replace committed changelog history.

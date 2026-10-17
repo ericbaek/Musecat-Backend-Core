@@ -856,7 +856,7 @@ to the fixed Musecat consent application. The first authenticated consent read b
 the current user and exact session token. The decision repeats active-account/session validation
 inside the transaction and accepts only a nonempty subset of requested permissions. Denial leaves
 an existing approval unchanged; approval replaces scopes and invalidates the previous grant generation.
-WebCore owns the consent UI/BFF at `/{locale}/oauth/authorize`, with explicit permission selection,
+WebCore owns the consent UI/BFF at `/{locale}/oauth/authorize`, with a bullet permission summary and one explicit connection approval,
 same-origin CSRF protection, no-referrer, no-store and frame/analytics protection. Deploy and configure
 that HTTPS page before enabling clients. The API parses a bounded JSON snapshot because PocketBase's
 rewindable HTTP body can return data and EOF together; strict trailing-data checks must not reread it.
@@ -872,13 +872,37 @@ before PocketBase activity logging; ingress logs require corresponding operator 
 Delegated bearer tokens work only on the explicitly mapped `/developer/v1/*` surface. The resource
 boundary resolves the current grant, registration epoch, expiry, account token-key fingerprint,
 active account and required scope before assigning the verified actor to an existing domain handler.
+The primary `account:access` scope maps the explicit general-user allowlist (currently 83 method/path
+pairs) into `/developer/v1/account`, reusing the original route registrations and domain guards.
+Management/moderation routes are rejected even for a staff actor; signup, withdrawal, credential
+changes, other-app authorization, reverse account linking and raw PocketBase routes are excluded.
+Unlisted/new operations fail closed. Legacy narrow scopes do not permit the account namespace;
+existing grants never broaden automatically. Omitted scopes default to account access only for a
+registered client that already permits that scope. Client changes invalidate grants for reapproval.
+Mutating account request attempts log the user, app-specific subject, method and path without
+bodies or credentials; committed domain history remains the authority for successful mutations.
 No delegated token is converted to a Musecat JWT. Public/closed/private visibility, ownership, staff
 checks, GPS eligibility, immutable history and XP rules remain in those handlers. In-flight accepted
-requests can finish after revocation; subsequent requests fail. Basic profile reads expose only the
-client-specific stable subject, username and nickname, without email, credentials or roles.
+requests can finish after revocation; subsequent requests fail. The legacy `/developer/v1/me` identity endpoint exposes only the
+client-specific stable subject, username and nickname, without email, credentials or roles. The account namespace retains each documented domain
+projection, including normal profile resource IDs; these are distinct from the app-specific subject.
 
 Users revoke only their own grants, including apps absent from current configuration. Revocation
 also cancels their bound pending requests. Withdrawal deletes grants, codes, tokens and bound requests
 in its existing transaction; a password/account-key reset invalidates every old delegated token.
 Core's migration creates only fresh schema. Full must apply its independent guarded forward migration
 to existing installations and pin this Core revision. Both executables register bounded expiry cleanup.
+
+## Reciprocal connection orchestration preparation
+
+`external_joint_connection` is a locked server-only coordination ledger owned by `connections`.
+It binds a current Musecat session, trusted partner/client/provider/service mapping and already
+verified partner subject. Confirmations require a redeemed live account-access grant generation
+for that user/client and the same user's matching private external service connection revision.
+Only both verified directions yield connected metadata. Live status rechecks grant revocation,
+client epoch, account key/restrictions, configuration and connection revision; incomplete requests
+expire after five minutes. This metadata never grants resource access. Withdrawal clears it.
+`Cancel` cancels orchestration only, preserving independently approved grants. No public route,
+receipt verifier, joint consent/token issuance, automatic remote revoke or runtime wiring is enabled.
+Core supplies fresh bootstrap schema; Full owns its guarded forward migration and must pin Core.
+See [joint connections](joint-connections.md) for the proposed bilateral protocol and ship gates.

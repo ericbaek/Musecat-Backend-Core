@@ -131,7 +131,7 @@ func ensureCollection(app core.App, want *core.Collection) error {
 
 // DeleteUserData must run in the caller's account-withdrawal transaction.
 func DeleteUserData(app core.App, userID string) error {
-	for _, name := range []string{Requests, Accounts} {
+	for _, name := range []string{JointAttempts, Requests, Accounts} {
 		rows, err := app.FindRecordsByFilter(name, "user = {:user}", "", 0, 0, dbx.Params{"user": userID})
 		if err != nil {
 			return err

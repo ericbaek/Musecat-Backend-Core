@@ -18,6 +18,7 @@ import (
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
+	"github.com/pocketbase/pocketbase/tools/router"
 	"github.com/pocketbase/pocketbase/tools/types"
 
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
@@ -52,10 +53,13 @@ type postInput struct {
 	Photos     []*filesystem.File `json:"-"`
 }
 
-func RegisterRoutes(se *core.ServeEvent) {
-	se.Router.GET("/community/posts", ListPosts)
-	se.Router.GET("/community/post", GetPost)
-	auth := se.Router.Group("/community").Bind(
+func RegisterRoutes(se *core.ServeEvent) { RegisterAccountRoutes(se.Router.RouterGroup) }
+
+// RegisterAccountRoutes shares the same guards and body limits on both transports.
+func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
+	api.GET("/community/posts", ListPosts)
+	api.GET("/community/post", GetPost)
+	auth := api.Group("/community").Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)

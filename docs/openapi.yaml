@@ -41,6 +41,7 @@ components:
           tokenUrl: "/oauth/token"
           refreshUrl: "/oauth/token"
           scopes:
+            account:access: General user features on behalf of the account; management and account-security operations excluded
             profile:read: Read your basic profile
             arcade:read: Read public arcade information
             arcade:report:create: Create fault reports
@@ -8355,9 +8356,9 @@ paths:
           - code
       - name: scope
         in: query
-        required: true
+        required: false
         schema:
-          description: Space-separated registered scopes.
+          description: 'Space-separated registered scopes. Send account:access for new clients. Omitted/empty defaults to account:access only if registered for that client; otherwise invalid_scope.'
           type: string
       - name: state
         in: query
@@ -9779,3 +9780,4855 @@ paths:
                 "$ref": "#/components/schemas/ErrorResponse"
         '429':
           description: Rate limited.
+  /developer/v1/account/arcade/draft:
+    delete:
+      tags:
+      - Connected account
+      summary: "/arcade/draft"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as DELETE /arcade/draft. Management operations are excluded even for staff.
+
+        Deletes only the authenticated creator's private draft. Published arcade history is never deleted by this endpoint.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Draft deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - deleted
+                properties:
+                  id:
+                    type: string
+                  deleted:
+                    type: boolean
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Caller is not the draft creator.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Draft not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '409':
+          description: Published arcades cannot be deleted.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/draft"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/draft. Management operations are excluded even for staff.
+
+        Reads a private draft only for its creator or a `developer|moderator`. Public records are intentionally rejected; clients use `/arcade` for public reads.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Arcade metadata with the same shape as `GET /arcade`.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeValueResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '404':
+          description: Arcade does not exist or is not accessible as a draft.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/notice:
+    delete:
+      tags:
+      - Connected account
+      summary: "/arcade/notice"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as DELETE /arcade/notice. Management operations are excluded even for staff.
+
+        Developers and moderators may delete every notice. Official account authors may delete their own notices. Level-30+ supporter authors may delete their own notices. Private drafts additionally require the draft creator or a developer/moderator.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/DeleteArcadeNoticeRequest"
+      responses:
+        '200':
+          description: Soft-deleted notice.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - delete
+                properties:
+                  id:
+                    type: string
+                  delete:
+                    type: boolean
+        '400':
+          description: Invalid JSON or missing notice id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: The caller lacks the required notice author role and level,
+            or is neither the notice author nor a developer or moderator.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Notice not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Delete failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/notice"
+      parameters:
+      - name: arcade
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Matching notices ordered by priority with 0 treated as the
+            lowest priority, then latest first within the same priority. Soft-deleted
+            notices are excluded. Notices whose `until` is reached are soft-deleted
+            before the response is returned.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ListArcadeNoticeResponse"
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Arcade does not exist or is private.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /arcade/notice. Management operations are excluded even for staff.
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/notice"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /arcade/notice. Management operations are excluded even for staff.
+
+        Requires `developer`, `moderator`, or `arcade_owner` in `tag` or `tags`, or a `supporter`/`founding_supporter` at level 30 or above. Developers and moderators may create on any arcade. Official accounts may create only on their own `owns` arcades. Level-30+ supporters may create unless another official account manages the target through `owns`. Private drafts additionally require the draft creator or a developer/moderator.
+      security:
+      - delegatedOAuth:
+        - account:access
+      x-upload-limits:
+        maxPhotos: 3
+        maxPhotoBytes: 5242880
+        maxBodyBytes: 16777216
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CreateArcadeNoticeRequest"
+          multipart/form-data:
+            schema:
+              "$ref": "#/components/schemas/CreateArcadeNoticeMultipartRequest"
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: Created notice.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeNotice"
+        '413':
+          description: Image exceeds 5 MiB or encoded body exceeds 16 MiB.
+        '400':
+          description: Invalid JSON or missing arcade id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Notice role or supporter level-30 access is missing, official
+            ownership is missing, or a supporter attempted to post on an officially
+            managed arcade.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/notice"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as PUT /arcade/notice. Management operations are excluded even for staff.
+
+        Developers and moderators may update every notice. Official account authors may update their own notices. Level-30+ supporter authors may update their own notices. Private drafts additionally require the draft creator or a developer/moderator.
+      security:
+      - delegatedOAuth:
+        - account:access
+      x-upload-limits:
+        maxPhotos: 3
+        maxPhotoBytes: 5242880
+        maxBodyBytes: 16777216
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/UpdateArcadeNoticeRequest"
+          multipart/form-data:
+            schema:
+              "$ref": "#/components/schemas/UpdateArcadeNoticeMultipartRequest"
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: Updated notice.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeNotice"
+        '413':
+          description: Image exceeds 5 MiB or encoded body exceeds 16 MiB.
+        '400':
+          description: Invalid JSON or missing notice id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: The caller lacks the required notice author role and level,
+            or is neither the notice author nor a developer or moderator.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Notice not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Update failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+  /developer/v1/account/arcade/photo/atom:
+    delete:
+      tags:
+      - Connected account
+      summary: "/arcade/photo/atom"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as DELETE /arcade/photo/atom. Management operations are excluded even for staff.
+
+        Deletes a pending photo atom only for its uploader or developer/moderator. Published atoms are immutable and return `409`.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Pending atom deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - deleted
+                properties:
+                  id:
+                    type: string
+                  deleted:
+                    type: boolean
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Atom is not owned by the caller.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '409':
+          description: Published atoms cannot be deleted.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+  /developer/v1/account/arcade:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade. Management operations are excluded even for staff.
+
+        Returns only a public arcade (open or closed) and relation ids by default.
+        Private arcades always return `404`; use authenticated `GET /arcade/draft` for a creator or developer/moderator draft read.
+        When `expand=game`, each `game.items[]` entry includes `version`, `series`, `updated`, and the editable game fields.
+        Unauthenticated callers receive redacted sensitive data: `tag` is null, `location` and `updated` are empty strings, `price` retains only representative items with `hasHiddenPrices=true` and `accept=null`, and `expand=hour` returns only today's schedule for the arcade timezone.
+      parameters:
+      - name: id
+        in: query
+        schema:
+          type: string
+        description: Arcade id.
+      - name: arcade
+        in: query
+        schema:
+          type: string
+        description: Alias for `id`.
+      - name: expand
+        in: query
+        schema:
+          type: string
+        description: |
+          `none` or empty returns relation ids only. `all` expands every section.
+          Comma-separated values such as `basic,hour` expand only the requested sections.
+      - name: source
+        in: query
+        schema:
+          type: string
+          enum:
+          - direct
+          - search
+          - nearby
+          - other
+          - poster
+          - google
+          - naver
+          - bing
+          default: direct
+        description: Optional acquisition source recorded with the page view. search
+          is internal site search; poster is poster QR; google, naver, and bing are
+          external search referrals. Missing or unknown values use direct.
+      - name: game_series
+        in: query
+        description: Optional repeated or comma-separated series IDs used to reach
+          the arcade.
+        schema:
+          type: array
+          items:
+            type: string
+        style: form
+        explode: true
+      responses:
+        '200':
+          description: Arcade metadata with relation ids or expanded relation payloads.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeValueResponse"
+              examples:
+                idsOnly:
+                  value:
+                    admin:
+                      id: arcade_123
+                      public: true
+                      closed: false
+                      country: AU
+                      timezone: Australia/Sydney
+                      createdBy: user_123
+                      created: '2026-04-01 12:00:00.000Z'
+                      updated: '2026-04-10 09:00:00.000Z'
+                    basic: basic_rel
+                    hour: hour_rel
+                    sns: sns_rel
+                    gtk: gtk_rel
+                    game: game_rel
+                    photo: photo_rel
+                expanded:
+                  value:
+                    admin:
+                      id: arcade_123
+                      public: true
+                      closed: false
+                      country: AU
+                      timezone: Australia/Sydney
+                      createdBy: user_123
+                      created: '2026-04-01 12:00:00.000Z'
+                      updated: '2026-04-10 09:00:00.000Z'
+                    basic:
+                      id: basic_rel
+                      name: Sydney Arcade
+                      address: 123 George St, Sydney NSW
+                      direction: Level 2
+                      nickname:
+                      - Town Hall
+                      subway_line:
+                      - T1
+                      location:
+                        lat: -33.8708
+                        lon: 151.2062
+                    hour:
+                      id: hour_rel
+                      Monday:
+                        start: 1000
+                        end: 2300
+                      Thursday:
+                        start: 0
+                        end: 0
+                      Sunday: 499
+                      Note: Late night on Thursdays
+                    sns:
+                      id: sns_rel
+                      items:
+                      - type: instagram
+                        link: https://instagram.com/example
+                        name: Official account
+                    gtk:
+                      id: gtk_rel
+                      items:
+                      - type: smoking
+                        bool: false
+                    game:
+                      id: game_rel
+                      items:
+                      - id: atom_123
+                        updated: '2026-04-10 09:00:00.000Z'
+                        version:
+                          id: version_123
+                          series: series_123
+                          released_on: '2025-01-01'
+                          en: Version A
+                          kr: Version A
+                          jp: Version A
+                          price_default:
+                        series:
+                          id: series_123
+                          seriesNumber: 1
+                          en: Series A
+                          kr: Series A
+                          jp: Series A
+                          en_short: A
+                          kr_short: A
+                          jp_short: A
+                          manufacturer:
+                        location: 2F
+                        quantity: 1
+                        price:
+                          currency: KRW
+                          type: custom
+                          list:
+                          - value: 500
+                          accept:
+                          - Cash
+                        tag: []
+                    photo:
+                      id: photo_rel
+        '400':
+          description: Missing target arcade id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/arcade/analytics:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/analytics"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/analytics. Management operations are excluded even for staff.
+
+        Returns cumulative analytics for a public, open arcade. Anonymous and ordinary
+        contributors below level 15 receive only `page_views`, `fault_reports`, and `edit_count`.
+        Level-15+ users additionally receive `page_views_by_source` and `series_filter_entries`
+        when `page_views` exceeds 1000. These breakdowns remain available to privileged users.
+        `direction_clicks`,
+        `visit_verifications`, and `distinct_visitors` are omitted unless the bearer
+        user has both the `arcade_owner` tag and the arcade ID in `owns`, or has the
+        `developer` or `moderator` tag. The `createdBy` relation alone is insufficient.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: arcade
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Public-safe or privileged cumulative analytics response.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeAnalyticsResponse"
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Arcade does not exist, is private, or is closed.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/campaigns:
+    get:
+      tags:
+      - Connected account
+      summary: List active campaign prompts for an arcade
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/campaigns. Management operations are excluded even for staff.
+
+        Returns campaign prompts for the requested public/open arcade to an authenticated active user. Includes current from_version machines and current to_version machines with an updated report for the same campaign and arcade/game created less than seven days ago. Already-updated machines without a campaign update report and reports aged seven days or more are excluded. Each item includes current target status and report history; expiry leaves game state and campaign overview history intact.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current campaign prompts for the arcade.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeCampaignListResponse"
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Campaign targets could not be loaded.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/campaigns/presence:
+    get:
+      tags:
+      - Connected account
+      summary: List campaign-target game ids for an arcade
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/campaigns/presence. Management operations are excluded even for staff.
+
+        Returns only game ids with active campaign prompts for a public/open arcade, using the same eligibility as /arcade/campaigns (current from_version machines or current to_version machines with an updated campaign report created less than seven days ago). Already-updated machines without reports and updates aged seven days or more are excluded. Campaign configuration, rewards, locations, and reports are omitted so anonymous detail pages can show campaign presence safely.
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Campaign-target game ids for the arcade.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeCampaignPresenceResponse"
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Campaign targets could not be loaded.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/arcade/changelog:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/changelog"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/changelog. Management operations are excluded even for staff.
+
+        Detailed changelog requires an active authenticated user, including for public open/closed arcades. Private history is available only to the creator or a developer/moderator.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: arcade
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: changed
+        in: query
+        description: Optional arcade part filter. Omit to return all supported categories.
+        schema:
+          type: string
+          enum:
+          - basic
+          - game
+          - hour
+          - sns
+          - gtk
+          - photo
+          - memo
+      responses:
+        '200':
+          description: Immutable changelog page.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeChangelogPage"
+        '400':
+          description: Invalid pagination, missing arcade id, or unsupported changed
+            category.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: User is inactive.
+        '404':
+          description: Arcade does not exist or private history is inaccessible.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+  /developer/v1/account/arcade/drafts:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/drafts"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/drafts. Management operations are excluded even for staff.
+
+        Lists the authenticated user's private drafts only.
+      security:
+      - delegatedOAuth:
+        - account:access
+      responses:
+        '200':
+          description: Own draft summaries.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeDraftListResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/memo:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/memo"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/memo. Management operations are excluded even for staff.
+
+        Returns the current immutable memo revision. Public arcades are anonymously readable; private arcades require the creator or a developer/moderator bearer token.
+      parameters:
+      - name: arcade
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current memo revision, or null when no memo has been written.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeMemoResponse"
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Arcade does not exist or private access is denied.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/memo"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as PUT /arcade/memo. Management operations are excluded even for staff.
+
+        Creates an immutable Tiptap JSON revision and moves the arcade memo pointer. Requires an authenticated user with arcade write access. Saves and changelog creation are atomic.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/PutArcadeMemoRequest"
+      responses:
+        '200':
+          description: Memo saved; unchanged documents return changed=false without
+            creating a revision.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - arcade
+                - changed
+                - memo
+                properties:
+                  arcade:
+                    type: string
+                  changed:
+                    type: boolean
+                  memo:
+                    "$ref": "#/components/schemas/ArcadeMemo"
+        '400':
+          description: Invalid arcade id or Tiptap document.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Authenticated arcade write access is required.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Arcade does not exist or private access is denied.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+  /developer/v1/account/arcade/photo/atoms:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/photo/atoms"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/photo/atoms. Management operations are excluded even for staff.
+
+        Lists photo atoms through the custom API. Use each `file_url` for file delivery. Public arcades are available to active contributors; private drafts require creator or developer/moderator access.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: arcade
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Photo atom list.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadePhotoAtomListResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '404':
+          description: Arcade does not exist or private draft is inaccessible.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/photo/file:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/photo/file"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/photo/file. Management operations are excluded even for staff.
+
+        Streams one photo through the custom API. A published photo of a public arcade is anonymous-readable and privately browser-cacheable for five minutes. Pending or draft photos require a bearer token with atom-list access and are never cached. Clients must use the returned `file_url`, not PocketBase `/api/files` URLs. Supported thumbnail queries return the configured derivative and never silently fall back to the original file.
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: thumb
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - 96x96
+          - 384x384
+          - 680x0
+        description: Returns a configured square crop or a 680px-wide aspect-preserving
+          thumbnail.
+      responses:
+        '200':
+          description: Photo bytes.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Missing photo atom id or unsupported thumbnail size.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Photo atom does not exist or is inaccessible.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/arcade/public:
+    get:
+      tags:
+      - Connected account
+      summary: Preview public-conversion XP and requirements
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/public. Management operations are excluded even for staff.
+
+        Reads the creator's current level-based public-conversion requirements and currently eligible public-conversion (5 XP) and draft-backfill (2 XP per eligible changed area) without changing visibility or the XP ledger. Levels 0-4 require game, contact-or-hours, and facility-photo-or-location-verification; levels 5-9 require game and facility-photo-or-location-verification; levels 10+ require game only. Only the private arcade creator may call this endpoint.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: arcade
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Current XP preview for converting the private arcade to public.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - arcade
+                - public
+                - level
+                - requirements
+                - location_verified
+                - xp_preview
+                properties:
+                  arcade:
+                    type: string
+                  public:
+                    type: boolean
+                    const: false
+                  level:
+                    type: integer
+                  requirements:
+                    type: array
+                    items:
+                      "$ref": "#/components/schemas/ArcadePublicRequirement"
+                  location_verified:
+                    type: boolean
+                  xp_preview:
+                    "$ref": "#/components/schemas/ArcadePublicExpPreview"
+        '400':
+          description: Missing arcade id, closed arcade, or already-public arcade.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Only the draft creator may preview its public-conversion XP.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to calculate the XP preview.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/public"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ArcadeOnlyRequest"
+      responses:
+        '200':
+          description: Arcade is now public. The creator receives 5 XP for the conversion
+            plus 2 XP for each eligible draft information area that has not already
+            received its backfill.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - arcade
+                - public
+                - xp_feedback
+                properties:
+                  arcade:
+                    type: string
+                  public:
+                    type: boolean
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+        '400':
+          description: Validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Only the private arcade creator may request public conversion.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Validation or update failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      description: Requires account:access. Same payload, response and domain checks
+        as PUT /arcade/public. Management operations are excluded even for staff.
+  /developer/v1/account/arcade/ranking:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/ranking"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcade/ranking. Management operations are excluded even for staff.
+
+        Returns up to five users ranked by XP earned from this public arcade. The total metric combines completed visit verifications and positive arcade edit grants; edit and passport rank those sources separately. Public closed arcades remain eligible. Private arcades return 404, and visit XP with private visit visibility is omitted.
+      parameters:
+      - name: arcade
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: metric
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - total
+          - edit
+          - passport
+          default: total
+      responses:
+        '200':
+          description: Top five contributors for the arcade.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeVisitRankingResponse"
+        '400':
+          description: Missing arcade id or invalid metric.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Arcade does not exist or is private.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Ranking query failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/arcade/request_admin:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/request_admin"
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: arcade
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Matching admin requests.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ListEnvelope"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /arcade/request_admin. Management operations are excluded even for
+        staff.
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/request_admin"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CreateArcadeRequestAdminRequest"
+      responses:
+        '200':
+          description: Created admin request.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as POST /arcade/request_admin. Management operations are excluded even for
+        staff.
+  /developer/v1/account/arcade/visits:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcade/visits"
+      parameters:
+      - name: arcade
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Public aggregate visit counts for a public arcade.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - arcade
+                - total_visits
+                - distinct_visitors
+                properties:
+                  arcade:
+                    type: string
+                  total_visits:
+                    type: integer
+                  distinct_visitors:
+                    type: integer
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /arcade/visits. Management operations are excluded even for staff.
+  /developer/v1/account/arcades:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcades"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcades. Management operations are excluded even for staff.
+
+        Returns operating public arcades only. Public closed arcades are deliberately excluded and remain available through detail/search.
+      parameters:
+      - name: public
+        in: query
+        schema:
+          type: boolean
+        description: "`false` is rejected; this parameter exists only for explicit
+          v2 compatibility diagnostics."
+      - name: closed
+        in: query
+        schema:
+          type: boolean
+        description: "`true` is rejected; `/arcades` is an operating-discovery endpoint."
+      - "$ref": "#/components/parameters/CountryQuery"
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      responses:
+        '200':
+          description: Page of operating public arcade summaries.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeSummaryPage"
+              example:
+                page: 1
+                per_page: 50
+                last_page: 1
+                total: 1
+                items:
+                - id: arcade_123
+                  country: AU
+                  name: Sydney Arcade
+                  address: 123 George St, Sydney NSW
+                  location:
+                    lat: -33.8708
+                    lon: 151.2062
+                  game_series:
+                  - series_1
+                  - series_2
+        '400':
+          description: Invalid boolean filter.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Database lookup failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/arcades/nearby:
+    get:
+      tags:
+      - Connected account
+      summary: "/arcades/nearby"
+      parameters:
+      - name: game_filter
+        in: query
+        description: |
+          Repeat this parameter once per selected game series with a
+          URL-encoded JSON object such as
+          `{"series":"sdvx","cabinet":"valkyrie"}`. Omitting
+          `cabinet` means all cabinets for that series. Separate objects
+          use AND semantics across series. For example, maimai without a
+          cabinet and SDVX with `"valkyrie"` requires both series while
+          leaving maimai's cabinet unrestricted. `game_filter` cannot be combined
+          with the legacy `game_series` or `game_cabinet` parameters.
+        schema:
+          type: array
+          items:
+            type: string
+      - name: game_series
+        in: query
+        description: |
+          Repeat the query parameter or pass comma-separated `game_series` ids.
+          With no `game_cabinet`, every listed series is required and cabinet
+          identity is ignored, including unverified cabinet revisions. When
+          `game_cabinet` is present, order is significant: each series is paired
+          positionally with the cabinet at the same index and every pair is required.
+        schema:
+          oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      - name: game_cabinet
+        in: query
+        description: |
+          Repeat the query parameter or pass comma-separated canonical
+          `game_cabinet` ids. Cabinet filtering requires `game_series`, the
+          two expanded lists must have equal lengths, and values are paired
+          positionally. Each `(game_series, game_cabinet)` pair must match the
+          same revision in the arcade's currently selected game state; all
+          requested pairs use AND semantics. A cabinet-only request is invalid.
+        schema:
+          oneOf:
+          - type: string
+          - type: array
+            items:
+              type: string
+      - name: lat
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: lon
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: address
+        in: query
+        schema:
+          type: string
+        description: Normalized address keyword filter.
+      - name: country
+        in: query
+        schema:
+          type: string
+        description: Optional ISO country-code filter.
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+      - name: distance_limit
+        in: query
+        description: Optional maximum distance in kilometers from the supplied location.
+        schema:
+          type: number
+          format: double
+          minimum: 0
+      - name: expand
+        in: query
+        description: |
+          When true, expands each item's `game` payload with arcade game details,
+          including each revision's cabinet. When game filters are supplied,
+          expanded items contain only revisions matching the requested series
+          and, when supplied, its selected cabinet. Separate grouped series
+          remain required. Legacy positional series/cabinet pairs retain
+          their compatibility behavior.
+        schema:
+          type: boolean
+      responses:
+        '200':
+          description: Distance-sorted paginated nearby results. The response also
+            marks campaign-target arcades and includes campaigns that have pending
+            targets in the current page.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadesNearbyResponse"
+              example:
+                page: 1
+                per_page: 15
+                last_page: 1
+                total: 1
+                country_totals:
+                  AU:
+                    total: 1
+                    nearest_arcade:
+                      id: arcade_123
+                      distance_km: 0.4
+                items:
+                - id: arcade_123
+                  country: AU
+                  name: Sydney Arcade
+                  address: 123 George St, Sydney NSW
+                  location:
+                    lat: -33.8708
+                    lon: 151.2062
+                  game_series:
+                  - series_1
+                  game:
+                    id: game_123
+                    state_id: game_123
+                    items:
+                    - id: atom_1
+                      updated: '2026-04-10 09:00:00.000Z'
+                      version:
+                        id: version_1
+                        series: series_1
+                        released_on: 2025-01-01
+                        en: Sydney Version
+                        kr: Sydney Version
+                        jp: Sydney Version
+                        price_default:
+                      series:
+                        id: series_1
+                        seriesNumber: 1
+                        en: Sydney Series
+                        kr: Sydney Series
+                        jp: Sydney Series
+                        en_short: Sydney
+                        kr_short: Sydney
+                        jp_short: Sydney
+                        manufacturer:
+                      cabinet:
+                        id: cabinet_gold
+                        en: CHUNITHM GOLD
+                        kr: 츄니즘 골드
+                        jp: チュウニズム ゴールド
+                      location: 1F
+                      quantity: 1
+                      price: {}
+                      tag: []
+                      flags: []
+                  distance_km: 0.4
+                campaigns: []
+        '400':
+          description: |
+            Invalid or missing location/page value; an invalid grouped
+            `game_filter`; mixed grouped and legacy game parameters; a
+            `game_cabinet` without `game_series`; or unequal expanded
+            `game_series` and `game_cabinet` list lengths.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to load arcades.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /arcades/nearby. Management operations are excluded even for staff.
+  /developer/v1/account/arcades/updates:
+    get:
+      tags:
+      - Connected account
+      summary: Fixed public dashboard summary
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcades/updates. Management operations are excluded even for staff.
+
+        Returns at most six latest blocks from distinct public open arcades. If a non-KR arcade has history, at least one is included, replacing the sixth KR entry when necessary. Results remain newest first. Query parameters, including page and limit, are rejected.
+      responses:
+        '200':
+          description: Fixed summary array.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 6
+                items:
+                  "$ref": "#/components/schemas/ArcadeUpdateSummary"
+        '400':
+          description: Query parameters are not supported.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/arcades/updates/history:
+    get:
+      tags:
+      - Connected account
+      summary: Authenticated recent change history
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /arcades/updates/history. Management operations are excluded even for staff.
+
+        Historical public open arcade activity, excluding passport verifications before block grouping and pagination. Requires a user session.
+      parameters:
+      - "$ref": "#/components/parameters/LimitQuery"
+      - "$ref": "#/components/parameters/CountryQuery"
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+          default: 1
+      responses:
+        '200':
+          description: Historical block pagination envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - page
+                - per_page
+                - last_page
+                - total
+                properties:
+                  items:
+                    type: array
+                    items:
+                      "$ref": "#/components/schemas/ArcadeUpdateSummary"
+                  page:
+                    type: integer
+                  per_page:
+                    type: integer
+                  last_page:
+                    type: integer
+                  total:
+                    type: integer
+        '400':
+          description: Invalid limit or page.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Failed to build update list.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/campaign:
+    get:
+      tags:
+      - Connected account
+      summary: "/campaign"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /campaign. Management operations are excluded even for staff.
+
+        Returns the active campaign detail for the requested id. The response
+        separates current old-version targets from current to-version targets,
+        so the updated list includes machines already on the target version
+        even when they were not updated through this campaign. It includes
+        newest-first report logs with the user, arcade, game, reaction,
+        location-verification status, and report time, plus the latest
+        still_old report. Updated targets can be reverted by a new still_old
+        report for seven days after the update. Only currently public/open
+        arcades are included.
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Campaign progress, updated targets, and report log.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CampaignDetailResponse"
+        '400':
+          description: Missing campaign id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Campaign is not active or was not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Campaign detail could not be loaded.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/campaign/photo:
+    get:
+      tags:
+      - Connected account
+      summary: Photo update campaign targets
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /campaign/photo. Management operations are excluded even for staff.
+
+        Returns public/open arcades whose current photo gallery has no public
+        photo or whose newest public photo is at least six months old. The
+        result is computed from the current `arcade.photo` molecule and is
+        paginated like the public arcade list. Missing-photo targets are listed
+        first, followed by stale targets from oldest to newest.
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: lat
+        in: query
+        description: Optional latitude for distance ordering; must be supplied with
+          lon.
+        schema:
+          type: number
+          minimum: -90
+          maximum: 90
+      - name: lon
+        in: query
+        description: Optional longitude for distance ordering; must be supplied with
+          lat.
+        schema:
+          type: number
+          minimum: -180
+          maximum: 180
+      responses:
+        '200':
+          description: Current automatic photo campaign targets.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PhotoCampaignListResponse"
+        '400':
+          description: Invalid pagination.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Photo campaign targets could not be loaded.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/campaigns:
+    get:
+      tags:
+      - Connected account
+      summary: List active update campaigns
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /campaigns. Management operations are excluded even for staff.
+
+        Returns at most 20 campaigns that are active at request time, newest start first. Target counts include pending and already-updated public/open targets.
+      responses:
+        '200':
+          description: Active campaign summaries.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CampaignListResponse"
+        '502':
+          description: Campaigns could not be loaded.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/community/post:
+    get:
+      tags:
+      - Connected account
+      summary: Get an immediately public community post
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: locale
+        in: query
+        schema:
+          type: string
+          enum:
+          - ko-KR
+          - en-US
+          - ja-JP
+          default: ko-KR
+      responses:
+        '200':
+          description: Active post, localized only when translation publication is
+            enabled and ready.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CommunityPost"
+        '400':
+          description: Missing id or invalid locale.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Post not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /community/post. Management operations are excluded even for staff.
+    post:
+      tags:
+      - Connected account
+      summary: Publish a Korean community post immediately
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CommunityPostInput"
+          multipart/form-data:
+            schema:
+              "$ref": "#/components/schemas/CommunityPostInput"
+      responses:
+        '201':
+          description: Korean original is public immediately; translation is scheduled
+            five minutes later.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CommunityPost"
+        '400':
+          description: Invalid body, flair, or game series.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Withdrawn or banned user.
+        '502':
+          description: Failed to create post.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      description: Requires account:access. Same payload, response and domain checks
+        as POST /community/post. Management operations are excluded even for staff.
+    put:
+      tags:
+      - Connected account
+      summary: Edit the author's Korean original within five minutes
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CommunityPostInput"
+          multipart/form-data:
+            schema:
+              "$ref": "#/components/schemas/CommunityPostInput"
+      responses:
+        '200':
+          description: Updated Korean original. The original translation deadline
+            is unchanged.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CommunityPost"
+        '400':
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Not the author, withdrawn, or banned.
+        '404':
+          description: Post not found.
+        '409':
+          description: Five-minute edit window has closed.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to update post.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      description: Requires account:access. Same payload, response and domain checks
+        as PUT /community/post. Management operations are excluded even for staff.
+  /developer/v1/account/community/posts:
+    get:
+      tags:
+      - Connected account
+      summary: List immediately public community posts
+      parameters:
+      - name: game_series
+        in: query
+        style: form
+        explode: true
+        schema:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            minLength: 1
+        description: Include posts matching any selected game series; omit to list
+          all posts. Applied before pagination.
+      - name: author
+        in: query
+        schema:
+          type: string
+        description: Restrict to this author before pagination.
+      - name: flair
+        in: query
+        schema:
+          type: string
+          enum:
+          - achievement
+          - question
+          - tip
+          - news
+          - event
+          - art
+          - chitchat
+      - name: has_images
+        in: query
+        schema:
+          type: string
+          enum:
+          - 'true'
+        description: Only posts with photos, applied before pagination.
+      - name: locale
+        in: query
+        schema:
+          type: string
+          enum:
+          - ko-KR
+          - en-US
+          - ja-JP
+          default: ko-KR
+        description: Requested display locale. Non-Korean variants fall back to ko-KR
+          until translation publication is enabled.
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 30
+      responses:
+        '200':
+          description: Paginated active posts.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CommunityPostList"
+        '400':
+          description: Invalid locale or pagination.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to load posts.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /community/posts. Management operations are excluded even for staff.
+  /developer/v1/account/game/catalog:
+    get:
+      tags:
+      - Connected account
+      summary: Localized game/version/cabinet catalog
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /game/catalog. Management operations are excluded even for staff.
+
+        Omits historical version aliases (non-empty alias_of) while retaining their records for historical game reads. Returns only explicitly supported cabinets for each version and distinct cabinets for each series. Cabinet arrays are ordered by the earliest release date among active compatible versions, newest first; undated cabinets follow, then name and ID break ties. An unverified cabinet is represented by `null` only in arcade game entries and mutations, never as a catalog item.
+      parameters:
+      - name: locale
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - en-US
+          - ko-KR
+          - ja-JP
+      responses:
+        '200':
+          description: Localized game catalog with cabinet-specific price defaults.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/GameCatalog"
+        '400':
+          description: Missing or unsupported locale.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to load the catalog.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/game_series_version:
+    get:
+      tags:
+      - Connected account
+      summary: "/game_series_version"
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Version plus related series data.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/GameSeriesBundle"
+        '400':
+          description: Missing id.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Version not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /game_series_version. Management operations are excluded even for staff.
+  /developer/v1/account/geo:
+    get:
+      tags:
+      - Connected account
+      summary: "/geo"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /geo. Management operations are excluded even for staff.
+
+        Default per-client-IP limit is 60 requests per 60 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults.
+      parameters:
+      - name: lat
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: lon
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      responses:
+        '200':
+          description: Country and timezone for the coordinate.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/GeoLookupResponse"
+        '400':
+          description: Invalid or missing coordinates.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '429':
+          description: Client IP request limit exceeded, including authenticated requests.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PocketBaseAuthError"
+        '502':
+          description: Upstream lookup failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/geocode:
+    get:
+      tags:
+      - Connected account
+      summary: "/geocode"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /geocode. Management operations are excluded even for staff.
+
+        Default per-client-IP limit is 30 requests per 60 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults. Cached responses preserve the requested query or exact coordinates.
+      parameters:
+      - name: query
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: region
+        in: query
+        schema:
+          type: string
+        description: "`kr` prefers Kakao."
+      - name: mode
+        in: query
+        schema:
+          type: string
+        description: "`free` uses OSM where applicable."
+      responses:
+        '200':
+          description: Normalized geocoding candidates.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/GeocodeResponse"
+        '400':
+          description: Missing query.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '429':
+          description: Client IP request limit exceeded, including authenticated requests.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PocketBaseAuthError"
+        '502':
+          description: Upstream geocoding failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/hello:
+    get:
+      tags:
+      - Connected account
+      summary: "/hello"
+      responses:
+        '200':
+          description: Plaintext greeting.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: hello world!
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /hello. Management operations are excluded even for staff.
+  /developer/v1/account/rankings:
+    get:
+      tags:
+      - Connected account
+      summary: "/rankings"
+      parameters:
+      - name: metric
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - explorer
+          - visits
+          - xp
+          - level
+          - photographer
+          - arcade_visits
+      - name: period
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - week
+          - month
+          - half_year
+          - year
+          - all
+      - name: Authorization
+        in: header
+        required: false
+        description: Optional bearer token used to include the requesting user's own
+          rank.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Public user and arcade rankings. Level rankings accept only
+            the all period. The arcade_visits metric displays completed visit-verification
+            counts and ranks public arcades by the total XP awarded by those verifications;
+            public closed arcades remain eligible as historical venues.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/RankingResponse"
+        '400':
+          description: Invalid metric or period.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /rankings. Management operations are excluded even for staff.
+  /developer/v1/account/reverse_geocode:
+    get:
+      tags:
+      - Connected account
+      summary: "/reverse_geocode"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /reverse_geocode. Management operations are excluded even for staff.
+
+        Default per-client-IP limit is 30 requests per 60 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults. Cached responses preserve the requested query or exact coordinates.
+      parameters:
+      - name: lat
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: lon
+        in: query
+        required: true
+        schema:
+          type: number
+          format: double
+      - name: region
+        in: query
+        schema:
+          type: string
+      - name: mode
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Normalized reverse geocoding result.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ReverseGeocodeResponse"
+        '400':
+          description: Invalid or missing coordinates.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '429':
+          description: Client IP request limit exceeded, including authenticated requests.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PocketBaseAuthError"
+        '502':
+          description: Upstream reverse geocoding failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/search:
+    get:
+      tags:
+      - Connected account
+      summary: "/search"
+      parameters:
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Case-insensitive search keyword.
+      - "$ref": "#/components/parameters/LimitQuery"
+      - name: lat
+        in: query
+        schema:
+          type: number
+          format: double
+        description: User latitude. Provide together with `lon` to boost nearby arcade
+          results.
+      - name: lon
+        in: query
+        schema:
+          type: number
+          format: double
+        description: User longitude. Provide together with `lat` to boost nearby arcade
+          results.
+      responses:
+        '200':
+          description: Search results grouped by resource bucket.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SearchResponse"
+              example:
+                users:
+                - username: searchhero
+                  nickname: Alpha Nick
+                  avatar: ''
+                arcades:
+                - id: ubbeq9qzfck5s4w
+                  country: KR
+                  name: Search Palace
+                  address: 101 Exact Road
+                  nickname:
+                  - First Spot
+                  closed: false
+                  distance_km: 0.4
+        '400':
+          description: Missing search query or invalid limit.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Upstream database lookup failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /search. Management operations are excluded even for staff.
+  /developer/v1/account/stats:
+    get:
+      tags:
+      - Connected account
+      summary: "/stats"
+      responses:
+        '200':
+          description: Current counts for arcade, changelog, and flag data.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/StatsResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /stats. Management operations are excluded even for staff.
+  /developer/v1/account/subway/map:
+    get:
+      tags:
+      - Connected account
+      summary: Get the newest subway map for a region
+      parameters:
+      - name: region
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - center
+          - busan
+      responses:
+        '200':
+          description: Latest map metadata and custom file URLs.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SubwayMap"
+        '400':
+          description: Unsupported or missing region.
+        '404':
+          description: No map exists for the region.
+        '502':
+          description: Map lookup failed.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /subway/map. Management operations are excluded even for staff.
+  /developer/v1/account/subway/map/file:
+    get:
+      tags:
+      - Connected account
+      summary: Download a subway map asset
+      parameters:
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: field
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - lightSVG
+          - darkSVG
+          - image
+          - file
+      responses:
+        '200':
+          description: The requested SVG
+          image:
+          or PDF bytes.:
+        '400':
+          description: Missing id or unsupported field.
+        '404':
+          description: Map or requested file was not found.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /subway/map/file. Management operations are excluded even for staff.
+  /developer/v1/account/supporter/score:
+    get:
+      tags:
+      - Connected account
+      summary: "/supporter/score"
+      security:
+      - delegatedOAuth:
+        - account:access
+      responses:
+        '200':
+          description: Current supporter XP ledger timeline.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SupporterScoreResponse"
+              example:
+                total_exp: 341
+                attendance_exp: 2
+                qualified: true
+                threshold: 300
+                can_request: true
+                entries:
+                - id: log_124
+                  kind: xp:attendance:service:2026-04-30
+                  source: attendance
+                  action: check_in
+                  exp: 2
+                  previous_exp: 10
+                  new_exp: 12
+                  created: '2026-04-30 10:05:00.000Z'
+                  detail:
+                    day: '2026-04-30'
+                - id: log_123
+                  kind: xp:arcade-public:arcade_123
+                  source: arcade
+                  action: public
+                  exp: 10
+                  previous_exp: 0
+                  new_exp: 10
+                  created: '2026-04-30 10:00:00.000Z'
+                  arcade_id: arcade_123
+                  arcade_name: Sample Arcade
+                  target_id: arcade_123
+                latest_request:
+                  id: req_123
+                  status: rejected
+                  exp_total: 341
+                  qualified: true
+                  created: '2026-04-30 10:30:00.000Z'
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Failed to build supporter XP.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /supporter/score. Management operations are excluded even for staff.
+  /developer/v1/account/user:
+    get:
+      tags:
+      - Connected account
+      summary: "/user"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /user. Management operations are excluded even for staff.
+
+        Public profile by ID or username. Active developers and moderators receive owner-level fields with private, no-store caching. Restricted staff receive the public projection.
+      parameters:
+      - "$ref": "#/components/parameters/UserIdQuery"
+      - "$ref": "#/components/parameters/UsernameQuery"
+      responses:
+        '200':
+          description: Normalized public profile.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/UserProfile"
+              example:
+                id: toq3to4ncbf5ubd
+                created: '2026-03-30 10:15:00.000Z'
+                username: public_user_toq3to4ncbf5ubd
+                nickname: public_nick
+                countries:
+                - KR
+                primary_country: KR
+                bio: public bio
+                avatar: ''
+                background: ''
+                tag: []
+                sns:
+                  items: []
+                withdrawn: false
+                series_public: false
+        '400':
+          description: Missing id and username.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to build profile.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/user/activity:
+    get:
+      tags:
+      - Connected account
+      summary: "/user/activity"
+      parameters:
+      - "$ref": "#/components/parameters/UserIdQuery"
+      - "$ref": "#/components/parameters/UsernameQuery"
+      - name: tz
+        in: query
+        description: IANA timezone. Defaults to `UTC`.
+        schema:
+          type: string
+      - name: days
+        in: query
+        description: Integer between 1 and 365. Defaults to 365.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 365
+      responses:
+        '200':
+          description: User profile plus activity counts and heatmap buckets. Heatmap
+            intensity uses fixed logarithmic daily-count buckets so an outlier does
+            not flatten the rest of the range.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/UserActivityResponse"
+              example:
+                user:
+                  id: toq3to4ncbf5ubd
+                  created: '2026-03-30 10:15:00.000Z'
+                  username: public_user_toq3to4ncbf5ubd
+                  nickname: public_nick
+                  bio: public bio
+                  avatar: ''
+                  background: ''
+                  tag: []
+                  sns:
+                    items: []
+                  withdrawn: false
+                  series_public: false
+                  level: 0
+                range:
+                  start_date: '2025-03-30'
+                  end_date: '2026-03-29'
+                  tz: Asia/Seoul
+                  days: 365
+                totals:
+                  total_count: 18
+                  changelog_count: 9
+                  flag_count: 5
+                  legacy_ticket_count: 4
+                  attendance_count: 0
+                  max_daily_count: 3
+                days:
+                - date: '2026-03-29'
+                  total_count: 2
+                  level: 2
+                  changelog_count: 1
+                  flag_count: 1
+                  legacy_ticket_count: 0
+                  attendance_count: 0
+        '400':
+          description: Invalid id/username combination, timezone, or day count.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to build activity response.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /user/activity. Management operations are excluded even for staff.
+  /developer/v1/account/user/changelog:
+    get:
+      tags:
+      - Connected account
+      summary: "/user/changelog"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /user/changelog. Management operations are excluded even for staff.
+
+        Returns only arcade and changed-category summaries of the user's edits in reverse
+        chronological order. Anonymous callers receive rows from public
+        arcades only. An authenticated caller may additionally receive rows
+        from private arcades they own; `developer` and `moderator` callers may
+        audit private rows. The endpoint never exposes flags, visits, or legacy
+        tickets; those remain activity aggregates rather than changelog rows.
+        Every caller receives only id, arcade, arcade_name, and changed. Revision
+        pointers, logs, timestamps, memo snapshots, and photo assets are omitted.
+        Rows whose arcade aggregate was deleted are omitted, and withdrawn
+        users receive an empty page.
+      parameters:
+      - name: user
+        in: query
+        required: true
+        description: User id whose server-authored changelog rows are requested.
+        schema:
+          type: string
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: changed
+        in: query
+        description: Optional arcade part filter. Omit to return all supported categories.
+        schema:
+          type: string
+          enum:
+          - basic
+          - game
+          - hour
+          - sns
+          - gtk
+          - photo
+          - memo
+      responses:
+        '200':
+          description: User-scoped immutable changelog page.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/UserChangelogPage"
+        '400':
+          description: Missing user id, invalid pagination, or unsupported changed
+            category.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: User does not exist.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to query the user changelog.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/user/feedback:
+    get:
+      tags:
+      - Connected account
+      summary: List the authenticated user's own feedback
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /user/feedback. Management operations are excluded even for staff.
+
+        Active users only. Ownership is forced from the bearer token; createdBy query values are ignored. Anonymous submissions and other users' records are never returned. Includes all statuses unless filtered, with id, message, status, createdBy, photos (filenames), created and updated. This does not grant file access or open the reviewer queue.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Own records ordered newest first, with items and total; an
+            empty history returns an empty array.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ListEnvelope"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Withdrawn or banned user.
+        '502':
+          description: List failure.
+  /developer/v1/account/user/me:
+    get:
+      tags:
+      - Connected account
+      summary: "/user/me"
+      security:
+      - delegatedOAuth:
+        - account:access
+      responses:
+        '200':
+          description: Full profile for the authenticated user.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/UserProfile"
+              example:
+                id: me_123
+                created: '2026-03-30 10:15:00.000Z'
+                username: me_user
+                nickname: me_nick
+                countries:
+                - KR
+                - JP
+                primary_country: KR
+                bio: public bio
+                avatar: ''
+                background: ''
+                tag: []
+                sns:
+                  items: []
+                withdrawn: false
+                series_public: false
+                warp: false
+                series: []
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '404':
+          description: User record not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to build profile.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /user/me. Management operations are excluded even for staff.
+  /developer/v1/account/user/passport:
+    get:
+      tags:
+      - Connected account
+      summary: Owner or shared passport
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /user/passport. Management operations are excluded even for staff.
+
+        Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; withdrawn profiles return 404. Private profiles return 404 except for active developers and moderators, who receive full visit dates. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - in: query
+        name: user
+        description: Target profile ID. Omit for the authenticated owner.
+        schema:
+          type: string
+      - in: query
+        name: year
+        schema:
+          type: string
+          default: all
+          pattern: "^(all|[0-9]{4})$"
+      responses:
+        '200':
+          description: Passport result. Stable sort ties use arcade ID.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Passport"
+        '400':
+          description: Invalid filter or pagination.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Inactive account.
+        '404':
+          description: Private
+          missing or withdrawn target profile.:
+        '502':
+          description: Failed to load passport.
+  /developer/v1/account/user/passport/stamps:
+    get:
+      tags:
+      - Connected account
+      summary: Owner or shared passport
+      description: |-
+        Requires account:access. Same payload, response and domain checks as GET /user/passport/stamps. Management operations are excluded even for staff.
+
+        Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; withdrawn profiles return 404. Private profiles return 404 except for active developers and moderators, who receive full visit dates. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - in: query
+        name: user
+        description: Target profile ID. Omit for the authenticated owner.
+        schema:
+          type: string
+      - in: query
+        name: year
+        schema:
+          type: string
+          default: all
+          pattern: "^(all|[0-9]{4})$"
+      - in: query
+        name: country
+        schema:
+          type: string
+          pattern: "^[A-Z]{2}$"
+      - in: query
+        name: city
+        schema:
+          type: string
+      - in: query
+        name: sort
+        schema:
+          type: string
+          enum:
+          - recent
+          - first
+          - visits
+          default: recent
+      - in: query
+        name: page
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+          default: 1
+      - in: query
+        name: per_page
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 24
+      responses:
+        '200':
+          description: Passport result. Stable sort ties use arcade ID.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PassportStampPage"
+        '400':
+          description: Invalid filter or pagination.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Inactive account.
+        '404':
+          description: Private
+          missing or withdrawn target profile.:
+        '502':
+          description: Failed to load passport.
+  /developer/v1/account/user/report:
+    get:
+      tags:
+      - Connected account
+      summary: "/user/report"
+      security:
+      - delegatedOAuth:
+        - account:access
+      parameters:
+      - name: user
+        in: query
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Matching user reports.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ListEnvelope"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /user/report. Management operations are excluded even for staff.
+    post:
+      tags:
+      - Connected account
+      summary: "/user/report"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CreateUserReportRequest"
+      responses:
+        '200':
+          description: User report created.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      description: Requires account:access. Same payload, response and domain checks
+        as POST /user/report. Management operations are excluded even for staff.
+  /developer/v1/account/user/visits:
+    get:
+      tags:
+      - Connected account
+      summary: "/user/visits"
+      security:
+      - delegatedOAuth:
+        - account:access
+      responses:
+        '200':
+          description: Authenticated user's profile-ready visit summary. It includes
+            all visit days per arcade without raw GPS, accuracy, XP, or visit-record
+            data.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - stats
+                properties:
+                  stats:
+                    "$ref": "#/components/schemas/VisitStats"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as GET /user/visits. Management operations are excluded even for staff.
+  /developer/v1/account/arcade/analytics/event:
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/analytics/event"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /arcade/analytics/event. Management operations are excluded even for staff.
+
+        Records an anonymous direction-click analytics event. The request body is limited to
+        2 KiB and accepts at most ten distinct game-series IDs. To limit anonymous metric
+        manipulation, each client IP may record at most 20 events per rolling 10 minutes and
+        may record an event for the same arcade only once every 30 seconds. Once the arcade is
+        validated, rejected series IDs also consume this quota before their database lookup. The server does
+        not persist the client IP, user agent, or identity; limits are process-local and retain
+        no more than 4,096 active clients.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ArcadeAnalyticsEventRequest"
+      responses:
+        '200':
+          description: Analytics event recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - recorded
+                properties:
+                  recorded:
+                    type: boolean
+                    const: true
+        '400':
+          description: Invalid event body.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '413':
+          description: Analytics event body exceeds 2 KiB.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '429':
+          description: Anonymous client exceeded the per-arcade cooldown or rolling
+            event limit. The `Retry-After` header is included.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+              description: Seconds until this anonymous client may retry.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Arcade does not exist or is private.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Analytics event persistence failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/arcade/edit_report:
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/edit_report"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /arcade/edit_report. Management operations are excluded even for staff.
+
+        Creates an independent abuse report linked to one immutable changelog row. The server derives the reported editor; unresolved duplicates for the same arcade/changelog return `409`.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CreateArcadeEditReportRequest"
+      responses:
+        '200':
+          description: Edit report queued for manual review. This endpoint does not
+            roll back or ban automatically.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadeEditReport"
+        '400':
+          description: Invalid parent id, message, or urgency.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '404':
+          description: Arcade/changelog mismatch or inaccessible private arcade.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '409':
+          description: An unresolved report already exists for this changelog.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/flag:
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/flag"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /arcade/flag. Management operations are excluded even for staff.
+
+        Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold. Accepts at most 3 images, 15000000 bytes each, within a 46048576-byte encoded request body.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CreateArcadeFlagRequest"
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - arcade
+              - game_id
+              - disruption
+              - message
+              properties:
+                arcade:
+                  type: string
+                game_id:
+                  type: string
+                disruption:
+                  type: string
+                  enum:
+                  - unplayable
+                  - major
+                  - bearable
+                  - minor
+                message:
+                  type: string
+                photos:
+                  type: array
+                  maxItems: 3
+                  description: Images only; at most 15000000 bytes per file. Server
+                    verifies contents.
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '200':
+          description: Flag created and linked to the durable game entry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - arcade
+                - game_id
+                - flag
+                - game
+                - xp_feedback
+                properties:
+                  arcade:
+                    type: string
+                  game_id:
+                    type: string
+                  flag:
+                    type: string
+                  game:
+                    "$ref": "#/components/schemas/ArcadeGameExpanded"
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+        '400':
+          description: Invalid body or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '413':
+          description: File or encoded request body exceeds its limit.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/flag/delete:
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/flag/delete"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/FlagActionRequest"
+      responses:
+        '200':
+          description: Flag deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - flag
+                - deleted
+                - game
+                - xp_feedback
+                properties:
+                  flag:
+                    type: string
+                  deleted:
+                    type: boolean
+                  game:
+                    "$ref": "#/components/schemas/ArcadeGameExpanded"
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+        '400':
+          description: Invalid body or delete rule failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as POST /arcade/flag/delete. Management operations are excluded even for staff.
+  /developer/v1/account/arcade/flag/reaction:
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/flag/reaction"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /arcade/flag/reaction. Management operations are excluded even for staff.
+
+        Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/FlagReactionRequest"
+      responses:
+        '200':
+          description: Reaction state updated. The response includes the authoritative
+            resolution summary, current user vote, and newest-first report history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - flag
+                - reaction
+                - action
+                - reaction_id
+                - solved
+                - game
+                - xp_feedback
+                - resolution
+                - reportHistory
+                properties:
+                  flag:
+                    type: string
+                  reaction:
+                    type: string
+                  action:
+                    type: string
+                  reaction_id:
+                    type: string
+                  solved:
+                    type: boolean
+                  game:
+                    "$ref": "#/components/schemas/ArcadeGameExpanded"
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+                  resolution:
+                    "$ref": "#/components/schemas/ArcadeFlagResolution"
+                  reportHistory:
+                    type: array
+                    items:
+                      "$ref": "#/components/schemas/ArcadeFlagReportHistoryItem"
+        '400':
+          description: Invalid body or reaction rule failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: The reaction transaction succeeded but the authoritative resolution
+            response could not be built.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/location-verification:
+    post:
+      tags:
+      - Connected account
+      summary: Verify the creator's current location for publication
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /arcade/location-verification. Management operations are excluded even for staff.
+
+        Stores a one-time location proof tied to the arcade's current basic-information revision. Editing basic information changes that revision and invalidates the proof. This endpoint does not create a Passport visit or award XP.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/VerifyArcadeLocationRequest"
+      responses:
+        '200':
+          description: Current location was verified.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/VerifyArcadeLocationResponse"
+        '400':
+          description: Invalid coordinates, accuracy, or arcade state.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Only the creator may verify the private arcade, or the current
+            position is outside the 100-meter radius.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '409':
+          description: The arcade has no usable basic-information location.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+  /developer/v1/account/arcade/new:
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/new"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/NewArcadeRequest"
+      responses:
+        '200':
+          description: Newly created arcade summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Persistence failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '503':
+          description: Required geo lookup failed; no arcade is persisted.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      description: Requires account:access. Same payload, response and domain checks
+        as POST /arcade/new. Management operations are excluded even for staff.
+  /developer/v1/account/arcade/photo/upload:
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/photo/upload"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /arcade/photo/upload. Management operations are excluded even for staff.
+
+        Uploads pending photo atoms. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - arcade
+              - photos
+              properties:
+                arcade:
+                  type: string
+                photos:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: string
+                    format: binary
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: All files uploaded successfully.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadePhotoUploadResponse"
+              example:
+                arcade: arcade_123
+                summary:
+                  total: 2
+                  success: 2
+                  failed: 0
+                uploaded:
+                - index: 0
+                  atomId: atom_1
+                  filename: ok.png
+                - index: 1
+                  atomId: atom_2
+                  filename: ok2.jpg
+                failed: []
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 5
+                  diff_exp: 5
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 25
+                  previous_level: 0
+                  new_level: 1
+                  level_diff: 1
+                  remaining_exp_to_next_level: 3
+                  remaining_percent_to_next_level: 75
+        '207':
+          description: Partial success.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadePhotoUploadResponse"
+              example:
+                arcade: arcade_123
+                summary:
+                  total: 2
+                  success: 1
+                  failed: 1
+                uploaded:
+                - index: 0
+                  atomId: atom_1
+                  filename: ok.png
+                failed:
+                - index: 1
+                  filename: bad.gif
+                  reason: unsupported mime type - image/gif
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 5
+                  diff_exp: 5
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 25
+                  previous_level: 0
+                  new_level: 1
+                  level_diff: 1
+                  remaining_exp_to_next_level: 3
+                  remaining_percent_to_next_level: 75
+        '400':
+          description: Invalid multipart body or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '422':
+          description: All files failed validation or persistence.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ArcadePhotoUploadResponse"
+              example:
+                arcade: arcade_123
+                summary:
+                  total: 2
+                  success: 0
+                  failed: 2
+                uploaded: []
+                failed:
+                - index: 0
+                  filename: bad1.gif
+                  reason: unsupported mime type - image/gif
+                - index: 1
+                  filename: bad2.gif
+                  reason: unsupported mime type - image/gif
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 0
+                  diff_exp: 0
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 0
+                  previous_level: 0
+                  new_level: 0
+                  level_diff: 0
+                  remaining_exp_to_next_level: 4
+                  remaining_percent_to_next_level: 100
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/rollback:
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/rollback"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /arcade/rollback. Management operations are excluded even for staff.
+
+        Applies an immediate rollback. With `report=true`, it atomically creates a `rollback_report` linked to the cited changelog; it never auto-bans the cited editor. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/RollbackArcadeRequest"
+      responses:
+        '200':
+          description: Rollback applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Validation or rollback rule failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '409':
+          description: An unresolved report already exists for the cited changelog.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Rollback transaction failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/visit:
+    post:
+      tags:
+      - Connected account
+      summary: "/arcade/visit"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ArcadeVisitRequest"
+      responses:
+        '200':
+          description: GPS visit verification result and XP feedback. The visit echoes
+            only its arcade and local visit date; raw GPS verification data is not
+            returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  visited:
+                    type: boolean
+                  already_visited:
+                    type: boolean
+                  first_visit_to_arcade:
+                    type: boolean
+                    description: True only for a newly committed lifetime first visit;
+                      false for a duplicate.
+                  visit:
+                    "$ref": "#/components/schemas/Visit"
+                  gained_exp:
+                    type: integer
+                  exp:
+                    type: integer
+                  level:
+                    type: integer
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+        '400':
+          description: Invalid coordinates or GPS accuracy greater than 150 m.
+        '403':
+          description: Inactive user
+          ineligible arcade:
+          outside the 100m radius:
+          or a deployment-provided visit policy restriction.:
+        '409':
+          description: Missing arcade coordinates or timezone.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+      description: Requires account:access. Same payload, response and domain checks
+        as POST /arcade/visit. Management operations are excluded even for staff.
+  /developer/v1/account/campaign/check:
+    post:
+      tags:
+      - Connected account
+      summary: "/campaign/check"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /campaign/check. Management operations are excluded even for staff.
+
+        Confirms whether one active update-campaign target is still on the old
+        version or has been updated. A `still_old` result awards 1 XP once per
+        user and target. The default request requires a same-day
+        verified visit at the public/open arcade. `bypass_location=true` skips
+        only that visit check and requires level 10 or above; an updated result
+        through this path awards 1 XP; clients must obtain two warning
+        confirmations before sending it.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CampaignCheckRequest"
+      responses:
+        '200':
+          description: Campaign check persisted; still_old results award 1 XP, while
+            updated results atomically move the game state and award campaign XP,
+            or 1 XP when location is bypassed.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CampaignCheckResponse"
+        '400':
+          description: Invalid campaign check body.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Active user is missing the required visit or level 10 access
+            for a location bypass.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '404':
+          description: Campaign or public arcade was not found.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '409':
+          description: Campaign is inactive, target is outside scope, or game state
+            is no longer eligible.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Campaign check transaction failed.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+  /developer/v1/account/support_feedback:
+    post:
+      tags:
+      - Connected account
+      summary: "/support_feedback"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as POST /support_feedback. Management operations are excluded even for staff.
+
+        Default per-client-IP limit is 10 requests per 600 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults. Accepts at most 3 images of 15000000 bytes each; the total encoded body is limited to 46048576 bytes (45 MB of photos plus 1 MiB of form overhead).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CreateSupportFeedbackRequest"
+          multipart/form-data:
+            schema:
+              "$ref": "#/components/schemas/CreateSupportFeedbackMultipartRequest"
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: Created support feedback record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - id
+                - message
+                - status
+                - createdBy
+                - photos
+                - created
+                - updated
+                properties:
+                  id:
+                    type: string
+                  message:
+                    type: string
+                  status:
+                    type: string
+                  createdBy:
+                    type: string
+                  created:
+                    type: string
+                  updated:
+                    type: string
+                  photos:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '413':
+          description: File exceeds 15000000 bytes or encoded request body exceeds
+            46048576 bytes.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PocketBaseAuthError"
+        '429':
+          description: Client IP request limit exceeded, including authenticated requests.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/PocketBaseAuthError"
+        '502':
+          description: Create failure.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      security:
+      - delegatedOAuth:
+        - account:access
+  /developer/v1/account/supporter/request:
+    post:
+      tags:
+      - Connected account
+      summary: "/supporter/request"
+      security:
+      - delegatedOAuth:
+        - account:access
+      responses:
+        '200':
+          description: Supporter request created and notifications sent.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CreateSupporterRequestResponse"
+        '400':
+          description: XP threshold not met.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '409':
+          description: Existing pending or approved supporter request.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Failed to create supporter request.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as POST /supporter/request. Management operations are excluded even for staff.
+  /developer/v1/account/user/check-in:
+    post:
+      tags:
+      - Connected account
+      summary: "/user/check-in"
+      security:
+      - delegatedOAuth:
+        - account:access
+      responses:
+        '200':
+          description: Check-in state and XP feedback.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - checked_in
+                - already_checked_in
+                - gained_exp
+                - exp
+                - level
+                - day
+                - xp_feedback
+                properties:
+                  checked_in:
+                    type: boolean
+                  already_checked_in:
+                    type: boolean
+                  gained_exp:
+                    type: integer
+                  exp:
+                    type: integer
+                  level:
+                    type: integer
+                  day:
+                    type: string
+                    description: KST date in `YYYY-MM-DD` format.
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Check-in transaction failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      description: Requires account:access. Same payload, response and domain checks
+        as POST /user/check-in. Management operations are excluded even for staff.
+  /developer/v1/account/arcade/basic:
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/basic"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as PUT /arcade/basic. Management operations are excluded even for staff.
+
+        Active authenticated users may edit public arcades without a level threshold; private drafts require the creator or a developer/moderator. Location changes are limited by the editor's level below 10 (at most 1 km), 10-14 (at most 5 km), 15-29 (at most 10 km), and 30 or above (any distance within the current country). Policy denials return a machine-readable code.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/UpdateArcadeBasicRequest"
+      responses:
+        '200':
+          description: Updated arcade basic relation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - arcade
+                - basic
+                - changed
+                - xp_feedback
+                properties:
+                  arcade:
+                    type: string
+                  basic:
+                    type: string
+                  changed:
+                    type: array
+                    items:
+                      type: string
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+        '400':
+          description: Invalid JSON, validation failure, or no changed fields.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Withdrawn or banned user, or a location move denied by the
+            level policy. Location policy codes are location_move_distance_exceeded,
+            location_move_country_changed, and location_move_origin_missing.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Load or persistence failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '503':
+          description: Required geo lookup failed; no location change is persisted.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+  /developer/v1/account/arcade/favorite:
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/favorite"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - arcade
+              - favorited
+              properties:
+                arcade:
+                  type: string
+                favorited:
+                  type: boolean
+      responses:
+        '200':
+          description: Updated favorite state for the arcade.
+        '404':
+          description: Arcade does not exist or is not public.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as PUT /arcade/favorite. Management operations are excluded even for staff.
+  /developer/v1/account/arcade/favorite/order:
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/favorite/order"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - arcades
+              properties:
+                arcades:
+                  type: array
+                  items:
+                    type: string
+                  description: Ordered list of arcade IDs representing the user's
+                    favorite order.
+      responses:
+        '200':
+          description: Updated favorite order for the authenticated user.
+        '400':
+          description: Invalid request body or contains duplicate/unfavorited arcades.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as PUT /arcade/favorite/order. Management operations are excluded even for
+        staff.
+  /developer/v1/account/arcade/game:
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/game"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as PUT /arcade/game. Management operations are excluded even for staff.
+
+        Applies an add/modify/remove delta to the current immutable game state and
+        updates only `arcade.game_v2`. All three arrays are required. `modify`
+        objects are complete replacements, not partial patches. Existing item ids
+        are durable entries; a deleted entry may be reused when the same arcade,
+        series, and verified cabinet match historical state. Cabinet ids must be
+        supported by the submitted version. Price titles accept strings or numbers
+        (for example, a numeric credit count) and preserve their stored type.
+        Fields and catalog references are validated only for submitted add/modify
+        items; untouched revisions are preserved. The resulting list still requires
+        unique entry ids and version/cabinet pairs. Public game edits use a rolling
+        seven-day distinct-entry XP window with target `min(10, 2*n)`;
+        private edits do not award normal edit XP, and administrative bulk
+        updates do not award it either.
+        Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/UpdateArcadeGameRequest"
+      responses:
+        '200':
+          description: Game relation updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - arcade
+                - game
+                - count
+                - xp_feedback
+                properties:
+                  arcade:
+                    type: string
+                  game:
+                    "$ref": "#/components/schemas/ArcadeGameExpanded"
+                  count:
+                    type: integer
+                    description: Number of active entries in the resulting state.
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '409':
+          description: "`base_state_id` is stale and does not equal the current `arcade.game_v2`."
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/gtk:
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/gtk"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as PUT /arcade/gtk. Management operations are excluded even for staff.
+
+        Active authenticated users may edit public arcades without a level threshold. Private drafts require the creator or a developer/moderator.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/UpdateArcadeGTKRequest"
+      responses:
+        '200':
+          description: GTK relation updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - arcade
+                - gtk
+                - xp_feedback
+                properties:
+                  arcade:
+                    type: string
+                  gtk:
+                    "$ref": "#/components/schemas/ArcadeGtkExpanded"
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/hour:
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/hour"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as PUT /arcade/hour. Management operations are excluded even for staff.
+
+        Active authenticated users may edit public arcades without a level threshold. Private drafts require the creator or a developer/moderator.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/UpdateArcadeHourRequest"
+            examples:
+              standard:
+                value:
+                  arcade: arcade_123
+                  Monday:
+                    start: 1000
+                    end: 2300
+                  Sunday: 499
+                  note: Weekdays only
+              fullDay:
+                value:
+                  arcade: arcade_123
+                  Thursday:
+                    start: 0
+                    end: 0
+                  note: 24 hours on Thursday
+      responses:
+        '200':
+          description: Hour relation updated.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/UpdateArcadeHourResponse"
+              example:
+                arcade: arcade_123
+                hour:
+                  id: hour_rel
+                  Monday:
+                    start: 1000
+                    end: 2300
+                  Tuesday:
+                  Wednesday:
+                  Thursday:
+                  Friday:
+                  Saturday:
+                  Sunday: 499
+                  Note: Weekdays only
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Transaction failed.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/photo:
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/photo"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as PUT /arcade/photo. Management operations are excluded even for staff.
+
+        Pending atoms receive 2 XP each when first published, up to 10 XP per campaign target or 4 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/UpdateArcadePhotoRequest"
+            example:
+              arcade: arcade_123
+              photos:
+              - atom_1
+              - atom_2
+      responses:
+        '200':
+          description: 'Photo relation updated. XP is awarded only when pending atoms
+            are first published: 2 XP per atom, up to 10 XP per campaign target or
+            4 XP per other public arcade in a rolling seven-day window. Uploading
+            alone, reordering, removing, or reusing a published atom awards no XP.'
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/UpdateArcadePhotoResponse"
+              example:
+                arcade: arcade_123
+                photo: photo_molecule_123
+                count: 2
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 2
+                  diff_exp: 2
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 50
+                  previous_level: 0
+                  new_level: 0
+                  level_diff: 0
+                  remaining_exp_to_next_level: 2
+                  remaining_percent_to_next_level: 50
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Transaction failed.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/arcade/sns:
+    put:
+      tags:
+      - Connected account
+      summary: "/arcade/sns"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as PUT /arcade/sns. Management operations are excluded even for staff.
+
+        Creates a new `arcade_sns` molecule and writes the atoms under it.
+        The success response returns the same expanded SNS shape used by `GET /arcade?expand=sns`.
+        Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/UpdateArcadeSNSRequest"
+      responses:
+        '200':
+          description: SNS relation updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - arcade
+                - sns
+                - xp_feedback
+                properties:
+                  arcade:
+                    type: string
+                  sns:
+                    "$ref": "#/components/schemas/ArcadeSnsExpanded"
+                  xp_feedback:
+                    "$ref": "#/components/schemas/XpFeedback"
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+  /developer/v1/account/user/countries:
+    put:
+      tags:
+      - Connected account
+      summary: "/user/countries"
+      description: |-
+        Requires account:access. Same payload, response and domain checks as PUT /user/countries. Management operations are excluded even for staff.
+
+        Replaces the authenticated user's ordered profile country list and display mode. Empty is allowed. Accounts below level 15 may select zero or one country; accounts at level 15 or above may select up to three. Supporter and staff tags do not change this limit.
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ProfileCountriesRequest"
+      responses:
+        '200':
+          description: Updated normalized profile countries.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ProfileCountriesResponse"
+        '400':
+          description: Invalid JSON, duplicate, invalid country code, or more than
+            three countries.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Multiple countries require level 15 or above, or the account
+            is inactive.
+        '409':
+          description: The account has not initialized user_info.
+        '502':
+          description: Failed to save profile countries.
+  /developer/v1/account/user/favorite-visibility:
+    put:
+      tags:
+      - Connected account
+      summary: "/user/favorite-visibility"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - favorite_visibility
+              properties:
+                favorite_visibility:
+                  type: string
+                  enum:
+                  - private
+                  - public
+      responses:
+        '200':
+          description: Updated favorite arcade visibility.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as PUT /user/favorite-visibility. Management operations are excluded even
+        for staff.
+  /developer/v1/account/user/game-preferences:
+    put:
+      tags:
+      - Connected account
+      summary: Replace the authenticated user's preferred game series and visibility
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - series
+              - series_public
+              properties:
+                series:
+                  type: array
+                  items:
+                    type: string
+                series_public:
+                  type: boolean
+                warp:
+                  type: boolean
+                  description: Omit to retain the current value.
+      responses:
+        '200':
+          description: Saved preferences with duplicate and blank series IDs removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - success
+                - series
+                - series_public
+                - warp
+                properties:
+                  success:
+                    type: boolean
+                  series:
+                    type: array
+                    items:
+                      type: string
+                  series_public:
+                    type: boolean
+                  warp:
+                    type: boolean
+        '400':
+          description: Invalid preferences or unknown game series.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Inactive user.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '409':
+          description: Missing user_info record.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Storage failure.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      description: Requires account:access. Same payload, response and domain checks
+        as PUT /user/game-preferences. Management operations are excluded even for
+        staff.
+  /developer/v1/account/user/profile:
+    put:
+      tags:
+      - Connected account
+      summary: Update the authenticated user's profile
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - nickname
+              properties:
+                nickname:
+                  type: string
+                  minLength: 1
+                  maxLength: 25
+                bio:
+                  type: string
+                  maxLength: 100
+                sns:
+                  "$ref": "#/components/schemas/UserProfileSns"
+                avatar:
+                  type: 'null'
+                  description: Null deletes the current avatar.
+                background:
+                  type: 'null'
+                  description: Null deletes the current background; requires level
+                    15.
+                background_position:
+                  "$ref": "#/components/schemas/UserProfile/properties/background_position"
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - nickname
+              properties:
+                nickname:
+                  type: string
+                  minLength: 1
+                  maxLength: 25
+                bio:
+                  type: string
+                  maxLength: 100
+                sns:
+                  type: string
+                  description: JSON encoded UserProfileSns object.
+                avatar:
+                  type: string
+                  format: binary
+                  description: PNG or JPEG up to 15 MB; empty or "null" text deletes.
+                background:
+                  type: string
+                  format: binary
+                  description: PNG or JPEG up to 15 MB; empty or "null" text deletes.
+                    Requires level 15.
+                background_position:
+                  type: string
+                  description: JSON encoded x/y percentages (0 to 100), optional zoom
+                    (1 to 4) and rotation (0/90/180/270); requires level 15.
+      responses:
+        '200':
+          description: Updated self profile, including private series.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/UserProfile"
+        '400':
+          description: Invalid profile input.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Inactive user or background access requires level 15.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '409':
+          description: Missing user_info record.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+        '502':
+          description: Storage or profile read failed.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+      description: Requires account:access. Same payload, response and domain checks
+        as PUT /user/profile. Management operations are excluded even for staff.
+  /developer/v1/account/user/visit-visibility:
+    put:
+      tags:
+      - Connected account
+      summary: "/user/visit-visibility"
+      security:
+      - delegatedOAuth:
+        - account:access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/VisitVisibilityRequest"
+      responses:
+        '200':
+          description: Updated public visit visibility.
+        '401':
+          description: Invalid, expired or revoked delegated token; Musecat session
+            JWTs are not accepted here.
+        '403':
+          description: Insufficient scope or existing user/domain restrictions.
+      description: Requires account:access. Same payload, response and domain checks
+        as PUT /user/visit-visibility. Management operations are excluded even for
+        staff.
+
+x-musecat-joint-connection:
+  status: server-only-preparation
+  public-endpoints-enabled: false
+  description: >-
+    Reciprocal one-step consent requires a bilateral partner agreement and verified
+    intent/receipt adapters. The internal joint ledger does not create or broaden
+    OAuth grants. Existing independent OAuth/resource operations remain unchanged.

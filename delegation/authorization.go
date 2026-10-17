@@ -93,6 +93,9 @@ func (m *Manager) Begin(app core.App, in AuthorizationInput) (string, error) {
 	if len(in.State) == 0 || len(in.State) > 512 || !pkce.MatchString(in.Challenge) || in.ChallengeMethod != "S256" {
 		return reject(oauthError("invalid_request"))
 	}
+	if len(in.Scope) == 0 && contains(c.Scopes, AccountAccess) {
+		in.Scope = []string{AccountAccess}
+	}
 	scopes, e := uniqueScopes(in.Scope, c.Scopes)
 	if e != nil {
 		return reject(e)

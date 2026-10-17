@@ -33,9 +33,14 @@ func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
 	}
 
 	operations := documentedOperations(string(spec))
-	routeDecl := routeFunction(t, file)
-	prefixes := routerGroupPrefixes(routeDecl.Body)
-	directOps := directRouteOperations(routeDecl.Body, prefixes)
+	directOps := map[string]bool{}
+	for _, name := range []string{"registerSessionRoutes", "registerAccountRoutes"} {
+		routeDecl := routeFunction(t, file, name)
+		prefixes := routerGroupPrefixes(routeDecl.Body)
+		for op := range directRouteOperations(routeDecl.Body, prefixes) {
+			directOps[op] = true
+		}
+	}
 	if len(directOps) == 0 {
 		t.Fatal("expected non-empty direct route operations")
 	}
@@ -46,15 +51,15 @@ func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
 	}
 }
 
-func routeFunction(t *testing.T, file *ast.File) *ast.FuncDecl {
+func routeFunction(t *testing.T, file *ast.File, name string) *ast.FuncDecl {
 	t.Helper()
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
-		if ok && function.Name.Name == "RegisterAPIRoutes" {
+		if ok && function.Name.Name == name {
 			return function
 		}
 	}
-	t.Fatal("RegisterAPIRoutes function not found")
+	t.Fatalf("route declaration %s not found", name)
 	return nil
 }
 

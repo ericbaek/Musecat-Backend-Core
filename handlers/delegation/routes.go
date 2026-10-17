@@ -296,3 +296,20 @@ func resource(m *delegation.Manager, scope string, h func(*core.RequestEvent, st
 		return h(re, sub)
 	}
 }
+
+// Resolve an opaque actor after PB token loading but before RequireAuth and domain guards.
+// Registered staff accounts still cannot call management paths through this transport.
+func AccountResource(m *delegation.Manager) *hook.Handler[*core.RequestEvent] {
+	return &hook.Handler[*core.RequestEvent]{Id: "oauthAccountActor", Priority: apis.DefaultLoadAuthTokenMiddlewarePriority + 1, Func: func(re *core.RequestEvent) error {
+		path := strings.TrimPrefix(re.Request.URL.Path, "/developer/v1/account")
+		if !delegation.AccountRouteAllowed(re.Request.Method, path) {
+			return re.JSON(403, map[string]string{"error": "access_denied"})
+		}
+		return resource(m, delegation.AccountAccess, func(re *core.RequestEvent, sub string) error {
+			if re.Request.Method != http.MethodGet && re.Request.Method != http.MethodHead {
+				re.App.Logger().Info("OAuth account operation", "user", re.Auth.Id, "delegation_subject", sub, "method", re.Request.Method, "path", re.Request.URL.Path)
+			}
+			return re.Next()
+		})(re)
+	}}
+}

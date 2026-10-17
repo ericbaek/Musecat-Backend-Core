@@ -13,7 +13,7 @@ transferred or silently replaced. Email and nickname are not identity keys.
 
 `external_service_connection` attaches independently named game services to an account connection.
 A rhythm.info identity can therefore authorize CHUNITHM and SOUND VOLTEX separately. An independent
-NosLog issuer remains a separate identity even if its subject happens to be identical. All new and
+provider issuer remains a separate identity even if its subject happens to be identical. All new and
 reauthorized service grants start private with no selected public fields. This phase has no API to
 publish those fields. Reauthorization replaces the game consent with exactly the requested services
 whose required scopes were granted, rather than keeping permissions that were not reapproved.
@@ -124,7 +124,7 @@ The provider variable is a JSON array. This illustrative provider is not a live 
 ]
 ```
 
-Use a separate registered provider and callback for NosLog. Provider and service IDs are lowercase
+Use a separate registered provider and callback for each independent issuer. Provider and service IDs are lowercase
 ASCII identifiers. Endpoints must be fixed HTTPS URLs without user-info, query or fragment. The
 client-auth method is `client_secret_basic` or `client_secret_post`; credentials are server-only.
 Production endpoints and scopes must be confirmed with each partner before enabling it.
@@ -148,3 +148,11 @@ fresh disposable synthetic existing installation. No production database is need
 
 The flow follows [OAuth security guidance](https://datatracker.ietf.org/doc/html/rfc9700) and
 [authorization-server issuer identification](https://www.rfc-editor.org/info/rfc9207/).
+
+## Reciprocal one-step preparation
+
+The proposed [joint connection](joint-connections.md) coordinates this reverse account ledger with
+Musecat-issued delegated grants under a separately agreed bilateral consent protocol. The original
+OAuth flow and private service defaults remain unchanged. The locked `external_joint_connection`
+ledger and `connections.JointManager` are server-only preparation; there are no new public joint
+HTTP routes or automatic opposite-direction token issuance. Withdrawal clears this ledger too.

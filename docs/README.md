@@ -35,3 +35,9 @@ When adding or changing an endpoint:
 - Integration guide: `/developer/guide.md`, embedded from [`developer-api.md`](developer-api.md).
 - OAuth metadata: `/.well-known/oauth-authorization-server` when configured.
 - Internal/operational API docs retain their existing optional authentication policy.
+
+- New integrations use `account:access` for the explicit general-user API allowlist; management is excluded.
+- CHUNITHM Info agent handoff: [`partners/chuniinfo/agent.md`](partners/chuniinfo/agent.md).
+  Share with the guide and developer OpenAPI. Development URL and credentials are supplied separately.
+
+- Reciprocal one-step design and internal preparation: [`joint-connections.md`](joint-connections.md).
