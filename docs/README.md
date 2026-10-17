@@ -41,4 +41,6 @@ When adding or changing an endpoint:
   partner decision/implementation checklist: [`partners/chuniinfo/checklist.md`](partners/chuniinfo/checklist.md).
   Share with the guide and developer OpenAPI. Development URL and credentials are supplied separately.
 
-- Reciprocal one-step design and internal preparation: [`joint-connections.md`](joint-connections.md).
+- Partner integration contract (all third-party platforms): [`partner-integration-spec.md`](partner-integration-spec.md).
+- Self-service registration and one-click activation design: [`developer-center.md`](developer-center.md).
+- Reciprocal one-step rationale and internal coordinator: [`joint-connections.md`](joint-connections.md).

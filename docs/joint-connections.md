@@ -1,8 +1,11 @@
 # One-step reciprocal account connection
 
-Status: design plus server-only preparation on `feat/external-account-connections`.
-Development URL, credentials and partner protocol remain unconfirmed. This is not a deployed
-bidirectional API announcement. See [partner agent brief](partners/chuniinfo/agent.md).
+Status: server-only preparation on `feat/external-account-connections`. The wire protocol is now
+fixed by Musecat in [`partner-integration-spec.md`](partner-integration-spec.md) §4–6 (intent /
+receipt / revocation endpoints, schemas, authentication, error codes) and partners register through
+the [Developer Center](developer-center.md). This document keeps the rationale and the internal
+coordinator contract; where the two differ, the specification wins. Development URL and credentials
+are issued per partner on approval. See also the [partner agent brief](partners/chuniinfo/agent.md).
 
 ## User experience and consent authority
 
@@ -25,10 +28,10 @@ No combined bearer token, universal user ID, shared login session or cross-app g
 Public record display is separate from connecting accounts: new game grants remain private.
 A later publication control must not exceed the partner's current disclosure rules.
 
-## Proposed bilateral protocol (requires partner agreement)
+## Bilateral protocol (specified; logical view)
 
-These are logical messages, not currently registered HTTP endpoints. Agree exact paths, schemas,
-authentication and error codes before implementing the public adapter. Do not invent deployment URLs.
+Concrete endpoints and payloads are in the specification §5. The logical sequence below is what
+the specification encodes; Musecat's HTTP adapter for it is not yet implemented.
 
 1. The initiating service creates a session-bound attempt with random state, PKCE and a correlation
    ID. The partner prepares an opaque, short-lived one-use intent bound to its logged-in account,
@@ -145,10 +148,10 @@ ordinary OAuth-only providers continue to work without one-step reciprocal suppo
 
 ## Ship gates
 
-1. Partner confirms joint-consent authority, manifest/scopes/identity fields and intent, code,
-   receipt, expiry, refresh and generation-bound revocation contracts.
-2. Implement authenticated adapters, session/receipt storage and issuance gates; connect the
-   existing login/consent UI to the joint summary and server-only coordinator.
+1. Partner declares support for `musecat-joint/v1` in the Developer Center form and passes the
+   automated checks and conformance kit (specification §8–9). No bilateral negotiation is needed.
+2. Implement Musecat's specification §4–6 endpoints, session/receipt storage and issuance gates;
+   connect the existing login/consent UI to the joint summary and server-only coordinator.
 3. Add partial-state UI, safe retry/abort, durable revocation outbox and reconciliation.
 4. Test real two-server flows: both entry points, both accounts logged out, account switch,
    denial, replay, wrong issuer/client, one-sided network failure, refresh race, reapproval and
