@@ -366,12 +366,6 @@ render revision-pointer changes as ordinary content diffs.
 
 Game mutations require `base_state_id`; a stale value returns `409`. The public request is a delta with required `add`, `modify`, and `remove` arrays. `modify` is a complete replacement object, not a patch, and a single modify cannot delete other active entries. Same-series version changes retain the entry; a cross-series change is rejected. Removed entries remain durable for historical flags, which appear as `orphanFlags` while absent from the selected batch. Re-addition can reuse the newest inactive history match for the same canonical series and verified cabinet; empty/unverified cabinets never reuse an identity.
 
-For `PUT /arcade/game`, a `modify` object may omit `price` to preserve the
-stored price exactly, including null or legacy values. All other replacement
-fields retain their existing requirements. New `add` objects require price;
-explicit null price is invalid. A location-only edit does not introduce a
-price change in immutable history or `game_diff`.
-
 Every game revision round-trips its canonical `game_cabinet` ID. A non-empty
 cabinet is valid only when `game_series_version_cabinet` contains the submitted
 version/cabinet pair. An empty cabinet means genuinely unverified cabinet

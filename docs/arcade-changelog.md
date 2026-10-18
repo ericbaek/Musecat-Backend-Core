@@ -225,12 +225,6 @@ successful request. Each item records `before` and `after` snapshots and one of
 from `arcade_game_id`, so historical flags remain attached and are returned as
 `orphanFlags` until that entry becomes active again.
 
-For `PUT /arcade/game`, a `modify` object may omit `price` to preserve the
-stored price exactly, including null or legacy values. All other replacement
-fields retain their existing requirements. New `add` objects require price;
-explicit null price is invalid. A location-only edit does not introduce a
-price change in immutable history or `game_diff`.
-
 When an add has a verified cabinet, the server may reuse the newest inactive
 entry for the same arcade, canonical series, and cabinet. It orders candidates
 by matching history revision `created`, entry `created`, and entry id, all
