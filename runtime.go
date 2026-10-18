@@ -62,6 +62,7 @@ func configureRuntime(app *pocketbase.PocketBase) error {
 	connections.RegisterRequestCleanupCron(app)
 	externalConnections.RegisterRecordRefreshCron(app)
 	partnerApps.RegisterSyncCron(app)
+	partnerApps.RegisterCheckCron(app)
 	if jointPartners != nil {
 		connections.RegisterJointCleanupCron(app)
 		jointPartners.RegisterOutboxCron(app)

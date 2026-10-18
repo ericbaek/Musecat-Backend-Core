@@ -3161,6 +3161,41 @@ components:
           properties:
             error: {minLength: 1}
             code: {maxLength: 0}
+    ConformanceReport:
+      type: object
+      required: [id, spec, status, current, created, cases]
+      properties:
+        id: {type: string}
+        spec: {type: string, const: musecat-conformance/v1}
+        status: {type: string, enum: [queued, running, passed, failed, incomplete, cancelled]}
+        current: {type: boolean}
+        created: {type: string}
+        started: {type: string}
+        finished: {type: string}
+        cases:
+          type: array
+          items:
+            type: object
+            required: [id, status, code]
+            properties:
+              id: {type: string}
+              status: {type: string, enum: [pass, fail, action_required, not_applicable]}
+              code: {type: string, description: Bounded result code; never a remote response body.}
+    ConformanceFixtures:
+      type: object
+      additionalProperties: false
+      description: Optional dedicated staging-account fixtures. Never returned or logged. Use a separate disposable refresh family from the public/private access fixtures.
+      properties:
+        access_token: {type: string, maxLength: 4096, writeOnly: true}
+        private_access_token: {type: string, maxLength: 4096, writeOnly: true}
+        refresh_token: {type: string, maxLength: 4096, writeOnly: true}
+        fresh_intent: {type: string, maxLength: 4096, writeOnly: true}
+        expired_intent: {type: string, maxLength: 4096, writeOnly: true}
+        consumed_intent: {type: string, maxLength: 4096, writeOnly: true}
+        expected_subject: {type: string, maxLength: 256, writeOnly: true}
+        private_subject: {type: string, maxLength: 256, writeOnly: true, description: Private test account subject when different from expected_subject.}
+        joint_attempt_id: {type: string, maxLength: 15, description: Must belong to the application owner and the currently approved partner configuration.}
+        destructive: {type: boolean, default: false, description: Required before refreshing and revoking a disposable refresh-token family.}
     JointConsent:
       type: object
       required: [id, partner, partner_name, partner_account, services, manifest, expires_at]
@@ -15197,6 +15232,69 @@ paths:
       security: [{bearerAuth: []}]
       responses:
         '200': {description: New key; previous hash accepted for the registered rotation window, content: {application/json: {schema: {type: object, properties: {partner_id: {type: string}, key: {type: string}}}}}}
+
+  /developer/apps/{id}/checks:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9]{15}$'}}
+    get:
+      summary: Read the latest ten conformance reports
+      security: [{bearerAuth: []}]
+      description: Application owner only; foreign IDs return 404. Reports exclude fixtures, remote bodies and credentials. current is false after form/credential changes or after 30 days.
+      responses:
+        '200': {description: Safe check history., content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/ConformanceReport'}}}}}}}
+        '401': {description: Active session required.}
+        '403': {description: Operator access required on moderation routes.}
+        '404': {description: Application not found.}
+    post:
+      summary: Queue an asynchronous conformance run
+      security: [{bearerAuth: []}]
+      description: >-
+        Probes registered HTTPS endpoints only. Runs start within one minute; at most one
+        run is active per app, three per actor, and a one-minute application cooldown applies.
+        Missing staging fixtures are action_required, never pass. Refresh tests require explicit
+        destructive consent and revoke the supplied disposable family. Fixtures are encrypted
+        while queued and wiped on completion, cancellation or interrupted-run recovery.
+        Execution never grants OAuth consent or approves an application.
+      requestBody: {required: false, content: {application/json: {schema: {$ref: '#/components/schemas/ConformanceFixtures'}}}}
+      responses:
+        '202': {description: Queued., content: {application/json: {schema: {$ref: '#/components/schemas/ConformanceReport'}}}}
+        '400': {description: Invalid fixtures or missing destructive consent.}
+        '401': {description: Active session required.}
+        '403': {description: Operator access required on moderation routes.}
+        '404': {description: Application not found.}
+        '409': {description: Suspended application.}
+        '429': {description: checks_busy; active run or cooldown.}
+  /moderation/developer/apps/{id}/checks:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9]{15}$'}}
+    get:
+      summary: Read the latest ten conformance reports
+      security: [{bearerAuth: []}]
+      description: Active operator access required. Reports exclude fixtures, remote bodies and credentials. current is false after form/credential changes or after 30 days.
+      responses:
+        '200': {description: Safe check history., content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/ConformanceReport'}}}}}}}
+        '401': {description: Active session required.}
+        '403': {description: Operator access required on moderation routes.}
+        '404': {description: Application not found.}
+    post:
+      summary: Queue an asynchronous conformance run
+      security: [{bearerAuth: []}]
+      description: >-
+        Probes registered HTTPS endpoints only. Runs start within one minute; at most one
+        run is active per app, three per actor, and a one-minute application cooldown applies.
+        Missing staging fixtures are action_required, never pass. Refresh tests require explicit
+        destructive consent and revoke the supplied disposable family. Fixtures are encrypted
+        while queued and wiped on completion, cancellation or interrupted-run recovery.
+        Execution never grants OAuth consent or approves an application.
+      requestBody: {required: false, content: {application/json: {schema: {$ref: '#/components/schemas/ConformanceFixtures'}}}}
+      responses:
+        '202': {description: Queued., content: {application/json: {schema: {$ref: '#/components/schemas/ConformanceReport'}}}}
+        '400': {description: Invalid fixtures or missing destructive consent.}
+        '401': {description: Active session required.}
+        '403': {description: Operator access required on moderation routes.}
+        '404': {description: Application not found.}
+        '409': {description: Suspended application.}
+        '429': {description: checks_busy; active run or cooldown.}
 
 x-musecat-joint-connection:
   status: implemented

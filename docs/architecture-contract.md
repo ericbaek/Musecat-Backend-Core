@@ -949,3 +949,28 @@ and never restore local access. Settings distinguish pending remote revocation. 
 remains local-only. OAuth refresh does not replace the connection's authorization generation.
 Core supplies fresh bootstrap schema; Full owns independent guarded forward migrations and job
 registration. No deployment or real-partner interoperability is implied by mock conformance tests.
+
+## Developer Center conformance execution
+
+`POST /developer/apps/{id}/checks` queues owner-authorized work; the matching GET returns
+safe history. Active strict reviewers use `/moderation/developer/apps/{id}/checks` with
+the existing reviewer policy. Raw `partner_conformance_run` access is locked. Each run freezes
+its submitted form and a revision of the form and credentials. Reports become stale after
+configuration changes or 30 days. Credentials, test subjects, remote response bodies and tokens
+are never projected or logged. Optional staging fixtures are sealed and cleared on completion,
+cancellation and interrupted-run recovery. One active run per app, a one-minute cooldown and
+three active runs per actor bound the queue; executables process bounded batches every minute.
+
+The runner performs outbound I/O outside transactions, with 10-second request and 90-second
+run deadlines, no redirects, no environment HTTP proxy and bounded response bodies. The default
+dialer rejects private, loopback, link-local, multicast, special and IPv4-embedded translation
+ranges, resolves and validates every address, then pins the selected public IP while preserving
+TLS hostname verification. Registered form endpoints are the only targets.
+
+Pass, fail, action_required and not_applicable remain distinct. A run is passed only when all
+applicable cases pass; missing staging fixtures produce incomplete, not success. Disposable refresh
+families are refreshed/revoked only with explicit consent. The runner never creates OAuth consent:
+Direction A requires an owner grant whose code was actually redeemed. A successful joint round
+trip must be evidenced by the owner's normal joint connection and both
+live grant generations under the approved configuration. Operator approval remains a separate
+review action; checks do not silently change existing approval policy or active registrations.

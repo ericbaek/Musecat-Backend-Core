@@ -487,8 +487,8 @@ remain only for Musecat's first-party clients and bootstrap.
 
 ## 9. Conformance and status
 
-Partners self-certify with the Musecat conformance kit (mock Musecat + test runner) before
-registration. Required passes: section 3 profile (PKCE, `iss`, userinfo `sub`, refresh, revoke,
+Partners run the built-in checks from the Developer Center against their staging deployment.
+The server measures results; missing fixtures are unverified and do not count as a pass. Required passes: section 3 profile (PKCE, `iss`, userinfo `sub`, refresh, revoke,
 records envelope validation, `records_private`), section 5 (lookup/receipt happy path, expired,
 consumed, wrong key, manifest unsupported, subject mismatch, partial recovery) and section 6
 (duplicate, old generation, unknown pair).
@@ -503,8 +503,8 @@ Musecat implementation status:
 | 4 Server-to-server auth | Implemented: distinct bearer keys, registered inbound rotation window, 10-minute persisted request replay |
 | 5 Joint protocol | Implemented: authenticated lookup/receipt adapter, session-bound single consent, PKCE exchanges, live evidence checks |
 | 6 Bilateral revocation | Implemented: exact generation revocation, transactional outbox, retry cron and pending UI |
-| 8 Developer Center (self-service form, checks, one-click approval, hot activation) | Implemented: form validation, operator approval, OAuth credentials, joint key activation. Live remote conformance probing remains pending. |
-| 9 Conformance kit | Designed (`developer-center.md` §6); not started |
+| 8 Developer Center (self-service form, checks, one-click approval, hot activation) | Implemented: form validation, operator approval, OAuth credentials, joint key activation. Server-measured conformance checks and staging fixture entry available in the Developer Center. |
+| 9 Conformance checks | Implemented in the Developer Center: real server probes, optional disposable staging fixtures and verified joint evidence. Interactive/fixture-dependent cases stay unverified until evidence is available. |
 
 Partner-facing promises in this document hold once the corresponding row reads "Implemented"; until
-then partners build against the schemas here and test with the conformance kit when it ships.
+then partners build against the schemas here and inspect the Developer Center report for any remaining unverified items.

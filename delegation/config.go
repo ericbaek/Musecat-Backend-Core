@@ -305,3 +305,11 @@ func (m *Manager) Metadata() map[string]any {
 	sort.Strings(scopes)
 	return map[string]any{"issuer": m.issuer, "authorization_endpoint": m.issuer + "/oauth/authorize", "token_endpoint": m.issuer + "/oauth/token", "revocation_endpoint": m.issuer + "/oauth/revoke", "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code", "refresh_token"}, "token_endpoint_auth_methods_supported": []string{"client_secret_basic"}, "code_challenge_methods_supported": []string{"S256"}, "authorization_response_iss_parameter_supported": true, "scopes_supported": scopes}
 }
+
+// CheckUser revalidates queued account-owned work against the current restrictions.
+func (m *Manager) CheckUser(app core.App, user *core.Record) error {
+	if m == nil || user == nil {
+		return oauthError("access_denied")
+	}
+	return m.checkUser(app, user)
+}

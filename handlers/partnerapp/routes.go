@@ -104,6 +104,20 @@ func RegisterRoutes(se *core.ServeEvent, service *partnerapp.Service) {
 		re.Response.Header().Set("Referrer-Policy", "no-referrer")
 		return re.JSON(http.StatusOK, map[string]string{"partner_id": partnerID, "key": key})
 	})
+	owner.GET("/{id}/checks", func(re *core.RequestEvent) error {
+		items, err := service.CheckReports(re.App, re.Auth.Id, re.Request.PathValue("id"), false)
+		return respond(re, map[string]any{"items": items}, err)
+	})
+	owner.POST("/{id}/checks", func(re *core.RequestEvent) error {
+		var in partnerapp.CheckFixtures
+		if re.Request.ContentLength != 0 {
+			if err := decode(re, &in); err != nil {
+				return err
+			}
+		}
+		out, err := service.QueueChecks(re.App, re.Auth.Id, re.Request.PathValue("id"), false, in)
+		return respondStatus(re, http.StatusAccepted, out, err)
+	}).Bind(apis.BodyLimit(16 << 10))
 	owner.GET("/{id}/events", func(re *core.RequestEvent) error {
 		items, err := service.OwnerEvents(re.App, re.Auth.Id, re.Request.PathValue("id"))
 		return respond(re, map[string]any{"items": items}, err)
@@ -118,6 +132,20 @@ func RegisterRoutes(se *core.ServeEvent, service *partnerapp.Service) {
 		app, err := service.Inspect(re.App, re.Request.PathValue("id"))
 		return respond(re, app, err)
 	})
+	operator.GET("/{id}/checks", func(re *core.RequestEvent) error {
+		items, err := service.CheckReports(re.App, re.Auth.Id, re.Request.PathValue("id"), true)
+		return respond(re, map[string]any{"items": items}, err)
+	})
+	operator.POST("/{id}/checks", func(re *core.RequestEvent) error {
+		var in partnerapp.CheckFixtures
+		if re.Request.ContentLength != 0 {
+			if err := decode(re, &in); err != nil {
+				return err
+			}
+		}
+		out, err := service.QueueChecks(re.App, re.Auth.Id, re.Request.PathValue("id"), true, in)
+		return respondStatus(re, http.StatusAccepted, out, err)
+	}).Bind(apis.BodyLimit(16 << 10))
 	operator.GET("/{id}/events", func(re *core.RequestEvent) error {
 		items, err := service.EventsFor(re.App, re.Request.PathValue("id"))
 		return respond(re, map[string]any{"items": items}, err)
@@ -169,6 +197,8 @@ func respondError(re *core.RequestEvent, err error) error {
 	switch {
 	case errors.As(err, &fields):
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid_form", "fields": fields})
+	case errors.Is(err, partnerapp.ErrChecksBusy):
+		return re.JSON(http.StatusTooManyRequests, map[string]string{"error": "checks_busy"})
 	case errors.Is(err, partnerapp.ErrNotFound):
 		return re.NotFoundError("Application not found.", nil)
 	case errors.Is(err, partnerapp.ErrConflict):

@@ -168,3 +168,30 @@ func TestDeveloperCenterRoutes(t *testing.T) {
 	check(t, f.req("GET", "/moderation/developer/apps/"+id+"/events", operator, ""), 200)
 	check(t, f.req("GET", "/moderation/developer/apps/nope", operator, ""), 404)
 }
+
+func TestConformanceRoutesAreOwnerAndReviewerOnly(t *testing.T) {
+	f := newFixture(t)
+	owner := f.user()
+	stranger := f.user()
+	operator := f.user("developer")
+	created := check(t, f.req("POST", "/developer/apps", owner, fmt.Sprintf(form, "checks_app")), 201)
+	id := created["id"].(string)
+	path := "/developer/apps/" + id + "/checks"
+	check(t, f.req("GET", path, "", ""), 401)
+	check(t, f.req("GET", path, stranger, ""), 404)
+	check(t, f.req("POST", path, stranger, "{}"), 404)
+	check(t, f.req("POST", path, owner, `{"refresh_token":"secret","destructive":false}`), 400)
+	first := check(t, f.req("POST", path, owner, "{}"), 202)
+	if first["status"] != "queued" {
+		t.Fatal(first)
+	}
+	check(t, f.req("POST", path, owner, "{}"), 429)
+	items := check(t, f.req("GET", path, owner, ""), 200)
+	if len(items["items"].([]any)) != 1 {
+		t.Fatal(items)
+	}
+	operatorPath := "/moderation/developer/apps/" + id + "/checks"
+	check(t, f.req("GET", operatorPath, owner, ""), 403)
+	check(t, f.req("GET", operatorPath, operator, ""), 200)
+	check(t, f.req("POST", operatorPath, operator, "{}"), 429)
+}

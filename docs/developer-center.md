@@ -1,6 +1,6 @@
 # Developer Center: self-service partner registration and one-click activation
 
-Status: design, 2026-10-18; Phase 1 (Direction A, sections 3–5 minus automated checks and usage) implemented in `partnerapp`. Companion to [`partner-integration-spec.md`](partner-integration-spec.md).
+Status: registration, activation, reciprocal connection and built-in conformance execution implemented in `partnerapp`, 2026-10-18. Collaborators and usage rollups below remain design targets. Companion to [`partner-integration-spec.md`](partner-integration-spec.md).
 Goal: a partner that has implemented the spec registers itself, passes automated checks, and goes
 live the moment a Musecat operator presses **Approve**. No per-partner negotiation, no manual
 environment-variable editing, no redeploy.
@@ -51,7 +51,7 @@ external-connection conventions.
 | `direction_a_secret_hash` | Musecat-generated client secret, hashed; plaintext shown once |
 | `direction_b_credentials` | encrypted JSON `{musecat_client_id, musecat_client_secret}` (partner-issued) using `MUSECAT_CONNECTION_ENCRYPTION_KEY` |
 | `joint_keys` | encrypted JSON `{musecat_to_partner, partner_to_musecat_hash, previous_*, rotation_until}` |
-| `conformance_report` | JSON, last uploaded kit result (see §6) |
+| Check history | Stored in the separate locked `partner_conformance_run` collection (see §6); not a partner-uploaded claim |
 | `created`, `updated` | autodate |
 
 ### `partner_application_event`
@@ -130,30 +130,35 @@ draft ──submit──▶ submitted ──automated checks──▶ ready for 
 - `joint.enabled` ⇒ `direction_b` present, `joint_url`, `connect_start_url`, ≥ 1 manifest Musecat supports, partner-issued `musecat_to_partner_key` ≥ 32 bytes.
 - Partner-issued secrets are accepted only on submit/rotate, encrypted immediately, never echoed.
 
-### 5.2 Automated checks (asynchronous, bounded, no user tokens involved)
+### 5.2 Automated checks (implemented)
 
-Run on submit and re-runnable by the operator. Each check records pass/fail/skip with a redacted
-detail string. All outbound calls use the same hardened HTTP client as the connections adapter
-(10-second deadline, no redirects, bounded body).
+Owners and active reviewers can run checks in the app's Developer Center panel. The run is
+persisted, starts within one minute, and the panel polls results and retains the latest ten
+reports. One run per application, three active runs per actor and a one-minute cooldown apply.
+The submitted form and credential revision identify the exact configuration tested. Changed
+settings or reports older than 30 days are shown as stale. A run's progress, timestamps and
+individual pass/fail/action_required/not_applicable cases remain visible separately.
 
-| Check | Method |
-| --- | --- |
-| TLS and reachability | `HEAD`/`GET` each declared URL; certificate valid; no redirect |
-| Authorization server metadata (if partner publishes RFC 8414) | `issuer` in metadata equals declared issuer; declared endpoints appear in metadata |
-| Authorization endpoint rejects `plain` PKCE | `GET authorization_url?...code_challenge_method=plain` returns an OAuth error or an error redirect, not a consent page |
-| Token endpoint requires client auth | `POST token_url` with `grant_type=authorization_code` and no credentials returns 401 `invalid_client` |
-| Revocation endpoint | Unauthenticated `POST` returns 401 |
-| Records endpoint | Unauthenticated `GET records_url/<service>` returns 401 for each declared service |
-| Joint endpoints | `POST joint_url/intents/lookup` without bearer returns 401 `unauthorized_partner`; with the partner-issued key and a random intent returns 400 `invalid_intent` (proves key provisioning) |
-| `connect_start_url` | Reachable; does not redirect to a non-HTTPS target |
-| Conformance report | Present, `spec` version supported, all required cases pass, report age ≤ 30 days (§6) |
+The server tests callback TLS/reachability, optional RFC 8414 metadata, rejection of unauthenticated
+token/revocation/userinfo/records calls, rejection of PKCE plain, joint bearer enforcement,
+partner-key provisioning, invalid/expired/consumed intents, unsupported manifests, unknown
+generations and idempotent revocation requests. Redirects are never followed. A PKCE error redirect
+counts only when its callback and state match the generated probe; login screens remain unverified.
 
-Checks that cannot run without a real user (userinfo shape, records envelope with data) are
-covered by the conformance kit, which the partner runs against its own staging account.
+Optional staging fixtures enable userinfo subject/issuer verification, typed public and private
+record envelopes, and refresh/revoke/rejected-reuse checks. Use dedicated test accounts and a
+separate disposable refresh family. Revocation requires the explicit destruction checkbox. Both
+servers' live joint grants are checked using an owner-supplied attempt ID from the normal consent
+flow; the checker never fabricates consent or grants. Missing fixtures or interactive requirements
+are action_required and keep the run incomplete. Raw fixtures and response bodies never appear in
+reports. Fixtures are encrypted while queued and erased after processing or interrupted-run recovery.
 
 ### 5.3 Approve (the one click)
 
-Precondition: all required checks pass. Effect, atomically:
+Current behavior: operators review the measured reports and approve separately. A successful
+check does not auto-approve. Initial approval may be needed to provision a normal joint test
+connection; unresolved cases remain explicit in the panel. The following activation design
+describes the existing independent approval action:
 
 1. `approved_form := submitted_form`, `approved_hash` recomputed, `status := approved`.
 2. If Direction A is new or its redirect URIs/scopes changed: generate a new client secret, store
@@ -183,25 +188,22 @@ before submit:
 | Joint URLs, manifests | Joint attempts restart; existing pairs unaffected until next action |
 | Partner-issued credentials/keys | Rotation window per spec §4; no user impact |
 
-## 6. Conformance kit
+## 6. Built-in conformance runner (implemented)
 
-Shipped as `musecat-conformance` (Go binary + Docker image) from this repository.
+The Developer Center now runs conformance checks directly on the Musecat server. Partners do not
+need to install a binary, upload a Markdown file, or self-sign a claimed result. The server produces
+`musecat-conformance/v1` reports from actual probes, with bounded codes and no remote payloads.
+This replaces the earlier proposed HMAC report upload: a partner-authored report is not treated
+as proof that a remote test ran. The same runner and cases are exercised against scripted partner
+fixtures in Core tests. Browser/BFF tests cover access checks, secret projection, result state and
+one-use fixture entry. Full owns the independent locked run-table migration and worker schedule.
 
-- **Mock Musecat**: a local server implementing spec §2 (authorization server with scripted
-  consent), §4 bearer verification, §5.4 and §6 Musecat-hosted endpoints. Partners point their
-  staging deployment at it using the same configuration shape they will use in production.
-- **Runner**: given the partner's onboarding form and a staging account's pre-provisioned
-  Direction-B authorization (an access token the partner obtains out of band), executes the cases
-  listed in spec §9, including the browser-less parts of the joint flow (`intents/lookup`,
-  `receipts`, `revocations`, idempotent `X-Request-Id`, old-generation rejection) and the records
-  envelope validation (schema, size limits, `records_private`).
-- **Report**: JSON `{spec, kit_version, partner_id, run_at, cases:[{id, status, detail}]}`, signed
-  with an HMAC derived from the partner's own `musecat_to_partner_key` so a report cannot be
-  reused across partners. Uploaded in the Developer Center; the Musecat server verifies the HMAC
-  with the stored key.
-
-The kit is also Musecat's own integration test for §5–6: the same case list runs in CI against the
-real coordinator with the mock partner swapped in.
+Use the app detail's **Run / rerun checks** action for basic checks. Expand **Provide test fixtures**
+for live staging data checks; the field descriptions identify the inputs. After normal joint consent,
+copy the attempt ID from the joint connection list into the test fixture. To test a partner that
+requires login before validating PKCE, complete its interactive PKCE rejection test separately;
+the UI keeps that item unverified instead of accepting a login page as proof. No check creates
+or transfers user authorization.
 
 ## 7. Partner-facing UI (WebCore)
 
@@ -235,10 +237,11 @@ User session (owner/collaborator):
 | `POST /developer/apps` | Create draft `{partner_id, display_name, …}` |
 | `GET /developer/apps/{id}` | Detail incl. submitted/approved forms (secrets stripped), checks, usage |
 | `PUT /developer/apps/{id}` | Update draft/submitted form; partner-issued secrets accepted here and encrypted |
-| `POST /developer/apps/{id}/submit` | Validate, set `submitted`, enqueue checks |
+| `POST /developer/apps/{id}/submit` | Validate and set `submitted`; checks are queued separately by the explicit run action |
 | `POST /developer/apps/{id}/rotate` | Rotate partner-issued credentials (`direction_b` or `joint`) with rotation window |
 | `GET /developer/apps/{id}/reveal/{token}` | One-time reveal of Musecat-issued secret/key |
-| `POST /developer/apps/{id}/conformance` | Upload report (≤ 256 KiB), verify HMAC |
+| `GET /developer/apps/{id}/checks` | Safe conformance history |
+| `POST /developer/apps/{id}/checks` | Queue server-measured conformance checks with optional sealed staging fixtures |
 | `PUT /developer/apps/{id}/collaborators` | Replace collaborator list |
 | `GET /developer/apps/{id}/events` | Audit timeline |
 
@@ -280,7 +283,7 @@ checks are queued, at most one run per application in flight. Routes are **not**
 | 1 | `partner_application` + events + `ApplicationRegistry` + merged registry + hot swap; Direction A only; operator approve/suspend API; minimal WebCore list/form/queue | Partners that only need Musecat features (`account:access`) self-register |
 | 2 | Direction B in the form and registry; automated checks §5.2 (except joint); records fetch/cache/profile rendering per spec §3.4 | Record display from any compliant partner |
 | 3 | Spec §4–6 Musecat endpoints, joint consent-page wiring, revocation outbox; joint section of the form and checks | One-approval reciprocal connection |
-| 4 | Conformance kit, HMAC-signed report upload, report check as approval gate; usage rollups | Approval without manual review of partner code |
+| 4 | Built-in server-measured conformance runner and Developer Center results implemented; usage rollups remain separate future work | Partners and operators can test implementations without reviewing their code manually |
 
 Phase 1 reuses the existing registration epoch mechanism unchanged; phases 2–3 implement the
 "Not started" rows in spec §9. Full owns the guarded forward migrations for every new collection;
