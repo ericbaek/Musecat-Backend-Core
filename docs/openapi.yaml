@@ -3368,7 +3368,7 @@ components:
         provider: {type: string}
         service: {type: string}
         status: {type: string, enum: [ok, private, unavailable, unsupported]}
-        error: {type: string, description: Machine code such as token_refresh, unauthorized, forbidden, not_found, rate_limited, invalid_envelope, provider_disabled, network, never_fetched.}
+        error: {type: string, description: Machine code such as token_refresh, unauthorized, forbidden, not_found, rate_limited, invalid_envelope, provider_disabled, network, never_fetched. A rate_limited result honors persisted upstream Retry-After seconds before another request.}
         fetched_at: {type: [string, 'null'], format: date-time}
         updated_at: {type: [string, 'null'], format: date-time}
         payload:
@@ -8393,7 +8393,7 @@ paths:
     get:
       tags: [Users]
       summary: Public game records a user has published
-      description: Anonymous. Returns only services the user set public in Musecat whose cached partner envelope also reports public visibility and status ok. Served from cache (refreshed hourly for published records); never triggers a partner request. Cache-Control public, max-age=300.
+      description: Anonymous. Returns only services the user set public in Musecat whose currently configured provider/service has a cached partner envelope with public visibility, status ok and age below 24 hours. Served from cache (refreshed hourly for published records); never triggers a partner request. Cache-Control public, max-age=300.
       parameters: [{name: user, in: query, required: true, schema: {type: string}}]
       responses:
         '200': {description: Published records., content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/ExternalPublicRecord'}}}}}}}
@@ -8405,7 +8405,7 @@ paths:
       tags: [Users]
       summary: Owner view of one cached game record, fetching when stale
       security: [{bearerAuth: []}]
-      description: Fetches from the partner when no cache exists or it is older than 24 hours; refresh=true forces a fetch unless one ran within the last minute. An expired access token is refreshed once and re-sealed. Partner records_private or a private envelope yields status private with no payload; the partner subject is validated against the connection and never returned.
+      description: Fetches from the partner when no cache exists or it is older than 24 hours; refresh=true forces a fetch unless one ran within the last minute or persisted upstream Retry-After backoff is still active. An expired access token is refreshed once and re-sealed. Partner records_private or a private envelope yields status private with no payload; the partner subject is validated against the connection and never returned.
       parameters: [{name: refresh, in: query, required: false, schema: {type: boolean}}]
       responses:
         '200': {description: Record view. Cache-Control is no-store., content: {application/json: {schema: {$ref: '#/components/schemas/ExternalRecordView'}}}}

@@ -167,14 +167,7 @@ func NewManager(providers []Provider, key []byte, client *http.Client) (*Manager
 		return nil, err
 	}
 	m := &Manager{static: append([]Provider(nil), providers...), aead: aead}
-	if client == nil {
-		client = &http.Client{}
-	}
-	// Copy rather than mutating an injected shared client. Redirects cannot forward credentials.
-	copyClient := *client
-	copyClient.Timeout = 10 * time.Second
-	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	m.client = &copyClient
+	m.client = NewPartnerHTTPClient(client)
 	built, err := buildProviders(providers, nil)
 	if err != nil {
 		return nil, err

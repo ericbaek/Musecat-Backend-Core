@@ -1,6 +1,6 @@
 # Developer Center: self-service partner registration and one-click activation
 
-Status: registration, activation, reciprocal connection and built-in conformance execution implemented in `partnerapp`, 2026-10-18. Collaborators and usage rollups below remain design targets. Companion to [`partner-integration-spec.md`](partner-integration-spec.md).
+Status: registration, activation, reciprocal connection and built-in conformance execution implemented in `partnerapp`, 2026-10-18. Collaborators, daily usage rollups and notification delivery below remain optional product extensions, not required by partner protocol v1. The API and UI tables below contain both the implemented surface and original design targets; use architecture-contract.md and OpenAPI as the implemented contract. Companion to [`partner-integration-spec.md`](partner-integration-spec.md).
 Goal: a partner that has implemented the spec registers itself, passes automated checks, and goes
 live the moment a Musecat operator presses **Approve**. No per-partner negotiation, no manual
 environment-variable editing, no redeploy.
@@ -105,7 +105,7 @@ Hot activation without restart:
    earlier grants for that client are invalidated exactly as an env change does today; suspension
    disables the registration row, so `clientHash` returns 503 and every token stops working.
 4. Multi-instance deployments poll `Version()` (a single row in `partner_registry_version`) every
-   30 seconds and rebuild when it differs; approval therefore propagates within 30 seconds without
+   minute and rebuild when it differs; approval therefore propagates within one minute without
    coordination. A restart always rebuilds from the database.
 
 Configuration precedence: env entries are authoritative for their IDs and cannot be edited in the
@@ -149,7 +149,8 @@ Optional staging fixtures enable userinfo subject/issuer verification, typed pub
 record envelopes, and refresh/revoke/rejected-reuse checks. Use dedicated test accounts and a
 separate disposable refresh family. Revocation requires the explicit destruction checkbox. Both
 servers' live joint grants are checked using an owner-supplied attempt ID from the normal consent
-flow; the checker never fabricates consent or grants. Missing fixtures or interactive requirements
+flow; the checker never fabricates consent or grants. Account-bound subject-mismatch, partial recovery and old-generation revocation scenarios require
+separate live staging evidence and remain explicitly unverified in the automated report. Missing fixtures or interactive requirements
 are action_required and keep the run incomplete. Raw fixtures and response bodies never appear in
 reports. Fixtures are encrypted while queued and erased after processing or interrupted-run recovery.
 
@@ -213,7 +214,7 @@ Routes under `/{locale}/developer`:
 | --- | --- |
 | `/developer` | Existing public docs; adds "Register an application" |
 | `/developer/apps` | My applications: status badges, last check result, usage sparkline |
-| `/developer/apps/new`, `/developer/apps/{id}` | Form editor mirroring spec §8 with inline validation and consequence warnings; file upload for the conformance report; collaborator management |
+| `/developer/apps/new`, `/developer/apps/{id}` | Form editor mirroring spec §8 with inline validation and consequence warnings; built-in checks and fixture entry; collaborator management is an optional extension |
 | `/developer/apps/{id}/credentials` | One-time reveal of Musecat-issued secret/key; rotate partner-issued credentials |
 | `/developer/apps/{id}/events` | Audit timeline |
 
@@ -285,6 +286,8 @@ checks are queued, at most one run per application in flight. Routes are **not**
 | 3 | Spec §4–6 Musecat endpoints, joint consent-page wiring, revocation outbox; joint section of the form and checks | One-approval reciprocal connection |
 | 4 | Built-in server-measured conformance runner and Developer Center results implemented; usage rollups remain separate future work | Partners and operators can test implementations without reviewing their code manually |
 
-Phase 1 reuses the existing registration epoch mechanism unchanged; phases 2–3 implement the
-"Not started" rows in spec §9. Full owns the guarded forward migrations for every new collection;
+All normative protocol rows in spec §9 are implemented. The original design targets above for
+collaborators, daily usage rollups, contact notifications and ownership transfer are not part of
+protocol v1 and are not exposed by the current API. Owner withdrawal instead suspends applications
+and disables registrations atomically; a withdrawn owner cannot be reinstated. Full owns the guarded forward migrations for every new collection;
 Core supplies fresh-bootstrap schema only, as for the existing connection tables.

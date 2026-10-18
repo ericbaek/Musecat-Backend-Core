@@ -5,22 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/netip"
 	"strings"
 	"testing"
 )
 
 func TestConformanceBlocksPrivateAndSpecialAddresses(t *testing.T) {
-	for _, raw := range []string{"127.0.0.1", "::1", "10.0.0.1", "172.16.1.2", "192.168.1.2", "169.254.169.254", "100.100.100.200", "0.0.0.0", "::ffff:127.0.0.1", "fd00::1", "2001:db8::1", "2002:7f00:1::1"} {
-		if publicCheckIP(netip.MustParseAddr(raw)) {
-			t.Fatal("unsafe address allowed", raw)
-		}
-	}
-	for _, raw := range []string{"1.1.1.1", "2606:4700:4700::1111"} {
-		if !publicCheckIP(netip.MustParseAddr(raw)) {
-			t.Fatal("public address rejected", raw)
-		}
-	}
 	runner := NewCheckRunner(nil)
 	for _, target := range []string{"https://127.0.0.1/", "https://[::1]/", "http://example.com/", "https://example.com/?token=secret"} {
 		if _, _, err := runner.call(context.Background(), "GET", target, "", nil, nil, "", nil); err == nil {

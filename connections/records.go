@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -197,6 +198,9 @@ func ParseEnvelope(data []byte, service, subject string) (RecordEnvelope, error)
 	if err := decoder.Decode(&raw); err != nil {
 		return RecordEnvelope{}, errEnvelope
 	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return RecordEnvelope{}, errEnvelope
+	}
 	e := raw.RecordEnvelope
 	if raw.Spec != RecordSpec || raw.Service != service || raw.Sub != subject || (raw.Visibility != "public" && raw.Visibility != "private") {
 		return RecordEnvelope{}, errEnvelope
@@ -274,6 +278,7 @@ func EnsureRecordSchema(app core.App) error {
 			&core.JSONField{Name: "payload", MaxSize: recordMaxBytes},
 			&core.DateField{Name: "source_updated"},
 			&core.DateField{Name: "fetched", Required: true},
+			&core.DateField{Name: "retry_at"},
 			&core.AutodateField{Name: "created", OnCreate: true},
 			&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
 		)
@@ -333,7 +338,8 @@ func (m *Manager) ReadRecord(ctx context.Context, app core.App, actor Actor, con
 	}
 	stale := existing == nil || time.Since(existing.GetDateTime("fetched").Time()) > recordFreshFor
 	recent := existing != nil && time.Since(existing.GetDateTime("fetched").Time()) < recordMinRefresh
-	if stale || (refresh && !recent) {
+	backoff := existing != nil && existing.GetDateTime("retry_at").Time().After(time.Now())
+	if !backoff && (stale || (refresh && !recent)) {
 		if m == nil {
 			return viewOf(account, existing, service), nil
 		}
@@ -390,21 +396,28 @@ func (m *Manager) PublicRecords(app core.App, userID string) ([]PublicRecord, er
 			return nil, err
 		}
 		providerName, serviceNames := account.GetString("provider"), map[string]string{}
-		if m != nil {
-			if p, ok := m.lookup(account.GetString("provider")); ok {
-				providerName = p.Name
-				for _, s := range p.Services {
-					serviceNames[s.ID] = s.Name
-				}
-			}
+		if m == nil {
+			continue
 		}
+		current, enabled := m.lookup(account.GetString("provider"))
+		if !enabled || current.Issuer != account.GetString("issuer") {
+			continue
+		}
+		providerName = current.Name
+		for _, service := range current.Services {
+			serviceNames[service.ID] = service.Name
+		}
+
 		for _, grant := range grants {
 			service := grant.GetString("service")
+			if !slices.ContainsFunc(current.Services, func(s Service) bool { return s.ID == service }) {
+				continue
+			}
 			row, err := recordRow(app, account.Id, service)
 			if err != nil {
 				return nil, err
 			}
-			if row == nil || row.GetString("status") != RecordOK {
+			if row == nil || row.GetString("status") != RecordOK || time.Since(row.GetDateTime("fetched").Time()) >= recordFreshFor {
 				continue
 			}
 			var e RecordEnvelope
@@ -427,27 +440,49 @@ func (m *Manager) RefreshStalePublicRecords(ctx context.Context, app core.App, l
 	if m == nil {
 		return nil
 	}
-	cutoff := time.Now().Add(-recordFreshFor).UTC().Format("2006-01-02 15:04:05.000Z")
-	rows, err := app.FindRecordsByFilter(Records, "fetched <= {:cutoff} && status != {:unsupported}", "fetched", limit, 0, dbx.Params{"cutoff": cutoff, "unsupported": RecordUnsupported})
+
+	limit = min(max(limit, 1), 100)
+	now := time.Now().UTC()
+	var rows []struct {
+		Connection string `db:"connection"`
+		Service    string `db:"service"`
+	}
+	err := app.DB().NewQuery(`SELECT s.connection, s.service
+ FROM external_service_connection s
+ LEFT JOIN external_service_record r ON r.connection=s.connection AND r.service=s.service
+ WHERE s.visibility='public' AND (r.id IS NULL OR
+ (r.fetched <= {:cutoff} AND r.status != 'unsupported' AND (r.retry_at='' OR r.retry_at <= {:now})))
+ ORDER BY COALESCE(r.fetched, ''), s.id LIMIT {:limit}`).Bind(dbx.Params{
+		"cutoff": now.Add(-recordFreshFor).Format("2006-01-02 15:04:05.000Z"),
+		"now":    now.Format("2006-01-02 15:04:05.000Z"), "limit": limit,
+	}).All(&rows)
 	if err != nil {
 		return err
 	}
 	for _, row := range rows {
-		account, err := app.FindRecordById(Accounts, row.GetString("connection"))
+		account, err := app.FindRecordById(Accounts, row.Connection)
 		if err != nil {
 			continue
 		}
-		if _, err := app.FindFirstRecordByFilter(Services, "connection = {:c} && service = {:s} && visibility = 'public'", dbx.Params{"c": account.Id, "s": row.GetString("service")}); err != nil {
-			continue
-		}
-		_, _ = m.fetch(ctx, app, account, row.GetString("service"))
+		_, _ = m.fetch(ctx, app, account, row.Service)
 	}
+
 	return nil
 }
 
-func (m *Manager) store(app core.App, account *core.Record, service, status, errCode string, payload *RecordEnvelope) (*core.Record, error) {
+func (m *Manager) store(app core.App, account *core.Record, service, status, errCode string, payload *RecordEnvelope, retryAt ...time.Time) (*core.Record, error) {
 	var out *core.Record
 	err := app.RunInTransaction(func(tx core.App) error {
+		current, err := tx.FindRecordById(Accounts, account.Id)
+		if err != nil {
+			return err
+		}
+		if current.GetString("authorization_generation") != account.GetString("authorization_generation") || current.GetString("credentials") != account.GetString("credentials") {
+			return ErrInvalid
+		}
+		if _, err := tx.FindFirstRecordByFilter(Services, "connection={:c} && service={:s}", dbx.Params{"c": account.Id, "s": service}); err != nil {
+			return err
+		}
 		row, err := recordRow(tx, account.Id, service)
 		if err != nil {
 			return err
@@ -464,6 +499,10 @@ func (m *Manager) store(app core.App, account *core.Record, service, status, err
 		row.Set("status", status)
 		row.Set("error", errCode)
 		row.Set("fetched", time.Now().UTC())
+		row.Set("retry_at", "")
+		if len(retryAt) > 0 {
+			row.Set("retry_at", retryAt[0])
+		}
 		if payload != nil {
 			row.Set("payload", payload)
 			row.Set("source_updated", payload.UpdatedAt)
@@ -514,21 +553,27 @@ func (m *Manager) fetch(ctx context.Context, app core.App, account *core.Record,
 		if err != nil {
 			return false
 		}
-		_ = app.RunInTransaction(func(tx core.App) error {
+		if err := app.RunInTransaction(func(tx core.App) error {
 			current, err := tx.FindRecordById(Accounts, account.Id)
 			if err != nil {
 				return err
 			}
+			if current.GetString("credentials") != account.GetString("credentials") || current.GetString("authorization_generation") != account.GetString("authorization_generation") {
+				return ErrInvalid
+			}
 			current.Set("credentials", sealed)
 			return tx.Save(current)
-		})
+		}); err != nil {
+			return false
+		}
+		account.Set("credentials", sealed)
 		return true
 	}
 	if !tokens.Expiry.IsZero() && !tokens.Expiry.After(time.Now().Add(30*time.Second)) && !refresh() {
 		return m.store(app, account, service, RecordUnavailable, "token_refresh", nil)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		status, body, err := m.getRecords(ctx, p.RecordsURL+"/"+url.PathEscape(service), tokens.AccessToken)
+		status, body, retryAfter, err := m.getRecords(ctx, p.RecordsURL+"/"+url.PathEscape(service), tokens.AccessToken)
 		if err != nil {
 			return m.store(app, account, service, RecordUnavailable, "network", nil)
 		}
@@ -558,7 +603,7 @@ func (m *Manager) fetch(ctx context.Context, app core.App, account *core.Record,
 		case status == http.StatusNotFound:
 			return m.store(app, account, service, RecordUnavailable, "not_found", nil)
 		case status == http.StatusTooManyRequests:
-			return m.store(app, account, service, RecordUnavailable, "rate_limited", nil)
+			return m.store(app, account, service, RecordUnavailable, "rate_limited", nil, recordRetryAt(retryAfter, time.Now()))
 		default:
 			return m.store(app, account, service, RecordUnavailable, fmt.Sprintf("upstream_%d", status), nil)
 		}
@@ -566,23 +611,23 @@ func (m *Manager) fetch(ctx context.Context, app core.App, account *core.Record,
 	return m.store(app, account, service, RecordUnavailable, "unauthorized", nil)
 }
 
-func (m *Manager) getRecords(ctx context.Context, target, token string) (int, []byte, error) {
+func (m *Manager) getRecords(ctx context.Context, target, token string) (int, []byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/json")
 	res, err := m.client.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	defer res.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(res.Body, recordMaxBytes+1))
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
-	return res.StatusCode, body, nil
+	return res.StatusCode, body, res.Header.Get("Retry-After"), nil
 }
 
 // RegisterRecordRefreshCron refreshes published stale records hourly in bounded batches.
@@ -595,4 +640,36 @@ func (m *Manager) RegisterRecordRefreshCron(app core.App) {
 			app.Logger().Error("Failed to refresh external service records")
 		}
 	})
+}
+
+// Invalid Retry-After values use the normal minimum interval. Valid seconds are
+// bounded to avoid duration overflow; requests never sleep while holding a handler.
+func recordRetryAt(value string, now time.Time) time.Time {
+	seconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || seconds < 0 {
+		seconds = 60
+	}
+	if seconds > 31536000 {
+		seconds = 31536000
+	}
+	return now.UTC().Add(time.Duration(max(seconds, 60)) * time.Second)
+}
+
+// EnsureRecordRetryColumn adds durable upstream backoff on a locked record cache.
+func EnsureRecordRetryColumn(app core.App) error {
+	c, err := app.FindCollectionByNameOrId(Records)
+	if err != nil {
+		return err
+	}
+	if !c.IsBase() || c.System || c.ListRule != nil || c.ViewRule != nil || c.CreateRule != nil || c.UpdateRule != nil || c.DeleteRule != nil {
+		return fmt.Errorf("%s must be locked", Records)
+	}
+	if f := c.Fields.GetByName("retry_at"); f != nil {
+		if _, ok := f.(*core.DateField); !ok {
+			return fmt.Errorf("retry_at must be a date")
+		}
+		return nil
+	}
+	c.Fields.Add(&core.DateField{Name: "retry_at"})
+	return app.Save(c)
 }

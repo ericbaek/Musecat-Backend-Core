@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/core"
 
 	"github.com/ericbaek/musecat-backend-core/connections"
 )
@@ -192,7 +193,118 @@ func TestParseEnvelopeRejectsMalformedInput(t *testing.T) {
 	if _, err := connections.ParseEnvelope(good, "chunithm", "other"); err == nil {
 		t.Fatal("subject mismatch accepted")
 	}
+	if _, err := connections.ParseEnvelope(append(append([]byte{}, good...), []byte(` {}`)...), "chunithm", "sub-1"); err == nil {
+		t.Fatal("trailing JSON accepted")
+	}
 	if _, err := connections.ParseEnvelope(append(good, make([]byte, 256<<10)...), "chunithm", "sub-1"); err == nil {
 		t.Fatal("oversized envelope accepted")
+	}
+}
+
+func TestRecordsPublicCacheExpiresAndProviderRemovalHidesIt(t *testing.T) {
+	f := newFixture(t)
+	id := f.complete(f.start(f.token, "rhythm", "chunithm"))
+	f.records = func(*http.Request) *http.Response { return status(200, envelope("chunithm", f.subject, "public")) }
+	f.request(f.token, "GET", "/user/connections/"+id+"/records/chunithm", nil, 200)
+	f.request(f.token, "PUT", "/user/connections/"+id+"/services/chunithm", map[string]string{"visibility": "public"}, 200)
+	row, _ := f.app.FindFirstRecordByFilter(connections.Records, "connection={:c}", dbxParams(id))
+	row.Set("fetched", time.Now().Add(-25*time.Hour))
+	if err := f.app.Save(row); err != nil {
+		t.Fatal(err)
+	}
+	if items, err := f.manager.PublicRecords(f.app, f.user.Id); err != nil || len(items) != 0 {
+		t.Fatal("expired public cache served", items, err)
+	}
+	row.Set("fetched", time.Now())
+	if err := f.app.Save(row); err != nil {
+		t.Fatal(err)
+	}
+	// Reloading a manager without this registration must hide an otherwise fresh cache.
+	disabled, err := connections.NewManager(nil, []byte(strings.Repeat("k", 32)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if items, err := disabled.PublicRecords(f.app, f.user.Id); err != nil || len(items) != 0 {
+		t.Fatal("disabled provider still published", items, err)
+	}
+}
+
+func TestRecordsHonorDurableRetryAfter(t *testing.T) {
+	f := newFixture(t)
+	id := f.complete(f.start(f.token, "rhythm", "chunithm"))
+	calls := 0
+	f.records = func(*http.Request) *http.Response {
+		calls++
+		response := status(429, map[string]string{"error": "rate_limited"})
+		response.Header.Set("Retry-After", "7200")
+		return response
+	}
+	path := "/user/connections/" + id + "/records/chunithm?refresh=true"
+	view := f.request(f.token, "GET", path, nil, 200)
+	if view["error"] != "rate_limited" {
+		t.Fatal(view)
+	}
+	row, _ := f.app.FindFirstRecordByFilter(connections.Records, "connection={:c}", dbxParams(id))
+	if time.Until(row.GetDateTime("retry_at").Time()) < 119*time.Minute {
+		t.Fatal("Retry-After lost", row)
+	}
+	// The normal one-minute refresh throttle has expired, but upstream backoff hasn't.
+	row.Set("fetched", time.Now().Add(-2*time.Minute))
+	if err := f.app.Save(row); err != nil {
+		t.Fatal(err)
+	}
+	f.request(f.token, "GET", path, nil, 200)
+	if calls != 1 {
+		t.Fatal("upstream backoff bypassed", calls)
+	}
+	row.Set("retry_at", time.Now().Add(-time.Second))
+	if err := f.app.Save(row); err != nil {
+		t.Fatal(err)
+	}
+	f.request(f.token, "GET", path, nil, 200)
+	if calls != 2 {
+		t.Fatal("backoff never ended", calls)
+	}
+}
+
+func TestRecordFetchCannotRecreateDisconnectedCache(t *testing.T) {
+	f := newFixture(t)
+	id := f.complete(f.start(f.token, "rhythm", "chunithm"))
+	f.records = func(*http.Request) *http.Response {
+		f.request(f.token, "DELETE", "/user/connections/"+id, nil, 204)
+		return status(200, envelope("chunithm", f.subject, "public"))
+	}
+	// A late result must fail after the account is deleted, never recreate a cache row.
+	_, err := f.manager.ReadRecord(t.Context(), f.app, connections.Actor{UserID: f.user.Id, Session: f.token, Check: func(core.App) error { return nil }}, id, "chunithm", true)
+	if err == nil {
+		t.Fatal("late result persisted")
+	}
+	rows, err := f.app.FindRecordsByFilter(connections.Records, "", "", 0, 0)
+	if err != nil || len(rows) != 0 {
+		t.Fatal("orphan cache recreated", rows, err)
+	}
+}
+
+func TestPublicRefreshFetchesNewlyPublishedServiceWithoutPriorOwnerRead(t *testing.T) {
+	f := newFixture(t)
+	id := f.complete(f.start(f.token, "rhythm", "chunithm"))
+	calls := 0
+	f.records = func(*http.Request) *http.Response {
+		calls++
+		return status(200, envelope("chunithm", f.subject, "public"))
+	}
+	f.request(f.token, "PUT", "/user/connections/"+id+"/services/chunithm", map[string]string{"visibility": "public"}, 200)
+	if err := f.manager.RefreshStalePublicRecords(t.Context(), f.app, 50); err != nil {
+		t.Fatal(err)
+	}
+	items, err := f.manager.PublicRecords(f.app, f.user.Id)
+	if err != nil || len(items) != 1 || calls != 1 {
+		t.Fatal("first published cache never fetched", items, err, calls)
+	}
+	if err := f.manager.RefreshStalePublicRecords(t.Context(), f.app, 50); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatal("fresh cache refetched", calls)
 	}
 }

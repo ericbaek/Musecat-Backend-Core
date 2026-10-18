@@ -139,6 +139,11 @@ func DeleteUserData(app core.App, userID string) error {
 			return err
 		}
 		for _, row := range rows {
+			if name == JointAttempts && row.GetString("generation") != "" && row.GetString("correlation") != "" {
+				if err := enqueueJointRevocation(app, row, "user"); err != nil {
+					return err
+				}
+			}
 			if err := app.Delete(row); err != nil {
 				return err
 			}

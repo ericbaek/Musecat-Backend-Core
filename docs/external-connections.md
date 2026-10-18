@@ -14,8 +14,7 @@ transferred or silently replaced. Email and nickname are not identity keys.
 `external_service_connection` attaches independently named game services to an account connection.
 A rhythm.info identity can therefore authorize CHUNITHM and SOUND VOLTEX separately. An independent
 provider issuer remains a separate identity even if its subject happens to be identical. All new and
-reauthorized service grants start private with no selected public fields. This phase has no API to
-publish those fields. Reauthorization replaces the game consent with exactly the requested services
+reauthorized service grants start private with no selected public fields. Publication is an explicit per-service owner action; the partner must also report the data public. Reauthorization replaces the game consent with exactly the requested services
 whose required scopes were granted, rather than keeping permissions that were not reapproved.
 
 `external_connection_request` stores a state hash, session-token hash, encrypted PKCE verifier,
@@ -86,10 +85,10 @@ with all their required scopes become game grants; other services are omitted fr
 ## Local disconnect boundary
 
 Disconnect is an atomic local unlink and works even if the provider is disabled or unreachable.
-This phase does not call the provider's token-revocation endpoint. Removing a Musecat connection
+Independent disconnect does not call the provider's token-revocation endpoint. Removing a Musecat connection
 therefore does not claim to revoke authorization in the provider's own account settings. No
 provider tokens are returned to clients, and local credentials and pending attempts are removed.
-There is no external play-data cache or partner delegation grant in this phase.
+Records use the separately locked cache below. Bilateral revocation is available through the joint flow.
 
 ## Runtime configuration
 
@@ -166,12 +165,18 @@ Publication needs two switches: the Musecat user sets a service public with
 `PUT /user/connections/{id}/services/{service}`, and the partner envelope must report `public`.
 Only then does `GET /user/records?user=` (anonymous, cached) include it. Executables schedule
 `Manager.RegisterRecordRefreshCron` to keep published records fresh in bounded hourly batches.
-Records cascade with their connection and are removed on disconnect and withdrawal.
+Records cascade with their connection and are removed on disconnect and withdrawal. Public reads
+hide expired (24-hour) cache entries and disabled providers without contacting the partner. A 429
+persists `Retry-After` seconds in `retry_at`; manual and scheduled refreshes honor it (minimum one
+minute, maximum one year, invalid values fall back to one minute). Late responses cannot recreate
+a disconnected cache or overwrite credentials from a newer authorization. Strict JSON parsing
+rejects trailing documents. Default partner HTTP calls pin public addresses at dial time, disable
+proxy inheritance, validate TLS and reject redirects; custom transports are trusted injection only.
 
 ## Reciprocal one-step preparation
 
-The proposed [joint connection](joint-connections.md) coordinates this reverse account ledger with
-Musecat-issued delegated grants under a separately agreed bilateral consent protocol. The original
-OAuth flow and private service defaults remain unchanged. The locked `external_joint_connection`
-ledger and `connections.JointManager` are server-only preparation; there are no new public joint
-HTTP routes or automatic opposite-direction token issuance. Withdrawal clears this ledger too.
+The implemented [joint connection](joint-connections.md) coordinates this reverse account ledger
+with Musecat-issued delegated grants under spec sections 4–6. The single session-bound consent
+issues both independent authorizations through `/user/joint/*`; `/partner/v1/*` uses distinct
+server bearer keys. Withdrawal queues generation-bound remote revocation before removing the
+personal ledger; the outbox survives until delivery. Independent OAuth and private defaults remain unchanged.

@@ -504,7 +504,7 @@ Musecat implementation status:
 | 5 Joint protocol | Implemented: authenticated lookup/receipt adapter, session-bound single consent, PKCE exchanges, live evidence checks |
 | 6 Bilateral revocation | Implemented: exact generation revocation, transactional outbox, retry cron and pending UI |
 | 8 Developer Center (self-service form, checks, one-click approval, hot activation) | Implemented: form validation, operator approval, OAuth credentials, joint key activation. Server-measured conformance checks and staging fixture entry available in the Developer Center. |
-| 9 Conformance checks | Implemented in the Developer Center: real server probes, optional disposable staging fixtures and verified joint evidence. Interactive/fixture-dependent cases stay unverified until evidence is available. |
+| 9 Conformance checks | Implemented in the Developer Center: real server probes, optional disposable staging fixtures and verified joint evidence. Interactive/fixture-dependent cases stay unverified until evidence is available. Account-bound subject mismatch, partial recovery and old-generation staging scenarios remain an explicit manual interoperability obligation; a happy path does not certify them. |
 
 Partner-facing promises in this document hold once the corresponding row reads "Implemented"; until
 then partners build against the schemas here and inspect the Developer Center report for any remaining unverified items.

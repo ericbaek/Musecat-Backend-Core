@@ -634,6 +634,9 @@ func (s *Service) Approve(app core.App, operatorID, id, note string) (Applicatio
 				return ErrConflict
 			}
 		}
+		if !s.activeOwner(tx, r) {
+			return ErrState
+		}
 		r.Set("approved_form", formJSON(form))
 		r.Set("approved_hash", formHash(form))
 		r.Set("approved_by", operatorID)
@@ -684,6 +687,9 @@ func (s *Service) transition(app core.App, operatorID, id, note, from, to, kind 
 			allowed = allowed || st == f
 		}
 		if !allowed {
+			return ErrState
+		}
+		if to != StatusSuspended && !s.activeOwner(tx, r) {
 			return ErrState
 		}
 		r.Set("status", to)
@@ -744,7 +750,7 @@ func (s *Service) Clients(app core.App) ([]delegation.Client, error) {
 	out := make([]delegation.Client, 0, len(rows))
 	for _, r := range rows {
 		f := formOf(r, "approved_form")
-		if f == nil || !isLive(r) {
+		if f == nil || !isLive(r) || !s.activeOwner(app, r) {
 			continue
 		}
 		out = append(out, delegation.Client{
@@ -768,7 +774,7 @@ func (s *Service) Providers(app core.App) ([]connections.Provider, error) {
 	out := make([]connections.Provider, 0, len(rows))
 	for _, r := range rows {
 		f := formOf(r, "approved_form")
-		if f == nil || f.DirectionB == nil {
+		if f == nil || f.DirectionB == nil || !s.activeOwner(app, r) {
 			continue
 		}
 		var c Credentials
@@ -804,7 +810,7 @@ func (s *Service) JointPartners(app core.App) ([]connections.JointPartner, error
 	out := make([]connections.JointPartner, 0, len(rows))
 	for _, r := range rows {
 		f := formOf(r, "approved_form")
-		if f == nil || f.DirectionB == nil || f.Joint == nil || !f.Joint.Enabled {
+		if f == nil || f.DirectionB == nil || f.Joint == nil || !f.Joint.Enabled || !s.activeOwner(app, r) {
 			continue
 		}
 		var jc jointCredentials
@@ -833,7 +839,7 @@ func (s *Service) Version(app core.App) (string, error) {
 	}
 	h := sha256.New()
 	for _, r := range rows {
-		h.Write([]byte(r.GetString("partner_id") + "|" + r.GetString("approved_hash") + "|" + r.GetString("secret_hash") + "|" + hashSecret(r.GetString("direction_b_credentials")) + "|" + hashSecret(r.GetString("joint_credentials")) + "|" + r.GetString("partner_key_hash") + "\n"))
+		h.Write([]byte(fmt.Sprint(s.activeOwner(app, r)) + "|" + r.GetString("partner_id") + "|" + r.GetString("approved_hash") + "|" + r.GetString("secret_hash") + "|" + hashSecret(r.GetString("direction_b_credentials")) + "|" + hashSecret(r.GetString("joint_credentials")) + "|" + r.GetString("partner_key_hash") + "\n"))
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

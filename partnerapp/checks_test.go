@@ -229,7 +229,7 @@ func TestConformanceJointNegativeCasesAndIntentValidation(t *testing.T) {
 	cases := runner.Run(context.Background(), form, "https://musecat.example/callback", partnerapp.Credentials{}, "server-key", partnerapp.CheckFixtures{FreshIntent: "fresh", ExpiredIntent: "expired", ConsumedIntent: "consumed", ExpectedSubject: "subject"})
 	checked := 0
 	for _, c := range cases {
-		if strings.HasPrefix(c.ID, "joint.") && c.ID != "joint.start" {
+		if strings.HasPrefix(c.ID, "joint.") && c.ID != "joint.start" && c.ID != "joint.failure_scenarios" {
 			checked++
 			if c.Status != "pass" {
 				t.Fatal("joint case failed", c)
@@ -355,4 +355,23 @@ func TestConformanceDirectionARequiresARealRedeemedGrant(t *testing.T) {
 	if err != nil || reports[0].Status != "passed" {
 		t.Fatal("redeemed grant not recognized", reports, err)
 	}
+}
+
+func TestJointConformanceDoesNotInferFailureScenariosFromHappyPath(t *testing.T) {
+	form := validForm("checked_app")
+	form.DirectionB = fullB()
+	form.Joint = &partnerapp.Joint{Enabled: true, JointURL: "https://partner.example/joint"}
+	runner := partnerapp.NewCheckRunner(&http.Client{Transport: checkTransport(func(*http.Request) (*http.Response, error) {
+		return checkJSON(401, map[string]string{"error": "unauthorized_partner"}), nil
+	})})
+	cases := runner.Run(t.Context(), form, "https://musecat.example/callback", partnerapp.Credentials{}, "", partnerapp.CheckFixtures{})
+	for _, c := range cases {
+		if c.ID == "joint.failure_scenarios" {
+			if c.Status != "action_required" {
+				t.Fatal("unmeasured scenarios passed", c)
+			}
+			return
+		}
+	}
+	t.Fatal("staging failure scenarios omitted")
 }

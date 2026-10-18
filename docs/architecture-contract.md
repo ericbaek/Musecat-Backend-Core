@@ -801,16 +801,17 @@ External game accounts use a separate connection ledger, not PocketBase sign-in 
 `external_account_connection` has unique `(issuer, subject)` and `(user, issuer)` identities;
 `external_service_connection` attaches multiple separately authorized game services to one account.
 Names, emails and game-specific service IDs never replace the verified issuer/subject identity.
-New and reauthorized game grants are private with no public fields. This phase has no public
-play-data API, visibility mutation, or permission to act on Musecat on a partner's behalf.
+New and reauthorized game grants are private with no selected public fields. Records and the
+explicit publication switch are separate APIs; acting on Musecat requires a separate delegated grant.
 
 `GET /integrations/providers` exposes only safe configured provider metadata. Active-user-only
 `GET /user/connections`, `POST /user/connections/start`, `POST /user/connections/complete`, and
 `DELETE /user/connections/{id}` manage owned connections. Raw REST for all connection collections
 is locked, and subject/credential/state/session/verifier fields are hidden. Responses never expose
 tokens or external subjects. Local disconnect works independently of provider availability and
-removes credentials, game grants and pending attempts atomically; remote token revocation is not
-part of this phase. Withdrawal performs that cleanup within its account transaction.
+removes credentials, game grants and pending attempts atomically. Independent unlink is local-only;
+joint disconnect additionally queues generation-bound bilateral revocation. Withdrawal performs
+cleanup and queues joint notifications within its account transaction.
 
 Requests expire after five minutes, are bound to the exact initiating Musecat token, and use
 hashed state plus encrypted PKCE verifier. A single pending-to-exchanging claim clears the verifier
@@ -974,3 +975,22 @@ Direction A requires an owner grant whose code was actually redeemed. A successf
 trip must be evidenced by the owner's normal joint connection and both
 live grant generations under the approved configuration. Operator approval remains a separate
 review action; checks do not silently change existing approval policy or active registrations.
+
+
+## Integration release preparation
+
+Owner withdrawal suspends all owned partner applications, disables the persistent OAuth
+registrations and wipes stored partner credentials and queued/running conformance fixtures in the
+same transaction. After commit, the current instance reloads its registries; other instances
+converge via the version poll. Registry building excludes restricted or missing owners; a withdrawn
+owner cannot be approved or reinstated. Withdrawal first preserves joint revocations in the
+non-personal outbox, then deletes personal connection/attempt data. Revocation retries keep the
+pair UUID as their `X-Request-Id` and the original body/time for idempotency.
+
+Public game records require a currently configured provider/service and a cache younger than
+24 hours. The locked record cache adds `retry_at`; owners and background workers honor upstream
+429 `Retry-After` seconds. Post-I/O persistence rechecks the current account authorization generation,
+credentials and service existence, preventing stale fetches from recreating disconnected data.
+The conformance runner and OAuth/record/joint adapters share the same default public-address-pinned,
+proxy-free HTTPS client. Full owns the independent guarded retry-column migration.
+See [release readiness](partner-release-readiness.md) for deployment and partner-dependent evidence.

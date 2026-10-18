@@ -456,3 +456,68 @@ func TestJointActivationAndInboundKeyRotation(t *testing.T) {
 		t.Fatal("suspended partner accepted")
 	}
 }
+
+func TestWithdrawnOwnerCannotKeepOrReactivateApplication(t *testing.T) {
+	f := newFixture(t)
+	application, err := f.service.Create(f.app, f.owner.Id, validForm("withdrawn_partner"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.service.Submit(f.app, f.owner.Id, application.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.service.Approve(f.app, f.operator.Id, application.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = f.service.GenerateSecret(f.app, f.owner.Id, application.ID); err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.service.QueueChecks(f.app, f.operator.Id, application.ID, true, partnerapp.CheckFixtures{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued, _ := f.app.FindRecordById(partnerapp.CheckRuns, run.ID)
+	queued.Set("status", "running")
+	queued.Set("fixtures", "encrypted-operator-fixtures")
+	if err := f.app.Save(queued); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.service.Version(f.app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.app.RunInTransaction(func(tx core.App) error {
+		owner, err := tx.FindRecordById("user", f.owner.Id)
+		if err != nil {
+			return err
+		}
+		owner.Set("withdrawn", true)
+		if err = tx.Save(owner); err != nil {
+			return err
+		}
+		return partnerapp.SuspendOwnedApplications(tx, owner.Id)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, _ := f.app.FindRecordById(partnerapp.CheckRuns, run.ID)
+	if cancelled.GetString("status") != "cancelled" || cancelled.GetString("fixtures") != "" {
+		t.Fatal("operator-owned run survived app owner withdrawal")
+	}
+	registration, err := f.app.FindFirstRecordByFilter(delegation.Registrations, "client='withdrawn_partner'")
+	if err != nil || registration.GetBool("enabled") {
+		t.Fatal("registration survived withdrawal", err)
+	}
+	after, err := f.service.Version(f.app)
+	if err != nil || after == before {
+		t.Fatal("withdrawal invisible to other instances", err)
+	}
+	if err := f.service.Sync(f.app); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.manager.Client("withdrawn_partner"); ok {
+		t.Fatal("withdrawn owner's client still active")
+	}
+	if _, err = f.service.Reinstate(f.app, f.operator.Id, application.ID, ""); !errors.Is(err, partnerapp.ErrState) {
+		t.Fatal("withdrawn owner reinstated", err)
+	}
+}

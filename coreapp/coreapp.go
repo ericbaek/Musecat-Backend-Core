@@ -85,6 +85,14 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		if partnerApps == nil {
 			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, config.Joint, "")
 		}
+		se.App.OnRecordAfterUpdateSuccess("user").BindFunc(func(e *core.RecordEvent) error {
+			if e.Record.GetBool("withdrawn") {
+				if err := partnerApps.Sync(e.App); err != nil {
+					e.App.Logger().Error("Failed to synchronize applications after owner withdrawal")
+				}
+			}
+			return e.Next()
+		})
 		// Load approved Developer Center clients on top of the static set, then
 		// synchronize registration epochs (disabling anything no longer configured).
 		if err := partnerApps.Sync(se.App); err != nil {

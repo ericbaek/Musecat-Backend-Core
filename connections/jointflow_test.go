@@ -163,3 +163,54 @@ func TestJointPartnerRequestReplaysOriginalResultAndRejectsChangedBody(t *testin
 	}
 	f.request("", "GET", "/partner/v1/joint/36bc2d92-98ae-4275-a1aa-312b00b44e91", nil, 401)
 }
+
+func TestWithdrawalPreservesRevocationAndRetryIdentity(t *testing.T) {
+	f, m, _, a, _, _ := flowFixture(t)
+	lookup, err := m.Lookup(t.Context(), f.app, a, "rhythm", strings.Repeat("h", 43))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Approve(t.Context(), f.app, a, lookup.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.request(f.token, "POST", "/user/withdraw", map[string]string{"password": "secret123"}, 200)
+	attempts, err := f.app.FindRecordsByFilter(connections.JointAttempts, "", "", 0, 0)
+	if err != nil || len(attempts) != 0 {
+		t.Fatal("personal attempt retained", err)
+	}
+	outbox, err := f.app.FindRecordsByFilter(connections.JointOutbox, "", "", 0, 0)
+	if err != nil || len(outbox) != 1 {
+		t.Fatal("withdrawal lost remote revocation", err)
+	}
+	requestID := ""
+	deliveries := 0
+	f.joint = func(r *http.Request) *http.Response {
+		deliveries++
+		if requestID != "" && requestID != r.Header.Get("X-Request-Id") {
+			t.Error("retry changed request ID")
+		}
+		requestID = r.Header.Get("X-Request-Id")
+		if deliveries == 1 {
+			return status(503, map[string]string{"error": "temporarily_unavailable"})
+		}
+		return status(200, map[string]string{"status": "revoked"})
+	}
+	if err := m.DeliverRevocations(t.Context(), f.app, 20); err != nil {
+		t.Fatal(err)
+	}
+	row, _ := f.app.FindRecordById(connections.JointOutbox, outbox[0].Id)
+	if row.GetString("delivered") != "" || row.GetFloat("attempts") != 1 {
+		t.Fatal("failed delivery marked complete")
+	}
+	row.Set("next_at", time.Now().Add(-time.Minute))
+	if err := f.app.Save(row); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.DeliverRevocations(t.Context(), f.app, 20); err != nil {
+		t.Fatal(err)
+	}
+	row, _ = f.app.FindRecordById(connections.JointOutbox, row.Id)
+	if row.GetString("delivered") == "" || deliveries != 2 || requestID == "" {
+		t.Fatal("revocation not delivered", deliveries)
+	}
+}

@@ -101,6 +101,10 @@ func newUUID() string {
 
 // call performs an authenticated server-to-server request to the partner (section 4).
 func (m *JointManager) call(ctx context.Context, p JointPartner, path string, body any, out any) error {
+	return m.callWithRequestID(ctx, p, path, body, out, newUUID())
+}
+
+func (m *JointManager) callWithRequestID(ctx context.Context, p JointPartner, path string, body any, out any, requestID string) error {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -114,7 +118,7 @@ func (m *JointManager) call(ctx context.Context, p JointPartner, path string, bo
 	req.Header.Set("Authorization", "Bearer "+p.OutboundKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-Request-Id", newUUID())
+	req.Header.Set("X-Request-Id", requestID)
 	res, err := m.connections.client.Do(req)
 	if err != nil {
 		return &partnerAPIError{Status: 0, Code: "network"}
@@ -648,7 +652,7 @@ func (m *JointManager) DeliverRevocations(ctx context.Context, app core.App, lim
 		if !ok || p.JointURL == "" {
 			deliveryErr = fmt.Errorf("partner_unavailable")
 		} else {
-			deliveryErr = m.call(ctx, p, "/revocations", map[string]string{"pair_id": o.GetString("pair_id"), "generation": o.GetString("generation"), "reason": o.GetString("reason"), "revoked_at": o.GetDateTime("created").Time().UTC().Format(time.RFC3339)}, &result)
+			deliveryErr = m.callWithRequestID(ctx, p, "/revocations", map[string]string{"pair_id": o.GetString("pair_id"), "generation": o.GetString("generation"), "reason": o.GetString("reason"), "revoked_at": o.GetDateTime("created").Time().UTC().Format(time.RFC3339)}, &result, o.GetString("pair_id"))
 		}
 		o.Set("attempts", attempts)
 		if deliveryErr == nil && !slices.Contains([]string{"revoked", "already_revoked", "unknown_generation"}, result.Status) {
@@ -728,6 +732,10 @@ func (m *JointManager) PartnerRequest(app core.App, partner, requestID, fingerpr
 }
 
 func (m *JointManager) enqueueRevocation(app core.App, r *core.Record, reason string) error {
+	return enqueueJointRevocation(app, r, reason)
+}
+
+func enqueueJointRevocation(app core.App, r *core.Record, reason string) error {
 	c, err := app.FindCollectionByNameOrId(JointOutbox)
 	if err != nil {
 		return err

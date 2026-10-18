@@ -197,6 +197,9 @@ func (r *CheckRunner) Run(ctx context.Context, form Form, callback string, creds
 		add("joint", "not_applicable", "not_declared")
 		return cases
 	}
+	// A successful connection does not prove these destructive, account-bound
+	// failure scenarios. Keep the live staging obligation visible, never infer a pass.
+	add("joint.failure_scenarios", "action_required", "staging_failure_scenarios_required")
 	base := strings.TrimRight(j.JointURL, "/")
 	invalidIntent := oauth2.GenerateVerifier()
 	invalidBody := map[string]any{"intent": invalidIntent, "correlation_id": uuid.NewString(), "manifest": connections.JointManifest, "generation": uuid.NewString(), "musecat_code": "musecat-conformance-invalid-code", "musecat_code_expires_at": time.Now().Add(time.Minute).UTC().Format(time.RFC3339), "code_challenge": oauth2.S256ChallengeFromVerifier(oauth2.GenerateVerifier()), "redirect_uri": callback}
