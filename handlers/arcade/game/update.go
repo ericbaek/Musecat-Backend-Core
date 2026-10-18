@@ -80,8 +80,6 @@ type GameAtomInput struct {
 	ID string `json:"id,omitempty"`
 	// idProvided distinguishes an omitted add id from an explicit null/empty id.
 	idProvided bool
-	// preservePrice keeps the stored price when a modify omits it.
-	preservePrice bool
 	// PrevID is legacy internal-only log input. API v2 does not decode it.
 	PrevID   string    `json:"-"`
 	Game     string    `json:"game"`
@@ -106,8 +104,6 @@ func (g *GameAtomInput) UnmarshalJSON(data []byte) error {
 	}
 	*g = GameAtomInput(decoded)
 	_, g.idProvided = fields["id"]
-	_, priceProvided := fields["price"]
-	g.preservePrice = !priceProvided
 	return nil
 }
 
@@ -235,7 +231,7 @@ func normalizePriceForComparison(raw any) any {
 
 func gamePriceForComparison(g GameAtomInput) any {
 	price := any(g.RawPrice)
-	if price == nil && !g.preservePrice {
+	if price == nil {
 		price = g.Price
 	}
 	return normalizePriceForComparison(price)
@@ -292,7 +288,7 @@ func validateGameAtomFields(label string, g *GameAtomInput) error {
 		return fmt.Errorf("%s.quantity must be > 0", label)
 	}
 	price := g.Price
-	if g.RawPrice != nil && !g.preservePrice {
+	if g.RawPrice != nil {
 		encoded, err := json.Marshal(g.RawPrice)
 		if err != nil {
 			return fmt.Errorf("%s.price is invalid", label)
@@ -301,7 +297,7 @@ func validateGameAtomFields(label string, g *GameAtomInput) error {
 			return fmt.Errorf("%s.price is invalid", label)
 		}
 	}
-	if err := validatePrice(price); !g.preservePrice && err != nil {
+	if err := validatePrice(price); err != nil {
 		return fmt.Errorf("%s.%v", label, err)
 	}
 	tags := g.Tag
@@ -360,9 +356,6 @@ func validateUpdateGameDeltaBody(body *UpdateArcadeGameDeltaBody) error {
 	seenModify, seenRemove := map[string]struct{}{}, map[string]struct{}{}
 	for i := range body.Add {
 		g := &body.Add[i]
-		if g.preservePrice {
-			return fmt.Errorf("add[%d].price is required", i)
-		}
 		if g.idProvided || strings.TrimSpace(g.ID) != "" {
 			return fmt.Errorf("add[%d].id must be omitted", i)
 		}
@@ -480,9 +473,6 @@ func materializeUpdateGameDelta(txApp core.App, delta UpdateArcadeGameDeltaBody)
 		}
 		if entry.GetString("series") != seriesID {
 			return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: fmt.Sprintf("modify[%d].game must remain in the entry series", i)}
-		}
-		if g.preservePrice {
-			g.RawPrice = previousByEntry[g.ID].Get("price")
 		}
 		if revisionChanged(previousByEntry[g.ID], g) {
 			changedEntries++
@@ -718,7 +708,7 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		revision.Set("cabinet", g.Cabinet)
 		revision.Set("location", g.Location)
 		revision.Set("quantity", g.Quantity)
-		if g.preservePrice || g.RawPrice != nil {
+		if g.RawPrice != nil {
 			revision.Set("price", g.RawPrice)
 		} else {
 			revision.Set("price", NormalizePriceForStorage(g.Price))

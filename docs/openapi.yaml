@@ -2750,34 +2750,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TagItem'
-    GameAtomModifyInput:
-      type: object
-      required: [id, game, location, quantity, tag]
-      properties:
-        game:
-          type: string
-        id:
-          type: string
-          description: Stable `arcade_game_id` id. Forbidden in `add`; required in `modify` and never supplied in `remove`.
-        cabinet:
-          oneOf:
-            - type: string
-            - type: 'null'
-          description: |
-            Canonical `game_cabinet` id for this revision. The cabinet must be
-            supported by the submitted version through `game_series_version_cabinet`.
-            Use null only when the cabinet is genuinely unverified.
-        location:
-          type: string
-        quantity:
-          type: integer
-          minimum: 1
-        price:
-          $ref: '#/components/schemas/Price'
-        tag:
-          type: array
-          items:
-            $ref: '#/components/schemas/TagItem'
     UpdateArcadeGameRequest:
       type: object
       required: [arcade, base_state_id, add, modify, remove]
@@ -2795,8 +2767,8 @@ components:
         modify:
           type: array
           items:
-            $ref: '#/components/schemas/GameAtomModifyInput'
-          description: Replacement objects with an active `id`. Omit `price` to preserve the stored price exactly, including an unregistered price. Explicit null is invalid.
+            $ref: '#/components/schemas/GameAtomInput'
+          description: Complete replacement objects with an active `id`; this is not a partial patch.
         remove:
           type: array
           items:
