@@ -63,7 +63,9 @@ const (
 	PriceTypeSong     PriceType = "song"
 	PriceTypeTime     PriceType = "time"
 	PriceTypeFree     PriceType = "free"
-	PriceTypeCustom   PriceType = "custom"
+	PriceTypeCustom   PriceType = "custom" // Legacy wire format.
+	PriceTypeCustomV1 PriceType = "custom_v1"
+	PriceTypeCustomV2 PriceType = "custom_v2"
 )
 
 var priceTypeEnum = map[PriceType]struct{}{
@@ -73,6 +75,8 @@ var priceTypeEnum = map[PriceType]struct{}{
 	PriceTypeTime:     {},
 	PriceTypeFree:     {},
 	PriceTypeCustom:   {},
+	PriceTypeCustomV1: {},
+	PriceTypeCustomV2: {},
 }
 
 type TagItem struct {
@@ -93,7 +97,7 @@ func ValidatePriceAccept(accepts []string) error {
 func ValidatePriceType(priceType string) error {
 	value := PriceType(strings.TrimSpace(priceType))
 	if _, ok := priceTypeEnum[value]; !ok {
-		return fmt.Errorf("price.type must be one of gamemode, credit, song, time, free, custom")
+		return fmt.Errorf("price.type must be one of gamemode, credit, song, time, free, custom, custom_v1, custom_v2")
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +81,7 @@ func SetOfflineResolver(resolver *OfflineResolver, required bool) {
 	offlineResolver = resolver
 	offlineRequired = required
 	offlineMu.Unlock()
+	clearLookupCache()
 }
 
 func currentOfflineResolver() (*OfflineResolver, bool, bool) {
@@ -255,11 +257,20 @@ func propertyString(properties map[string]interface{}, keys ...string) string {
 }
 
 // Resolve performs country, timezone and optional city point-in-polygon
-// lookups without network access. A city is unresolved when zero or multiple
-// mapped city polygons contain the point.
+// lookups without network access. Country misses allow a unique exterior
+// boundary within 1km to accommodate coastline approximation. Timezone and
+// city lookups always use the original coordinate.
 func (r *OfflineResolver) Resolve(lat, lon float64) (OfflineResult, error) {
+	return r.resolve(lat, lon, false)
+}
+
+// Country misses may be repaired by the caller; timezone ambiguity still fails.
+func (r *OfflineResolver) resolve(lat, lon float64, allowCountryMiss bool) (OfflineResult, error) {
 	if r == nil {
 		return OfflineResult{}, errors.New("offline geo resolver is not configured")
+	}
+	if math.IsNaN(lat) || math.IsNaN(lon) || math.IsInf(lat, 0) || math.IsInf(lon, 0) || math.Abs(lat) > 90 || math.Abs(lon) > 180 {
+		return OfflineResult{}, errors.New("invalid coordinates")
 	}
 	country := []boundaryFeature{}
 	for _, feature := range r.countries {
@@ -267,7 +278,14 @@ func (r *OfflineResolver) Resolve(lat, lon float64) (OfflineResult, error) {
 			country = append(country, feature)
 		}
 	}
-	if len(country) != 1 {
+	if len(country) == 0 {
+		for _, feature := range r.countries {
+			if feature.exteriorDistanceMeters(lat, lon) <= 1000 {
+				country = append(country, feature)
+			}
+		}
+	}
+	if len(country) != 1 && !(allowCountryMiss && len(country) == 0) {
 		return OfflineResult{}, fmt.Errorf("offline country boundary matched %d features", len(country))
 	}
 	timezone := []boundaryFeature{}
@@ -282,7 +300,10 @@ func (r *OfflineResolver) Resolve(lat, lon float64) (OfflineResult, error) {
 	if _, err := time.LoadLocation(timezone[0].Timezone); err != nil {
 		return OfflineResult{}, fmt.Errorf("offline timezone is invalid: %w", err)
 	}
-	result := OfflineResult{Country: country[0].Country, Timezone: timezone[0].Timezone, CityStatus: "unmapped"}
+	result := OfflineResult{Timezone: timezone[0].Timezone, CityStatus: "unmapped"}
+	if len(country) == 1 {
+		result.Country = country[0].Country
+	}
 	if len(r.cities) == 0 {
 		return result, nil
 	}
@@ -301,6 +322,48 @@ func (r *OfflineResolver) Resolve(lat, lon float64) (OfflineResult, error) {
 		}
 	}
 	return result, nil
+}
+
+// exteriorDistanceMeters uses a local equirectangular projection for the 1km
+// tolerance. Only exterior rings participate; holes are not coastline fixes.
+func (f boundaryFeature) exteriorDistanceMeters(lat, lon float64) float64 {
+	const metersPerDegree = 6371000 * math.Pi / 180
+	xScale := metersPerDegree * math.Cos(lat*math.Pi/180)
+	best := math.Inf(1)
+	visit := func(polygon [][][]float64) {
+		if len(polygon) == 0 {
+			return
+		}
+		for _, hole := range polygon[1:] {
+			if pointInRing(hole, lat, lon) {
+				return
+			}
+		}
+		ring := polygon[0]
+		for i, j := 0, len(ring)-1; i < len(ring); j, i = i, i+1 {
+			a, b := ring[j], ring[i]
+			if len(a) < 2 || len(b) < 2 {
+				continue
+			}
+			// Keep each segment continuous across the antimeridian without
+			// accidentally drawing it through the opposite side of the world.
+			ax := math.Remainder(a[0]-lon, 360) * xScale
+			ay := (a[1] - lat) * metersPerDegree
+			bx := ax + math.Remainder(b[0]-a[0], 360)*xScale
+			by := (b[1] - lat) * metersPerDegree
+			dx, dy := bx-ax, by-ay
+			t := 0.0
+			if lengthSquared := dx*dx + dy*dy; lengthSquared > 0 {
+				t = math.Max(0, math.Min(1, -(ax*dx+ay*dy)/lengthSquared))
+			}
+			best = math.Min(best, math.Hypot(ax+t*dx, ay+t*dy))
+		}
+	}
+	visit(f.Polygon)
+	for _, polygon := range f.MultiPolygon {
+		visit(polygon)
+	}
+	return best
 }
 
 func (f boundaryFeature) contains(lat, lon float64) bool {

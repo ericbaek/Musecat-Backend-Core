@@ -25,10 +25,53 @@ type PriceItem struct {
 	Represent *bool    `json:"represent,omitempty"`
 }
 type Price struct {
-	Currency string      `json:"currency"`
-	Type     string      `json:"type"`
-	List     []PriceItem `json:"list"`
-	Accept   []string    `json:"accept"`
+	Currency   string      `json:"currency"`
+	Type       string      `json:"type"`
+	List       []PriceItem `json:"list"`
+	Accept     []string    `json:"accept"`
+	CustomList []string    `json:"-"`
+}
+
+// CustomList is the current custom wire format; List retains legacy object
+// prices so historical snapshots and rollback keep their original shape.
+func (p Price) MarshalJSON() ([]byte, error) {
+	type alias Price
+	if p.CustomList == nil {
+		return json.Marshal(alias(p))
+	}
+	return json.Marshal(struct {
+		Currency string   `json:"currency"`
+		Type     string   `json:"type"`
+		List     []string `json:"list"`
+		Accept   []string `json:"accept"`
+	}{p.Currency, p.Type, p.CustomList, p.Accept})
+}
+
+func (p *Price) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Currency string          `json:"currency"`
+		Type     string          `json:"type"`
+		List     json.RawMessage `json:"list"`
+		Accept   []string        `json:"accept"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*p = Price{Currency: wire.Currency, Type: wire.Type, Accept: wire.Accept}
+	if string(wire.List) == "null" || len(wire.List) == 0 {
+		return nil
+	}
+	var lines []string
+	if err := json.Unmarshal(wire.List, &lines); err == nil {
+		if wire.Type != "custom" && wire.Type != "custom_v2" && len(lines) > 0 {
+			return fmt.Errorf("only custom prices accept strings")
+		}
+		if wire.Type == "custom" || wire.Type == "custom_v2" {
+			p.CustomList = lines
+			return nil
+		}
+	}
+	return json.Unmarshal(wire.List, &p.List)
 }
 
 // ID is an arcade_game_id id. It is intentionally stable across revisions.
@@ -37,6 +80,8 @@ type GameAtomInput struct {
 	ID string `json:"id,omitempty"`
 	// idProvided distinguishes an omitted add id from an explicit null/empty id.
 	idProvided bool
+	// preservePrice keeps the stored price when a modify omits it.
+	preservePrice bool
 	// PrevID is legacy internal-only log input. API v2 does not decode it.
 	PrevID   string    `json:"-"`
 	Game     string    `json:"game"`
@@ -61,6 +106,8 @@ func (g *GameAtomInput) UnmarshalJSON(data []byte) error {
 	}
 	*g = GameAtomInput(decoded)
 	_, g.idProvided = fields["id"]
+	_, priceProvided := fields["price"]
+	g.preservePrice = !priceProvided
 	return nil
 }
 
@@ -122,6 +169,15 @@ func NormalizePriceForRead(p Price) Price {
 func NormalizePriceForStorage(p Price) Price {
 	p.Currency = strings.TrimSpace(p.Currency)
 	p.Type = strings.TrimSpace(p.Type)
+	if p.CustomList != nil {
+		lines := make([]string, 0, len(p.CustomList))
+		for _, line := range p.CustomList {
+			if line = strings.TrimSpace(line); line != "" {
+				lines = append(lines, line)
+			}
+		}
+		p.CustomList = lines
+	}
 	for i := range p.List {
 		if title, ok := p.List[i].Title.(string); ok {
 			p.List[i].Title = strings.TrimSpace(title)
@@ -179,7 +235,7 @@ func normalizePriceForComparison(raw any) any {
 
 func gamePriceForComparison(g GameAtomInput) any {
 	price := any(g.RawPrice)
-	if price == nil {
+	if price == nil && !g.preservePrice {
 		price = g.Price
 	}
 	return normalizePriceForComparison(price)
@@ -196,6 +252,20 @@ func validatePrice(p Price) error {
 	}
 	if err := ValidatePriceType(p.Type); err != nil {
 		return err
+	}
+	if p.CustomList != nil {
+		if p.Type != "custom" && p.Type != "custom_v2" {
+			return fmt.Errorf("only custom prices accept strings")
+		}
+		for i, line := range p.CustomList {
+			if strings.TrimSpace(line) == "" {
+				return fmt.Errorf("price.list[%d] must not be blank", i)
+			}
+		}
+		return ValidatePriceAccept(p.Accept)
+	}
+	if p.Type == "custom_v2" {
+		return fmt.Errorf("custom_v2 price.list must be a string array")
 	}
 	if len(p.List) == 0 {
 		return fmt.Errorf("price.list must have at least 1 item")
@@ -222,7 +292,7 @@ func validateGameAtomFields(label string, g *GameAtomInput) error {
 		return fmt.Errorf("%s.quantity must be > 0", label)
 	}
 	price := g.Price
-	if g.RawPrice != nil {
+	if g.RawPrice != nil && !g.preservePrice {
 		encoded, err := json.Marshal(g.RawPrice)
 		if err != nil {
 			return fmt.Errorf("%s.price is invalid", label)
@@ -231,7 +301,7 @@ func validateGameAtomFields(label string, g *GameAtomInput) error {
 			return fmt.Errorf("%s.price is invalid", label)
 		}
 	}
-	if err := validatePrice(price); err != nil {
+	if err := validatePrice(price); !g.preservePrice && err != nil {
 		return fmt.Errorf("%s.%v", label, err)
 	}
 	tags := g.Tag
@@ -290,6 +360,9 @@ func validateUpdateGameDeltaBody(body *UpdateArcadeGameDeltaBody) error {
 	seenModify, seenRemove := map[string]struct{}{}, map[string]struct{}{}
 	for i := range body.Add {
 		g := &body.Add[i]
+		if g.preservePrice {
+			return fmt.Errorf("add[%d].price is required", i)
+		}
 		if g.idProvided || strings.TrimSpace(g.ID) != "" {
 			return fmt.Errorf("add[%d].id must be omitted", i)
 		}
@@ -407,6 +480,9 @@ func materializeUpdateGameDelta(txApp core.App, delta UpdateArcadeGameDeltaBody)
 		}
 		if entry.GetString("series") != seriesID {
 			return UpdateArcadeGameBody{}, 0, &gameRequestValidationError{message: fmt.Sprintf("modify[%d].game must remain in the entry series", i)}
+		}
+		if g.preservePrice {
+			g.RawPrice = previousByEntry[g.ID].Get("price")
 		}
 		if revisionChanged(previousByEntry[g.ID], g) {
 			changedEntries++
@@ -642,7 +718,7 @@ func updateArcadeGameTx(txApp core.App, body UpdateArcadeGameBody, createdBy str
 		revision.Set("cabinet", g.Cabinet)
 		revision.Set("location", g.Location)
 		revision.Set("quantity", g.Quantity)
-		if g.RawPrice != nil {
+		if g.preservePrice || g.RawPrice != nil {
 			revision.Set("price", g.RawPrice)
 		} else {
 			revision.Set("price", NormalizePriceForStorage(g.Price))

@@ -1,6 +1,7 @@
 package user
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -8,6 +9,9 @@ import (
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+
+	memoDiff "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo/diff"
+	photo "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo/read"
 )
 
 const (
@@ -28,11 +32,16 @@ var userChangelogCategorySet = map[string]struct{}{
 // GetUserChangelog handles GET /user/changelog?user=<userId>.
 //
 // This endpoint is intentionally separate from /arcade/changelog. It exposes
-// only arcade/category summaries authored by the requested user and applies
+// arcade/category summaries to guests and full permitted rows to authenticated users. It applies
 // the same arcade visibility boundary as the arcade-scoped history endpoint. Public arcades
 // are readable anonymously; a caller may additionally read their own private
 // arcade history, while strict reviewers may read all rows.
 func GetUserChangelog(re *core.RequestEvent) error {
+	re.Response.Header().Set("Cache-Control", "private, no-store")
+	if re.Auth == nil && strings.TrimSpace(re.Request.Header.Get("Authorization")) != "" {
+		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
+	}
+	includeDetails := re.Auth != nil && re.Auth.Collection().Name == CollectionUser
 	q := re.Request.URL.Query()
 	userID := strings.TrimSpace(q.Get("user"))
 	if userID == "" {
@@ -70,19 +79,24 @@ WHERE %s
 		})
 	}
 
+	columns := ""
+	if includeDetails {
+		columns = `,
+	c."from", c."to", c."by", c.log, c.created`
+	}
 	rows, err := re.App.DB().NewQuery(fmt.Sprintf(`
 SELECT
 	c.id,
 	c.arcade,
 	COALESCE(ab.name, '') AS arcade_name,
-	c.changed
+	c.changed%s
 FROM arcade_changelog c
 INNER JOIN arcade a ON a.id = c.arcade
 LEFT JOIN arcade_basic ab ON ab.id = a.basic
 WHERE %s
 ORDER BY c.created DESC, c.id DESC
 LIMIT {:limit} OFFSET {:offset}
-`, where)).Bind(mergeUserChangelogParams(params, perPage, (page-1)*perPage)).Rows()
+`, columns, where)).Bind(mergeUserChangelogParams(params, perPage, (page-1)*perPage)).Rows()
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to list user changelog",
@@ -106,6 +120,22 @@ LIMIT {:limit} OFFSET {:offset}
 			"arcade_name": userChangelogString(raw, "arcade_name"),
 			"changed":     userChangelogString(raw, "changed"),
 		}
+		if includeDetails {
+			var log any
+			if value := userChangelogString(raw, "log"); value != "" {
+				if err := json.Unmarshal([]byte(value), &log); err != nil {
+					return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to decode user changelog"})
+				}
+			}
+			item["from"] = userChangelogString(raw, "from")
+			item["to"] = userChangelogString(raw, "to")
+			item["by"] = userChangelogString(raw, "by")
+			item["log"] = log
+			item["created"] = userChangelogString(raw, "created")
+			if item["changed"] == "memo" {
+				item["memo"] = memoDiff.Build(re.App, userChangelogString(raw, "arcade"), userChangelogString(raw, "from"), userChangelogString(raw, "to"))
+			}
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -113,6 +143,11 @@ LIMIT {:limit} OFFSET {:offset}
 			"error":   "failed to iterate user changelog",
 			"details": err.Error(),
 		})
+	}
+	if includeDetails {
+		if err := photo.ExpandChangelogAssets(re, items); err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load changelog photos"})
+		}
 	}
 
 	lastPage := int64(0)

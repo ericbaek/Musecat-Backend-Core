@@ -263,6 +263,8 @@ components:
       properties:
         country:
           type: string
+          pattern: '^[A-Z]{2}$'
+          description: ISO 3166-1 alpha-2 country code; missing-data sentinels such as -99 are never returned.
         timezone:
           type: string
     GeocodeCandidate:
@@ -2556,6 +2558,13 @@ components:
         total:
           type: integer
     ArcadeMemoDocument:
+      description: >-
+        Recursive Tiptap document. Nodes and marks require a nonempty string type;
+        text nodes require string text. Present content and marks must be arrays,
+        attrs must be objects, and heading levels must be integers 1 through 6.
+        At most 5000 nodes, 64 nested content levels, and 128 total JSON nesting levels are accepted. Each node allows at most 32 marks. Malformed
+        documents return 400 without saving notices, memo revisions, or history.
+        Extension node and mark names are preserved.
       type: object
       required: [type]
       properties:
@@ -2695,17 +2704,37 @@ components:
     Price:
       type: object
       required: [currency, type, list, accept]
+      allOf:
+        - if:
+            properties:
+              type: {enum: [gamemode, credit, song, time, free, custom_v1]}
+          then:
+            properties:
+              list:
+                items:
+                  $ref: '#/components/schemas/PriceItem'
+                minItems: 1
+        - if:
+            properties:
+              type: {const: custom_v2}
+          then:
+            properties:
+              list:
+                items: {type: string, minLength: 1}
       properties:
         currency:
           type: string
           enum: [KRW, JPY, USD]
         type:
           type: string
-          enum: [gamemode, credit, song, time, free, custom]
+          enum: [gamemode, credit, song, time, free, custom, custom_v1, custom_v2]
         list:
           type: array
-          items:
-            $ref: '#/components/schemas/PriceItem'
+          description: custom_v1 uses named numeric PriceItem objects with currency conversion. custom_v2 uses literal strings, one per line (empty array means unknown). Legacy custom accepts either shape without rewriting existing data.
+          anyOf:
+            - items: {type: string, minLength: 1}
+            - items:
+                $ref: '#/components/schemas/PriceItem'
         accept:
           type: array
           items:
@@ -2748,6 +2777,34 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TagItem'
+    GameAtomModifyInput:
+      type: object
+      required: [id, game, location, quantity, tag]
+      properties:
+        game:
+          type: string
+        id:
+          type: string
+          description: Stable `arcade_game_id` id. Forbidden in `add`; required in `modify` and never supplied in `remove`.
+        cabinet:
+          oneOf:
+            - type: string
+            - type: 'null'
+          description: |
+            Canonical `game_cabinet` id for this revision. The cabinet must be
+            supported by the submitted version through `game_series_version_cabinet`.
+            Use null only when the cabinet is genuinely unverified.
+        location:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        price:
+          $ref: '#/components/schemas/Price'
+        tag:
+          type: array
+          items:
+            $ref: '#/components/schemas/TagItem'
     UpdateArcadeGameRequest:
       type: object
       required: [arcade, base_state_id, add, modify, remove]
@@ -2765,8 +2822,8 @@ components:
         modify:
           type: array
           items:
-            $ref: '#/components/schemas/GameAtomInput'
-          description: Complete replacement objects with an active `id`; this is not a partial patch.
+            $ref: '#/components/schemas/GameAtomModifyInput'
+          description: Replacement objects with an active `id`. Omit `price` to preserve the stored price exactly, including an unregistered price. Explicit null is invalid.
         remove:
           type: array
           items:
@@ -2993,7 +3050,7 @@ components:
       properties:
         id:
           type: string
-          description: Opaque row identity for pagination; no revision details are exposed.
+          description: Opaque row identity.
         arcade: {type: string}
         arcade_name:
           type: string
@@ -3001,6 +3058,22 @@ components:
         changed:
           type: string
           enum: [basic, game, hour, sns, gtk, photo, memo]
+        from:
+          description: Authenticated, authorized rows only.
+        to:
+          description: Authenticated, authorized rows only.
+        by:
+          type: string
+          description: Authenticated, authorized rows only.
+        log:
+          description: Authenticated, authorized rows only.
+        created:
+          type: string
+          description: Authenticated, authorized rows only.
+        memo: {$ref: '#/components/schemas/ChangelogMemoSnapshots'}
+        photo_assets:
+          type: array
+          items: {$ref: '#/components/schemas/ChangelogPhotoAsset'}
     UserChangelogPage:
       type: object
       required: [page, per_page, last_page, total, items]
@@ -4809,14 +4882,15 @@ paths:
       tags: [Users]
       summary: /user/changelog
       description: |
-        Returns only arcade and changed-category summaries of the user's edits in reverse
-        chronological order. Anonymous callers receive rows from public
+        Returns the user's edits in reverse chronological order. Anonymous callers
+        receive only arcade and changed-category summaries from public
         arcades only. An authenticated caller may additionally receive rows
         from private arcades they own; `developer` and `moderator` callers may
         audit private rows. The endpoint never exposes flags, visits, or legacy
         tickets; those remain activity aggregates rather than changelog rows.
-        Every caller receives only id, arcade, arcade_name, and changed. Revision
-        pointers, logs, timestamps, memo snapshots, and photo assets are omitted.
+        Authenticated user accounts receive revision detail only for rows allowed
+        by the existing arcade visibility filter. Responses use private, no-store
+        caching. Invalid bearer credentials receive 401.
         Rows whose arcade aggregate was deleted are omitted, and withdrawn
         users receive an empty page.
       parameters:
@@ -4845,6 +4919,11 @@ paths:
               schema: {$ref: '#/components/schemas/UserChangelogPage'}
         '400':
           description: Missing user id, invalid pagination, or unsupported changed category.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Invalid bearer credentials.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -5338,7 +5417,16 @@ paths:
     get:
       tags: [Geo]
       summary: /geo
-      description: Default per-client-IP limit is 60 requests per 60 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults.
+      description: >-
+        Resolves the original coordinate using offline country and timezone boundaries.
+        A country miss may use a unique exterior boundary within 1000 metres to
+        tolerate coastline approximation. A missing or invalid country code falls back
+        to BigDataCloud, then Nominatim, within an eight-second total budget, retaining
+        the offline timezone. Only successful fallback results are cached for 24 hours.
+        Ambiguous countries, missing or ambiguous timezones, and exhausted country
+        providers still fail. The coordinate is not moved. Default per-client-IP limit
+        is 60 requests per 60 seconds, shared by anonymous and authenticated users.
+        Operator-configured limits and PocketBase exemptions may override the defaults.
       parameters:
         - name: lat
           in: query
@@ -5371,7 +5459,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '502':
-          description: Upstream lookup failure.
+          description: Country or timezone lookup failure, including missing or ambiguous offline boundaries.
           content:
             application/json:
               schema:

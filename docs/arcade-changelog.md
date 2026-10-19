@@ -9,8 +9,9 @@ The important rule is simple:
 
 Rows are immutable. API v2 serves arcade timelines through `GET /arcade/changelog`
 with active user authentication. `GET /user/changelog` returns only arcade/category
-summaries (`id`, `arcade`, `arcade_name`, `changed`) for every caller; it never
-returns revision pointers, logs, timestamps, memo snapshots, or photo assets. Clients must not use
+summaries (`id`, `arcade`, `arcade_name`, `changed`) for guests. Active authenticated
+users also receive revision details for rows allowed by the existing arcade visibility
+filter. Both variants use private, no-store caching. Clients must not use
 PocketBase collection REST to read or mutate them. A report cites an existing
 changelog id and derives the reported editor from the row's server-written `by`
 value.
@@ -224,6 +225,12 @@ successful request. Each item records `before` and `after` snapshots and one of
 from `arcade_game_id`, so historical flags remain attached and are returned as
 `orphanFlags` until that entry becomes active again.
 
+For `PUT /arcade/game`, a `modify` object may omit `price` to preserve the
+stored price exactly, including null or legacy values. All other replacement
+fields retain their existing requirements. New `add` objects require price;
+explicit null price is invalid. A location-only edit does not introduce a
+price change in immutable history or `game_diff`.
+
 When an add has a verified cabinet, the server may reuse the newest inactive
 entry for the same arcade, canonical series, and cabinet. It orders candidates
 by matching history revision `created`, entry `created`, and entry id, all
@@ -412,3 +419,17 @@ handlers, including information edits, photo upload/application and rollback. Th
 immutable changelog, XP and cache-invalidation rules apply; no separate partner history or XP path exists.
 Management operations remain excluded even for connected staff accounts. Request-attempt logs include
 the verified user and app-specific delegation subject, but do not replace committed changelog history.
+
+## Custom game prices
+
+`custom_v1` uses the existing named numeric `PriceItem[]` contract, including
+currency, payment methods and representative flags. `custom_v2` uses literal
+`string[]`, one price or condition per line in order; `[]` means no information.
+Strings have no numeric interpretation or exchange-rate conversion. The UI shows
+both as Custom and chooses the input mode inside the price editor.
+Legacy `custom` accepts both shapes for unchanged round trips and historical
+rollback. No migration rewrites stored prices, revisions or changelog rows.
+Untouched revisions and rollback retain their original raw price JSON. New
+edits may have a legacy price in `before` and a versioned price in `after`.
+Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
+retains the existing representative-item policy.

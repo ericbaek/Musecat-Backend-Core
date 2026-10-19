@@ -29,6 +29,17 @@ func RedactGuestPrice(raw any) any {
 		rawList = listVal
 	}
 
+	// Custom text has no represent flag. Keep the existing guest fallback:
+	// expose the first item and signal that remaining items require login.
+	if (priceMap["type"] == "custom" || priceMap["type"] == "custom_v2") && len(rawList) > 0 {
+		if _, ok := rawList[0].(string); ok {
+			priceMap["list"] = rawList[:1]
+			priceMap["accept"] = nil
+			priceMap["hasHiddenPrices"] = len(rawList) > 1
+			return priceMap
+		}
+	}
+
 	representativeList := make([]map[string]any, 0)
 	for _, item := range rawList {
 		if itemMap, ok := item.(map[string]any); ok {

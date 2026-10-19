@@ -2,9 +2,60 @@ package arcade_test
 
 import (
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/ericbaek/musecat-backend-core/geo"
 )
+
+func TestContractV2_FranceCountryFallbackCreatesValidArcadeOrPersistsNothing(t *testing.T) {
+	resolver, err := geo.LoadEmbeddedResolver()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, success := range []bool{true, false} {
+		t.Run(fmt.Sprint(success), func(t *testing.T) {
+			app := newArcadeTestApp(t)
+			token, user := createAuthUser(t, app)
+			geo.SetOfflineResolver(resolver, true)
+			t.Cleanup(func() { geo.SetOfflineResolver(nil, false) })
+			restore := geo.SetHTTPClient(&http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if !success {
+					return nil, fmt.Errorf("country providers unavailable")
+				}
+				if req.URL.Host != "api.bigdatacloud.net" {
+					t.Fatalf("unexpected HTTP provider %s", req.URL.Host)
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"countryCode":"FR"}`))}, nil
+			})})
+			t.Cleanup(restore)
+			res := executeJSONRequest(t, app, http.MethodPost, "/arcade/new", `{"name":"France Regression","address":"39 Rue de Nanterre","location":{"lat":48.910027800911,"lon":2.284050484981}}`, map[string]string{"Authorization": "Bearer " + token})
+			if !success {
+				assertContractStatus(t, res, http.StatusServiceUnavailable)
+			} else {
+				assertContractStatus(t, res, http.StatusOK)
+				body := decodeJSONMap(t, res)
+				record := mustFindRecord(t, app, "arcade", body["id"].(string))
+				if record.GetString("country") != "FR" || record.GetString("timezone") != "Europe/Paris" {
+					t.Fatalf("invalid stored geography: %v", record.PublicExport())
+				}
+			}
+			records, err := app.FindRecordsByFilter("arcade", "createdBy={:id}", "", 0, 0, map[string]any{"id": user.Id})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if success {
+				want = 1
+			}
+			if len(records) != want {
+				t.Fatalf("arcades=%d want=%d", len(records), want)
+			}
+		})
+	}
+}
 
 func TestContractV2_NewArcadeGeoFailureDoesNotPersist(t *testing.T) {
 	app := newArcadeTestApp(t)

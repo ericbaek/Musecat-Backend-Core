@@ -125,15 +125,10 @@ func normalizeDocument(raw json.RawMessage) (any, error) {
 	if document["type"] != "doc" {
 		return nil, fmt.Errorf("memo document type must be doc")
 	}
-	if content, ok := document["content"]; ok && !isArray(content) {
-		return nil, fmt.Errorf("memo document content must be an array")
+	if err := arcadeinternal.ValidateDocument(document); err != nil {
+		return nil, err
 	}
 	return document, nil
-}
-
-func isArray(value any) bool {
-	_, ok := value.([]any)
-	return ok
 }
 
 func memoPayload(arcadeID string, memo *core.Record) map[string]any {

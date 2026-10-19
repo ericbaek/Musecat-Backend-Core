@@ -34,6 +34,9 @@ func TestGetUserChangelog_PublicPrivateVisibilityAndCategoryFilter(t *testing.T)
 	}
 	scenario.AfterTestFunc = func(tb testing.TB, _ *tests.TestApp, res *http.Response) {
 		tb.Helper()
+		if res.Header.Get("Cache-Control") != "private, no-store" {
+			tb.Fatalf("guest changelog must not be cached: %q", res.Header.Get("Cache-Control"))
+		}
 		payload := decodeJSON(tb, res)
 		assertJSONNumber(tb, payload["total"], 1)
 		assertJSONNumber(tb, payload["last_page"], 1)
@@ -82,7 +85,7 @@ func TestGetUserChangelog_OwnerCanReadPrivateRows(t *testing.T) {
 		scenario.Headers = map[string]string{"Authorization": "Bearer " + ownerToken}
 	}
 
-	scenario.AfterTestFunc = assertUserChangelogSummary
+	scenario.AfterTestFunc = assertUserChangelogDetails
 
 	scenario.Test(t)
 }
@@ -128,7 +131,7 @@ func TestGetUserChangelog_ReviewerCanReadPrivateRows(t *testing.T) {
 		scenario.Headers = map[string]string{"Authorization": "Bearer " + reviewerToken}
 	}
 
-	scenario.AfterTestFunc = assertUserChangelogSummary
+	scenario.AfterTestFunc = assertUserChangelogDetails
 
 	scenario.Test(t)
 }
@@ -236,4 +239,73 @@ func assertUserChangelogSummary(tb testing.TB, _ *tests.TestApp, res *http.Respo
 			}
 		}
 	}
+}
+
+func assertUserChangelogDetails(tb testing.TB, _ *tests.TestApp, res *http.Response) {
+	tb.Helper()
+	if res.Header.Get("Cache-Control") != "private, no-store" {
+		tb.Fatalf("authenticated changelog must not be cached: %q", res.Header.Get("Cache-Control"))
+	}
+	payload := decodeJSON(tb, res)
+	items, ok := payload["items"].([]any)
+	if !ok || len(items) != 1 {
+		tb.Fatalf("expected one permitted changelog item, got %#v", payload["items"])
+	}
+	item := items[0].(map[string]any)
+	for _, key := range []string{"id", "arcade", "arcade_name", "changed", "from", "to", "by", "log", "created"} {
+		if _, exists := item[key]; !exists {
+			tb.Fatalf("missing authenticated detail %s: %#v", key, item)
+		}
+	}
+	if item["from"] != "before" || item["to"] != "after" || item["log"].(map[string]any)["type"] != item["changed"] {
+		tb.Fatalf("incorrect authenticated detail: %#v", item)
+	}
+}
+
+func TestGetUserChangelog_AuthenticatedOtherSeesPublicOnly(t *testing.T) {
+	scenario := tests.ApiScenario{
+		Name:            "authenticated profile visitor sees public details but no private rows",
+		Method:          http.MethodGet,
+		ExpectedStatus:  http.StatusOK,
+		ExpectedContent: []string{`"items":[{`},
+		TestAppFactory:  func(tb testing.TB) *tests.TestApp { return newUserFetchTestApp(tb) },
+	}
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		_, author := createAuthUser(tb, app, true)
+		viewerToken, _ := createAuthUser(tb, app, true)
+		publicArcade := seedUserChangelogArcade(tb, app, author.Id, true, "Public Arcade")
+		privateArcade := seedUserChangelogArcade(tb, app, author.Id, false, "Private Arcade")
+		seedUserChangelog(tb, app, publicArcade, "basic", author.Id)
+		seedUserChangelog(tb, app, privateArcade, "basic", author.Id)
+		scenario.URL = "/user/changelog?user=" + author.Id
+		scenario.Headers = map[string]string{"Authorization": "Bearer " + viewerToken}
+	}
+	scenario.AfterTestFunc = func(tb testing.TB, _ *tests.TestApp, res *http.Response) {
+		if res.Header.Get("Cache-Control") != "private, no-store" {
+			tb.Fatalf("authenticated changelog must not be cached")
+		}
+		payload := decodeJSON(tb, res)
+		assertJSONNumber(tb, payload["total"], 1)
+		item := payload["items"].([]any)[0].(map[string]any)
+		if item["arcade_name"] != "Public Arcade" || item["from"] != "before" || item["log"] == nil {
+			tb.Fatalf("private arcade leaked to another viewer: %#v", item)
+		}
+	}
+	scenario.Test(t)
+}
+
+func TestGetUserChangelog_InvalidAuthorizationCannotGetDetails(t *testing.T) {
+	scenario := tests.ApiScenario{
+		Name:            "invalid bearer token cannot get profile detail",
+		Method:          http.MethodGet,
+		ExpectedStatus:  http.StatusUnauthorized,
+		ExpectedContent: []string{`"error":"authentication required"`},
+		TestAppFactory:  func(tb testing.TB) *tests.TestApp { return newUserFetchTestApp(tb) },
+		Headers:         map[string]string{"Authorization": "Bearer invalid"},
+	}
+	scenario.BeforeTestFunc = func(tb testing.TB, app *tests.TestApp, _ *core.ServeEvent) {
+		_, user := createAuthUser(tb, app, true)
+		scenario.URL = "/user/changelog?user=" + user.Id
+	}
+	scenario.Test(t)
 }

@@ -109,3 +109,47 @@ func TestArcadeMemo_AuthenticatedUserKeepsImmutableHistory(t *testing.T) {
 		t.Fatalf("expected memo changelog row to include before/after snapshots")
 	}
 }
+
+func TestArcadeMemo_MalformedDocumentDoesNotPersist(t *testing.T) {
+	app := newArcadeTestApp(t)
+	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{Name: "Safe memo", Address: "1 Memo St", Location: location{Lat: 37.5, Lon: 127.0}})
+	token, _ := createAuthUserWithTags(t, app, nil)
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	for _, document := range []string{
+		`{"type":"doc","content":[{"type":"paragraph","content":{}}]}`,
+		`{"type":"doc","content":[null]}`,
+		`{"type":"doc","content":[{"type":"text","text":{}}]}`,
+		`{"type":"doc","content":[{"type":"text","text":"bad","marks":{}}]}`,
+		`{"type":"doc","content":[{"type":"text","text":"bad","marks":[null]}]}`,
+		`{"type":"doc","content":[{"type":"image","attrs":[]}]}`,
+	} {
+		t.Run(document, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"arcade": arcadeID, "document": json.RawMessage(document)})
+			res := executeJSONRequest(t, app, http.MethodPut, "/arcade/memo", string(body), headers)
+			res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", res.StatusCode)
+			}
+		})
+	}
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if arcade.GetString("memo") != "" {
+		t.Fatal("malformed document changed memo pointer")
+	}
+	for _, collection := range []string{"arcade_memo", "arcade_changelog"} {
+		filter := "arcade={:arcade}"
+		if collection == "arcade_changelog" {
+			filter += " && changed='memo'"
+		}
+		records, err := app.FindRecordsByFilter(collection, filter, "", 0, 0, map[string]any{"arcade": arcadeID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) != 0 {
+			t.Fatalf("malformed document persisted %s records", collection)
+		}
+	}
+}

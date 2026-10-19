@@ -550,3 +550,64 @@ func seedInactiveGameCandidate(t testing.TB, app *tests.TestApp, arcadeID, serie
 	}
 	return entry.Id
 }
+
+func TestUpdateArcadeGameDelta_OmittedPricePreservesStoredValue(t *testing.T) {
+	for _, raw := range []string{"null", `{"currency":"KRW","type":"custom","list":[{"value":500}],"accept":[]}`, `{"currency":"KRW","type":"legacy","list":[{"title":true,"value":500}]}`} {
+		t.Run(raw, func(t *testing.T) {
+			app := newArcadeTestApp(t)
+			token, user := createAuthUser(t, app)
+			arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Preserve price", Address: "Street", Location: location{Lat: 37.5, Lon: 127}})
+			version := seedGameSeriesVersion(t, app)
+			headers := map[string]string{"Authorization": "Bearer " + token}
+			initial := postGameDelta(t, app, headers, gameDeltaRequest(t, arcadeID, "", []map[string]any{testGameObject(version, "", "", 500, "")}, nil, nil))
+			state := gameStateID(t, initial)
+			entry := gameEntryForVersion(t, gameItems(t, initial), version)
+			if _, err := app.DB().NewQuery("UPDATE arcade_game_history SET price={:price} WHERE batch={:batch} AND entry={:entry}").Bind(dbx.Params{"price": raw, "batch": state, "entry": entry}).Execute(); err != nil {
+				t.Fatal(err)
+			}
+			modified := testGameObject(version, entry, "1F", 999, "")
+			delete(modified, "price")
+			updated := postGameDelta(t, app, headers, gameDeltaRequest(t, arcadeID, state, nil, []map[string]any{modified}, nil))
+			for _, batch := range []string{state, gameStateID(t, updated)} {
+				revision, err := app.FindFirstRecordByFilter("arcade_game_history", "batch={:batch} && entry={:entry}", dbx.Params{"batch": batch, "entry": entry})
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := json.Marshal(revision.Get("price"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var expected any
+				var actual any
+				if err := json.Unmarshal([]byte(raw), &expected); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(got, &actual); err != nil {
+					t.Fatal(err)
+				}
+				expectedJSON, _ := json.Marshal(expected)
+				actualJSON, _ := json.Marshal(actual)
+				if string(expectedJSON) != string(actualJSON) {
+					t.Fatalf("price changed: %s -> %s", expectedJSON, actualJSON)
+				}
+				if batch != state && revision.GetString("location") != "1F" {
+					t.Fatal("location was not updated")
+				}
+			}
+			// Explicit null is not an instruction to erase a price.
+			modified["price"] = nil
+			res := executeJSONRequest(t, app, http.MethodPut, "/arcade/game", gameDeltaRequest(t, arcadeID, gameStateID(t, updated), nil, []map[string]any{modified}, nil), headers)
+			defer res.Body.Close()
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("null price accepted: %d", res.StatusCode)
+			}
+			added := testGameObject(version, "", "1F", 500, "")
+			delete(added, "price")
+			res2 := executeJSONRequest(t, app, http.MethodPut, "/arcade/game", gameDeltaRequest(t, arcadeID, gameStateID(t, updated), []map[string]any{added}, nil, nil), headers)
+			defer res2.Body.Close()
+			if res2.StatusCode != http.StatusBadRequest {
+				t.Fatalf("add without price accepted: %d", res2.StatusCode)
+			}
+		})
+	}
+}

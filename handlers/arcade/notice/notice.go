@@ -221,63 +221,63 @@ func hasOtherOfficialArcadeManager(app core.App, auth *core.Record, arcadeID str
 	return false
 }
 
-func rejectNoticeCreateAccess(re *core.RequestEvent, arcadeID string) error {
+func rejectNoticeCreateAccess(re *core.RequestEvent, arcadeID string) (bool, error) {
 	if re.Auth == nil {
-		return re.UnauthorizedError("The request requires valid record authorization token.", nil)
+		return true, re.UnauthorizedError("The request requires valid record authorization token.", nil)
 	}
 
 	if !hasAnyNoticeAccessTag(re.Auth) {
-		return re.JSON(http.StatusForbidden, map[string]any{
+		return true, re.JSON(http.StatusForbidden, map[string]any{
 			"error": "notice access required",
 		})
 	}
 
 	if hasElevatedNoticeAccess(re.Auth) {
-		return nil
+		return false, nil
 	}
 	if hasNoticeTag(re.Auth, "arcade_owner") && ownsArcade(re.Auth, arcadeID) {
-		return nil
+		return false, nil
 	}
 	if isSupporter(re.Auth) {
 		if !hasSupporterNoticeAccess(re.App, re.Auth) {
-			return re.JSON(http.StatusForbidden, map[string]any{
+			return true, re.JSON(http.StatusForbidden, map[string]any{
 				"error": "supporter level 30 or staff access required",
 			})
 		}
 		if !hasOtherOfficialArcadeManager(re.App, re.Auth, arcadeID) {
-			return nil
+			return false, nil
 		}
 	}
-	return re.JSON(http.StatusForbidden, map[string]any{"error": "notice creation is not allowed for this arcade"})
+	return true, re.JSON(http.StatusForbidden, map[string]any{"error": "notice creation is not allowed for this arcade"})
 }
 
-func rejectNoticeMutationAccess(re *core.RequestEvent, rec *core.Record) error {
+func rejectNoticeMutationAccess(re *core.RequestEvent, rec *core.Record) (bool, error) {
 	if re.Auth == nil {
-		return re.UnauthorizedError("The request requires valid record authorization token.", nil)
+		return true, re.UnauthorizedError("The request requires valid record authorization token.", nil)
 	}
 	arcade, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, rec.GetString("arcade"))
 	if err != nil {
-		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
+		return true, re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
 	}
 	if !arcadeinternal.CanWriteArcade(re.Auth, arcade) {
-		return re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
+		return true, re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
 	}
 	if hasElevatedNoticeAccess(re.Auth) {
-		return nil
+		return false, nil
 	}
 	if rec.GetString("createdBy") != re.Auth.Id {
-		return re.JSON(http.StatusForbidden, map[string]any{"error": "only the notice author can modify this notice"})
+		return true, re.JSON(http.StatusForbidden, map[string]any{"error": "only the notice author can modify this notice"})
 	}
 	if hasNoticeTag(re.Auth, "arcade_owner") && ownsArcade(re.Auth, rec.GetString("arcade")) {
-		return nil
+		return false, nil
 	}
 	if isSupporter(re.Auth) && !hasSupporterNoticeAccess(re.App, re.Auth) {
-		return re.JSON(http.StatusForbidden, map[string]any{
+		return true, re.JSON(http.StatusForbidden, map[string]any{
 			"error": "supporter level 30 or staff access required",
 		})
 	}
 
-	return nil
+	return false, nil
 }
 
 func noticePayload(rec *core.Record) map[string]any {
@@ -506,7 +506,7 @@ func CreateArcadeNotice(re *core.RequestEvent) error {
 		})
 	}
 
-	if err := rejectNoticeCreateAccess(re, body.Arcade); err != nil {
+	if denied, err := rejectNoticeCreateAccess(re, body.Arcade); denied {
 		return err
 	}
 
@@ -573,7 +573,7 @@ func UpdateArcadeNotice(re *core.RequestEvent) error {
 		})
 	}
 
-	if err := rejectNoticeMutationAccess(re, rec); err != nil {
+	if denied, err := rejectNoticeMutationAccess(re, rec); denied {
 		return err
 	}
 
@@ -617,7 +617,7 @@ func DeleteArcadeNotice(re *core.RequestEvent) error {
 		})
 	}
 
-	if err := rejectNoticeMutationAccess(re, rec); err != nil {
+	if denied, err := rejectNoticeMutationAccess(re, rec); denied {
 		return err
 	}
 
