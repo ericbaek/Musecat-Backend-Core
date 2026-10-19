@@ -14,6 +14,8 @@ import (
 
 	"github.com/ericbaek/musecat-backend-core/delegation"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/filesystem"
 )
 
 func oidcKey(t *testing.T) (*rsa.PrivateKey, string) {
@@ -172,5 +174,61 @@ func TestOIDCExplicitScopeNonceAndKeyRotation(t *testing.T) {
 	// A failing configuration must leave the working key set intact.
 	if !f.m.OIDCEnabled() {
 		t.Fatal("invalid configuration removed working keys")
+	}
+}
+
+func TestProfilePictureWithExactScopeAndConfiguredOrigin(t *testing.T) {
+	f := newFixture(t)
+	setupOIDC(t, f)
+	c, err := f.app.FindCollectionByNameOrId("user_info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := core.NewRecord(c)
+	info.Id = f.user.Id
+	info.Set("nickname", "Visible nickname")
+	png, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := filesystem.NewFileFromBytes(png, "avatar.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info.Set("avatar", file)
+	if err = f.app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	code := signinCode(t, f, []string{delegation.OpenID, delegation.Profile})
+	tokens, err := f.m.Exchange(f.app, "signin", delegation.TokenInput{GrantType: "authorization_code", Code: code, RedirectURI: callback, Verifier: verifier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := f.access(tokens.AccessToken, "/oauth/userinfo", 200)
+	picture, ok := response["picture"].(string)
+	if !ok || !strings.HasPrefix(picture, "https://api.musecat.example/api/files/") || !strings.HasSuffix(picture, ".png") {
+		t.Fatal("missing canonical picture", response)
+	}
+	me := f.access(tokens.AccessToken, "/developer/v1/me", 200)
+	if me["picture"] != picture {
+		t.Fatal("identity picture differs", me)
+	}
+	if response["email"] != nil || response["id"] != nil {
+		t.Fatal("private identity leaked", response)
+	}
+	code = signinCode(t, f, []string{delegation.OpenID})
+	tokens, err = f.m.Exchange(f.app, "signin", delegation.TokenInput{GrantType: "authorization_code", Code: code, RedirectURI: callback, Verifier: verifier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response = f.access(tokens.AccessToken, "/oauth/userinfo", 200); len(response) != 1 {
+		t.Fatal("picture without profile scope", response)
+	}
+	info.Set("avatar", nil)
+	if err = f.app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	if f.m.ProfilePicture(info) != "" {
+		t.Fatal("missing avatar invented")
 	}
 }

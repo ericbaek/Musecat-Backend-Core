@@ -1,5 +1,5 @@
 // Package partnerapp implements the Developer Center: self-service partner
-// application registration, operator approval and hot activation of the
+// application registration, operator suspension and hot activation of the
 // resulting OAuth client registration. It never stores plaintext secrets.
 package partnerapp
 

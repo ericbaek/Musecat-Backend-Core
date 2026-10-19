@@ -3322,7 +3322,7 @@ components:
             key_rotation_window_hours: {type: integer, minimum: 1, maximum: 168, default: 24}
     PartnerApplication:
       type: object
-      description: Safe projection; secret material is never returned. live means at least one approved direction is active. Direction A needs its own generated secret; Direction B needs only its partner-issued credentials. Suspension disables both.
+      description: Safe projection; secret material is never returned. status approved means validated registration, not operator endorsement; live means at least one registered direction is active. Direction A needs its own generated secret; Direction B needs only its partner-issued credentials. Suspension disables both.
       required: [id, partner_id, owner, status, live, display_name, description, submitted_form, approved_form, has_secret, review_note, created, updated]
       properties:
         id: {type: string}
@@ -3369,12 +3369,63 @@ components:
       type: object
       required: [en]
       properties: {ko: {type: string}, en: {type: string}, ja: {type: string}}
+    ExternalRecordField:
+      type: object
+      required: [key, label, type, value]
+      properties:
+        key: {type: string, maxLength: 64}
+        label: {$ref: '#/components/schemas/ExternalRecordLabel'}
+        type: {type: string, enum: [integer, decimal, string, percent, datetime, date, rank]}
+        value: {}
+        precision: {type: integer, minimum: 0, maximum: 6}
+    ExternalRecentPlays:
+      type: object
+      required: [plays]
+      description: Latest first. IDs are provider-local; scores and performance metrics retain game-specific units. Omitted metrics are never zero-filled.
+      properties:
+        total: {type: integer, minimum: 0}
+        more_url: {type: string, format: uri, description: HTTPS source history URL.}
+        plays:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [played_at, song, chart, fields]
+            properties:
+              id: {type: string, maxLength: 128}
+              played_at: {type: string, format: date-time}
+              song:
+                type: object
+                required: [title]
+                properties:
+                  id: {type: string, maxLength: 128}
+                  title: {type: string, minLength: 1, maxLength: 256}
+                  artist: {type: string, maxLength: 256}
+              chart:
+                type: object
+                required: [difficulty]
+                properties:
+                  id: {type: string, maxLength: 128}
+                  difficulty: {type: string, minLength: 1, maxLength: 64}
+                  level: {type: string, maxLength: 32}
+                  mode: {type: string, maxLength: 64}
+              fields: {type: array, maxItems: 16, items: {$ref: '#/components/schemas/ExternalRecordField'}}
+    ExternalRecordSelection:
+      type: object
+      required: [key, status]
+      description: Explains an omitted group or item. The corresponding data MUST be absent. Keys are player, fields, sections, recent_plays, fields.KEY or sections.KEY. Missing selection metadata means unspecified, never consent.
+      properties:
+        key: {type: string, maxLength: 73}
+        status: {type: string, enum: [denied, no_data, unsupported]}
     ExternalRecordEnvelope:
       type: object
       description: Validated musecat-records/v1 envelope. The partner subject is removed before storage.
       required: [spec, service, visibility, updated_at, source, fields, sections]
       properties:
         spec: {type: string, enum: [musecat-records/v1]}
+        game_schema: {type: string, enum: [musecat-game/maimai/v1, musecat-game/chunithm/v1, musecat-game/sdvx/v1, musecat-game/iidx/v1, musecat-game/nostalgia/v1], description: Optional semantic profile matching the service. Unspecified service IDs keep generic typed rendering.}
+        recent_plays: {$ref: '#/components/schemas/ExternalRecentPlays'}
+        selection: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/ExternalRecordSelection'}}
         service: {type: string}
         visibility: {type: string, enum: [public, private]}
         updated_at: {type: string, format: date-time}
@@ -3455,9 +3506,9 @@ paths:
       tags: [OAuth delegation]
       security: [{delegatedOAuth: [openid]}]
       summary: Verified login identity and approved basic profile
-      description: Requires an opaque bearer access token with explicitly granted openid scope. Returns app-specific sub and, only with profile, preferred_username and nickname. No email or global user id. Live revocation and account restrictions apply. No query parameters or body allowed. Cache-Control no-store.
+      description: Requires an opaque bearer access token with explicitly granted openid scope. Returns app-specific sub and, only with profile, preferred_username, nickname and an optional absolute public avatar picture URL. No email or global user id. Live revocation and account restrictions apply. No query parameters or body allowed. Cache-Control no-store.
       responses:
-        '200': {description: UserInfo, content: {application/json: {schema: {type: object, required: [sub], properties: {sub: {type: string}, preferred_username: {type: string}, nickname: {type: string}}}}}}
+        '200': {description: UserInfo, content: {application/json: {schema: {type: object, required: [sub], properties: {sub: {type: string}, preferred_username: {type: string}, nickname: {type: string}, picture: {type: string, format: uri}}}}}}
         '400': {description: Invalid request.}
         '401': {description: Invalid, expired or revoked bearer token.}
         '403': {description: Missing explicit openid scope.}
@@ -8475,6 +8526,29 @@ paths:
         '429': {description: Request rate limit exceeded.}
         '500': {description: Connection storage failure.}
         '503': {description: Linking is disabled or the provider is not configured.}
+  /partner/v1/records/invalidate:
+    post:
+      tags: [External Connections]
+      operationId: invalidatePartnerRecords
+      summary: Immediately remove cached records after a partner selection or privacy change
+      description: B-only and joint apps use the Musecat-issued records key. Idempotently purges only the authenticated provider's matching subject and service, without revealing whether a connection exists. A fetch already in flight cannot republish its old selection. Send after committing the reduced selection, retry failures durably, and do not claim completion until 204. Subsequent owner/background reads fetch the new selection.
+      security: [{partnerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sub, service]
+              properties:
+                sub: {type: string, minLength: 1, maxLength: 256}
+                service: {type: string}
+      responses:
+        '204': {description: Purged or no matching connection. No identities returned.}
+        '400': {description: Invalid subject or undeclared service.}
+        '401': {description: Missing or invalid Musecat-issued records key.}
+        '429': {description: Retry with backoff.}
   /user/records:
     get:
       tags: [Users]
@@ -9278,6 +9352,10 @@ paths:
                     type: string
                   nickname:
                     type: string
+                  picture:
+                    type: string
+                    format: uri
+                    description: Absolute public avatar URL, omitted when no avatar is set.
         '400':
           description: Invalid request or invalid grant.
           content:
@@ -14854,12 +14932,12 @@ paths:
         '403': {description: Withdrawn or banned account.}
     post:
       tags: [Developer Center]
-      summary: Create a draft partner application
+      summary: Register a partner application without operator review
       security: [{bearerAuth: []}]
       description: Accepts exactly one JSON document with optional trailing whitespace and rejects unknown fields. Validates the form structurally. At most 8 applications per owner. partner_id must not collide with another application or an executable-configured client. Runtime default limit is 30 requests per client IP per 600 seconds.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerOnboardingForm'}}}}
       responses:
-        '201': {description: Draft created., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '201': {description: Registered immediately (status approved is retained for compatibility)., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
         '400':
           description: Malformed body or field errors.
           content:
@@ -14887,12 +14965,12 @@ paths:
         '404': {description: Missing or another user's application.}
     put:
       tags: [Developer Center]
-      summary: Replace the submitted form
+      summary: Validate and immediately activate the replacement form
       security: [{bearerAuth: []}]
-      description: Returns the application to draft for review; an approved form stays live until the change is approved. partner_id is immutable once approved. Suspended applications cannot be edited.
+      description: Atomically validates and activates the replacement without operator review. partner_id is immutable once registered. Suspended applications cannot be edited. Existing grant epochs change when the live client fingerprint changes.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerOnboardingForm'}}}}
       responses:
-        '200': {description: Updated draft., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '200': {description: Updated active registration., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
         '400': {description: Field errors (see POST /developer/apps).}
         '404': {description: Missing or another user's application.}
         '409': {description: partner_id_conflict or invalid_state.}
@@ -14900,10 +14978,10 @@ paths:
     parameters: [{name: id, in: path, required: true, schema: {type: string}}]
     post:
       tags: [Developer Center]
-      summary: Submit a draft or rejected application for operator review
+      summary: Compatibility activation of an existing legacy draft
       security: [{bearerAuth: []}]
       responses:
-        '200': {description: Status is now submitted., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
+        '200': {description: Status is approved; already registered applications are returned unchanged., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
         '400': {description: Stored form no longer validates.}
         '404': {description: Missing or another user's application.}
         '409': {description: invalid_state.}
@@ -15011,7 +15089,7 @@ paths:
       tags: [Developer Center]
       summary: Approve the submitted form and activate the OAuth client registration
       security: [{bearerAuth: []}]
-      description: Copies submitted_form to approved_form, validates the merged client registry before writing, then reloads the live delegation manager. Direction A serves tokens once the owner generates a secret. B-only applications do not create an OAuth client; their provider activates independently after partner-issued credential entry. A partner_id owned by an executable-configured client cannot be approved.
+      description: Legacy queued-app compatibility action; new registrations are already active and this call is idempotent. Copies a legacy submitted_form to approved_form, validates the merged client registry before writing, then reloads the live delegation manager. Direction A serves tokens once the owner generates a secret. B-only applications do not create an OAuth client; their provider activates independently after partner-issued credential entry. A partner_id owned by an executable-configured client cannot be approved.
       requestBody: {required: false, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerReviewInput'}}}}
       responses:
         '200': {description: Approved., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}
@@ -15279,3 +15357,16 @@ x-musecat-joint-connection:
   status: implemented
   public-endpoints-enabled: true
   description: Active only for operator-approved registrations with both OAuth credentials and both server keys. See /developer/integration-spec.md.
+
+  /developer/apps/{id}/records-key:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}]
+    post:
+      tags: [Developer Center]
+      summary: Generate or rotate the incoming record-cache invalidation server key
+      security: [{bearerAuth: []}]
+      description: Requires an owned non-suspended registration declaring Direction B. Supports B-only apps. Returns plaintext once with no-store and no-referrer. Shares the inbound server key and rotation window with Joint when Joint is enabled; a B-only key does not enable Joint endpoints. Default previous-key grace is 24 hours. Store only on the partner server.
+      responses:
+        '200': {description: One-time server key., content: {application/json: {schema: {type: object, required: [partner_id, key], properties: {partner_id: {type: string}, key: {type: string}}}}}}
+        '401': {description: User authentication required.}
+        '404': {description: Missing or another user's application.}
+        '409': {description: Direction B not declared or application suspended.}

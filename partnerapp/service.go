@@ -3,6 +3,7 @@ package partnerapp
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
@@ -237,7 +238,7 @@ func (s *Service) partnerIDTaken(app core.App, partnerID, exceptID string) (bool
 	return false, nil
 }
 
-// Create stores a draft. Owners may hold at most 8 applications.
+// Create validates and registers an application immediately. Owners may hold at most 8 applications.
 func (s *Service) Create(app core.App, ownerID string, form Form) (Application, error) {
 	if err := form.Validate(); err != nil {
 		return Application{}, err
@@ -265,12 +266,15 @@ func (s *Service) Create(app core.App, ownerID string, form Form) (Application, 
 		r := core.NewRecord(c)
 		r.Set("partner_id", form.PartnerID)
 		r.Set("owner", ownerID)
-		r.Set("status", StatusDraft)
+		r.Set("status", StatusApproved)
 		r.Set("submitted_form", formJSON(&form))
 		if err := tx.Save(r); err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "unique") {
 				return ErrConflict
 			}
+			return err
+		}
+		if err := s.activate(tx, r, ownerID, ""); err != nil {
 			return err
 		}
 		if err := logEvent(tx, r.Id, ownerID, "created", ""); err != nil {
@@ -279,7 +283,10 @@ func (s *Service) Create(app core.App, ownerID string, form Form) (Application, 
 		out = s.project(r, true)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return Application{}, err
+	}
+	return out, s.Sync(app)
 }
 
 func (s *Service) List(app core.App, ownerID string) ([]Application, error) {
@@ -302,8 +309,7 @@ func (s *Service) Get(app core.App, ownerID, id string) (Application, error) {
 	return s.project(r, true), nil
 }
 
-// Update replaces the submitted form. partner_id is immutable once approved. An
-// approved application keeps serving its approved form until the change is approved.
+// Update validates and activates the replacement atomically. partner_id remains immutable.
 func (s *Service) Update(app core.App, ownerID, id string, form Form) (Application, error) {
 	if err := form.Validate(); err != nil {
 		return Application{}, err
@@ -331,9 +337,7 @@ func (s *Service) Update(app core.App, ownerID, id string, form Form) (Applicati
 			r.Set("partner_id", form.PartnerID)
 		}
 		r.Set("submitted_form", formJSON(&form))
-		// An approved application stays live; the edit becomes a new draft for review.
-		r.Set("status", StatusDraft)
-		if err := tx.Save(r); err != nil {
+		if err := s.activate(tx, r, ownerID, ""); err != nil {
 			return err
 		}
 		if err := logEvent(tx, r.Id, ownerID, "updated", ""); err != nil {
@@ -342,9 +346,13 @@ func (s *Service) Update(app core.App, ownerID, id string, form Form) (Applicati
 		out = s.project(r, true)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return Application{}, err
+	}
+	return out, s.Sync(app)
 }
 
+// Submit is retained for older clients. Registration no longer requires review.
 func (s *Service) Submit(app core.App, ownerID, id string) (Application, error) {
 	var out Application
 	err := app.RunInTransaction(func(tx core.App) error {
@@ -352,28 +360,24 @@ func (s *Service) Submit(app core.App, ownerID, id string) (Application, error) 
 		if err != nil {
 			return err
 		}
-		if st := r.GetString("status"); st != StatusDraft && st != StatusRejected {
+		if r.GetString("status") == StatusSuspended {
 			return ErrState
 		}
-		form := formOf(r, "submitted_form")
-		if form == nil {
-			return ErrState
-		}
-		if err := form.Validate(); err != nil {
-			return err
-		}
-		r.Set("status", StatusSubmitted)
-		r.Set("review_note", "")
-		if err := tx.Save(r); err != nil {
-			return err
-		}
-		if err := logEvent(tx, r.Id, ownerID, "submitted", ""); err != nil {
-			return err
+		if r.GetString("status") != StatusApproved {
+			if err := s.activate(tx, r, ownerID, ""); err != nil {
+				return err
+			}
+			if err := logEvent(tx, r.Id, ownerID, "submitted", ""); err != nil {
+				return err
+			}
 		}
 		out = s.project(r, true)
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return Application{}, err
+	}
+	return out, s.Sync(app)
 }
 
 // GenerateSecret issues a new client secret for an approved application and
@@ -549,6 +553,16 @@ func (s *Service) SetJointKey(app core.App, ownerID, id, key string) (Applicatio
 // GeneratePartnerKey issues the key the partner must present on /partner/v1/* calls.
 // Only the hash is stored; the plaintext is returned once. Regeneration rotates it.
 func (s *Service) GeneratePartnerKey(app core.App, ownerID, id string) (partnerID, key string, err error) {
+	return s.generateServerKey(app, ownerID, id, false)
+}
+
+// GenerateRecordsKey issues a server key for record-cache invalidation, including
+// B-only apps. Apps with Joint enabled share the same inbound key and rotation.
+func (s *Service) GenerateRecordsKey(app core.App, ownerID, id string) (partnerID, key string, err error) {
+	return s.generateServerKey(app, ownerID, id, true)
+}
+
+func (s *Service) generateServerKey(app core.App, ownerID, id string, recordsOnly bool) (partnerID, key string, err error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		return "", "", err
@@ -561,7 +575,7 @@ func (s *Service) GeneratePartnerKey(app core.App, ownerID, id string) (partnerI
 		}
 		approved, submitted := formOf(r, "approved_form"), formOf(r, "submitted_form")
 		declared := func(f *Form) bool { return f != nil && f.Joint != nil && f.Joint.Enabled }
-		if r.GetString("status") == StatusSuspended || (!declared(approved) && !declared(submitted)) {
+		if r.GetString("status") == StatusSuspended || (!recordsOnly && !declared(approved) && !declared(submitted)) || (recordsOnly && (approved == nil || approved.DirectionB == nil)) {
 			return ErrState
 		}
 		partnerID = r.GetString("partner_id")
@@ -609,63 +623,68 @@ func (s *Service) Inspect(app core.App, id string) (Application, error) {
 	return s.project(r, true), nil
 }
 
-// Approve makes the submitted form live. The merged registry is validated before
-// anything is written so a duplicate or invalid client cannot be approved.
-func (s *Service) Approve(app core.App, operatorID, id, note string) (Application, error) {
-	if s.manager == nil {
-		return Application{}, ErrUnavailable
+// activate installs the validated snapshot while preserving registry collision checks.
+// approved_* retain their historical names for wire/storage compatibility; the
+// actor is now normally the owner, not a moderator.
+func (s *Service) activate(app core.App, r *core.Record, actorID, note string) error {
+	if r.GetString("status") == StatusSuspended || !s.activeOwner(app, r) {
+		return ErrState
 	}
-	var out Application
-	err := app.RunInTransaction(func(tx core.App) error {
-		r, err := record(tx, id)
-		if err != nil {
-			return err
-		}
-		if r.GetString("status") != StatusSubmitted {
-			return ErrState
-		}
-		form := formOf(r, "submitted_form")
-		if form == nil {
-			return ErrState
-		}
-		if err := form.Validate(); err != nil {
-			return err
-		}
-		if form.PartnerID != r.GetString("partner_id") {
-			return ErrState
-		}
-		if _, ok := s.manager.Client(form.PartnerID); ok {
-			if approved := formOf(r, "approved_form"); approved == nil || !directionALive(r) {
-				return ErrConflict
-			}
-		}
-		if !s.activeOwner(tx, r) {
-			return ErrState
-		}
-		r.Set("approved_form", formJSON(form))
-		r.Set("approved_hash", formHash(form))
-		r.Set("approved_by", operatorID)
-		r.Set("approved_at", time.Now().UTC())
-		r.Set("status", StatusApproved)
-		r.Set("review_note", note)
-		if err := tx.Save(r); err != nil {
-			return err
-		}
-		clients, err := s.Clients(tx)
+	form := formOf(r, "submitted_form")
+	if form == nil || form.PartnerID != r.GetString("partner_id") {
+		return ErrState
+	}
+	if err := form.Validate(); err != nil {
+		return err
+	}
+	r.Set("approved_form", formJSON(form))
+	r.Set("approved_hash", formHash(form))
+	r.Set("approved_by", actorID)
+	r.Set("approved_at", time.Now().UTC())
+	r.Set("status", StatusApproved)
+	r.Set("review_note", note)
+	if err := app.Save(r); err != nil {
+		return err
+	}
+	if s.manager != nil {
+		clients, err := s.Clients(app)
 		if err != nil {
 			return err
 		}
 		if err := s.manager.Check(clients); err != nil {
 			return ErrConflict
 		}
-		if s.connections != nil {
-			providers, err := s.Providers(tx)
-			if err != nil {
-				return err
-			}
-			if err := s.connections.Check(providers); err != nil {
-				return ErrConflict
-			}
+	}
+	if s.connections != nil {
+		providers, err := s.Providers(app)
+		if err != nil {
+			return err
+		}
+		if err := s.connections.Check(providers); err != nil {
+			return ErrConflict
+		}
+	}
+	return nil
+}
+
+// Approve is a compatibility action for legacy queued apps. New registrations
+// are already active; operators continue to suspend and reinstate them.
+func (s *Service) Approve(app core.App, operatorID, id, note string) (Application, error) {
+	var out Application
+	err := app.RunInTransaction(func(tx core.App) error {
+		r, err := record(tx, id)
+		if err != nil {
+			return err
+		}
+		if r.GetString("status") == StatusApproved {
+			out = s.project(r, true)
+			return nil
+		}
+		if r.GetString("status") != StatusSubmitted {
+			return ErrState
+		}
+		if err := s.activate(tx, r, operatorID, note); err != nil {
+			return err
 		}
 		if err := logEvent(tx, r.Id, operatorID, "approved", note); err != nil {
 			return err
@@ -903,4 +922,28 @@ func (s *Service) RegisterSyncCron(app core.App) {
 		}
 		last = v
 	})
+}
+
+// AuthenticateRecordsKey authorizes only live B providers for cache invalidation.
+// Possession alone never enables Joint endpoints; their own live-Joint checks remain.
+func (s *Service) AuthenticateRecordsKey(app core.App, key string) (string, error) {
+	invalid := &delegation.OAuthError{Code: "invalid_client", Status: 401}
+	if len(key) < 43 || len(key) > 512 || strings.ContainsAny(key, " \t\r\n") {
+		return "", invalid
+	}
+	digest := hashSecret(key)
+	rows, err := app.FindRecordsByFilter(Applications, "partner_key_hash={:h} || previous_partner_key_hash={:h}", "", 2, 0, dbx.Params{"h": digest})
+	if err != nil {
+		return "", err
+	}
+	if len(rows) != 1 {
+		return "", invalid
+	}
+	r := rows[0]
+	current := subtle.ConstantTimeCompare([]byte(digest), []byte(r.GetString("partner_key_hash"))) == 1
+	previous := subtle.ConstantTimeCompare([]byte(digest), []byte(r.GetString("previous_partner_key_hash"))) == 1 && r.GetDateTime("previous_partner_key_expires").Time().After(time.Now())
+	if (!current && !previous) || !s.directionBLive(r) || !s.activeOwner(app, r) {
+		return "", invalid
+	}
+	return r.GetString("partner_id"), nil
 }

@@ -103,7 +103,7 @@ func (m *Manager) OIDCMetadata() (map[string]any, error) {
 	v["subject_types_supported"] = []string{"pairwise"}
 	v["id_token_signing_alg_values_supported"] = []string{"RS256"}
 	v["response_modes_supported"] = []string{"query"}
-	v["claims_supported"] = []string{"iss", "sub", "aud", "exp", "iat", "nonce", "preferred_username", "nickname"}
+	v["claims_supported"] = []string{"iss", "sub", "aud", "exp", "iat", "nonce", "preferred_username", "nickname", "picture"}
 	v["request_parameter_supported"] = false
 	v["request_uri_parameter_supported"] = false
 	v["claims_parameter_supported"] = false
@@ -142,6 +142,9 @@ func (m *Manager) UserInfo(app core.App, raw string) (map[string]string, error) 
 		out["preferred_username"] = u.GetString("username")
 		if info, err := app.FindRecordById("user_info", u.Id); err == nil {
 			out["nickname"] = info.GetString("nickname")
+			if picture := m.ProfilePicture(info); picture != "" {
+				out["picture"] = picture
+			}
 		}
 	}
 	return out, nil
@@ -160,4 +163,18 @@ func (m *Manager) VerifyLoginGrant(app core.App, userID, clientID, id, generatio
 	}
 	_, _, err = m.activeGrant(app, row, clientID)
 	return err
+}
+
+// ProfilePicture resolves an existing public avatar against the configured issuer,
+// never the request Host. No image is invented for users without an avatar.
+func (m *Manager) ProfilePicture(info *core.Record) string {
+	if m == nil || info == nil {
+		return ""
+	}
+	for _, filename := range info.GetStringSlice("avatar") {
+		if filename = strings.TrimSpace(filename); filename != "" {
+			return m.issuer + "/api/files/" + url.PathEscape(info.Collection().Id) + "/" + url.PathEscape(info.Id) + "/" + url.PathEscape(filename)
+		}
+	}
+	return ""
 }

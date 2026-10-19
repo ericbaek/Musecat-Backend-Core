@@ -74,10 +74,10 @@ Normative reference: `developer-api.md` and `developer-openapi.yaml`. Summary of
 | Refresh token | Rotates on every use; family absolute lifetime 30 days; replay revokes the grant |
 | Revocation | RFC 7009 `POST /oauth/revoke`; revoking either token revokes the grant |
 | Discovery | RFC 8414 `/.well-known/oauth-authorization-server` |
-| Identity | `GET /developer/v1/me` → `{sub, username, nickname}` |
+| Identity | `GET /developer/v1/me` → `{sub, username, nickname, picture?}` |
 | Resource surface | 82 allowlisted operations under `/developer/v1/account/*` |
 
-For API delegation, partners use `account:access`. Applications approved with
+For API delegation, partners use `account:access`. Applications registered with
 `direction_a.login_enabled: true` may instead request `openid profile arcade:read` for
 [Sign in with Musecat](sign-in-with-musecat.md), without write permissions.
 
@@ -195,17 +195,31 @@ partner with one generic component; partners do not need to coordinate UI with M
 | `spec` | MUST be `musecat-records/v1`. |
 | `service`, `sub` | MUST match the request and the token's subject. |
 | `visibility` | `public` or `private`. `private` MAY be returned instead of 403; Musecat treats both identically. |
-| `updated_at` | RFC 3339 UTC. Musecat shows it as the data freshness and uses it for cache invalidation. |
+| `updated_at` | RFC 3339 UTC. Musecat shows it as the source data freshness; immediate privacy changes use section 3.5 invalidation. |
 | `source` | REQUIRED. Attribution shown with the data. |
 | `player` | OPTIONAL. All keys optional. |
 | `fields` | 0–24 summary entries. `type` ∈ `integer`, `decimal`, `string`, `percent`, `datetime`, `date`, `rank`. `label` MUST include `en`; `ko`/`ja` SHOULD be included. |
 | `sections` | 0–4 tables, each ≤ 50 rows, ≤ 8 columns. Rows are positional arrays matching `columns`. `more_url` is an outbound link to the partner for the full list. |
 | Size | Response ≤ 256 KiB. |
 
-Musecat caches an envelope for at most 24 hours and re-fetches on profile view when stale. Musecat
+Musecat caches an envelope for at most 24 hours. Owner reads refresh stale data; a scheduled background job refreshes public records (public reads never call the partner). Musecat
 never displays data for a service the user has not granted, and never publishes partner data on a
 public Musecat profile unless both the partner `visibility` is `public` and the Musecat user has
 enabled publication for that service.
+
+### 3.5 Multi-game profiles, recent plays and user-selected items
+
+These optional additive fields retain `spec: musecat-records/v1` compatibility:
+
+- `game_schema`: `musecat-game/{service}/v1`, for `maimai`, `chunithm`, `sdvx`, `iidx`, or `nostalgia`. It identifies metric semantics, not an executable UI. Unknown games omit this field and use the generic typed fields/tables. Provider IDs and song/chart IDs are not global cross-provider identifiers.
+- `recent_plays`: `{ "plays": [...], "total": 123, "more_url": "https://partner.example/history" }`. Maximum 50 plays, latest first, with required RFC3339 `played_at`, `song: {title, id?, artist?}`, `chart: {difficulty, id?, level?, mode?}`, and `fields` (0–16 existing typed metrics). `level` is a string to preserve values such as `14+`; scores, achievements, judgments and clear lamps remain explicitly named game-specific fields. `total`, if supplied, cannot be less than the number returned. Play IDs are optional provider-local unique strings. No time or score may be fabricated when the upstream lacks it; omit unavailable plays and declare why.
+- `selection`: up to 64 `{ "key": "recent_plays", "status": "denied" }` items. Statuses distinguish `denied` (user did not authorize), `no_data` (authorized but no available data), and `unsupported` (adapter cannot provide it). Keys address `player`, `fields`, `sections`, `recent_plays`, `fields.KEY`, or `sections.KEY`. An unavailable key cannot coexist with corresponding data, including null-valued fields. Never zero-fill omissions or fetch another endpoint to bypass user selection. Omission without metadata is unspecified, not consent.
+
+Example play: `{ "id": "provider-play-123", "played_at": "2026-10-19T01:02:03Z", "song": {"id": "song-1", "title": "Example"}, "chart": {"difficulty": "MASTER", "level": "14+"}, "fields": [{"key": "score", "label": {"en": "Score"}, "type": "integer", "value": 1009876}] }`.
+
+Adapters MUST apply the user's selection before constructing the envelope. Successful refresh replaces the entire cache, so removed keys are deleted rather than merged. When a user reduces selection or sets records private, persist that change first, then deliver `POST /partner/v1/records/invalidate` with `{ "sub": "verified-provider-subject", "service": "chunithm" }`. Authenticate with the **Musecat-issued** records key from `POST /developer/apps/{id}/records-key`; never use the partner-issued OAuth client secret. B-only apps can issue this key too. It shares rotation with the inbound joint key when both are used.
+
+A 204 response is idempotent and reveals no connection identity. Musecat atomically deletes matching cached payloads and ignores in-flight responses started before the invalidation; subsequent owner/background reads can immediately fetch the reduced selection. Deliver notifications through a durable retry queue and show a pending state until acknowledged. Cached browser/API record responses use `no-store`; an already-open page can still show previously received data until refreshed. Without a delivered notification, normal cache freshness is at most 24 hours and is not an immediate privacy guarantee.
 
 ## 4. Server-to-server authentication
 
@@ -485,14 +499,14 @@ scenarios retain explicit unverified status until partner interoperability evide
 ```
 
 A partner that only wants Direction A omits `direction_b` and `joint`. A Direction B-only
-partner omits `direction_a` (or supplies empty `redirect_uris`) and `joint`; approval and
+partner omits `direction_a` (or supplies empty `redirect_uris`) and `joint`; validated registration and
 partner-issued credentials activate its provider without a Musecat-issued OAuth secret. At least
 one direction must be configured. `direction_a.login_enabled` and `joint.enabled` require
 nonempty Direction A redirects; joint also requires Direction B. Apps offering both directions
 without one-step consent omit `joint` or set `joint.enabled` to `false`; users approve each
 direction independently on the respective site.
 
-An approved form is the source of truth: the runtime derives the OAuth client, external provider
+Registration and updates activate immediately without moderator review. The `approved_form` field retains its historical name and is the active source of truth: the runtime derives the OAuth client, external provider
 and joint partner registrations from it directly (Developer Center §4). Environment variables
 remain only for Musecat's first-party clients and bootstrap.
 

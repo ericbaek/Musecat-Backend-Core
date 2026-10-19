@@ -8,9 +8,8 @@ It follows [OIDC Core](https://openid.net/specs/openid-connect-core-1_0.html) an
 ## Enable an application
 
 In Developer Center, enable **Sign in with Musecat** (`direction_a.login_enabled: true`), register
-exact HTTPS callback URLs and submit for operator review. After approval, generate the client
-secret once and keep it on the partner server. Existing approved forms remain live until a change
-is approved. Enabling login changes the client's allowed scopes/fingerprint and requires existing
+exact HTTPS callback URLs. Validated registration and updates activate immediately without operator review. Generate the client
+secret once and keep it on the partner server. Enabling login changes the client's allowed scopes/fingerprint and requires existing
 users to reconnect; a form with this flag absent/false keeps its previous registration unchanged.
 The deployment must configure persistent signing keys before OpenID requests can succeed.
 
@@ -37,7 +36,7 @@ API delegation uses an explicitly requested `account:access` scope.
   nonce before creating your own session. Reject duplicated callback parameters; verify state and
   callback issuer before exchanging. The ID token cannot be used as a Musecat API bearer token.
 - `GET` or empty `POST {issuer}/oauth/userinfo` with the opaque bearer access token returns `sub`.
-  With `profile`, it also returns `preferred_username` and `nickname`. Verify its `sub` equals the
+  With `profile`, it also returns `preferred_username`, `nickname` and optional absolute public avatar `picture`. The picture URL is omitted when no avatar is set. Verify its `sub` equals the
   ID token's `sub`. No email or global user ID is returned; do not merge accounts by display name.
 - `GET {issuer}/developer/v1/arcade` and `/developer/v1/arcades/nearby` use
   the same access token and `arcade:read`, preserving public/private visibility checks.

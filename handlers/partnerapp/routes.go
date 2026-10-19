@@ -106,6 +106,15 @@ func RegisterRoutes(se *core.ServeEvent, service *partnerapp.Service) {
 		re.Response.Header().Set("Referrer-Policy", "no-referrer")
 		return re.JSON(http.StatusOK, map[string]string{"partner_id": partnerID, "key": key})
 	})
+	owner.POST("/{id}/records-key", func(re *core.RequestEvent) error {
+		partnerID, key, err := service.GenerateRecordsKey(re.App, re.Auth.Id, re.Request.PathValue("id"))
+		if err != nil {
+			return respondError(re, err)
+		}
+		re.Response.Header().Set("Cache-Control", "no-store")
+		re.Response.Header().Set("Referrer-Policy", "no-referrer")
+		return re.JSON(http.StatusOK, map[string]string{"partner_id": partnerID, "key": key})
+	})
 	owner.GET("/{id}/checks", func(re *core.RequestEvent) error {
 		items, err := service.CheckReports(re.App, re.Auth.Id, re.Request.PathValue("id"), false)
 		return respond(re, map[string]any{"items": items}, err)

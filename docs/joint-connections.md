@@ -2,7 +2,7 @@
 
 The normative protocol is [Partner Integration Specification v1](partner-integration-spec.md),
 sections 4–6. Partners register through the Developer Center, declare the joint manifest and fixed
-HTTPS endpoints, then enter their Direction B credentials and server key. After Musecat approval,
+HTTPS endpoints, then enter their Direction B credentials and server key. After validated registration and credential setup,
 the developer issues the Musecat server key once; the joint registration activates automatically.
 
 The web consent entry is `/{locale}/connect/{partner}?intent=<handle>`. Settings offer both joint

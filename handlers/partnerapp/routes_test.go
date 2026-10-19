@@ -13,6 +13,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 
+	"github.com/ericbaek/musecat-backend-core/connections"
 	"github.com/ericbaek/musecat-backend-core/delegation"
 	handler "github.com/ericbaek/musecat-backend-core/handlers/partnerapp"
 	"github.com/ericbaek/musecat-backend-core/handlers/user"
@@ -27,7 +28,7 @@ type fixture struct {
 	manager *delegation.Manager
 }
 
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T, withB ...bool) *fixture {
 	t.Helper()
 	f := &fixture{t: t, app: testutil.NewTestApp(t)}
 	var err error
@@ -35,7 +36,14 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := partnerapp.NewService(f.manager, nil, nil, "")
+	var conns *connections.Manager
+	if len(withB) > 0 && withB[0] {
+		conns, err = connections.NewManager(nil, []byte(strings.Repeat("k", 32)), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := partnerapp.NewService(f.manager, conns, nil, "")
 	if err := service.Sync(f.app); err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +52,9 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	handler.RegisterRoutes(&core.ServeEvent{App: f.app, Router: r}, service)
+	if conns != nil {
+		handler.RegisterRecordsInvalidationRoutes(&core.ServeEvent{App: f.app, Router: r}, service, conns)
+	}
 	f.mux, err = r.BuildMux()
 	if err != nil {
 		t.Fatal(err)
@@ -121,17 +132,16 @@ func TestDeveloperCenterRoutes(t *testing.T) {
 
 	created := check(t, f.req("POST", "/developer/apps", owner, fmt.Sprintf(form, "newpartner")), 201)
 	id := created["id"].(string)
-	if created["status"] != "draft" || created["has_secret"] != false {
+	if created["status"] != "approved" || created["has_secret"] != false {
 		t.Fatal("created", created)
 	}
 	check(t, f.req("GET", "/developer/apps/"+id, stranger, ""), 404)
-	check(t, f.req("POST", "/developer/apps/"+id+"/secret", owner, ""), 409)
 	check(t, f.req("POST", "/developer/apps/"+id+"/submit", owner, ""), 200)
-	check(t, f.req("POST", "/developer/apps/"+id+"/submit", owner, ""), 409)
+	check(t, f.req("POST", "/developer/apps/"+id+"/submit", owner, ""), 200)
 
 	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", owner, ""), 403)
 	queue := check(t, f.req("GET", "/moderation/developer/apps?status=submitted", operator, ""), 200)
-	if len(queue["items"].([]any)) != 1 {
+	if len(queue["items"].([]any)) != 0 {
 		t.Fatal("queue", queue)
 	}
 	approved := check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", operator, `{"note":"ok"}`), 200)
@@ -139,7 +149,7 @@ func TestDeveloperCenterRoutes(t *testing.T) {
 		t.Fatal("approved", approved)
 	}
 	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", operator, `{"note":"`+strings.Repeat("n", 2001)+`"}`), 400)
-	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", operator, ""), 409)
+	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", operator, ""), 200)
 
 	secret := check(t, f.req("POST", "/developer/apps/"+id+"/secret", owner, ""), 200)
 	if secret["client_id"] != "newpartner" || len(secret["client_secret"].(string)) < 32 {
@@ -153,7 +163,7 @@ func TestDeveloperCenterRoutes(t *testing.T) {
 		t.Fatal("detail leaks or not live", detail)
 	}
 	events := check(t, f.req("GET", "/developer/apps/"+id+"/events", owner, ""), 200)
-	if len(events["items"].([]any)) != 4 {
+	if len(events["items"].([]any)) != 2 {
 		t.Fatal("events", events)
 	}
 	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/suspend", operator, `{"note":"policy"}`), 200)
@@ -235,4 +245,25 @@ func TestDirectionBOnlyRegistrationWithoutDirectionA(t *testing.T) {
 	// Neither omission nor empty Direction A grants a direction when B is absent.
 	withoutB := `{"spec":"musecat-partner-onboarding/v1","partner_id":"no_direction","display_name":{"en":"None"},"contact_email":"dev@partner.example"}`
 	check(t, f.req("POST", "/developer/apps", owner, withoutB), 400)
+}
+
+func TestBOnlyRecordsKeyInvalidationRoutes(t *testing.T) {
+	f := newFixture(t, true)
+	owner, stranger := f.user(), f.user()
+	body := `{"spec":"musecat-partner-onboarding/v1","partner_id":"records_key","display_name":{"en":"Records"},"contact_email":"dev@partner.example","direction_b":{"issuer":"https://partner.example","authorization_url":"https://partner.example/authorize","token_url":"https://partner.example/token","userinfo_url":"https://partner.example/userinfo","revocation_url":"https://partner.example/revoke","records_url":"https://partner.example/records","client_auth_method":"client_secret_basic","identity_scope":"profile","services":[{"id":"chunithm","scope":"chunithm:read"}]}}`
+	created := check(t, f.req("POST", "/developer/apps", owner, body), 201)
+	id := created["id"].(string)
+	check(t, f.req("POST", "/developer/apps/"+id+"/records-key", stranger, ""), 404)
+	issued := check(t, f.req("POST", "/developer/apps/"+id+"/records-key", owner, ""), 200)
+	key := issued["key"].(string)
+	check(t, f.req("POST", "/partner/v1/records/invalidate", key, `{"sub":"own-subject","service":"chunithm"}`), 401)
+	check(t, f.req("PUT", "/developer/apps/"+id+"/credentials", owner, `{"client_id":"musecat","client_secret":"`+strings.Repeat("p", 40)+`"}`), 200)
+	for _, invalid := range []string{"", strings.Repeat("x", 43)} {
+		check(t, f.req("POST", "/partner/v1/records/invalidate", invalid, `{"sub":"own-subject","service":"chunithm"}`), 401)
+	}
+	for _, sub := range []string{"own-subject", "unknown-subject"} {
+		check(t, f.req("POST", "/partner/v1/records/invalidate", key, `{"sub":"`+sub+`","service":"chunithm"}`), 204)
+	}
+	check(t, f.req("POST", "/partner/v1/records/invalidate", key, `{"sub":"own-subject","service":"invalid-game"}`), 400)
+	check(t, f.req("POST", "/developer/apps/"+id+"/partner-key", owner, ""), 409)
 }

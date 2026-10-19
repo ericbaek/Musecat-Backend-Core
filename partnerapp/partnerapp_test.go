@@ -126,21 +126,15 @@ func TestLifecycleActivatesClientWithoutRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if app.Status != partnerapp.StatusDraft || app.Live || app.HasSecret {
+	if app.Status != partnerapp.StatusApproved || app.Live || app.HasSecret {
 		t.Fatal("unexpected draft projection", app)
 	}
-	// Secret generation and approval are impossible before review.
-	if _, _, err := f.service.GenerateSecret(f.app, f.owner.Id, app.ID); !errors.Is(err, partnerapp.ErrState) {
-		t.Fatal("secret before approval", err)
-	}
-	if _, err := f.service.Approve(f.app, f.operator.Id, app.ID, ""); !errors.Is(err, partnerapp.ErrState) {
-		t.Fatal("approve before submit", err)
-	}
+	// Registration is accepted immediately; old submit/approve calls remain compatible.
 	if _, err := f.service.Submit(f.app, f.owner.Id, app.ID); err != nil {
 		t.Fatal(err)
 	}
 	queue, err := f.service.Queue(f.app, partnerapp.StatusSubmitted)
-	if err != nil || len(queue) != 1 || queue[0].ID != app.ID {
+	if err != nil || len(queue) != 0 {
 		t.Fatal("queue", queue, err)
 	}
 	// Another user cannot see or act on it.
@@ -175,7 +169,7 @@ func TestLifecycleActivatesClientWithoutRestart(t *testing.T) {
 		t.Fatal("static client lost on reload")
 	}
 	events, err := f.service.OwnerEvents(f.app, f.owner.Id, app.ID)
-	if err != nil || len(events) != 4 || events[0].Kind != "secret_generated" || events[3].Kind != "created" {
+	if err != nil || len(events) != 2 || events[0].Kind != "secret_generated" || events[1].Kind != "created" {
 		t.Fatal("events", events, err)
 	}
 	// Rotation keeps the client live but changes the secret.
@@ -207,11 +201,11 @@ func TestLifecycleActivatesClientWithoutRestart(t *testing.T) {
 	changed := validForm("rhythm_info")
 	changed.DirectionA.RedirectURIs = []string{"https://partner.example/new/callback"}
 	edited, err := f.service.Update(f.app, f.owner.Id, app.ID, changed)
-	if err != nil || edited.Status != partnerapp.StatusDraft || !edited.Live {
+	if err != nil || edited.Status != partnerapp.StatusApproved || !edited.Live {
 		t.Fatal("edit approved", edited, err)
 	}
-	if info, _ := f.manager.Client("rhythm_info"); info.RedirectURIs[0] != "https://partner.example/oauth/musecat/callback" {
-		t.Fatal("unapproved edit went live")
+	if info, _ := f.manager.Client("rhythm_info"); info.RedirectURIs[0] != "https://partner.example/new/callback" {
+		t.Fatal("validated edit did not activate")
 	}
 	renamed := changed
 	renamed.PartnerID = "other_id"
@@ -252,8 +246,8 @@ func TestConflictsAndLimits(t *testing.T) {
 	if _, err := f.service.Create(f.app, f.operator.Id, validForm("dup")); !errors.Is(err, partnerapp.ErrConflict) {
 		t.Fatal("duplicate partner_id across owners", err)
 	}
-	if _, err := f.service.Update(f.app, f.owner.Id, first.ID, validForm("static_partner")); !errors.Is(err, partnerapp.ErrConflict) {
-		t.Fatal("rename onto static ID", err)
+	if _, err := f.service.Update(f.app, f.owner.Id, first.ID, validForm("static_partner")); !errors.Is(err, partnerapp.ErrState) {
+		t.Fatal("registered ID must be immutable", err)
 	}
 	for i := 0; i < 7; i++ {
 		if _, err := f.service.Create(f.app, f.owner.Id, validForm(fmt.Sprintf("app%d", i))); err != nil {
@@ -263,17 +257,11 @@ func TestConflictsAndLimits(t *testing.T) {
 	if _, err := f.service.Create(f.app, f.owner.Id, validForm("app_overflow")); !errors.Is(err, partnerapp.ErrState) {
 		t.Fatal("owner limit", err)
 	}
-	// Reject returns to the owner with a note; resubmission is allowed.
-	if _, err := f.service.Submit(f.app, f.owner.Id, first.ID); err != nil {
-		t.Fatal(err)
+	// Review actions cannot reject an already registered application.
+	if _, err := f.service.Reject(f.app, f.operator.Id, first.ID, ""); !errors.Is(err, partnerapp.ErrState) {
+		t.Fatal("reject active app", err)
 	}
-	rejected, err := f.service.Reject(f.app, f.operator.Id, first.ID, "use a production domain")
-	if err != nil || rejected.Status != partnerapp.StatusRejected || rejected.ReviewNote == "" {
-		t.Fatal("reject", rejected, err)
-	}
-	if _, err := f.service.Submit(f.app, f.owner.Id, first.ID); err != nil {
-		t.Fatal("resubmit after rejection", err)
-	}
+
 }
 
 func TestDisabledOAuthStillAllowsRegistration(t *testing.T) {
@@ -286,8 +274,8 @@ func TestDisabledOAuthStillAllowsRegistration(t *testing.T) {
 	if _, err := service.Submit(f.app, f.owner.Id, app.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Approve(f.app, f.operator.Id, app.ID, ""); !errors.Is(err, partnerapp.ErrUnavailable) {
-		t.Fatal("approve without OAuth", err)
+	if _, err := service.Approve(f.app, f.operator.Id, app.ID, ""); err != nil {
+		t.Fatal("register without OAuth", err)
 	}
 }
 
@@ -316,14 +304,14 @@ func TestDirectionBActivatesProviderWithCredentials(t *testing.T) {
 	creds := partnerapp.Credentials{ClientID: "musecat-at-partner", ClientSecret: strings.Repeat("p", 40)}
 	// Credentials may be entered before approval; activation waits for the approved form.
 	withCreds, err := service.SetCredentials(f.app, f.owner.Id, app.ID, creds)
-	if err != nil || !withCreds.HasDirectionBCredentials || withCreds.DirectionBLive {
+	if err != nil || !withCreds.HasDirectionBCredentials || !withCreds.DirectionBLive {
 		t.Fatal("pre-approval credentials", withCreds, err)
 	}
 	if _, err := service.SetCredentials(f.app, f.owner.Id, app.ID, partnerapp.Credentials{ClientID: "x", ClientSecret: "short"}); err == nil {
 		t.Fatal("weak credentials accepted")
 	}
-	if len(conns.Providers()) != 0 {
-		t.Fatal("provider live before approval")
+	if len(conns.Providers()) != 1 {
+		t.Fatal("provider not live after credentials")
 	}
 	if _, err := service.Submit(f.app, f.owner.Id, app.ID); err != nil {
 		t.Fatal(err)
@@ -351,14 +339,8 @@ func TestDirectionBActivatesProviderWithCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.SetCredentials(f.app, f.operator.Id, clone.ID, creds); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.Submit(f.app, f.operator.Id, clone.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.Approve(f.app, f.operator.Id, clone.ID, ""); !errors.Is(err, partnerapp.ErrConflict) {
-		t.Fatal("duplicate issuer approved", err)
+	if _, err := service.SetCredentials(f.app, f.operator.Id, clone.ID, creds); !errors.Is(err, partnerapp.ErrConflict) {
+		t.Fatal("duplicate issuer activated", err)
 	}
 	// Suspension and credential removal both deactivate the provider immediately.
 	if _, err := service.Suspend(f.app, f.operator.Id, app.ID, ""); err != nil {
@@ -413,8 +395,8 @@ func TestJointActivationAndInboundKeyRotation(t *testing.T) {
 	if _, err = service.Submit(f.app, f.owner.Id, app.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = service.GenerateSecret(f.app, f.owner.Id, app.ID); err == nil {
-		t.Fatal("unapproved OAuth secret issued")
+	if _, _, err = service.GenerateSecret(f.app, f.owner.Id, app.ID); err != nil {
+		t.Fatal("registered OAuth secret failed")
 	}
 	if _, err = service.Approve(f.app, f.operator.Id, app.ID, ""); err != nil {
 		t.Fatal(err)
@@ -522,7 +504,7 @@ func TestWithdrawnOwnerCannotKeepOrReactivateApplication(t *testing.T) {
 	}
 }
 
-func TestLoginCapabilityRequiresApprovalAndDoesNotUpgradeExistingClients(t *testing.T) {
+func TestLoginCapabilityChangesOnlyWithExplicitOwnerUpdate(t *testing.T) {
 	f := newFixture(t)
 	form := validForm("login_partner")
 	app, err := f.service.Create(f.app, f.owner.Id, form)
@@ -547,8 +529,8 @@ func TestLoginCapabilityRequiresApprovalAndDoesNotUpgradeExistingClients(t *test
 		t.Fatal(err)
 	}
 	info, _ = f.manager.Client("login_partner")
-	if len(info.Scopes) != 1 {
-		t.Fatal("draft changed live capabilities")
+	if len(info.Scopes) != 4 {
+		t.Fatal("owner update did not change capabilities")
 	}
 	if _, err = f.service.Submit(f.app, f.owner.Id, app.ID); err != nil {
 		t.Fatal(err)
@@ -683,8 +665,8 @@ func TestRemovingDirectionADisablesExistingClient(t *testing.T) {
 	if _, err = service.Update(f.app, f.owner.Id, a.ID, form); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := f.manager.Client(form.PartnerID); !ok {
-		t.Fatal("unapproved edit disabled A")
+	if _, ok := f.manager.Client(form.PartnerID); ok {
+		t.Fatal("removing A did not disable client")
 	}
 	if _, err = service.Submit(f.app, f.owner.Id, a.ID); err != nil {
 		t.Fatal(err)
@@ -700,5 +682,113 @@ func TestRemovingDirectionADisablesExistingClient(t *testing.T) {
 	}
 	if _, _, err = service.GenerateSecret(f.app, f.owner.Id, a.ID); !errors.Is(err, partnerapp.ErrState) {
 		t.Fatal("B-only rotated old secret", err)
+	}
+}
+
+func TestRecordsKeyForBOnlyDoesNotEnableJoint(t *testing.T) {
+	f := newFixture(t)
+	conns, err := connections.NewManager(nil, []byte(strings.Repeat("k", 32)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := partnerapp.NewService(f.manager, conns, nil, "")
+	form := validForm("b_records_key")
+	form.DirectionA.RedirectURIs = nil
+	form.DirectionB = fullB()
+	a, err := service.Create(f.app, f.owner.Id, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, key, err := service.GenerateRecordsKey(f.app, f.owner.Id, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.AuthenticateRecordsKey(f.app, key); err == nil {
+		t.Fatal("inactive B authenticated")
+	}
+	a, err = service.SetCredentials(f.app, f.owner.Id, a.ID, partnerapp.Credentials{ClientID: "musecat", ClientSecret: strings.Repeat("p", 40)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, err := service.AuthenticateRecordsKey(f.app, key); err != nil || id != form.PartnerID {
+		t.Fatal(id, err)
+	}
+	if a.JointLive || a.JointDeclared {
+		t.Fatal("records key enabled Joint")
+	}
+	if _, _, err = service.GeneratePartnerKey(f.app, f.owner.Id, a.ID); !errors.Is(err, partnerapp.ErrState) {
+		t.Fatal("Joint key issued for B only", err)
+	}
+	if _, _, err = service.GenerateRecordsKey(f.app, f.operator.Id, a.ID); !errors.Is(err, partnerapp.ErrNotFound) {
+		t.Fatal("foreign key issued", err)
+	}
+	_, rotated, err := service.GenerateRecordsKey(f.app, f.owner.Id, a.ID)
+	if err != nil || rotated == key {
+		t.Fatal(err)
+	}
+	for _, k := range []string{key, rotated} {
+		if _, err := service.AuthenticateRecordsKey(f.app, k); err != nil {
+			t.Fatal("rotation window", err)
+		}
+	}
+	r, _ := f.app.FindRecordById(partnerapp.Applications, a.ID)
+	r.Set("previous_partner_key_expires", time.Now().Add(-time.Minute))
+	if err = f.app.Save(r); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.AuthenticateRecordsKey(f.app, key); err == nil {
+		t.Fatal("expired previous key accepted")
+	}
+	if _, err = service.Suspend(f.app, f.operator.Id, a.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.AuthenticateRecordsKey(f.app, rotated); err == nil {
+		t.Fatal("suspended key accepted")
+	}
+}
+
+func TestRegistrationAndOwnerUpdateNeedNoOperatorAction(t *testing.T) {
+	f := newFixture(t)
+	form := validForm("immediate_registration")
+	a, err := f.service.Create(f.app, f.owner.Id, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Status != partnerapp.StatusApproved || a.Approved == nil {
+		t.Fatal("registration snapshot missing", a)
+	}
+	_, secret, err := f.service.GenerateSecret(f.app, f.owner.Id, a.ID)
+	if err != nil {
+		t.Fatal("secret requires review", err)
+	}
+	if err = f.manager.AuthenticateClient(form.PartnerID, secret); err != nil {
+		t.Fatal("not immediately usable", err)
+	}
+	registration, err := f.app.FindFirstRecordByFilter(delegation.Registrations, "client='immediate_registration'")
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := registration.GetString("epoch")
+	form.DirectionA.RedirectURIs = []string{"https://partner.example/changed"}
+	a, err = f.service.Update(f.app, f.owner.Id, a.ID, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, ok := f.manager.Client(form.PartnerID)
+	if !ok || client.RedirectURIs[0] != form.DirectionA.RedirectURIs[0] || !a.Live {
+		t.Fatal("update requires review", client, a)
+	}
+	registration, err = f.app.FindRecordById(delegation.Registrations, registration.Id)
+	if err != nil || registration.GetString("epoch") == epoch {
+		t.Fatal("changed registration did not invalidate old epoch", err)
+	}
+	invalid := form
+	invalid.DirectionA.RedirectURIs = []string{"http://untrusted.example/cb"}
+	if _, err = f.service.Update(f.app, f.owner.Id, a.ID, invalid); err == nil {
+		t.Fatal("unvalidated update activated")
+	}
+	client, _ = f.manager.Client(form.PartnerID)
+	if client.RedirectURIs[0] != form.DirectionA.RedirectURIs[0] {
+		t.Fatal("invalid update changed active configuration")
 	}
 }

@@ -104,6 +104,7 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 			}
 		}
 		partnerapphandler.RegisterRoutes(se, partnerApps)
+		partnerapphandler.RegisterRecordsInvalidationRoutes(se, partnerApps, config.Connections)
 		jointhandler.RegisterRoutes(se, config.Joint)
 		delegationhandler.RegisterRoutes(se, config.Delegation)
 		RegisterAccountDelegationRoutes(se, config.Delegation)

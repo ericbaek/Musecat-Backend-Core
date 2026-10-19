@@ -301,11 +301,14 @@ func RegisterRoutes(se *core.ServeEvent, m *delegation.Manager) {
 	})
 	api := se.Router.Group("/developer/v1")
 	api.GET("/me", resource(m, "profile:read", func(re *core.RequestEvent, sub string) error {
-		nickname := ""
+		out := map[string]string{"sub": sub, "username": re.Auth.GetString("username"), "nickname": ""}
 		if info, e := re.App.FindRecordById("user_info", re.Auth.Id); e == nil {
-			nickname = info.GetString("nickname")
+			out["nickname"] = info.GetString("nickname")
+			if picture := m.ProfilePicture(info); picture != "" {
+				out["picture"] = picture
+			}
 		}
-		return re.JSON(200, map[string]string{"sub": sub, "username": re.Auth.GetString("username"), "nickname": nickname})
+		return re.JSON(200, out)
 	}))
 	for path, handler := range map[string]func(*core.RequestEvent) error{"/arcade": query.GetArcadeValues, "/arcades/nearby": query.ListArcadesBySeriesAndLocation} {
 		api.GET(path, resource(m, "arcade:read", domain(handler)))

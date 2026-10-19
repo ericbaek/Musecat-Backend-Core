@@ -35,7 +35,7 @@ func RegisterRoutes(se *core.ServeEvent, manager *connections.Manager) {
 		if err != nil {
 			return respondError(re, err)
 		}
-		re.Response.Header().Set("Cache-Control", "public, max-age=300")
+		re.Response.Header().Set("Cache-Control", "no-store")
 		return re.JSON(http.StatusOK, map[string]any{"items": items})
 	})
 	routes := se.Router.Group("/user/connections").Bind(apis.RequireAuth("user"), user.RequireActiveUser())

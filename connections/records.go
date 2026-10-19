@@ -76,16 +76,50 @@ type RecordSource struct {
 	URL  string `json:"url,omitempty"`
 }
 
+// RecordPlay uses stable provider-local IDs; metrics retain their game-specific units.
+type RecordPlay struct {
+	ID       string        `json:"id,omitempty"`
+	PlayedAt time.Time     `json:"played_at"`
+	Song     RecordSong    `json:"song"`
+	Chart    RecordChart   `json:"chart"`
+	Fields   []RecordField `json:"fields"`
+}
+type RecordSong struct {
+	ID     string `json:"id,omitempty"`
+	Title  string `json:"title"`
+	Artist string `json:"artist,omitempty"`
+}
+type RecordChart struct {
+	ID         string `json:"id,omitempty"`
+	Difficulty string `json:"difficulty"`
+	Level      string `json:"level,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+}
+type RecordRecentPlays struct {
+	Plays   []RecordPlay `json:"plays"`
+	Total   *int         `json:"total,omitempty"`
+	MoreURL string       `json:"more_url,omitempty"`
+}
+
+// RecordSelection explains omitted groups or individual fields without implying zero.
+type RecordSelection struct {
+	Key    string `json:"key"`
+	Status string `json:"status"`
+}
+
 // RecordEnvelope is the validated, size-bounded projection of a partner response.
 type RecordEnvelope struct {
-	Spec       string          `json:"spec"`
-	Service    string          `json:"service"`
-	Visibility string          `json:"visibility"`
-	UpdatedAt  time.Time       `json:"updated_at"`
-	Source     RecordSource    `json:"source"`
-	Player     *RecordPlayer   `json:"player,omitempty"`
-	Fields     []RecordField   `json:"fields"`
-	Sections   []RecordSection `json:"sections"`
+	Spec        string             `json:"spec"`
+	GameSchema  string             `json:"game_schema,omitempty"`
+	RecentPlays *RecordRecentPlays `json:"recent_plays,omitempty"`
+	Selection   []RecordSelection  `json:"selection,omitempty"`
+	Service     string             `json:"service"`
+	Visibility  string             `json:"visibility"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+	Source      RecordSource       `json:"source"`
+	Player      *RecordPlayer      `json:"player,omitempty"`
+	Fields      []RecordField      `json:"fields"`
+	Sections    []RecordSection    `json:"sections"`
 }
 
 // RecordView is what owners and public readers receive. Sub is never included.
@@ -181,6 +215,98 @@ func validValue(kind string, v any) bool {
 	return false
 }
 
+func validRecordFields(fields []RecordField, limit int) bool {
+	if len(fields) > limit {
+		return false
+	}
+	keys := map[string]bool{}
+	for _, f := range fields {
+		if !validKey(f.Key) || keys[f.Key] || !validLabel(f.Label) || !slices.Contains(recordFieldTypes, f.Type) || !validValue(f.Type, f.Value) || (f.Precision != nil && (*f.Precision < 0 || *f.Precision > 6)) {
+			return false
+		}
+		keys[f.Key] = true
+	}
+	return true
+}
+
+func validRecordExtensions(e RecordEnvelope) bool {
+	if e.GameSchema != "" && !slices.Contains([]string{"musecat-game/maimai/v1", "musecat-game/chunithm/v1", "musecat-game/sdvx/v1", "musecat-game/iidx/v1", "musecat-game/nostalgia/v1"}, e.GameSchema) {
+		return false
+	}
+	if e.GameSchema != "" && e.GameSchema != "musecat-game/"+e.Service+"/v1" {
+		return false
+	}
+	if r := e.RecentPlays; r != nil {
+		if len(r.Plays) > 50 || !httpsLink(r.MoreURL) || (r.Total != nil && *r.Total < len(r.Plays)) {
+			return false
+		}
+		seen := map[string]bool{}
+		var previous time.Time
+		for _, p := range r.Plays {
+			if len(p.ID) > 128 || (p.ID != "" && seen[p.ID]) || p.PlayedAt.IsZero() || p.PlayedAt.After(time.Now().Add(time.Hour)) || (!previous.IsZero() && p.PlayedAt.After(previous)) {
+				return false
+			}
+			if p.ID != "" {
+				seen[p.ID] = true
+			}
+			previous = p.PlayedAt
+			if len(p.Song.ID) > 128 || p.Song.Title == "" || len(p.Song.Title) > 256 || len(p.Song.Artist) > 256 || len(p.Chart.ID) > 128 || p.Chart.Difficulty == "" || len(p.Chart.Difficulty) > 64 || len(p.Chart.Level) > 32 || len(p.Chart.Mode) > 64 || !validRecordFields(p.Fields, 16) {
+				return false
+			}
+		}
+	}
+	if len(e.Selection) > 64 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, item := range e.Selection {
+		if seen[item.Key] || !slices.Contains([]string{"denied", "no_data", "unsupported"}, item.Status) {
+			return false
+		}
+		seen[item.Key] = true
+		switch item.Key {
+		case "player":
+			if e.Player != nil {
+				return false
+			}
+		case "fields":
+			if len(e.Fields) > 0 {
+				return false
+			}
+		case "sections":
+			if len(e.Sections) > 0 {
+				return false
+			}
+		case "recent_plays":
+			if e.RecentPlays != nil {
+				return false
+			}
+		default:
+			group, key, ok := strings.Cut(item.Key, ".")
+			if !ok || !validKey(key) {
+				return false
+			}
+			switch group {
+			case "fields":
+				for _, f := range e.Fields {
+					if f.Key == key {
+						return false
+					}
+				}
+			case "sections":
+				for _, section := range e.Sections {
+					if section.Key == key {
+						return false
+					}
+				}
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // ParseEnvelope validates a partner response against the spec. The service must match
 // the requested one and sub must equal the connection's verified subject; sub is then
 // dropped so it never reaches storage or clients.
@@ -218,15 +344,8 @@ func ParseEnvelope(data []byte, service, subject string) (RecordEnvelope, error)
 			return RecordEnvelope{}, errEnvelope
 		}
 	}
-	if len(e.Fields) > 24 || len(e.Sections) > 4 {
+	if !validRecordFields(e.Fields, 24) || len(e.Sections) > 4 || !validRecordExtensions(e) {
 		return RecordEnvelope{}, errEnvelope
-	}
-	keys := map[string]bool{}
-	for _, f := range e.Fields {
-		if !validKey(f.Key) || keys[f.Key] || !validLabel(f.Label) || !slices.Contains(recordFieldTypes, f.Type) || !validValue(f.Type, f.Value) || (f.Precision != nil && (*f.Precision < 0 || *f.Precision > 6)) {
-			return RecordEnvelope{}, errEnvelope
-		}
-		keys[f.Key] = true
 	}
 	sections := map[string]bool{}
 	for _, s := range e.Sections {
@@ -249,6 +368,16 @@ func ParseEnvelope(data []byte, service, subject string) (RecordEnvelope, error)
 				if !validValue(s.Columns[i].Type, cell) {
 					return RecordEnvelope{}, errEnvelope
 				}
+			}
+		}
+	}
+	if e.RecentPlays != nil {
+		if e.RecentPlays.Plays == nil {
+			e.RecentPlays.Plays = []RecordPlay{}
+		}
+		for i := range e.RecentPlays.Plays {
+			if e.RecentPlays.Plays[i].Fields == nil {
+				e.RecentPlays.Plays[i].Fields = []RecordField{}
 			}
 		}
 	}
@@ -336,8 +465,9 @@ func (m *Manager) ReadRecord(ctx context.Context, app core.App, actor Actor, con
 	if err != nil {
 		return RecordView{}, err
 	}
-	stale := existing == nil || time.Since(existing.GetDateTime("fetched").Time()) > recordFreshFor
-	recent := existing != nil && time.Since(existing.GetDateTime("fetched").Time()) < recordMinRefresh
+	invalidated := existing != nil && existing.GetString("error") == "privacy_invalidated"
+	stale := invalidated || existing == nil || time.Since(existing.GetDateTime("fetched").Time()) > recordFreshFor
+	recent := !invalidated && existing != nil && time.Since(existing.GetDateTime("fetched").Time()) < recordMinRefresh
 	backoff := existing != nil && existing.GetDateTime("retry_at").Time().After(time.Now())
 	if !backoff && (stale || (refresh && !recent)) {
 		if m == nil {
@@ -450,7 +580,7 @@ func (m *Manager) RefreshStalePublicRecords(ctx context.Context, app core.App, l
 	err := app.DB().NewQuery(`SELECT s.connection, s.service
  FROM external_service_connection s
  LEFT JOIN external_service_record r ON r.connection=s.connection AND r.service=s.service
- WHERE s.visibility='public' AND (r.id IS NULL OR
+ WHERE s.visibility='public' AND (r.id IS NULL OR r.error='privacy_invalidated' OR
  (r.fetched <= {:cutoff} AND r.status != 'unsupported' AND (r.retry_at='' OR r.retry_at <= {:now})))
  ORDER BY COALESCE(r.fetched, ''), s.id LIMIT {:limit}`).Bind(dbx.Params{
 		"cutoff": now.Add(-recordFreshFor).Format("2006-01-02 15:04:05.000Z"),
@@ -470,7 +600,7 @@ func (m *Manager) RefreshStalePublicRecords(ctx context.Context, app core.App, l
 	return nil
 }
 
-func (m *Manager) store(app core.App, account *core.Record, service, status, errCode string, payload *RecordEnvelope, retryAt ...time.Time) (*core.Record, error) {
+func (m *Manager) store(app core.App, account *core.Record, service, status, errCode string, payload *RecordEnvelope, started time.Time, retryAt ...time.Time) (*core.Record, error) {
 	var out *core.Record
 	err := app.RunInTransaction(func(tx core.App) error {
 		current, err := tx.FindRecordById(Accounts, account.Id)
@@ -486,6 +616,11 @@ func (m *Manager) store(app core.App, account *core.Record, service, status, err
 		row, err := recordRow(tx, account.Id, service)
 		if err != nil {
 			return err
+		}
+		// A privacy notification received during an upstream fetch wins over that stale response.
+		if row != nil && !row.GetDateTime("fetched").Time().Before(started) {
+			out = row
+			return nil
 		}
 		if row == nil {
 			c, err := tx.FindCollectionByNameOrId(Records)
@@ -518,22 +653,71 @@ func (m *Manager) store(app core.App, account *core.Record, service, status, err
 	return out, err
 }
 
+// InvalidateRecords removes previously shared data for this provider's verified subject.
+// Unknown subjects are deliberately indistinguishable. The next read fetches a fresh selection.
+func (m *Manager) InvalidateRecords(app core.App, provider, subject, service string) error {
+	if m == nil {
+		return ErrUnavailable
+	}
+	p, ok := m.lookup(provider)
+	if !ok || subject == "" || len(subject) > 256 || !slices.ContainsFunc(p.Services, func(s Service) bool { return s.ID == service }) {
+		return ErrInvalid
+	}
+	return app.RunInTransaction(func(tx core.App) error {
+		accounts, err := tx.FindRecordsByFilter(Accounts, "provider={:p} && issuer={:i} && subject={:s}", "", 0, 0, dbx.Params{"p": provider, "i": p.Issuer, "s": subject})
+		if err != nil {
+			return err
+		}
+		for _, account := range accounts {
+			if _, err := tx.FindFirstRecordByFilter(Services, "connection={:c} && service={:s}", dbx.Params{"c": account.Id, "s": service}); errors.Is(err, sql.ErrNoRows) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			row, err := recordRow(tx, account.Id, service)
+			if err != nil {
+				return err
+			}
+			if row == nil {
+				c, err := tx.FindCollectionByNameOrId(Records)
+				if err != nil {
+					return err
+				}
+				row = core.NewRecord(c)
+				row.Set("connection", account.Id)
+				row.Set("service", service)
+			}
+			row.Set("status", RecordPrivate)
+			row.Set("error", "privacy_invalidated")
+			row.Set("payload", nil)
+			row.Set("source_updated", "")
+			row.Set("retry_at", "")
+			row.Set("fetched", time.Now().UTC())
+			if err := tx.Save(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // fetch performs the partner request outside any transaction and persists the outcome.
 // The access token is refreshed once when expired; a refreshed family is re-sealed.
 func (m *Manager) fetch(ctx context.Context, app core.App, account *core.Record, service string) (*core.Record, error) {
+	started := time.Now().UTC().Truncate(time.Millisecond)
 	p, ok := m.lookup(account.GetString("provider"))
 	if !ok || p.Issuer != account.GetString("issuer") {
-		return m.store(app, account, service, RecordUnavailable, "provider_disabled", nil)
+		return m.store(app, account, service, RecordUnavailable, "provider_disabled", nil, started)
 	}
 	if p.RecordsURL == "" {
-		return m.store(app, account, service, RecordUnsupported, "", nil)
+		return m.store(app, account, service, RecordUnsupported, "", nil, started)
 	}
 	if !slices.ContainsFunc(p.Services, func(s Service) bool { return s.ID == service }) {
-		return m.store(app, account, service, RecordUnavailable, "unknown_service", nil)
+		return m.store(app, account, service, RecordUnavailable, "unknown_service", nil, started)
 	}
 	var tokens credentials
 	if err := m.open(account.GetString("credentials"), "account:"+account.Id, &tokens); err != nil || tokens.AccessToken == "" {
-		return m.store(app, account, service, RecordUnavailable, "credentials", nil)
+		return m.store(app, account, service, RecordUnavailable, "credentials", nil, started)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -570,45 +754,45 @@ func (m *Manager) fetch(ctx context.Context, app core.App, account *core.Record,
 		return true
 	}
 	if !tokens.Expiry.IsZero() && !tokens.Expiry.After(time.Now().Add(30*time.Second)) && !refresh() {
-		return m.store(app, account, service, RecordUnavailable, "token_refresh", nil)
+		return m.store(app, account, service, RecordUnavailable, "token_refresh", nil, started)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		status, body, retryAfter, err := m.getRecords(ctx, p.RecordsURL+"/"+url.PathEscape(service), tokens.AccessToken)
 		if err != nil {
-			return m.store(app, account, service, RecordUnavailable, "network", nil)
+			return m.store(app, account, service, RecordUnavailable, "network", nil, started)
 		}
 		switch {
 		case status == http.StatusOK:
 			envelope, err := ParseEnvelope(body, service, account.GetString("subject"))
 			if err != nil {
-				return m.store(app, account, service, RecordUnavailable, "invalid_envelope", nil)
+				return m.store(app, account, service, RecordUnavailable, "invalid_envelope", nil, started)
 			}
 			if envelope.Visibility == "private" {
-				return m.store(app, account, service, RecordPrivate, "", nil)
+				return m.store(app, account, service, RecordPrivate, "", nil, started)
 			}
-			return m.store(app, account, service, RecordOK, "", &envelope)
+			return m.store(app, account, service, RecordOK, "", &envelope, started)
 		case status == http.StatusUnauthorized && attempt == 0 && refresh():
 			continue
 		case status == http.StatusUnauthorized:
-			return m.store(app, account, service, RecordUnavailable, "unauthorized", nil)
+			return m.store(app, account, service, RecordUnavailable, "unauthorized", nil, started)
 		case status == http.StatusForbidden:
 			var payload struct {
 				Error string `json:"error"`
 			}
 			_ = json.Unmarshal(body, &payload)
 			if payload.Error == "records_private" {
-				return m.store(app, account, service, RecordPrivate, "", nil)
+				return m.store(app, account, service, RecordPrivate, "", nil, started)
 			}
-			return m.store(app, account, service, RecordUnavailable, "forbidden", nil)
+			return m.store(app, account, service, RecordUnavailable, "forbidden", nil, started)
 		case status == http.StatusNotFound:
-			return m.store(app, account, service, RecordUnavailable, "not_found", nil)
+			return m.store(app, account, service, RecordUnavailable, "not_found", nil, started)
 		case status == http.StatusTooManyRequests:
-			return m.store(app, account, service, RecordUnavailable, "rate_limited", nil, recordRetryAt(retryAfter, time.Now()))
+			return m.store(app, account, service, RecordUnavailable, "rate_limited", nil, started, recordRetryAt(retryAfter, time.Now()))
 		default:
-			return m.store(app, account, service, RecordUnavailable, fmt.Sprintf("upstream_%d", status), nil)
+			return m.store(app, account, service, RecordUnavailable, fmt.Sprintf("upstream_%d", status), nil, started)
 		}
 	}
-	return m.store(app, account, service, RecordUnavailable, "unauthorized", nil)
+	return m.store(app, account, service, RecordUnavailable, "unauthorized", nil, started)
 }
 
 func (m *Manager) getRecords(ctx context.Context, target, token string) (int, []byte, string, error) {

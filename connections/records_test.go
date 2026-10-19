@@ -308,3 +308,162 @@ func TestPublicRefreshFetchesNewlyPublishedServiceWithoutPriorOwnerRead(t *testi
 		t.Fatal("fresh cache refetched", calls)
 	}
 }
+
+func TestRecentPlaysAndSelectionContract(t *testing.T) {
+	makeEnvelope := func() map[string]any {
+		e := envelope("chunithm", "player", "public")
+		e["game_schema"] = "musecat-game/chunithm/v1"
+		e["recent_plays"] = map[string]any{"plays": []any{map[string]any{
+			"id": "play-1", "played_at": "2026-01-01T00:00:00Z",
+			"song":   map[string]any{"id": "song-1", "title": "Example"},
+			"chart":  map[string]any{"difficulty": "MASTER", "level": "14+"},
+			"fields": []any{map[string]any{"key": "score", "label": map[string]string{"en": "Score"}, "type": "integer", "value": 1009876}},
+		}}, "total": 1}
+		e["selection"] = []any{map[string]string{"key": "fields.over_power", "status": "denied"}, map[string]string{"key": "sections.rivals", "status": "unsupported"}}
+		return e
+	}
+	t.Run("accepted and projected", func(t *testing.T) {
+		data, _ := json.Marshal(makeEnvelope())
+		e, err := connections.ParseEnvelope(data, "chunithm", "player")
+		if err != nil || e.RecentPlays == nil || len(e.RecentPlays.Plays) != 1 || len(e.Selection) != 2 {
+			t.Fatalf("%+v %v", e, err)
+		}
+		projected, _ := json.Marshal(e)
+		if strings.Contains(string(projected), `"sub"`) {
+			t.Fatal("subject leaked")
+		}
+	})
+	cases := map[string]func(map[string]any){
+		"unknown version": func(e map[string]any) { e["game_schema"] = "musecat-game/chunithm/v2" },
+		"wrong game":      func(e map[string]any) { e["game_schema"] = "musecat-game/sdvx/v1" },
+		"present denied field": func(e map[string]any) {
+			e["selection"] = []any{map[string]string{"key": "fields.rating", "status": "denied"}}
+		},
+		"present denied group": func(e map[string]any) {
+			e["selection"] = []any{map[string]string{"key": "recent_plays", "status": "denied"}}
+		},
+		"unsupported selection key": func(e map[string]any) { e["selection"] = []any{map[string]string{"key": "secret", "status": "denied"}} },
+		"unknown status": func(e map[string]any) {
+			e["selection"] = []any{map[string]string{"key": "fields.x", "status": "hidden"}}
+		},
+		"duplicate selection": func(e map[string]any) {
+			item := map[string]string{"key": "fields.x", "status": "no_data"}
+			e["selection"] = []any{item, item}
+		},
+		"missing song": func(e map[string]any) {
+			e["recent_plays"].(map[string]any)["plays"].([]any)[0].(map[string]any)["song"] = map[string]string{}
+		},
+		"invalid played_at": func(e map[string]any) {
+			e["recent_plays"].(map[string]any)["plays"].([]any)[0].(map[string]any)["played_at"] = "yesterday"
+		},
+		"too many plays": func(e map[string]any) {
+			r := e["recent_plays"].(map[string]any)
+			p := r["plays"].([]any)[0]
+			rows := []any{}
+			for range 51 {
+				rows = append(rows, p)
+			}
+			r["plays"] = rows
+		},
+		"non https history": func(e map[string]any) { e["recent_plays"].(map[string]any)["more_url"] = "http://example.org/plays" },
+		"oldest first": func(e map[string]any) {
+			r := e["recent_plays"].(map[string]any)
+			r["plays"] = append(r["plays"].([]any), map[string]any{"played_at": "2026-01-02T00:00:00Z", "song": map[string]string{"title": "Newer"}, "chart": map[string]string{"difficulty": "MASTER"}, "fields": []any{}})
+			r["total"] = 2
+		},
+		"duplicate play IDs": func(e map[string]any) {
+			r := e["recent_plays"].(map[string]any)
+			r["plays"] = append(r["plays"].([]any), r["plays"].([]any)[0])
+			r["total"] = 2
+		},
+		"too many play metrics": func(e map[string]any) {
+			p := e["recent_plays"].(map[string]any)["plays"].([]any)[0].(map[string]any)
+			metrics := []any{}
+			for i := 0; i < 17; i++ {
+				metrics = append(metrics, map[string]any{"key": fmt.Sprint("metric", i), "label": map[string]string{"en": "Metric"}, "type": "integer", "value": i})
+			}
+			p["fields"] = metrics
+		},
+		"total too small": func(e map[string]any) { e["recent_plays"].(map[string]any)["total"] = 0 },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := makeEnvelope()
+			mutate(e)
+			data, _ := json.Marshal(e)
+			if _, err := connections.ParseEnvelope(data, "chunithm", "player"); err == nil {
+				t.Fatal("accepted invalid envelope")
+			}
+		})
+	}
+	for _, game := range []string{"maimai", "chunithm", "sdvx", "iidx", "nostalgia"} {
+		t.Run(game, func(t *testing.T) {
+			e := makeEnvelope()
+			e["service"] = game
+			e["game_schema"] = "musecat-game/" + game + "/v1"
+			data, _ := json.Marshal(e)
+			if _, err := connections.ParseEnvelope(data, game, "player"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	t.Run("selected history omitted", func(t *testing.T) {
+		e := makeEnvelope()
+		delete(e, "recent_plays")
+		e["selection"] = []any{map[string]string{"key": "recent_plays", "status": "denied"}}
+		data, _ := json.Marshal(e)
+		if _, err := connections.ParseEnvelope(data, "chunithm", "player"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestRecordPrivacyInvalidationPurgesAndRejectsInFlightResponse(t *testing.T) {
+	f := newFixture(t)
+	id := f.complete(f.start(f.token, "rhythm", "chunithm"))
+	f.records = func(*http.Request) *http.Response { return status(200, envelope("chunithm", f.subject, "public")) }
+	f.request(f.token, "GET", "/user/connections/"+id+"/records/chunithm", nil, 200)
+	f.request(f.token, "PUT", "/user/connections/"+id+"/services/chunithm", map[string]string{"visibility": "public"}, 200)
+	if err := f.manager.InvalidateRecords(f.app, "rhythm", f.subject, "chunithm"); err != nil {
+		t.Fatal(err)
+	}
+	row, _ := f.app.FindFirstRecordByFilter(connections.Records, "connection={:c}", dbxParams(id))
+	if row.GetString("error") != "privacy_invalidated" || row.GetString("payload") != "null" {
+		t.Fatal("cached data survived", row.PublicExport())
+	}
+	public, err := f.manager.PublicRecords(f.app, f.user.Id)
+	if err != nil || len(public) != 0 {
+		t.Fatal(public, err)
+	}
+	// Invalidation must not enumerate unknown subjects or affect an unrelated provider.
+	if err := f.manager.InvalidateRecords(f.app, "rhythm", "unconnected", "chunithm"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.InvalidateRecords(f.app, "unknown", f.subject, "chunithm"); err == nil {
+		t.Fatal("unknown provider accepted")
+	}
+	// An upstream response in flight when the user changes selection cannot resurrect it.
+	time.Sleep(2 * time.Millisecond)
+	f.records = func(*http.Request) *http.Response {
+		if err := f.manager.InvalidateRecords(f.app, "rhythm", f.subject, "chunithm"); err != nil {
+			t.Fatal(err)
+		}
+		return status(200, envelope("chunithm", f.subject, "public"))
+	}
+	view := f.request(f.token, "GET", "/user/connections/"+id+"/records/chunithm", nil, 200)
+	if view["payload"] != nil || view["status"] != connections.RecordPrivate {
+		t.Fatal("in-flight response restored private data", view)
+	}
+	time.Sleep(2 * time.Millisecond) // Persistence stores timestamps at millisecond resolution.
+	f.records = func(*http.Request) *http.Response {
+		e := envelope("chunithm", f.subject, "public")
+		e["fields"] = []any{}
+		e["selection"] = []any{map[string]string{"key": "fields", "status": "denied"}}
+		return status(200, e)
+	}
+	view = f.request(f.token, "GET", "/user/connections/"+id+"/records/chunithm", nil, 200)
+	payload, ok := view["payload"].(map[string]any)
+	if !ok || len(payload["fields"].([]any)) != 0 {
+		t.Fatal("immediate reduced selection refresh failed", view)
+	}
+}

@@ -902,15 +902,13 @@ its body reader on EOF; a final read returning both bytes and EOF must not repla
 Unknown fields, second documents, and route body-limit overflows remain rejected.
 
 `partner_application` and `partner_application_event` are locked base collections owned by
-`partnerapp`. An active user creates up to eight drafts of the `musecat-partner-onboarding/v1`
+`partnerapp`. An active user registers up to eight applications of the `musecat-partner-onboarding/v1`
 form (`partner_id`, localized name/description, contact and at least one direction). Direction A
 requires 1–8 redirect URIs; Direction B-only apps may omit `direction_a` or use empty redirects.
 `login_enabled` and joint declarations require nonempty Direction-A redirects; joint also requires
-Direction B. All declarations are validated structurally. Submit → operator (`developer`/`moderator`)
-approve/reject/suspend/reinstate through `/moderation/developer/apps/*`; every action appends an
-immutable event. The form never carries credentials.
+Direction B. All declarations are validated structurally. Create and update immediately install the validated registration without moderator approval. Operators retain monitoring, suspend and reinstate through `/moderation/developer/apps/*`; mutations append immutable events. Legacy submit/approve endpoints are idempotent for registered apps and activate legacy drafts/queued forms. The form never carries credentials.
 
-Approval copies `submitted_form` to `approved_form`, validates the merged OAuth client registry
+Registration/update copies `submitted_form` to `approved_form` (historical storage names retained; status `approved` now means registered), validates the merged OAuth client registry
 (static executable clients plus live applications; duplicates and executable-owned IDs fail with
 409) and then calls `delegation.Manager.Reload`, which swaps the client map under a lock and runs
 `SynchronizeClients`. The existing registration epoch/config-hash mechanism therefore applies
@@ -921,7 +919,7 @@ flag is true when either approved direction is active;
 only with approved nonempty redirects, a generated secret and a non-suspended status. B-only
 apps never enter the OAuth registry, even if a previous approved version left a stored secret.
 Secret generation/rotation returns `invalid_state` for B-only apps. Owners generate the
-Direction-A client secret after approval; only its SHA-256 is stored and the plaintext is
+Direction-A client secret after registration; only its SHA-256 is stored and the plaintext is
 returned once with
 `no-store`/`no-referrer`.
 
@@ -1047,3 +1045,18 @@ Bulk arcade enumeration is not part of the external API: `/developer/v1/arcades`
 and `/developer/v1/account/arcades` is denied by the allowlist (including HEAD). Existing
 grants do not bypass this restriction. Individual arcade detail and paginated nearby
 search remain available; first-party `/arcades` retains its existing behavior.
+
+### External record selection and privacy invalidation
+
+The v1 record envelope accepts optional game semantic profiles, typed recent plays, and explicit unavailable selection metadata. The parser rejects data that contradicts a denied/no-data/unsupported item. A refresh replaces the entire payload. `POST /partner/v1/records/invalidate` authenticates a separately Musecat-issued server key scoped to an active B provider, matches only that provider's verified subject/service, atomically erases the payload, and returns identical 204 results for unknown subjects. No network call runs in that transaction. A concurrent upstream fetch started before the purge cannot restore old data; owner/background reads may refetch immediately. Public records use no-store. Existing client displays require refresh; undelivered partner notifications retain the normal freshness limit and cannot promise immediate privacy.
+
+### Incoming records invalidation key and profile pictures
+
+`POST /developer/apps/{id}/records-key` issues the incoming server key for any registered
+Direction-B app, including B-only. It shares the stored current/previous inbound key and
+configured rotation window with Joint when enabled, without granting Joint capability to
+B-only providers. Authentication checks the active owner and live B provider, and honors
+only the bounded previous-key grace. UserInfo exposes optional absolute `picture` only
+with explicit `profile` scope. `/developer/v1/me` uses the same public avatar URL with its
+existing profile access requirement. URLs use the configured issuer, never untrusted Host;
+missing avatars are omitted, and emails remain excluded.
