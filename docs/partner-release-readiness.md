@@ -31,8 +31,10 @@ Set these in the deployment secret/config store (both repository `.env.example` 
 - `MUSECAT_WEB_ORIGIN`: public HTTPS web origin; callbacks derive from it.
 - `MUSECAT_CONNECTION_ENCRYPTION_KEY`: base64 of exactly 32 random bytes. Persist and back up
   separately from the DB; changing it requires re-entering partner credentials/reconnecting users.
-- `MUSECAT_OAUTH_CLIENTS`, `MUSECAT_EXTERNAL_PROVIDERS`, `MUSECAT_JOINT_PARTNERS`: empty for
-  third-party DB onboarding; optional static bootstrap/first-party registrations must use distinct IDs.
+- `MUSECAT_OAUTH_CLIENTS`: set to `[]` when enabling OAuth with third-party DB onboarding and
+  no static clients; an unset/empty string disables OAuth and cannot accompany an issuer/consent URL.
+  `MUSECAT_EXTERNAL_PROVIDERS` and `MUSECAT_JOINT_PARTNERS` may be empty or `[]`. Optional static
+  bootstrap/first-party registrations must use distinct IDs.
 
 Allow outbound DNS/TLS to public partner endpoints. Private/loopback/metadata destinations,
 environment proxies and HTTP redirects are rejected by the default partner client. Run Core/Full

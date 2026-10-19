@@ -1,6 +1,7 @@
 package connections
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -118,7 +119,15 @@ func actor(re *core.RequestEvent) connections.Actor {
 }
 
 func decode(re *core.RequestEvent, target any) error {
-	decoder := json.NewDecoder(re.Request.Body)
+	// PocketBase rewinds on EOF, including a final read that also returns data.
+	raw, err := io.ReadAll(io.LimitReader(re.Request.Body, 16384+1))
+	if err != nil {
+		return err
+	}
+	if len(raw) > 16384 {
+		return apis.ErrRequestEntityTooLarge
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return re.BadRequestError("Invalid connection request.", nil)

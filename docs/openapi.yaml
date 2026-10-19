@@ -8405,6 +8405,7 @@ paths:
       summary: Begin an external account connection using Authorization Code and PKCE S256
       security: [{bearerAuth: []}]
       description: |
+        Accepts exactly one JSON document with optional trailing whitespace and rejects unknown fields.
         Creates a five-minute, one-use request bound to the exact current Musecat token.
         A new attempt cancels prior work for the user and issuer. Only registered services
         and fixed HTTPS endpoints are used. The caller cannot supply an external subject or URL.
@@ -14970,7 +14971,7 @@ paths:
       tags: [Developer Center]
       summary: Create a draft partner application
       security: [{bearerAuth: []}]
-      description: Validates the form structurally. At most 8 applications per owner. partner_id must not collide with another application or an executable-configured client. Runtime default limit is 30 requests per client IP per 600 seconds.
+      description: Accepts exactly one JSON document with optional trailing whitespace and rejects unknown fields. Validates the form structurally. At most 8 applications per owner. partner_id must not collide with another application or an executable-configured client. Runtime default limit is 30 requests per client IP per 600 seconds.
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerOnboardingForm'}}}}
       responses:
         '201': {description: Draft created., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}

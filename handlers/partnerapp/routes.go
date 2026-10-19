@@ -4,6 +4,7 @@
 package partnerapp
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -169,7 +170,15 @@ func RegisterRoutes(se *core.ServeEvent, service *partnerapp.Service) {
 }
 
 func decode(re *core.RequestEvent, target any) error {
-	decoder := json.NewDecoder(re.Request.Body)
+	// PocketBase rewinds on EOF, including a final read that also returns data.
+	raw, err := io.ReadAll(io.LimitReader(re.Request.Body, bodyLimit+1))
+	if err != nil {
+		return err
+	}
+	if len(raw) > bodyLimit {
+		return apis.ErrRequestEntityTooLarge
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return re.BadRequestError("Invalid developer application request.", nil)

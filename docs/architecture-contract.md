@@ -896,6 +896,11 @@ to existing installations and pin this Core revision. Both executables register 
 
 ## Developer Center: self-service partner registration
 
+Developer Center and external-connection JSON requests accept exactly one document with
+optional trailing whitespace. Decode a bounded body snapshot because PocketBase rewinds
+its body reader on EOF; a final read returning both bytes and EOF must not replay the body.
+Unknown fields, second documents, and route body-limit overflows remain rejected.
+
 `partner_application` and `partner_application_event` are locked base collections owned by
 `partnerapp`. An active user creates up to eight drafts of the `musecat-partner-onboarding/v1`
 form (`partner_id`, localized name/description, contact, Direction-A redirect URIs, optional
