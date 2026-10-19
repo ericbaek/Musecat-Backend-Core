@@ -75,7 +75,7 @@ Normative reference: `developer-api.md` and `developer-openapi.yaml`. Summary of
 | Revocation | RFC 7009 `POST /oauth/revoke`; revoking either token revokes the grant |
 | Discovery | RFC 8414 `/.well-known/oauth-authorization-server` |
 | Identity | `GET /developer/v1/me` → `{sub, username, nickname}` |
-| Resource surface | 83 allowlisted operations under `/developer/v1/account/*` |
+| Resource surface | 82 allowlisted operations under `/developer/v1/account/*` |
 
 For API delegation, partners use `account:access`. Applications approved with
 `direction_a.login_enabled: true` may instead request `openid profile arcade:read` for
@@ -515,3 +515,16 @@ Musecat implementation status:
 
 Partner-facing promises in this document hold once the corresponding row reads "Implemented"; until
 then partners build against the schemas here and inspect the Developer Center report for any remaining unverified items.
+
+### External profile visibility and arcade discovery
+
+Connected-app profile reads use the ordinary third-party projection, even when the actor
+is the profile owner or staff. Private favorites and games are omitted, country display
+follows the public profile policy, and private passports/visit statistics return 404.
+Summary passports omit visit dates; full passports include them. Profile update responses
+use the same public projection. These read rules do not change authorized write operations.
+
+Bulk arcade enumeration is not part of the external API: `/developer/v1/arcades` is absent
+and `/developer/v1/account/arcades` is denied by the allowlist (including HEAD). Existing
+grants do not bypass this restriction. Individual arcade detail and paginated nearby
+search remain available; first-party `/arcades` retains its existing behavior.

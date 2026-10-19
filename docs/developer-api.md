@@ -86,13 +86,13 @@ never log authorization codes, the verifier, client secrets or tokens.
 operation list under `/developer/v1/account`, with the same request payloads, multipart fields,
 query parameters, responses, ownership, visibility, location, eligibility and validation rules as
 the corresponding Musecat custom API. The public OpenAPI document contains the complete list
-(currently 83 method/path pairs). This is an allowlist, not an unrestricted proxy: unlisted and
+(currently 82 method/path pairs). This is an allowlist, not an unrestricted proxy: unlisted and
 future operations are denied until deliberately added to the contract.
 
 | Feature | Examples (all require `account:access`) |
 | --- | --- |
 | Profile and preferences | `GET /developer/v1/account/user/me`, `PUT /developer/v1/account/user/profile`, `PUT /developer/v1/account/user/game-preferences` |
-| Arcades and information edits | `GET /developer/v1/account/arcades`, `PUT /developer/v1/account/arcade/basic`, `PUT /developer/v1/account/arcade/game` |
+| Arcades and information edits | `GET /developer/v1/account/arcade`, `PUT /developer/v1/account/arcade/basic`, `PUT /developer/v1/account/arcade/game` |
 | Photos | `POST /developer/v1/account/arcade/photo/upload` (multipart), `PUT /developer/v1/account/arcade/photo` (apply photo selection) |
 | Fault reports and reactions | `POST /developer/v1/account/arcade/flag`, `POST /developer/v1/account/arcade/flag/reaction` |
 | Visits and campaigns | `POST /developer/v1/account/arcade/visit`, `POST /developer/v1/account/campaign/check` |
@@ -229,3 +229,16 @@ Security basis: [OAuth 2.0](https://www.rfc-editor.org/rfc/rfc6749),
 CHUNITHM Info implementation brief: [`partners/chuniinfo/agent.md`](partners/chuniinfo/agent.md)
 in the source repository. Share it with this guide, `developer-openapi.yaml` and `joint-connections.md`. The partner brief
 is a repository handoff file, not an additional HTTP API endpoint.
+
+### External profile visibility and arcade discovery
+
+Connected-app profile reads use the ordinary third-party projection, even when the actor
+is the profile owner or staff. Private favorites and games are omitted, country display
+follows the public profile policy, and private passports/visit statistics return 404.
+Summary passports omit visit dates; full passports include them. Profile update responses
+use the same public projection. These read rules do not change authorized write operations.
+
+Bulk arcade enumeration is not part of the external API: `/developer/v1/arcades` is absent
+and `/developer/v1/account/arcades` is denied by the allowlist (including HEAD). Existing
+grants do not bypass this restriction. Individual arcade detail and paginated nearby
+search remain available; first-party `/arcades` retains its existing behavior.

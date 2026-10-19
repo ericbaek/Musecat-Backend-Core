@@ -22,7 +22,6 @@ var accountRoutes = map[string]struct{}{
 	"GET /arcade/ranking":                {},
 	"GET /arcade/request_admin":          {},
 	"GET /arcade/visits":                 {},
-	"GET /arcades":                       {},
 	"GET /arcades/nearby":                {},
 	"GET /arcades/updates":               {},
 	"GET /arcades/updates/history":       {},

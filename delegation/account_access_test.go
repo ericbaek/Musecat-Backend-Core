@@ -149,3 +149,99 @@ func TestAccountConnectionPreservesPrivateArcadeAndMultipartPolicy(t *testing.T)
 		}
 	}
 }
+
+// Bulk enumeration is intentionally absent from both external transports.
+func TestExternalArcadeListIsNotAvailable(t *testing.T) {
+	f := newFixture(t)
+	at := f.accountToken()
+	for _, method := range []string{"GET", "HEAD"} {
+		for _, suffix := range []string{"", "?page=1&per_page=100", "/"} {
+			r := f.req(method, "/developer/v1/arcades"+suffix, at, "", "", false)
+			if r.Code != 404 && r.Code != 405 {
+				t.Fatalf("external list returned %d", r.Code)
+			}
+			r = f.req(method, "/developer/v1/account/arcades"+suffix, at, "", "", false)
+			if r.Code != 403 && r.Code != 404 {
+				t.Fatalf("account list returned %d", r.Code)
+			}
+		}
+	}
+	// First-party discovery and bounded external nearby discovery remain available.
+	f.access("", "/arcades", 200)
+	f.access(at, "/developer/v1/arcades/nearby?lat=37.5&lon=127", 200)
+}
+
+func TestConnectedProfileUsesPublicVisibility(t *testing.T) {
+	f := newFixture(t)
+	save := func(collection string, fields map[string]any) *core.Record {
+		c, err := f.app.FindCollectionByNameOrId(collection)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := core.NewRecord(c)
+		for k, v := range fields {
+			if k == "id" {
+				r.Id = v.(string)
+			} else {
+				r.Set(k, v)
+			}
+		}
+		if err := f.app.Save(r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	a := save("arcade", map[string]any{"public": true, "country": "KR"})
+	b := save("arcade_basic", map[string]any{"arcade": a.Id, "name": "Visibility test", "address": "Test"})
+	a.Set("basic", b.Id)
+	if err := f.app.Save(a); err != nil {
+		t.Fatal(err)
+	}
+	save("arcade_favorite", map[string]any{"user": f.user.Id, "arcade": a.Id})
+	save("arcade_visit", map[string]any{"user": f.user.Id, "arcade": a.Id, "visit_day": "2026-01-01", "visited_at": "2026-01-01 10:00:00.000Z"})
+	info := save("user_info", map[string]any{"id": f.user.Id, "favorite_visibility": "private", "visit_visibility": "private", "country_mode": "off"})
+	// A connected staff account must not inherit the staff profile override.
+	f.user.Set("tags", []string{"moderator"})
+	if err := f.app.Save(f.user); err != nil {
+		t.Fatal(err)
+	}
+	at := f.accountToken()
+	for _, visibility := range []string{"private", "summary", "full"} {
+		info.Set("visit_visibility", visibility)
+		info.Set("favorite_visibility", map[bool]string{true: "public", false: "private"}[visibility == "full"])
+		if err := f.app.Save(info); err != nil {
+			t.Fatal(err)
+		}
+		public := f.access("", "/user?id="+f.user.Id, 200)
+		for _, path := range []string{"/developer/v1/account/user/me", "/developer/v1/account/user?id=" + f.user.Id} {
+			got := f.access(at, path, 200)
+			for _, key := range []string{"favorite_arcades", "visit_stats", "series", "countries", "primary_country", "warp", "owns"} {
+				x, _ := json.Marshal(got[key])
+				y, _ := json.Marshal(public[key])
+				if string(x) != string(y) {
+					t.Fatalf("%s %s mismatch %s", visibility, path, key)
+				}
+			}
+		}
+		status := 200
+		if visibility == "private" {
+			status = 404
+		}
+		for _, path := range []string{"/user/passport", "/user/passport/stamps", "/user/visits"} {
+			response := f.req("GET", "/developer/v1/account"+path, at, "", "", false)
+			check(t, response, status)
+			if visibility == "summary" && (strings.Contains(response.Body.String(), "2026-01-01") || strings.Contains(response.Body.String(), "visit_dates")) {
+				t.Fatalf("summary exposed dates: %s", path)
+			}
+			f.access(f.token, path, 200)
+		}
+	}
+	info.Set("favorite_visibility", "private")
+	if err := f.app.Save(info); err != nil {
+		t.Fatal(err)
+	}
+	response := check(t, f.req("PUT", "/developer/v1/account/user/profile", at, `{"nickname":"Visibility test","bio":"Public projection"}`, "application/json", false), 200)
+	if response["favorite_arcades"] != nil {
+		t.Fatal("profile mutation leaked private favorites")
+	}
+}

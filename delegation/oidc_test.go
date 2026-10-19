@@ -112,7 +112,7 @@ func TestOIDCLoginAndReadonlyResources(t *testing.T) {
 		t.Fatal(info, claims)
 	}
 	f.access(at, "/developer/v1/me", 200)
-	f.access(at, "/developer/v1/arcades", 200)
+	f.access(at, "/developer/v1/arcades/nearby?lat=37.5&lon=127", 200)
 	check(t, f.req("PUT", "/developer/v1/account/user/profile", at, `{}`, "application/json", false), 403)
 	f.access(idToken, "/developer/v1/me", 401)
 	// Refresh remains rotating, grants no new scope and need not return another ID token.
@@ -149,7 +149,7 @@ func TestOIDCExplicitScopeNonceAndKeyRotation(t *testing.T) {
 	if len(info) != 1 {
 		t.Fatal("profile leaked without profile scope", info)
 	}
-	f.access(tokens.AccessToken, "/developer/v1/arcades", 403)
+	f.access(tokens.AccessToken, "/developer/v1/arcades/nearby?lat=37.5&lon=127", 403)
 	f.access(tokens.AccessToken, "/developer/v1/me", 403)
 	// Existing API delegation does not implicitly become an OpenID authentication grant.
 	old := f.exchange(f.authorize("profile:read"), verifier, 200)

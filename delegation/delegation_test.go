@@ -181,7 +181,7 @@ func TestAuthorizationLifecycle(t *testing.T) {
 	if sub == f.user.Id || len(sub) != 43 || len(me) != 3 {
 		t.Fatal("unsafe profile projection", me)
 	}
-	f.access(at, "/developer/v1/arcades", 200)
+	f.access(at, "/developer/v1/arcades/nearby?lat=37.5&lon=127", 200)
 	// Neither kind of token is accepted in the other security realm.
 	f.access(f.token, "/developer/v1/me", 401)
 	f.access(rt, "/developer/v1/me", 401)
@@ -209,7 +209,7 @@ func TestPartialConsentAndScopeEnforcement(t *testing.T) {
 	token := f.exchange(f.authorize("profile:read"), verifier, 200)
 	at := token["access_token"].(string)
 	f.access(at, "/developer/v1/me", 200)
-	f.access(at, "/developer/v1/arcades", 403)
+	f.access(at, "/developer/v1/arcades/nearby?lat=37.5&lon=127", 403)
 	for _, path := range []string{"/developer/v1/arcade/flag", "/developer/v1/arcade/flag/reaction", "/developer/v1/campaign/check"} {
 		check(t, f.req("POST", path, at, `{}`, "application/json", false), 403)
 	}
@@ -297,7 +297,7 @@ func TestReapprovalReplacesScopesAndOldReplayCannotRevokeNewGrant(t *testing.T) 
 	old := f.exchange(oldCode, verifier, 200)
 	next := f.exchange(f.authorize("profile:read"), verifier, 200)
 	f.access(old["access_token"].(string), "/developer/v1/me", 401)
-	f.access(next["access_token"].(string), "/developer/v1/arcades", 403)
+	f.access(next["access_token"].(string), "/developer/v1/arcades/nearby?lat=37.5&lon=127", 403)
 	f.refresh(old["refresh_token"].(string), 400)
 	f.exchange(oldCode, verifier, 400)
 	f.access(next["access_token"].(string), "/developer/v1/me", 200)

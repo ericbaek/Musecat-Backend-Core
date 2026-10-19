@@ -9,9 +9,9 @@ import (
 func TestUsageCountsAttributedRequestsAndErrors(t *testing.T) {
 	f := newFixture(t)
 	tokens := f.exchange(f.authorize("arcade:read"), verifier, 200)
-	f.access(tokens["access_token"].(string), "/developer/v1/arcades", 200)
+	f.access(tokens["access_token"].(string), "/developer/v1/arcades/nearby?lat=37.5&lon=127", 200)
 	f.access(tokens["access_token"].(string), "/developer/v1/me", 403)
-	f.access("unknown-token", "/developer/v1/arcades", 401)
+	f.access("unknown-token", "/developer/v1/arcades/nearby?lat=37.5&lon=127", 401)
 	var rows []struct {
 		Kind     string `db:"kind"`
 		Requests int    `db:"requests"`

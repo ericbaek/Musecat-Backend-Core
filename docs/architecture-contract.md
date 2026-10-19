@@ -873,7 +873,7 @@ before PocketBase activity logging; ingress logs require corresponding operator 
 Delegated bearer tokens work only on the explicitly mapped `/developer/v1/*` surface. The resource
 boundary resolves the current grant, registration epoch, expiry, account token-key fingerprint,
 active account and required scope before assigning the verified actor to an existing domain handler.
-The primary `account:access` scope maps the explicit general-user allowlist (currently 83 method/path
+The primary `account:access` scope maps the explicit general-user allowlist (currently 82 method/path
 pairs) into `/developer/v1/account`, reusing the original route registrations and domain guards.
 Management/moderation routes are rejected even for a staff actor; signup, withdrawal, credential
 changes, other-app authorization, reverse account linking and raw PocketBase routes are excluded.
@@ -1026,3 +1026,16 @@ expose no private material. UserInfo requires an exact OpenID grant, reports onl
 unless profile was approved, and shares the live revocation/account policy. General account access
 does not imply OpenID scope. ID tokens are rejected on resource APIs. Readonly login tokens cannot
 invoke the general write allowlist. See sign-in-with-musecat.md for the supported protocol profile.
+
+### External profile visibility and arcade discovery
+
+Connected-app profile reads use the ordinary third-party projection, even when the actor
+is the profile owner or staff. Private favorites and games are omitted, country display
+follows the public profile policy, and private passports/visit statistics return 404.
+Summary passports omit visit dates; full passports include them. Profile update responses
+use the same public projection. These read rules do not change authorized write operations.
+
+Bulk arcade enumeration is not part of the external API: `/developer/v1/arcades` is absent
+and `/developer/v1/account/arcades` is denied by the allowlist (including HEAD). Existing
+grants do not bypass this restriction. Individual arcade detail and paginated nearby
+search remain available; first-party `/arcades` retains its existing behavior.

@@ -4946,85 +4946,6 @@ paths:
       security:
       - delegatedOAuth:
         - profile:read
-  /developer/v1/arcades:
-    get:
-      tags:
-      - Delegated resources
-      summary: GET /developer/v1/arcades
-      description: Delegated access requires arcade:read. Existing domain visibility,
-        role, ownership, location and XP rules still apply. Returns operating public
-        arcades only. Public closed arcades are deliberately excluded and remain available
-        through detail/search.
-      parameters:
-      - name: public
-        in: query
-        schema:
-          type: boolean
-        description: "`false` is rejected; this parameter exists only for explicit
-          v2 compatibility diagnostics."
-      - name: closed
-        in: query
-        schema:
-          type: boolean
-        description: "`true` is rejected; `/arcades` is an operating-discovery endpoint."
-      - "$ref": "#/components/parameters/CountryQuery"
-      - name: page
-        in: query
-        schema:
-          type: integer
-          minimum: 1
-          default: 1
-      - name: per_page
-        in: query
-        schema:
-          type: integer
-          minimum: 1
-          maximum: 100
-          default: 50
-      responses:
-        '200':
-          description: Page of operating public arcade summaries.
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/ArcadeSummaryPage"
-              example:
-                page: 1
-                per_page: 50
-                last_page: 1
-                total: 1
-                items:
-                - id: arcade_123
-                  country: AU
-                  name: Sydney Arcade
-                  address: 123 George St, Sydney NSW
-                  location:
-                    lat: -33.8708
-                    lon: 151.2062
-                  game_series:
-                  - series_1
-                  - series_2
-        '400':
-          description: Invalid boolean filter.
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/ErrorResponse"
-        '502':
-          description: Database lookup failure.
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/ErrorResponse"
-        '401':
-          description: Invalid, expired, revoked or wrong-kind delegated access token.
-        '403':
-          description: Missing approved scope or existing domain permission denied.
-        '429':
-          description: Rate limited.
-      security:
-      - delegatedOAuth:
-        - arcade:read
   /developer/v1/arcade:
     get:
       tags:
@@ -7038,84 +6959,6 @@ paths:
         - account:access
       description: Requires account:access. Same payload, response and domain checks
         as GET /arcade/visits. Management operations are excluded even for staff.
-  /developer/v1/account/arcades:
-    get:
-      tags:
-      - Connected account
-      summary: "/arcades"
-      description: |-
-        Requires account:access. Same payload, response and domain checks as GET /arcades. Management operations are excluded even for staff.
-
-        Returns operating public arcades only. Public closed arcades are deliberately excluded and remain available through detail/search.
-      parameters:
-      - name: public
-        in: query
-        schema:
-          type: boolean
-        description: "`false` is rejected; this parameter exists only for explicit
-          v2 compatibility diagnostics."
-      - name: closed
-        in: query
-        schema:
-          type: boolean
-        description: "`true` is rejected; `/arcades` is an operating-discovery endpoint."
-      - "$ref": "#/components/parameters/CountryQuery"
-      - name: page
-        in: query
-        schema:
-          type: integer
-          minimum: 1
-          default: 1
-      - name: per_page
-        in: query
-        schema:
-          type: integer
-          minimum: 1
-          maximum: 100
-          default: 50
-      responses:
-        '200':
-          description: Page of operating public arcade summaries.
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/ArcadeSummaryPage"
-              example:
-                page: 1
-                per_page: 50
-                last_page: 1
-                total: 1
-                items:
-                - id: arcade_123
-                  country: AU
-                  name: Sydney Arcade
-                  address: 123 George St, Sydney NSW
-                  location:
-                    lat: -33.8708
-                    lon: 151.2062
-                  game_series:
-                  - series_1
-                  - series_2
-        '400':
-          description: Invalid boolean filter.
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/ErrorResponse"
-        '502':
-          description: Database lookup failure.
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/ErrorResponse"
-        '401':
-          description: Invalid, expired or revoked delegated token; Musecat session
-            JWTs are not accepted here.
-        '403':
-          description: Insufficient scope or existing user/domain restrictions.
-      security:
-      - delegatedOAuth:
-        - account:access
   /developer/v1/account/arcades/nearby:
     get:
       tags:
@@ -8382,7 +8225,7 @@ paths:
       - Connected account
       summary: "/user"
       description: |-
-        Requires account:access. Same payload, response and domain checks as GET /user. Management operations are excluded even for staff.
+        Requires account:access. Same request and domain checks as GET /user. Management operations are excluded even for staff.
 
         Public profile by ID or username. Active developers and moderators receive owner-level fields with private, no-store caching. Restricted staff receive the public projection.
       parameters:
@@ -8535,7 +8378,7 @@ paths:
       - Connected account
       summary: "/user/changelog"
       description: |-
-        Requires account:access. Same payload, response and domain checks as GET /user/changelog. Management operations are excluded even for staff.
+        Requires account:access. Same request and domain checks as GET /user/changelog. Management operations are excluded even for staff.
 
         Returns only arcade and changed-category summaries of the user's edits in reverse
         chronological order. Anonymous callers receive rows from public
@@ -8697,7 +8540,7 @@ paths:
                 "$ref": "#/components/schemas/ErrorResponse"
         '403':
           description: Insufficient scope or existing user/domain restrictions.
-      description: Requires account:access. Same payload, response and domain checks
+      description: Requires account:access. Connected apps use ordinary third-party profile visibility, including for the owner or staff actor. Private favorites and games are omitted; passport and visits return 404 when private, summary omits visit dates, and full includes dates. Profile mutation responses use the same public projection. Same payload, response and domain checks
         as GET /user/me. Management operations are excluded even for staff.
   /developer/v1/account/user/passport:
     get:
@@ -8705,7 +8548,7 @@ paths:
       - Connected account
       summary: Owner or shared passport
       description: |-
-        Requires account:access. Same payload, response and domain checks as GET /user/passport. Management operations are excluded even for staff.
+        Requires account:access. Same request and domain checks as GET /user/passport. Management operations are excluded even for staff.
 
         Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; withdrawn profiles return 404. Private profiles return 404 except for active developers and moderators, who receive full visit dates. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
       security:
@@ -8748,7 +8591,7 @@ paths:
       - Connected account
       summary: Owner or shared passport
       description: |-
-        Requires account:access. Same payload, response and domain checks as GET /user/passport/stamps. Management operations are excluded even for staff.
+        Requires account:access. Same request and domain checks as GET /user/passport/stamps. Management operations are excluded even for staff.
 
         Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; withdrawn profiles return 404. Private profiles return 404 except for active developers and moderators, who receive full visit dates. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
       security:
@@ -8925,7 +8768,7 @@ paths:
             JWTs are not accepted here.
         '403':
           description: Insufficient scope or existing user/domain restrictions.
-      description: Requires account:access. Same payload, response and domain checks
+      description: Requires account:access. Connected apps use ordinary third-party profile visibility, including for the owner or staff actor. Private favorites and games are omitted; passport and visits return 404 when private, summary omits visit dates, and full includes dates. Profile mutation responses use the same public projection. Same payload, response and domain checks
         as GET /user/visits. Management operations are excluded even for staff.
   /developer/v1/account/arcade/analytics/event:
     post:
@@ -10575,7 +10418,7 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/ErrorResponse"
-      description: Requires account:access. Same payload, response and domain checks
+      description: Requires account:access. Connected apps use ordinary third-party profile visibility, including for the owner or staff actor. Private favorites and games are omitted; passport and visits return 404 when private, summary omits visit dates, and full includes dates. Profile mutation responses use the same public projection. Same payload, response and domain checks
         as PUT /user/profile. Management operations are excluded even for staff.
   /developer/v1/account/user/visit-visibility:
     put:

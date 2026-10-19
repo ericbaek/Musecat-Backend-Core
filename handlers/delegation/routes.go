@@ -307,7 +307,7 @@ func RegisterRoutes(se *core.ServeEvent, m *delegation.Manager) {
 		}
 		return re.JSON(200, map[string]string{"sub": sub, "username": re.Auth.GetString("username"), "nickname": nickname})
 	}))
-	for path, handler := range map[string]func(*core.RequestEvent) error{"/arcades": query.ListArcades, "/arcade": query.GetArcadeValues, "/arcades/nearby": query.ListArcadesBySeriesAndLocation} {
+	for path, handler := range map[string]func(*core.RequestEvent) error{"/arcade": query.GetArcadeValues, "/arcades/nearby": query.ListArcadesBySeriesAndLocation} {
 		api.GET(path, resource(m, "arcade:read", domain(handler)))
 	}
 	api.GET("/campaigns", resource(m, "campaign:read", domain(campaign.ListCampaigns)))
@@ -334,6 +334,7 @@ func resource(m *delegation.Manager, scope string, h func(*core.RequestEvent, st
 			return respond(re, e)
 		}
 		re.Auth = u
+		user.UsePublicProfileAudience(re)
 		return h(re, sub)
 	}
 }
