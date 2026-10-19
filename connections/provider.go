@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/singleflight"
 )
 
 // Service describes a game data service, not an authentication identity or partner API client.
@@ -64,11 +65,12 @@ type ProviderInfo struct {
 // dynamic set supplied through Reload (Developer Center). Lookups are lock-protected
 // so approved partners activate without a restart.
 type Manager struct {
-	static    []Provider
-	mu        sync.RWMutex
-	providers map[string]Provider
-	aead      cipher.AEAD
-	client    *http.Client
+	static        []Provider
+	mu            sync.RWMutex
+	providers     map[string]Provider
+	nativeRecords singleflight.Group
+	aead          cipher.AEAD
+	client        *http.Client
 }
 
 func (m *Manager) lookup(id string) (Provider, bool) {
@@ -201,6 +203,17 @@ func buildProviders(static, dynamic []Provider) (map[string]Provider, error) {
 			if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" || u.RawQuery != "" {
 				return nil, fmt.Errorf("external provider endpoints must be fixed HTTPS URLs without queries or fragments")
 			}
+		}
+		if p.IsChuniInfo() {
+			if len(p.Services) != 1 || p.Services[0].ID != "chunithm" {
+				return nil, fmt.Errorf("CHUNITHM Info supports only chunithm")
+			}
+			p.SubjectField = "id"
+			// The pinned OAuth2 provider does not publish an iss response parameter.
+			// State, session, dedicated callback and S256 remain mandatory.
+			p.RequireIssuer = false
+			p.Scopes = []string{"profile"}
+			p.Services[0].Scopes = []string{"rating", "stats", "scores"}
 		}
 		ids := map[string]bool{}
 		for _, s := range p.Services {

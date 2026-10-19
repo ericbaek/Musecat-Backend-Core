@@ -3423,7 +3423,7 @@ components:
         status: {type: string, enum: [denied, no_data, unsupported]}
     ExternalRecordEnvelope:
       type: object
-      description: Validated musecat-records/v1 envelope. The partner subject is removed before storage.
+      description: Validated musecat-records/v1 envelope. The partner subject is removed before storage. The fixed CHUNITHM Info adapter projects authorized @me profile/rating/stats/scores into this same envelope; recent plays remain unsupported until the upstream exposes their detail.
       required: [spec, service, visibility, updated_at, source, fields, sections]
       properties:
         spec: {type: string, enum: [musecat-records/v1]}

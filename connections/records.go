@@ -715,6 +715,26 @@ func (m *Manager) InvalidateRecords(app core.App, provider, subject, service str
 // fetch performs the partner request outside any transaction and persists the outcome.
 // The access token is refreshed once when expired; a refreshed family is re-sealed.
 func (m *Manager) fetch(ctx context.Context, app core.App, account *core.Record, service string) (*core.Record, error) {
+	p, ok := m.lookup(account.GetString("provider"))
+	if !ok || !p.IsChuniInfo() {
+		return m.fetchProvider(ctx, app, account, service)
+	}
+	// CHUNITHM Info rotates refresh tokens and treats replay as compromise.
+	// Coalesce concurrent reads and reload credentials after a preceding refresh.
+	value, err, _ := m.nativeRecords.Do(account.Id+":"+service, func() (any, error) {
+		current, err := app.FindRecordById(Accounts, account.Id)
+		if err != nil {
+			return nil, err
+		}
+		return m.fetchProvider(ctx, app, current, service)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*core.Record), nil
+}
+
+func (m *Manager) fetchProvider(ctx context.Context, app core.App, account *core.Record, service string) (*core.Record, error) {
 	started := time.Now().UTC().Truncate(time.Millisecond)
 	p, ok := m.lookup(account.GetString("provider"))
 	if !ok || !p.AllowsUser(account.GetString("user")) || p.Issuer != account.GetString("issuer") {
@@ -768,13 +788,13 @@ func (m *Manager) fetch(ctx context.Context, app core.App, account *core.Record,
 		return m.store(app, account, service, RecordUnavailable, "token_refresh", nil, started)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		status, body, retryAfter, err := m.getRecords(ctx, p.RecordsURL+"/"+url.PathEscape(service), tokens.AccessToken)
+		status, body, retryAfter, err := m.getRecords(ctx, p.RecordEndpoint(url.PathEscape(service)), tokens.AccessToken)
 		if err != nil {
 			return m.store(app, account, service, RecordUnavailable, "network", nil, started)
 		}
 		switch {
 		case status == http.StatusOK:
-			envelope, err := ParseEnvelope(body, service, account.GetString("subject"))
+			envelope, err := ParseProviderRecords(p, body, service, account.GetString("subject"))
 			if err != nil {
 				return m.store(app, account, service, RecordUnavailable, "invalid_envelope", nil, started)
 			}

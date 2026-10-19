@@ -62,6 +62,11 @@ func (r *CheckRunner) Run(ctx context.Context, form Form, callback string, creds
 		add("direction_b", "not_applicable", "not_declared")
 		return cases
 	}
+	provider := connections.Provider{Issuer: b.Issuer, AuthorizationURL: b.AuthorizationURL, TokenURL: b.TokenURL, UserInfoURL: b.UserInfoURL, RecordsURL: b.RecordsURL}
+	identityField := "sub"
+	if provider.IsChuniInfo() {
+		identityField = "id"
+	}
 	metadataStatus, metadataBody, metadataErr := r.call(ctx, http.MethodGet, strings.TrimRight(b.Issuer, "/")+"/.well-known/oauth-authorization-server", "", nil, nil, "", nil)
 	if metadataErr != nil {
 		add("oauth.metadata", "fail", metadataErr.Error())
@@ -79,7 +84,7 @@ func (r *CheckRunner) Run(ctx context.Context, form Form, callback string, creds
 	expect("oauth.revoke_auth", http.MethodPost, b.RevocationURL, "", url.Values{"token": {"musecat-conformance-invalid-token"}}, nil, 401, "", nil)
 	expect("oauth.userinfo_auth", http.MethodGet, b.UserInfoURL, "", nil, nil, 401, "", nil)
 	for _, service := range b.Services {
-		expect("records.auth."+service.ID, http.MethodGet, strings.TrimRight(b.RecordsURL, "/")+"/"+service.ID, "", nil, nil, 401, "", nil)
+		expect("records.auth."+service.ID, http.MethodGet, provider.RecordEndpoint(service.ID), "", nil, nil, 401, "", nil)
 	}
 	if creds.ClientID == "" {
 		add("oauth.pkce_plain", "action_required", "oauth_credentials_required")
@@ -115,7 +120,7 @@ func (r *CheckRunner) Run(ctx context.Context, form Form, callback string, creds
 	} else {
 		status, data, err := r.call(ctx, http.MethodGet, b.UserInfoURL, fixtures.AccessToken, nil, nil, "", nil)
 		v := jsonObject(data)
-		sub := stringValue(v, "sub")
+		sub := stringValue(v, identityField)
 		if err != nil {
 			add("oauth.userinfo", "fail", err.Error())
 		} else if status != 200 || sub != fixtures.ExpectedSubject || (stringValue(v, "iss") != "" && stringValue(v, "iss") != b.Issuer) {
@@ -124,12 +129,12 @@ func (r *CheckRunner) Run(ctx context.Context, form Form, callback string, creds
 			add("oauth.userinfo", "pass", "verified_subject")
 		}
 		for _, service := range b.Services {
-			status, data, err := r.call(ctx, http.MethodGet, strings.TrimRight(b.RecordsURL, "/")+"/"+service.ID, fixtures.AccessToken, nil, nil, "", nil)
+			status, data, err := r.call(ctx, http.MethodGet, provider.RecordEndpoint(service.ID), fixtures.AccessToken, nil, nil, "", nil)
 			if err != nil {
 				add("records.envelope."+service.ID, "fail", err.Error())
 				continue
 			}
-			envelope, e := connections.ParseEnvelope(data, service.ID, fixtures.ExpectedSubject)
+			envelope, e := connections.ParseProviderRecords(provider, data, service.ID, fixtures.ExpectedSubject)
 			if status != 200 || e != nil || envelope.Visibility != "public" {
 				add("records.envelope."+service.ID, "fail", "invalid_public_records_envelope")
 			} else {
@@ -139,6 +144,10 @@ func (r *CheckRunner) Run(ctx context.Context, form Form, callback string, creds
 	}
 	for _, service := range b.Services {
 		id := "records.private." + service.ID
+		if provider.IsChuniInfo() {
+			add(id, "not_applicable", "upstream_scope_visibility")
+			continue
+		}
 		privateSubject := fixtures.PrivateSubject
 		if privateSubject == "" {
 			privateSubject = fixtures.ExpectedSubject
@@ -147,14 +156,14 @@ func (r *CheckRunner) Run(ctx context.Context, form Form, callback string, creds
 			add(id, "action_required", "private_records_token_required")
 			continue
 		}
-		status, data, err := r.call(ctx, http.MethodGet, strings.TrimRight(b.RecordsURL, "/")+"/"+service.ID, fixtures.PrivateToken, nil, nil, "", nil)
+		status, data, err := r.call(ctx, http.MethodGet, provider.RecordEndpoint(service.ID), fixtures.PrivateToken, nil, nil, "", nil)
 		if err != nil {
 			add(id, "fail", err.Error())
 			continue
 		}
 		hidden := status == 403 && stringValue(jsonObject(data), "error") == "records_private"
 		if status == 200 {
-			envelope, e := connections.ParseEnvelope(data, service.ID, privateSubject)
+			envelope, e := connections.ParseProviderRecords(provider, data, service.ID, privateSubject)
 			hidden = e == nil && envelope.Visibility == "private"
 		}
 		if hidden {
@@ -180,7 +189,7 @@ func (r *CheckRunner) Run(ctx context.Context, form Form, callback string, creds
 			add("oauth.refresh_revoke", "fail", "invalid_refresh_response")
 		} else {
 			identityStatus, identity, identityErr := r.call(ctx, http.MethodGet, b.UserInfoURL, access, nil, nil, "", nil)
-			identityOK := identityErr == nil && identityStatus == 200 && stringValue(jsonObject(identity), "sub") == fixtures.ExpectedSubject
+			identityOK := identityErr == nil && identityStatus == 200 && stringValue(jsonObject(identity), identityField) == fixtures.ExpectedSubject
 			// Always attempt to clean up a successfully refreshed disposable family.
 			revokeStatus, _, revokeErr := r.call(ctx, http.MethodPost, b.RevocationURL, "", url.Values{"token": {refresh}}, nil, "", &creds)
 			deniedStatus, _, deniedErr := r.call(ctx, http.MethodGet, b.UserInfoURL, access, nil, nil, "", nil)
