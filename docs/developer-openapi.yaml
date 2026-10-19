@@ -4240,9 +4240,9 @@ paths:
       tags: [OAuth delegation]
       security: [{delegatedOAuth: [openid]}]
       summary: Verified login identity and approved basic profile
-      description: Requires an opaque bearer access token with explicitly granted openid scope. Returns app-specific sub and, only with profile, preferred_username and nickname. No email or global user id. Live revocation and account restrictions apply. No query parameters or body allowed. Cache-Control no-store.
+      description: Requires an opaque bearer access token with explicitly granted openid scope. Returns app-specific sub and, only with profile, preferred_username, nickname and an optional absolute public avatar picture URL. No email or global user id. Live revocation and account restrictions apply. No query parameters or body allowed. Cache-Control no-store.
       responses:
-        '200': {description: UserInfo, content: {application/json: {schema: {type: object, required: [sub], properties: {sub: {type: string}, preferred_username: {type: string}, nickname: {type: string}}}}}}
+        '200': {description: UserInfo, content: {application/json: {schema: {type: object, required: [sub], properties: {sub: {type: string}, preferred_username: {type: string}, nickname: {type: string}, picture: {type: string, format: uri}}}}}}
         '400': {description: Invalid request.}
         '401': {description: Invalid, expired or revoked bearer token.}
         '403': {description: Missing explicit openid scope.}
@@ -4903,6 +4903,10 @@ paths:
                     type: string
                   nickname:
                     type: string
+                  picture:
+                    type: string
+                    format: uri
+                    description: Absolute public avatar URL, omitted when no avatar is set.
         '400':
           description: Invalid request or invalid grant.
           content:
