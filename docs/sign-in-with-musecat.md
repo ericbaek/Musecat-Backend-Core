@@ -39,7 +39,7 @@ API delegation uses an explicitly requested `account:access` scope.
 - `GET` or empty `POST {issuer}/oauth/userinfo` with the opaque bearer access token returns `sub`.
   With `profile`, it also returns `preferred_username` and `nickname`. Verify its `sub` equals the
   ID token's `sub`. No email or global user ID is returned; do not merge accounts by display name.
-- `GET {issuer}/developer/v1/arcades`, `/developer/v1/arcade`, `/developer/v1/arcades/nearby` use
+- `GET {issuer}/developer/v1/arcade` and `/developer/v1/arcades/nearby` use
   the same access token and `arcade:read`, preserving public/private visibility checks.
 - `GET {issuer}/developer/v1/me` returns the basic profile under `profile` or legacy `profile:read`.
 - Refresh tokens retain the existing rotating 30-day family. Refresh responses do not issue a new

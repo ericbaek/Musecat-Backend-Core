@@ -95,9 +95,9 @@ password/implicit grant, browser-only client, OIDC ID token, 임의 UID 연결�
 
 - 단일 연결 scope: `account:access`.
 - 일반 기능 경로: `/developer/v1/account` + 문서에 명시된 사용자 기능 경로.
-  예: `GET /developer/v1/account/arcades`, `PUT /developer/v1/account/arcade/basic`,
+  예: `GET /developer/v1/account/arcade`, `PUT /developer/v1/account/arcade/basic`,
   `POST /developer/v1/account/arcade/photo/upload`, `POST /developer/v1/account/arcade/flag`.
-- 현재 명시적으로 허용된 83개 method/path는 동봉 OpenAPI를 기준으로 한다.
+- 현재 명시적으로 허용된 82개 method/path는 동봉 OpenAPI를 기준으로 한다.
   임의의 기존 API 앞에 prefix만 붙이면 된다고 가정하지 않는다. 새 기능은 계약 확인 후 추가한다.
 - query/body/응답/multipart 파일 필드는 해당 operation schema를 그대로 사용한다.
   사진 업로드와 오락실 사진 적용은 별도 operation이며 업로드 성공만으로 게시 완료로 표시하지 않는다.
