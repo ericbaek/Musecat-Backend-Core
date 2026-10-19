@@ -544,9 +544,9 @@ func AwardArcadePhotoExpTx(txApp core.App, userID, arcadeID string, atomIDs []st
 		return 0, false, err
 	}
 
-	capExp := 4
+	capExp := 10
 	if campaignTarget {
-		capExp = 10
+		capExp = 20
 	}
 	cutoff := now.Add(-7 * 24 * time.Hour)
 	prefix := "xp:arcade-photo:" + arcadeID + ":%"

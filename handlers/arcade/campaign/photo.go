@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	photoCampaignStaleAfter  = 6 // months
+	photoCampaignStaleAfter  = 12 // months
 	defaultPhotoCampaignPage = 50
 	maxPhotoCampaignPage     = 100
 )

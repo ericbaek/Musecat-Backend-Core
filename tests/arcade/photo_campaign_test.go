@@ -2,11 +2,14 @@ package arcade_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 	pbtypes "github.com/pocketbase/pocketbase/tools/types"
 )
@@ -21,12 +24,13 @@ func TestListPhotoCampaignTargetsMissingAndStale(t *testing.T) {
 	staleID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Stale Photos", Address: "B", Nickname: []string{"stale"}, Location: location{Lat: 37.51, Lon: 127.01}})
 	setArcadeVisibility(t, app, staleID, true, false)
 	staleAtomID := seedPhotoAtom(t, app, staleID, user.Id, true)
-	setPhotoAtomCreated(t, app, staleAtomID, time.Now().UTC().AddDate(0, -6, 0).Add(-time.Minute))
+	setPhotoAtomCreated(t, app, staleAtomID, time.Now().UTC().AddDate(-1, 0, 0).Add(-time.Minute))
 	seedPhotoMolecule(t, app, staleID, user.Id, []string{staleAtomID})
 
 	currentID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Current Photos", Address: "C", Nickname: []string{"current"}, Location: location{Lat: 37.52, Lon: 127.02}})
 	setArcadeVisibility(t, app, currentID, true, false)
 	currentAtomID := seedPhotoAtom(t, app, currentID, user.Id, true)
+	setPhotoAtomCreated(t, app, currentAtomID, time.Now().UTC().AddDate(0, -9, 0))
 	seedPhotoMolecule(t, app, currentID, user.Id, []string{currentAtomID})
 
 	closedID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Closed Photos", Address: "D", Nickname: []string{"closed"}, Location: location{Lat: 37.53, Lon: 127.03}})
@@ -108,5 +112,39 @@ func setPhotoAtomCreated(tb testing.TB, app *tests.TestApp, atomID string, at ti
 		"id":      atom.Id,
 	}).Execute(); err != nil {
 		tb.Fatal(err)
+	}
+}
+
+func TestPhotoPublicationWeeklyCaps(t *testing.T) {
+	for _, target := range []bool{false, true} {
+		t.Run(fmt.Sprintf("campaign=%t", target), func(t *testing.T) {
+			app := newArcadeTestApp(t)
+			_, user := createAuthUser(t, app)
+			capExp := 10
+			if target {
+				capExp = 20
+			}
+			atoms := make([]string, 12)
+			for i := range atoms {
+				atoms[i] = fmt.Sprintf("photo%d", i)
+			}
+			err := app.RunInTransaction(func(tx core.App) error {
+				exp, granted, err := xp.AwardArcadePhotoExpTx(tx, user.Id, "arcade", atoms, target, 0, time.Now().UTC())
+				if err != nil {
+					return err
+				}
+				if !granted || exp != capExp {
+					t.Fatalf("expected %d XP, got %d (granted=%t)", capExp, exp, granted)
+				}
+				exp, granted, err = xp.AwardArcadePhotoExpTx(tx, user.Id, "arcade", []string{"another"}, target, exp, time.Now().UTC())
+				if err == nil && (granted || exp != capExp) {
+					t.Fatalf("weekly cap exceeded: %d (granted=%t)", exp, granted)
+				}
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
