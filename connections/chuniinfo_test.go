@@ -22,7 +22,7 @@ func chuniInfoProvider() connections.Provider {
 	return p
 }
 func chuniBody() map[string]any {
-	return map[string]any{"id": "42", "scopes": []string{"profile", "rating", "stats", "scores"}, "profile": map[string]any{"display_name": "PLAYER"}, "rating": map[string]any{"rating_current": 16.42, "rating_peak": 16.58, "over_power": 12345.67}, "stats": map[string]any{"played_chart_count": 123, "fc_count": 80, "aj_count": 30, "rank_distribution": map[string]int{"SSS+": 30}, "last_play_at": "2026-01-01T10:00:00Z"}, "scores": map[string]any{"best30": []any{map[string]any{"song_title": "Song", "difficulty": "MASTER", "score": 1009876, "rank": "SSS+", "rating": 16.7}}}}
+	return map[string]any{"id": "42", "scopes": []string{"profile", "rating", "stats", "scores"}, "profile": map[string]any{"display_name": "PLAYER"}, "rating": map[string]any{"rating_current": 16.42, "rating_peak": 16.58, "over_power": 12345.67}, "stats": map[string]any{"played_chart_count": 123, "fc_count": 80, "aj_count": 30, "rank_distribution": map[string]int{"sssp": 30}, "last_play_at": "2026-01-01T10:00:00Z"}, "scores": map[string]any{"best30": []any{map[string]any{"song_title": "Song", "difficulty": "MASTER", "score": 1009876, "rank": "SSS+", "rating": 16.7}}}}
 }
 func TestChuniInfoProjectionAndScopeBoundary(t *testing.T) {
 	p := chuniInfoProvider()
@@ -31,6 +31,9 @@ func TestChuniInfoProjectionAndScopeBoundary(t *testing.T) {
 	e, err := connections.ParseProviderRecords(p, data, "chunithm", "42")
 	if err != nil || e.Player.Name != "PLAYER" || len(e.Fields) != 7 || len(e.Sections) != 2 || e.RecentPlays != nil {
 		t.Fatalf("projection: %+v %v", e, err)
+	}
+	if e.Sections[0].Rows[0][0] != "SSS+" {
+		t.Fatal("native rank was not normalized", e.Sections[0])
 	}
 	if p.RecordEndpoint("chunithm") != p.UserInfoURL {
 		t.Fatal("wrong endpoint")

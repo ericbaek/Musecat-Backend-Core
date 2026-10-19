@@ -97,7 +97,7 @@ func ParseProviderRecords(p Provider, data []byte, service, subject string) (Rec
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			section.Rows = append(section.Rows, []any{k, d[k]})
+			section.Rows = append(section.Rows, []any{chuniInfoRank(k), d[k]})
 		}
 		e.Sections = append(e.Sections, section)
 	}
@@ -118,7 +118,7 @@ func ParseProviderRecords(p Provider, data []byte, service, subject string) (Rec
 			if title == "" {
 				return RecordEnvelope{}, errEnvelope
 			}
-			section.Rows = append(section.Rows, []any{title, r["difficulty"], r["score"], r["rank"], r["rating"]})
+			section.Rows = append(section.Rows, []any{title, r["difficulty"], r["score"], chuniInfoRank(r["rank"]), r["rating"]})
 		}
 		e.Sections = append(e.Sections, section)
 	}
@@ -134,4 +134,22 @@ func ParseProviderRecords(p Provider, data []byte, service, subject string) (Rec
 	raw["sub"] = subject
 	b, _ = json.Marshal(raw)
 	return ParseEnvelope(b, service, subject)
+}
+
+// Native API rank names use a trailing p for plus (sssp, ssp, sp).
+func chuniInfoRank(value any) any {
+	text, ok := value.(string)
+	if !ok {
+		return value
+	}
+	rank := strings.ToUpper(text)
+	switch rank {
+	case "SSSP":
+		return "SSS+"
+	case "SSP":
+		return "SS+"
+	case "SP":
+		return "S+"
+	}
+	return rank
 }
