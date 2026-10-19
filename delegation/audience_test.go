@@ -38,3 +38,23 @@ func TestDevelopmentAudienceConsentTokensAndTesterRemoval(t *testing.T) {
 	}
 	f.access(token.AccessToken, "/developer/v1/me", 401)
 }
+
+func TestConsentShowsValidatedReturnDestinationAndPublication(t *testing.T) {
+	f := newFixture(t)
+	production := f.read(f.begin("chuniinfo", callback, "profile:read"), f.token, 200)
+	if production["redirect_uri"] != callback || production["publication"] != "production" {
+		t.Fatal("static consent metadata does not match the selected registered request", production)
+	}
+	localCallback := "http://localhost:8300/oauth/callback"
+	client := delegation.Client{ID: "consent_dev", Name: "Development App", Secret: secret, RedirectURIs: []string{localCallback, "https://partner.example/other"}, Scopes: allScopes, Development: true, AllowedUserIDs: []string{f.user.Id}}
+	if err := f.m.Reload(f.app, []delegation.Client{client}); err != nil {
+		t.Fatal(err)
+	}
+	consent := f.read(f.begin(client.ID, localCallback, "profile:read"), f.token, 200)
+	if consent["redirect_uri"] != localCallback || consent["publication"] != "development" {
+		t.Fatal("development consent metadata does not match the selected registered request", consent)
+	}
+	if len(consent["requested_scopes"].([]any)) != 1 {
+		t.Fatal("consent metadata expanded requested permissions", consent)
+	}
+}

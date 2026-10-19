@@ -1069,7 +1069,7 @@ usernames to internal IDs. Dynamic OAuth clients and B providers carry Developme
 AllowedUserIDs; persistent fingerprints/epochs bind audience changes. Consent read/decision,
 code/refresh exchange, resource/UserInfo access, B start/complete/fetch and Joint actor paths
 must enforce the audience. Anonymous provider discovery and public record reads hide development
-providers. Static executable registrations remain unrestricted by default.
+providers. Static executable registrations remain unrestricted by default. The session-bound consent summary exposes publication and the exact registered redirect_uri from the validated pending authorization request so the user can see development status and the return destination before deciding. It does not expose client credentials or expand the requested scopes.
 
 Publication production requires an explicit owner request and operator approval of the current
 submitted form. Production edits do not overwrite the reviewed active snapshot; any edit cancels

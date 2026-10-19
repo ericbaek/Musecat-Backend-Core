@@ -32,6 +32,8 @@ type Consent struct {
 	ClientID    string         `json:"client_id"`
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
+	RedirectURI string         `json:"redirect_uri"`
+	Publication string         `json:"publication"`
 	Scopes      []ConsentScope `json:"requested_scopes"`
 	Expires     string         `json:"expires_at"`
 }
@@ -180,7 +182,11 @@ func (m *Manager) ReadConsent(app core.App, a Actor, handle string) (Consent, er
 		if e := tx.Save(r); e != nil {
 			return e
 		}
-		out = Consent{ClientID: c.ID, Name: c.Name, Description: c.Description, Scopes: []ConsentScope{}, Expires: r.GetDateTime("expires").Time().Format(time.RFC3339)}
+		publication := "production"
+		if c.Development {
+			publication = "development"
+		}
+		out = Consent{ClientID: c.ID, Name: c.Name, Description: c.Description, RedirectURI: r.GetString("redirect_uri"), Publication: publication, Scopes: []ConsentScope{}, Expires: r.GetDateTime("expires").Time().Format(time.RFC3339)}
 		for _, s := range r.GetStringSlice("scopes") {
 			out.Scopes = append(out.Scopes, ConsentScope{ID: s, Description: scopeLabels[s]})
 		}

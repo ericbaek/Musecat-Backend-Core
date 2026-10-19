@@ -8831,6 +8831,8 @@ paths:
                 - client_id
                 - name
                 - description
+                - redirect_uri
+                - publication
                 - requested_scopes
                 - expires_at
                 properties:
@@ -8840,6 +8842,14 @@ paths:
                     type: string
                   description:
                     type: string
+                  redirect_uri:
+                    type: string
+                    format: uri
+                    description: Exact registered callback selected by this validated pending request.
+                  publication:
+                    type: string
+                    enum: [development, production]
+                    description: Development applications are limited to the owner and designated testers. Static executable registrations default to production.
                   expires_at:
                     type: string
                     format: date-time
