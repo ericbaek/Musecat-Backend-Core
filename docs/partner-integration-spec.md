@@ -484,9 +484,13 @@ scenarios retain explicit unverified status until partner interoperability evide
 }
 ```
 
-A partner that only wants Direction A omits `direction_b` and `joint`. A partner that wants Direction
-B without one-step consent sets `joint.enabled` to `false`; users then approve each direction on
-the respective site.
+A partner that only wants Direction A omits `direction_b` and `joint`. A Direction B-only
+partner omits `direction_a` (or supplies empty `redirect_uris`) and `joint`; approval and
+partner-issued credentials activate its provider without a Musecat-issued OAuth secret. At least
+one direction must be configured. `direction_a.login_enabled` and `joint.enabled` require
+nonempty Direction A redirects; joint also requires Direction B. Apps offering both directions
+without one-step consent omit `joint` or set `joint.enabled` to `false`; users approve each
+direction independently on the respective site.
 
 An approved form is the source of truth: the runtime derives the OAuth client, external provider
 and joint partner registrations from it directly (Developer Center §4). Environment variables

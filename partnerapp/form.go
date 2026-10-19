@@ -149,8 +149,14 @@ func (f *Form) Validate() error {
 			errs[key] = "invalid"
 		}
 	}
-	if n := len(f.DirectionA.RedirectURIs); n == 0 || n > 8 {
+	if f.DirectionA.RedirectURIs == nil && f.DirectionB != nil {
+		f.DirectionA.RedirectURIs = []string{}
+	}
+	if n := len(f.DirectionA.RedirectURIs); n > 8 || (n == 0 && f.DirectionB == nil) {
 		errs["direction_a.redirect_uris"] = "count"
+	}
+	if f.DirectionA.LoginEnabled && len(f.DirectionA.RedirectURIs) == 0 {
+		errs["direction_a.redirect_uris"] = "requires_direction_a"
 	}
 	seen := map[string]bool{}
 	for i, u := range f.DirectionA.RedirectURIs {
@@ -193,6 +199,9 @@ func (f *Form) Validate() error {
 	}
 	if f.Joint != nil && f.Joint.Enabled {
 		j := f.Joint
+		if len(f.DirectionA.RedirectURIs) == 0 {
+			errs["direction_a.redirect_uris"] = "requires_direction_a"
+		}
 		if f.DirectionB == nil {
 			errs["joint.enabled"] = "requires_direction_b"
 		}

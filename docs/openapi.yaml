@@ -3235,11 +3235,47 @@ components:
         ja: {type: string, maxLength: 1024}
     PartnerOnboardingForm:
       type: object
-      description: Partner-authored onboarding document (musecat-partner-onboarding/v1). Never contains credentials.
-      required: [spec, partner_id, display_name, contact_email, direction_a]
+      description: Partner-authored onboarding document (musecat-partner-onboarding/v1). Never contains credentials. At least one direction is required. Direction B-only apps may omit direction_a; login and joint require nonempty Direction A redirects.
+      required: [spec, partner_id, display_name, contact_email]
+      anyOf:
+        - required: [direction_a]
+          properties:
+            direction_a:
+              required: [redirect_uris]
+              properties:
+                redirect_uris: {minItems: 1}
+        - required: [direction_b]
+      allOf:
+        - if:
+            required: [direction_a]
+            properties:
+              direction_a:
+                required: [login_enabled]
+                properties:
+                  login_enabled: {const: true}
+          then:
+            properties:
+              direction_a:
+                required: [redirect_uris]
+                properties:
+                  redirect_uris: {minItems: 1}
+        - if:
+            required: [joint]
+            properties:
+              joint:
+                required: [enabled]
+                properties:
+                  enabled: {const: true}
+          then:
+            required: [direction_a, direction_b]
+            properties:
+              direction_a:
+                required: [redirect_uris]
+                properties:
+                  redirect_uris: {minItems: 1}
       properties:
         spec: {type: string, enum: [musecat-partner-onboarding/v1]}
-        partner_id: {type: string, pattern: '^[a-z][a-z0-9_-]{0,127}$', description: Immutable after approval; becomes the OAuth client ID.}
+        partner_id: {type: string, pattern: '^[a-z][a-z0-9_-]{0,127}$', description: Immutable after approval; also the OAuth client ID when Direction A is enabled.}
         display_name: {$ref: '#/components/schemas/PartnerLocalized'}
         description: {$ref: '#/components/schemas/PartnerLocalized'}
         contact_email: {type: string, format: email}
@@ -3249,10 +3285,10 @@ components:
         support_url: {type: string, format: uri, maxLength: 2048}
         direction_a:
           type: object
-          required: [redirect_uris]
+          description: Omit or use empty redirect_uris for a Direction B-only application.
           properties:
             login_enabled: {type: boolean, default: false, description: Enable Sign in with Musecat after operator approval.}
-            redirect_uris: {type: array, minItems: 1, maxItems: 8, items: {type: string, format: uri}}
+            redirect_uris: {type: array, minItems: 0, maxItems: 8, items: {type: string, format: uri}}
         direction_b:
           type: object
           description: Activates after approval and partner-issued OAuth credential entry.
@@ -3286,7 +3322,7 @@ components:
             key_rotation_window_hours: {type: integer, minimum: 1, maximum: 168, default: 24}
     PartnerApplication:
       type: object
-      description: Safe projection; secret material is never returned. live is true only when an approved form and a generated secret exist and the application is not suspended.
+      description: Safe projection; secret material is never returned. live means at least one approved direction is active. Direction A needs its own generated secret; Direction B needs only its partner-issued credentials. Suspension disables both.
       required: [id, partner_id, owner, status, live, display_name, description, submitted_form, approved_form, has_secret, review_note, created, updated]
       properties:
         id: {type: string}
@@ -3301,6 +3337,8 @@ components:
         approved_form:
           oneOf: [{$ref: '#/components/schemas/PartnerOnboardingForm'}, {type: 'null'}]
         has_secret: {type: boolean}
+        direction_a_declared: {type: boolean, description: Submitted or approved form contains nonempty Direction A redirects.}
+        direction_a_live: {type: boolean, description: Approved Direction A redirects and a generated Musecat secret exist and the application is not suspended.}
         direction_b_declared: {type: boolean}
         has_direction_b_credentials: {type: boolean}
         direction_b_live: {type: boolean, description: Approved form declares Direction B, credentials are stored, not suspended, and the server has a connection key. The partner then appears in GET /integrations/providers.}
@@ -14875,7 +14913,7 @@ paths:
       tags: [Developer Center]
       summary: Generate (or rotate) the OAuth client secret; plaintext is returned exactly once
       security: [{bearerAuth: []}]
-      description: Requires an approved, non-suspended application. Only the hash is stored. Rotation changes the registration fingerprint and invalidates existing grants for the client. The registration becomes live immediately on this instance and within one minute on others.
+      description: Requires an approved, non-suspended application with nonempty Direction A redirects; B-only applications return 409 invalid_state. Only the hash is stored. Rotation changes the registration fingerprint and invalidates existing grants for the client. The registration becomes live immediately on this instance and within one minute on others.
       responses:
         '200':
           description: One-time secret. Cache-Control no-store, Referrer-Policy no-referrer.
@@ -14973,7 +15011,7 @@ paths:
       tags: [Developer Center]
       summary: Approve the submitted form and activate the OAuth client registration
       security: [{bearerAuth: []}]
-      description: Copies submitted_form to approved_form, validates the merged client registry before writing, then reloads the live delegation manager. The client serves tokens once the owner generates a secret. A partner_id owned by an executable-configured client cannot be approved.
+      description: Copies submitted_form to approved_form, validates the merged client registry before writing, then reloads the live delegation manager. Direction A serves tokens once the owner generates a secret. B-only applications do not create an OAuth client; their provider activates independently after partner-issued credential entry. A partner_id owned by an executable-configured client cannot be approved.
       requestBody: {required: false, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerReviewInput'}}}}
       responses:
         '200': {description: Approved., content: {application/json: {schema: {$ref: '#/components/schemas/PartnerApplication'}}}}

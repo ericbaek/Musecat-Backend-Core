@@ -903,8 +903,10 @@ Unknown fields, second documents, and route body-limit overflows remain rejected
 
 `partner_application` and `partner_application_event` are locked base collections owned by
 `partnerapp`. An active user creates up to eight drafts of the `musecat-partner-onboarding/v1`
-form (`partner_id`, localized name/description, contact, Direction-A redirect URIs, optional
-Direction-B/joint declarations validated structurally). Submit → operator (`developer`/`moderator`)
+form (`partner_id`, localized name/description, contact and at least one direction). Direction A
+requires 1–8 redirect URIs; Direction B-only apps may omit `direction_a` or use empty redirects.
+`login_enabled` and joint declarations require nonempty Direction-A redirects; joint also requires
+Direction B. All declarations are validated structurally. Submit → operator (`developer`/`moderator`)
 approve/reject/suspend/reinstate through `/moderation/developer/apps/*`; every action appends an
 immutable event. The form never carries credentials.
 
@@ -913,13 +915,18 @@ Approval copies `submitted_form` to `approved_form`, validates the merged OAuth 
 409) and then calls `delegation.Manager.Reload`, which swaps the client map under a lock and runs
 `SynchronizeClients`. The existing registration epoch/config-hash mechanism therefore applies
 unchanged: a changed approved form or rotated secret is a new fingerprint and invalidates earlier
-grants; suspension disables the registration row so tokens fail with 503. An application is live
-only with an approved form, a generated secret and a non-suspended status. Owners generate the
-client secret after approval; only its SHA-256 is stored and the plaintext is returned once with
+grants; suspension disables the registration row so tokens fail with 503. The application `live`
+flag is true when either approved direction is active;
+`direction_a_declared`/`direction_a_live` distinguish OAuth capability. Direction A is live
+only with approved nonempty redirects, a generated secret and a non-suspended status. B-only
+apps never enter the OAuth registry, even if a previous approved version left a stored secret.
+Secret generation/rotation returns `invalid_state` for B-only apps. Owners generate the
+Direction-A client secret after approval; only its SHA-256 is stored and the plaintext is
+returned once with
 `no-store`/`no-referrer`.
 
-Direction B activates from the same record: the owner stores the partner-issued Musecat client
-credentials (`PUT /developer/apps/{id}/credentials`), which are AES-GCM sealed with the connection
+Direction B activates independently of Direction A and its secret from the same record: the owner
+stores the partner-issued Musecat client credentials (`PUT /developer/apps/{id}/credentials`), which are AES-GCM sealed with the connection
 key and bound to the application ID. When the approved form declares `direction_b`, the service
 maps it to a `connections.Provider` (`subject_field` fixed to `sub`, `client_secret_basic`,
 `require_issuer`, callback `<web origin>/api/user/connections/callback/<partner_id>`) and calls
@@ -988,7 +995,8 @@ TLS hostname verification. Registered form endpoints are the only targets.
 Pass, fail, action_required and not_applicable remain distinct. A run is passed only when all
 applicable cases pass; missing staging fixtures produce incomplete, not success. Disposable refresh
 families are refreshed/revoked only with explicit consent. The runner never creates OAuth consent:
-Direction A requires an owner grant whose code was actually redeemed. A successful joint round
+Direction A requires an owner grant whose code was actually redeemed; its round-trip check is
+`not_applicable` for a B-only form. A successful joint round
 trip must be evidenced by the owner's normal joint connection and both
 live grant generations under the approved configuration. Operator approval remains a separate
 review action; checks do not silently change existing approval policy or active registrations.

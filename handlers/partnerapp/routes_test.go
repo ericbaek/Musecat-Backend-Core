@@ -213,3 +213,26 @@ func TestConsoleOwnershipAndPagination(t *testing.T) {
 		t.Fatal("console leaked credentials")
 	}
 }
+
+func TestDirectionBOnlyRegistrationWithoutDirectionA(t *testing.T) {
+	f := newFixture(t)
+	owner, operator := f.user(), f.user("developer")
+	body := `{"spec":"musecat-partner-onboarding/v1","partner_id":"records_only","display_name":{"en":"Records only"},"contact_email":"dev@partner.example","direction_b":{"issuer":"https://partner.example","authorization_url":"https://partner.example/authorize","token_url":"https://partner.example/token","userinfo_url":"https://partner.example/userinfo","revocation_url":"https://partner.example/revoke","records_url":"https://partner.example/records","client_auth_method":"client_secret_basic","identity_scope":"profile","services":[{"id":"chunithm","scope":"chunithm:read"}]}}`
+	created := check(t, f.req("POST", "/developer/apps", owner, body), 201)
+	id := created["id"].(string)
+	if created["direction_a_declared"] != false || created["direction_b_declared"] != true {
+		t.Fatal("B-only capabilities", created)
+	}
+	check(t, f.req("POST", "/developer/apps/"+id+"/submit", owner, ""), 200)
+	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", operator, `{}`), 200)
+	result := check(t, f.req("POST", "/developer/apps/"+id+"/secret", owner, ""), 409)
+	if result["error"] != "invalid_state" {
+		t.Fatal("B-only secret response", result)
+	}
+	if _, exists := f.manager.Client("records_only"); exists {
+		t.Fatal("B-only OAuth client registered")
+	}
+	// Neither omission nor empty Direction A grants a direction when B is absent.
+	withoutB := `{"spec":"musecat-partner-onboarding/v1","partner_id":"no_direction","display_name":{"en":"None"},"contact_email":"dev@partner.example"}`
+	check(t, f.req("POST", "/developer/apps", owner, withoutB), 400)
+}

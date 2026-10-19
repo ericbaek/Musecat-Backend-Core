@@ -42,17 +42,19 @@ type Credentials struct {
 // Application is the safe projection returned to owners and operators. It never
 // includes secret material; HasSecret only reports that one has been generated.
 type Application struct {
-	ID           string    `json:"id"`
-	PartnerID    string    `json:"partner_id"`
-	Owner        string    `json:"owner"`
-	Status       string    `json:"status"`
-	Live         bool      `json:"live"`
-	DisplayName  Localized `json:"display_name"`
-	Description  Localized `json:"description"`
-	ContactEmail string    `json:"contact_email,omitempty"`
-	Submitted    *Form     `json:"submitted_form"`
-	Approved     *Form     `json:"approved_form"`
-	HasSecret    bool      `json:"has_secret"`
+	ID                 string    `json:"id"`
+	PartnerID          string    `json:"partner_id"`
+	Owner              string    `json:"owner"`
+	Status             string    `json:"status"`
+	Live               bool      `json:"live"`
+	DisplayName        Localized `json:"display_name"`
+	Description        Localized `json:"description"`
+	ContactEmail       string    `json:"contact_email,omitempty"`
+	Submitted          *Form     `json:"submitted_form"`
+	Approved           *Form     `json:"approved_form"`
+	HasSecret          bool      `json:"has_secret"`
+	DirectionADeclared bool      `json:"direction_a_declared"`
+	DirectionALive     bool      `json:"direction_a_live"`
 	// Direction B: declared in the approved form, credentials entered, and therefore
 	// registered as a live external provider.
 	DirectionBDeclared       bool   `json:"direction_b_declared"`
@@ -108,7 +110,7 @@ type jointCredentials struct {
 
 func (s *Service) jointLive(r *core.Record) bool {
 	f := formOf(r, "approved_form")
-	return s.joint != nil && s.directionBLive(r) && f.Joint != nil && f.Joint.Enabled && r.GetString("joint_credentials") != "" && r.GetString("partner_key_hash") != ""
+	return s.joint != nil && directionALive(r) && s.directionBLive(r) && f.Joint != nil && f.Joint.Enabled && r.GetString("joint_credentials") != "" && r.GetString("partner_key_hash") != ""
 }
 
 func (s *Service) redirectURI(partnerID string) string {
@@ -146,8 +148,9 @@ func formJSON(f *Form) string {
 
 func formHash(f *Form) string { return hashSecret(formJSON(f)) }
 
-func isLive(r *core.Record) bool {
-	return formOf(r, "approved_form") != nil && r.GetString("status") != StatusSuspended && r.GetString("secret_hash") != ""
+func directionALive(r *core.Record) bool {
+	f := formOf(r, "approved_form")
+	return f != nil && len(f.DirectionA.RedirectURIs) > 0 && r.GetString("status") != StatusSuspended && r.GetString("secret_hash") != ""
 }
 
 func (s *Service) project(r *core.Record, includeContact bool) Application {
@@ -155,7 +158,9 @@ func (s *Service) project(r *core.Record, includeContact bool) Application {
 	approved := formOf(r, "approved_form")
 	a := Application{
 		ID: r.Id, PartnerID: r.GetString("partner_id"), Owner: r.GetString("owner"), Status: r.GetString("status"),
-		Live: isLive(r), Submitted: submitted, Approved: approved, HasSecret: r.GetString("secret_hash") != "",
+		Live: directionALive(r) || s.directionBLive(r), Submitted: submitted, Approved: approved, HasSecret: r.GetString("secret_hash") != "",
+		DirectionADeclared:       (approved != nil && len(approved.DirectionA.RedirectURIs) > 0) || (submitted != nil && len(submitted.DirectionA.RedirectURIs) > 0),
+		DirectionALive:           directionALive(r),
 		DirectionBDeclared:       (approved != nil && approved.DirectionB != nil) || (submitted != nil && submitted.DirectionB != nil),
 		HasDirectionBCredentials: r.GetString("direction_b_credentials") != "",
 		DirectionBLive:           s.directionBLive(r),
@@ -388,7 +393,7 @@ func (s *Service) GenerateSecret(app core.App, ownerID, id string) (clientID, se
 		if err != nil {
 			return err
 		}
-		if formOf(r, "approved_form") == nil || r.GetString("status") == StatusSuspended {
+		if approved := formOf(r, "approved_form"); approved == nil || len(approved.DirectionA.RedirectURIs) == 0 || r.GetString("status") == StatusSuspended {
 			return ErrState
 		}
 		clientID = r.GetString("partner_id")
@@ -630,7 +635,7 @@ func (s *Service) Approve(app core.App, operatorID, id, note string) (Applicatio
 			return ErrState
 		}
 		if _, ok := s.manager.Client(form.PartnerID); ok {
-			if approved := formOf(r, "approved_form"); approved == nil || !isLive(r) {
+			if approved := formOf(r, "approved_form"); approved == nil || !directionALive(r) {
 				return ErrConflict
 			}
 		}
@@ -750,7 +755,7 @@ func (s *Service) Clients(app core.App) ([]delegation.Client, error) {
 	out := make([]delegation.Client, 0, len(rows))
 	for _, r := range rows {
 		f := formOf(r, "approved_form")
-		if f == nil || !isLive(r) || !s.activeOwner(app, r) {
+		if f == nil || !directionALive(r) || !s.activeOwner(app, r) {
 			continue
 		}
 		scopes := []string{delegation.AccountAccess}
@@ -814,7 +819,7 @@ func (s *Service) JointPartners(app core.App) ([]connections.JointPartner, error
 	out := make([]connections.JointPartner, 0, len(rows))
 	for _, r := range rows {
 		f := formOf(r, "approved_form")
-		if f == nil || f.DirectionB == nil || f.Joint == nil || !f.Joint.Enabled || !s.activeOwner(app, r) {
+		if f == nil || !directionALive(r) || f.DirectionB == nil || f.Joint == nil || !f.Joint.Enabled || !s.activeOwner(app, r) {
 			continue
 		}
 		var jc jointCredentials

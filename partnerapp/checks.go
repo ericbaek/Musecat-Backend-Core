@@ -288,7 +288,7 @@ func (s *Service) processCheck(ctx context.Context, app core.App, id string, run
 	cases := runner.Run(bounded, *form, s.redirectURI(form.PartnerID), creds, key, fixtures)
 	signIn := CheckCase{ID: "oauth.signin_roundtrip", Status: "action_required", Code: "signin_test_connection_required"}
 	directionA := CheckCase{ID: "oauth.direction_a_roundtrip", Status: "action_required", Code: "direction_a_test_connection_required"}
-	if formHash(formOf(application, "approved_form")) == formHash(form) {
+	if len(form.DirectionA.RedirectURIs) > 0 && formHash(formOf(application, "approved_form")) == formHash(form) {
 		grant, e := app.FindFirstRecordByFilter(delegation.Grants, "user={:owner} && client={:client}", dbx.Params{"owner": application.GetString("owner"), "client": form.PartnerID})
 		if e == nil && form.DirectionA.LoginEnabled && s.manager.VerifyLoginGrant(app, application.GetString("owner"), form.PartnerID, grant.Id, grant.GetString("generation")) == nil {
 			signIn.Status = "pass"
@@ -300,6 +300,9 @@ func (s *Service) processCheck(ctx context.Context, app core.App, id string, run
 			directionA.Status = "pass"
 			directionA.Code = "direction_a_grant_verified"
 		}
+	}
+	if len(form.DirectionA.RedirectURIs) == 0 {
+		directionA.Status, directionA.Code = "not_applicable", "not_declared"
 	}
 	cases = append(cases, directionA)
 	if form.DirectionA.LoginEnabled {

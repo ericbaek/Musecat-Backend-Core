@@ -2,25 +2,38 @@
 
 Connect a user's Musecat account once with `account:access` to use general user features on their behalf.
 Management functions and account-security operations are excluded, including for staff accounts.
-This document describes the feature-branch implementation, not a deployment announcement.
-The development server URL and application credentials will be supplied separately; no live URL
-is specified here. All example domains are placeholders.
-Musecat is the OAuth authorization server. Your server is the OAuth client. Each direction has its own grant and tokens. A proposed reciprocal one-step flow can coordinate
-both under an explicit bilateral consent agreement; the current generic OAuth flow does not do that.
-See [`joint-connections.md`](joint-connections.md) in the source handoff for design and implemented
-server-only state preparation. The implementation supports registered
+The development environment uses [Musecat Preview](https://preview.musecat.app) and OAuth issuer
+`https://db-dev.musecat.app`. Register development applications in the
+[Developer Center](https://preview.musecat.app/kr/developer); application credentials are issued
+there after review. Other example domains in this guide are placeholders.
+Musecat is the OAuth authorization server for Direction A. Your server is the OAuth client.
+Direction B lets Musecat connect to your authorization server and read your users' records.
+Each direction has its own grant and tokens. The implemented reciprocal one-step flow coordinates
+both under explicit bilateral consent; independent single-direction OAuth remains available.
+See [`joint-connections.md`](joint-connections.md) and the
+[partner integration specification](partner-integration-spec.md) for consent and server endpoints.
+The implementation supports registered
 confidential server applications using Authorization Code with PKCE S256 and HTTP Basic client
 authentication. Opt-in OpenID Connect login is documented in [Sign in with Musecat](sign-in-with-musecat.md).
 The readonly login scope bundle is `openid profile arcade:read`; the general API delegation flow below uses `account:access`.
 
 ## Register your application
 
-Ask the Musecat operator to register your application's immutable ID, display name, description,
-exact HTTPS callback URLs and permitted scopes (normally `["account:access"]`). Receive the client ID and a random client secret
-of at least 32 characters through a private channel. Keep the secret, access tokens and refresh
-tokens on your server. Your browser should hold only your own application's session cookie.
-There is no public dynamic registration, password grant, implicit grant or browser-only client.
-No partner is hardcoded. CHUNITHM Info and future rhythm.info registrations use explicit configuration.
+Create an application in Developer Center with an immutable partner ID, display name, contact
+and the direction you need. Direction A requires exact HTTPS callback URLs. Submit it for operator
+review, then generate its Musecat client secret once approved. Opt into Sign in with Musecat if
+you need the readonly `openid profile arcade:read` scope bundle.
+
+A Direction B-only application needs no Direction A callback or Musecat-issued client secret.
+Declare your OAuth/records endpoints and service scopes, submit for review, and store your
+partner-issued credentials for Musecat in the application's Direction B settings. Joint consent
+requires both directions and its separate server keys. See
+[Developer Center](developer-center.md) for the registration contract.
+
+Keep client secrets, access tokens and refresh tokens on your server. Your browser should hold
+only your own application's session cookie. Developer Center self-service registration still
+requires operator approval; there is no unauthenticated OAuth dynamic registration, password
+grant, implicit grant or browser-only client. No partner is hardcoded.
 A change to a client's registered configuration invalidates existing grants until reapproval.
 Registration epochs are persisted at startup; disabling a client and later restoring the same
 configuration cannot revive its previous tokens. Deploy the same registry on all instances.

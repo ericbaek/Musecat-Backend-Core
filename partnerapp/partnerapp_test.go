@@ -567,3 +567,138 @@ func TestLoginCapabilityRequiresApprovalAndDoesNotUpgradeExistingClients(t *test
 		}
 	}
 }
+
+func TestDirectionBOnlyLifecycle(t *testing.T) {
+	f := newFixture(t)
+	conns, err := connections.NewManager(nil, []byte(strings.Repeat("k", 32)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := partnerapp.NewService(f.manager, conns, nil, "")
+	form := validForm("records_only")
+	form.DirectionA.RedirectURIs = nil
+	form.DirectionB = fullB()
+	if err := form.Validate(); err != nil {
+		t.Fatal("B-only rejected", err)
+	}
+	for _, kind := range []string{"login", "joint", "invalid_b"} {
+		bad := form
+		switch kind {
+		case "login":
+			bad.DirectionA.LoginEnabled = true
+		case "joint":
+			bad.Joint = &partnerapp.Joint{Enabled: true, Manifests: []string{partnerapp.JointManifest}, JointURL: "https://p.example/joint", ConnectStartURL: "https://p.example/connect"}
+		case "invalid_b":
+			bad.DirectionB = &partnerapp.DirectionB{}
+		}
+		err := bad.Validate()
+		if err == nil {
+			t.Fatalf("invalid %s B-only accepted", kind)
+		}
+		if kind != "invalid_b" {
+			var fields partnerapp.FieldErrors
+			if !errors.As(err, &fields) || fields["direction_a.redirect_uris"] != "requires_direction_a" {
+				t.Fatalf("%s missing explicit Direction A requirement: %v", kind, err)
+			}
+		}
+	}
+	a, err := service.Create(f.app, f.owner.Id, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.DirectionADeclared || a.DirectionALive || a.Live || !a.DirectionBDeclared {
+		t.Fatal("draft capabilities", a)
+	}
+	creds := partnerapp.Credentials{ClientID: "musecat-records", ClientSecret: strings.Repeat("b", 40)}
+	if _, err = service.SetCredentials(f.app, f.owner.Id, a.ID, creds); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Submit(f.app, f.owner.Id, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	a, err = service.Approve(f.app, f.operator.Id, a.ID, "B only")
+	if err != nil || !a.Live || !a.DirectionBLive || a.DirectionALive || a.HasSecret {
+		t.Fatal("approval", a, err)
+	}
+	if len(conns.Providers()) != 1 {
+		t.Fatal("B provider missing")
+	}
+	if _, ok := f.manager.Client(form.PartnerID); ok {
+		t.Fatal("B-only became OAuth client")
+	}
+	if _, _, err = service.GenerateSecret(f.app, f.owner.Id, a.ID); !errors.Is(err, partnerapp.ErrState) {
+		t.Fatal("B-only issued A secret", err)
+	}
+	// Persisted state reloads without an A secret or client registration.
+	if err = service.Sync(f.app); err != nil {
+		t.Fatal(err)
+	}
+	console, err := service.Console(f.app, f.owner.Id, a.ID, 1)
+	if err != nil || len(console.Scopes) != 0 || len(console.RedirectURIs) != 0 || console.ConnectedCount != 0 {
+		t.Fatal("B-only console", console, err)
+	}
+	if a, err = service.Suspend(f.app, f.operator.Id, a.ID, "pause"); err != nil || a.Live || len(conns.Providers()) != 0 {
+		t.Fatal("suspend", a, err)
+	}
+	if _, err = service.SetCredentials(f.app, f.owner.Id, a.ID, creds); !errors.Is(err, partnerapp.ErrState) {
+		t.Fatal("suspended credential write", err)
+	}
+	if a, err = service.Reinstate(f.app, f.operator.Id, a.ID, "resume"); err != nil || !a.Live || len(conns.Providers()) != 1 {
+		t.Fatal("reinstate", a, err)
+	}
+	if a, err = service.ClearCredentials(f.app, f.owner.Id, a.ID); err != nil || a.Live || a.DirectionBLive || len(conns.Providers()) != 0 {
+		t.Fatal("clear credentials", a, err)
+	}
+	if a, err = service.SetCredentials(f.app, f.owner.Id, a.ID, creds); err != nil || !a.Live {
+		t.Fatal("restore credentials", a, err)
+	}
+}
+
+func TestRemovingDirectionADisablesExistingClient(t *testing.T) {
+	f := newFixture(t)
+	conns, err := connections.NewManager(nil, []byte(strings.Repeat("k", 32)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := partnerapp.NewService(f.manager, conns, nil, "")
+	form := validForm("switch_to_b")
+	form.DirectionB = fullB()
+	a, err := service.Create(f.app, f.owner.Id, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Submit(f.app, f.owner.Id, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Approve(f.app, f.operator.Id, a.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = service.GenerateSecret(f.app, f.owner.Id, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.manager.Client(form.PartnerID); !ok {
+		t.Fatal("A client absent")
+	}
+	form.DirectionA.RedirectURIs = nil
+	if _, err = service.Update(f.app, f.owner.Id, a.ID, form); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.manager.Client(form.PartnerID); !ok {
+		t.Fatal("unapproved edit disabled A")
+	}
+	if _, err = service.Submit(f.app, f.owner.Id, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Approve(f.app, f.operator.Id, a.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.manager.Client(form.PartnerID); ok {
+		t.Fatal("stored old secret reactivated A for B-only")
+	}
+	if err = service.Sync(f.app); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = service.GenerateSecret(f.app, f.owner.Id, a.ID); !errors.Is(err, partnerapp.ErrState) {
+		t.Fatal("B-only rotated old secret", err)
+	}
+}

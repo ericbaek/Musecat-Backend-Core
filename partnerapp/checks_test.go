@@ -375,3 +375,42 @@ func TestJointConformanceDoesNotInferFailureScenariosFromHappyPath(t *testing.T)
 	}
 	t.Fatal("staging failure scenarios omitted")
 }
+
+func TestConformanceDirectionBOnlyDoesNotRequireDirectionAGrant(t *testing.T) {
+	f := newFixture(t)
+	form := validForm("b_only_checks")
+	form.DirectionA.RedirectURIs = nil
+	form.DirectionB = fullB()
+	a, err := f.service.Create(f.app, f.owner.Id, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.service.QueueChecks(f.app, f.owner.Id, a.ID, false, partnerapp.CheckFixtures{}); err != nil {
+		t.Fatal(err)
+	}
+	runner := partnerapp.NewCheckRunner(&http.Client{Transport: checkTransport(func(*http.Request) (*http.Response, error) {
+		return checkJSON(401, map[string]string{"error": "invalid_client"}), nil
+	})})
+	if err = f.service.ProcessChecks(context.Background(), f.app, 1, runner); err != nil {
+		t.Fatal(err)
+	}
+	reports, err := f.service.CheckReports(f.app, f.owner.Id, a.ID, false)
+	if err != nil || len(reports) != 1 {
+		t.Fatal(reports, err)
+	}
+	found := false
+	for _, c := range reports[0].Cases {
+		if c.ID == "oauth.direction_a_roundtrip" {
+			found = true
+			if c.Status != "not_applicable" || c.Code != "not_declared" {
+				t.Fatal("A grant required for B-only", c)
+			}
+		}
+		if strings.HasPrefix(c.ID, "callback.transport") {
+			t.Fatal("B-only A callback probe", c)
+		}
+	}
+	if !found {
+		t.Fatal("missing explicit A applicability result")
+	}
+}

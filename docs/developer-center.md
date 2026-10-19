@@ -125,9 +125,11 @@ draft ──submit──▶ submitted ──automated checks──▶ ready for 
 - Form matches `musecat-partner-onboarding/v1` schema; all URLs HTTPS, no query/fragment/userinfo.
 - `partner_id` unique and not reserved; display names present.
 - `services[].id` exist in the spec §1.1 registry.
-- Direction A: 1–8 redirect URIs, exact strings.
+- At least one direction is required. Direction A: 1–8 redirect URIs, exact strings.
+  B-only apps omit `direction_a` or use empty redirects; no Musecat OAuth secret is issued.
+  `direction_a.login_enabled` requires nonempty Direction A redirects.
 - Direction B present ⇒ all five endpoints plus `records_url`, `identity_scope`, ≥ 1 service.
-- `joint.enabled` ⇒ `direction_b` present, `joint_url`, `connect_start_url`, ≥ 1 manifest Musecat supports, partner-issued `musecat_to_partner_key` ≥ 32 bytes.
+- `joint.enabled` ⇒ nonempty Direction A redirects and `direction_b` present, `joint_url`, `connect_start_url`, ≥ 1 manifest Musecat supports, partner-issued `musecat_to_partner_key` ≥ 32 bytes.
 - Partner-issued secrets are accepted only on submit/rotate, encrypted immediately, never echoed.
 
 ### 5.2 Automated checks (implemented)
