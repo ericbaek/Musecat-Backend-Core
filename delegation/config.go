@@ -41,12 +41,14 @@ var pkce = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var verifierPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
 
 type Client struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Secret       string   `json:"secret"`
-	RedirectURIs []string `json:"redirect_uris"`
-	Scopes       []string `json:"scopes"`
+	Development    bool     `json:"development,omitempty"`
+	AllowedUserIDs []string `json:"allowed_user_ids,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Description    string   `json:"description"`
+	Secret         string   `json:"secret"`
+	RedirectURIs   []string `json:"redirect_uris"`
+	Scopes         []string `json:"scopes"`
 	// SecretHash is the hex SHA-256 of an already generated secret. Dynamic
 	// registrations (Developer Center) supply it instead of Secret so plaintext
 	// never leaves the one-time generation response.
@@ -223,6 +225,7 @@ func buildClients(issuer string, static, dynamic []Client) (map[string]registere
 	out := map[string]registeredClient{}
 	for _, c := range append(append([]Client(nil), static...), dynamic...) {
 		c.RedirectURIs = append([]string(nil), c.RedirectURIs...)
+		c.AllowedUserIDs = append([]string(nil), c.AllowedUserIDs...)
 		secretHash := c.SecretHash
 		if c.Secret != "" {
 			if len(c.Secret) < 32 || len(c.Secret) > 256 {
@@ -238,7 +241,7 @@ func buildClients(issuer string, static, dynamic []Client) (map[string]registere
 		}
 		seen := map[string]bool{}
 		for _, u := range c.RedirectURIs {
-			if !validHTTPS(u) || seen[u] {
+			if (!validHTTPS(u) && !(c.Development && validLoopbackRedirect(u))) || seen[u] {
 				return nil, fmt.Errorf("invalid OAuth redirect URI")
 			}
 			seen[u] = true
@@ -318,4 +321,22 @@ func (m *Manager) CheckUser(app core.App, user *core.Record) error {
 		return oauthError("access_denied")
 	}
 	return m.checkUser(app, user)
+}
+
+func (c Client) AllowsUser(userID string) bool {
+	if !c.Development {
+		return true
+	}
+	return userID != "" && contains(c.AllowedUserIDs, userID)
+}
+func validLoopbackRedirect(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" || u.User != nil || u.Fragment != "" || u.RawQuery != "" || u.ForceQuery {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }

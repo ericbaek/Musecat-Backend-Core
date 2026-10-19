@@ -30,16 +30,19 @@ type Service struct {
 }
 
 type Provider struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Issuer           string `json:"issuer"`
-	AuthorizationURL string `json:"authorization_url"`
-	TokenURL         string `json:"token_url"`
-	UserInfoURL      string `json:"userinfo_url"`
-	SubjectField     string `json:"subject_field"`
-	ClientID         string `json:"client_id"`
-	ClientSecret     string `json:"client_secret"`
-	RedirectURI      string `json:"redirect_uri"`
+	// Development providers are usable only by the owner and explicitly assigned testers.
+	Development      bool     `json:"development,omitempty"`
+	AllowedUserIDs   []string `json:"allowed_user_ids,omitempty"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Issuer           string   `json:"issuer"`
+	AuthorizationURL string   `json:"authorization_url"`
+	TokenURL         string   `json:"token_url"`
+	UserInfoURL      string   `json:"userinfo_url"`
+	SubjectField     string   `json:"subject_field"`
+	ClientID         string   `json:"client_id"`
+	ClientSecret     string   `json:"client_secret"`
+	RedirectURI      string   `json:"redirect_uri"`
 	// client_secret_basic or client_secret_post; no automatic authentication retries.
 	ClientAuthMethod string    `json:"client_auth_method"`
 	RequireIssuer    bool      `json:"require_issuer"`
@@ -239,12 +242,21 @@ func validScopes(scopes []string) bool {
 	return len(scopes) <= 64
 }
 
-func (m *Manager) Providers() []ProviderInfo {
+func (p Provider) AllowsUser(userID string) bool {
+	return !p.Development || (userID != "" && slices.Contains(p.AllowedUserIDs, userID))
+}
+
+func (m *Manager) Providers() []ProviderInfo { return m.ProvidersFor("") }
+
+func (m *Manager) ProvidersFor(userID string) []ProviderInfo {
 	out := []ProviderInfo{}
 	if m == nil {
 		return out
 	}
 	for _, p := range m.snapshot() {
+		if !p.AllowsUser(userID) {
+			continue
+		}
 		services := slices.Clone(p.Services)
 		for i := range services {
 			services[i].Scopes = slices.Clone(services[i].Scopes)

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -43,6 +44,10 @@ type Credentials struct {
 // Application is the safe projection returned to owners and operators. It never
 // includes secret material; HasSecret only reports that one has been generated.
 type Application struct {
+	Publication        string    `json:"publication"`
+	ReviewStatus       string    `json:"review_status"`
+	Testers            []string  `json:"testers"`
+	TesterUsernames    []string  `json:"tester_usernames"`
 	ID                 string    `json:"id"`
 	PartnerID          string    `json:"partner_id"`
 	Owner              string    `json:"owner"`
@@ -154,10 +159,11 @@ func directionALive(r *core.Record) bool {
 	return f != nil && len(f.DirectionA.RedirectURIs) > 0 && r.GetString("status") != StatusSuspended && r.GetString("secret_hash") != ""
 }
 
-func (s *Service) project(r *core.Record, includeContact bool) Application {
+func (s *Service) project(app core.App, r *core.Record, includeContact bool) Application {
 	submitted := formOf(r, "submitted_form")
 	approved := formOf(r, "approved_form")
 	a := Application{
+		Publication: publication(r), ReviewStatus: reviewStatus(r), Testers: r.GetStringSlice("testers"), TesterUsernames: []string{},
 		ID: r.Id, PartnerID: r.GetString("partner_id"), Owner: r.GetString("owner"), Status: r.GetString("status"),
 		Live: directionALive(r) || s.directionBLive(r), Submitted: submitted, Approved: approved, HasSecret: r.GetString("secret_hash") != "",
 		DirectionADeclared:       (approved != nil && len(approved.DirectionA.RedirectURIs) > 0) || (submitted != nil && len(submitted.DirectionA.RedirectURIs) > 0),
@@ -170,6 +176,11 @@ func (s *Service) project(r *core.Record, includeContact bool) Application {
 		HasPartnerKey:            r.GetString("partner_key_hash") != "",
 		JointLive:                s.jointLive(r),
 		ReviewNote:               r.GetString("review_note"), Created: r.GetDateTime("created").Time().Format(time.RFC3339), Updated: r.GetDateTime("updated").Time().Format(time.RFC3339),
+	}
+	for _, id := range a.Testers {
+		if u, err := app.FindRecordById("user", id); err == nil {
+			a.TesterUsernames = append(a.TesterUsernames, u.GetString("username"))
+		}
 	}
 	if a.DirectionBDeclared {
 		a.MusecatRedirectURI = s.redirectURI(a.PartnerID)
@@ -267,6 +278,8 @@ func (s *Service) Create(app core.App, ownerID string, form Form) (Application, 
 		r.Set("partner_id", form.PartnerID)
 		r.Set("owner", ownerID)
 		r.Set("status", StatusApproved)
+		r.Set("publication", "development")
+		r.Set("review_status", "none")
 		r.Set("submitted_form", formJSON(&form))
 		if err := tx.Save(r); err != nil {
 			if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -280,7 +293,7 @@ func (s *Service) Create(app core.App, ownerID string, form Form) (Application, 
 		if err := logEvent(tx, r.Id, ownerID, "created", ""); err != nil {
 			return err
 		}
-		out = s.project(r, true)
+		out = s.project(app, r, true)
 		return nil
 	})
 	if err != nil {
@@ -296,7 +309,7 @@ func (s *Service) List(app core.App, ownerID string) ([]Application, error) {
 	}
 	out := make([]Application, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, s.project(r, true))
+		out = append(out, s.project(app, r, true))
 	}
 	return out, nil
 }
@@ -306,10 +319,10 @@ func (s *Service) Get(app core.App, ownerID, id string) (Application, error) {
 	if err != nil {
 		return Application{}, err
 	}
-	return s.project(r, true), nil
+	return s.project(app, r, true), nil
 }
 
-// Update validates and activates the replacement atomically. partner_id remains immutable.
+// Update activates development edits or stores a proposed production form. partner_id remains immutable.
 func (s *Service) Update(app core.App, ownerID, id string, form Form) (Application, error) {
 	if err := form.Validate(); err != nil {
 		return Application{}, err
@@ -337,13 +350,18 @@ func (s *Service) Update(app core.App, ownerID, id string, form Form) (Applicati
 			r.Set("partner_id", form.PartnerID)
 		}
 		r.Set("submitted_form", formJSON(&form))
-		if err := s.activate(tx, r, ownerID, ""); err != nil {
+		r.Set("review_status", "none")
+		if publication(r) == "production" {
+			if err := tx.Save(r); err != nil {
+				return err
+			}
+		} else if err := s.activate(tx, r, ownerID, ""); err != nil {
 			return err
 		}
 		if err := logEvent(tx, r.Id, ownerID, "updated", ""); err != nil {
 			return err
 		}
-		out = s.project(r, true)
+		out = s.project(app, r, true)
 		return nil
 	})
 	if err != nil {
@@ -352,7 +370,7 @@ func (s *Service) Update(app core.App, ownerID, id string, form Form) (Applicati
 	return out, s.Sync(app)
 }
 
-// Submit is retained for older clients. Registration no longer requires review.
+// Submit requests production review; development access remains available.
 func (s *Service) Submit(app core.App, ownerID, id string) (Application, error) {
 	var out Application
 	err := app.RunInTransaction(func(tx core.App) error {
@@ -363,21 +381,27 @@ func (s *Service) Submit(app core.App, ownerID, id string) (Application, error) 
 		if r.GetString("status") == StatusSuspended {
 			return ErrState
 		}
-		if r.GetString("status") != StatusApproved {
-			if err := s.activate(tx, r, ownerID, ""); err != nil {
+		form := formOf(r, "submitted_form")
+		if form == nil {
+			return ErrState
+		}
+		if err := form.ValidateProduction(); err != nil {
+			return err
+		}
+		if reviewStatus(r) != "submitted" {
+			r.Set("review_status", "submitted")
+			r.Set("review_note", "")
+			if err := tx.Save(r); err != nil {
 				return err
 			}
 			if err := logEvent(tx, r.Id, ownerID, "submitted", ""); err != nil {
 				return err
 			}
 		}
-		out = s.project(r, true)
+		out = s.project(tx, r, true)
 		return nil
 	})
-	if err != nil {
-		return Application{}, err
-	}
-	return out, s.Sync(app)
+	return out, err
 }
 
 // GenerateSecret issues a new client secret for an approved application and
@@ -476,7 +500,7 @@ func (s *Service) SetCredentials(app core.App, ownerID, id string, c Credentials
 		if err := logEvent(tx, r.Id, ownerID, "credentials_set", ""); err != nil {
 			return err
 		}
-		out = s.project(r, true)
+		out = s.project(app, r, true)
 		return nil
 	})
 	if err != nil {
@@ -500,7 +524,7 @@ func (s *Service) ClearCredentials(app core.App, ownerID, id string) (Applicatio
 		if err := logEvent(tx, r.Id, ownerID, "credentials_cleared", ""); err != nil {
 			return err
 		}
-		out = s.project(r, true)
+		out = s.project(app, r, true)
 		return nil
 	})
 	if err != nil {
@@ -541,7 +565,7 @@ func (s *Service) SetJointKey(app core.App, ownerID, id, key string) (Applicatio
 		if err := logEvent(tx, r.Id, ownerID, "joint_key_set", ""); err != nil {
 			return err
 		}
-		out = s.project(r, true)
+		out = s.project(app, r, true)
 		return nil
 	})
 	if err != nil {
@@ -601,6 +625,9 @@ func (s *Service) generateServerKey(app core.App, ownerID, id string, recordsOnl
 
 func (s *Service) Queue(app core.App, status string) ([]Application, error) {
 	filter, params := "status = {:s}", dbx.Params{"s": status}
+	if status == StatusSubmitted {
+		filter = "review_status = {:s}"
+	}
 	if status == "" {
 		filter, params = "status != {:d}", dbx.Params{"d": StatusDraft}
 	}
@@ -610,7 +637,7 @@ func (s *Service) Queue(app core.App, status string) ([]Application, error) {
 	}
 	out := make([]Application, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, s.project(r, true))
+		out = append(out, s.project(app, r, true))
 	}
 	return out, nil
 }
@@ -620,7 +647,7 @@ func (s *Service) Inspect(app core.App, id string) (Application, error) {
 	if err != nil {
 		return Application{}, err
 	}
-	return s.project(r, true), nil
+	return s.project(app, r, true), nil
 }
 
 // activate installs the validated snapshot while preserving registry collision checks.
@@ -667,8 +694,8 @@ func (s *Service) activate(app core.App, r *core.Record, actorID, note string) e
 	return nil
 }
 
-// Approve is a compatibility action for legacy queued apps. New registrations
-// are already active; operators continue to suspend and reinstate them.
+// Approve publishes the current requested production snapshot. Development access
+// is immediate, but use by all users requires this independent operator decision.
 func (s *Service) Approve(app core.App, operatorID, id, note string) (Application, error) {
 	var out Application
 	err := app.RunInTransaction(func(tx core.App) error {
@@ -676,20 +703,25 @@ func (s *Service) Approve(app core.App, operatorID, id, note string) (Applicatio
 		if err != nil {
 			return err
 		}
-		if r.GetString("status") == StatusApproved {
-			out = s.project(r, true)
-			return nil
-		}
-		if r.GetString("status") != StatusSubmitted {
+		if r.GetString("status") == StatusSuspended || reviewStatus(r) != "submitted" {
 			return ErrState
 		}
+		form := formOf(r, "submitted_form")
+		if form == nil {
+			return ErrState
+		}
+		if err := form.ValidateProduction(); err != nil {
+			return err
+		}
+		r.Set("publication", "production")
+		r.Set("review_status", "none")
 		if err := s.activate(tx, r, operatorID, note); err != nil {
 			return err
 		}
 		if err := logEvent(tx, r.Id, operatorID, "approved", note); err != nil {
 			return err
 		}
-		out = s.project(r, true)
+		out = s.project(app, r, true)
 		return nil
 	})
 	if err != nil {
@@ -724,7 +756,7 @@ func (s *Service) transition(app core.App, operatorID, id, note, from, to, kind 
 		if err := logEvent(tx, r.Id, operatorID, kind, note); err != nil {
 			return err
 		}
-		out = s.project(r, true)
+		out = s.project(app, r, true)
 		return nil
 	})
 	if err != nil {
@@ -734,7 +766,27 @@ func (s *Service) transition(app core.App, operatorID, id, note, from, to, kind 
 }
 
 func (s *Service) Reject(app core.App, operatorID, id, note string) (Application, error) {
-	return s.transition(app, operatorID, id, note, StatusSubmitted, StatusRejected, "rejected")
+	var out Application
+	err := app.RunInTransaction(func(tx core.App) error {
+		r, err := record(tx, id)
+		if err != nil {
+			return err
+		}
+		if r.GetString("status") == StatusSuspended || reviewStatus(r) != "submitted" {
+			return ErrState
+		}
+		r.Set("review_status", "rejected")
+		r.Set("review_note", note)
+		if err := tx.Save(r); err != nil {
+			return err
+		}
+		if err := logEvent(tx, r.Id, operatorID, "rejected", note); err != nil {
+			return err
+		}
+		out = s.project(tx, r, true)
+		return nil
+	})
+	return out, err
 }
 
 // Suspend stops the live registration immediately; every token for the client fails.
@@ -742,18 +794,9 @@ func (s *Service) Suspend(app core.App, operatorID, id, note string) (Applicatio
 	return s.transition(app, operatorID, id, note, StatusApproved, StatusSuspended, "suspended", StatusSubmitted, StatusRejected, StatusDraft)
 }
 
-// Reinstate restores the previously approved form without issuing a new secret. If the
-// owner edited the form while suspended, the edit returns to draft for review.
+// Reinstate restores the same active snapshot and audience; pending review stays separate.
 func (s *Service) Reinstate(app core.App, operatorID, id, note string) (Application, error) {
-	r, err := record(app, id)
-	if err != nil {
-		return Application{}, err
-	}
-	to := StatusApproved
-	if submitted := formOf(r, "submitted_form"); submitted != nil && formHash(submitted) != r.GetString("approved_hash") {
-		to = StatusDraft
-	}
-	return s.transition(app, operatorID, id, note, StatusSuspended, to, "reinstated")
+	return s.transition(app, operatorID, id, note, StatusSuspended, StatusApproved, "reinstated")
 }
 
 // --- Registry ---
@@ -782,7 +825,7 @@ func (s *Service) Clients(app core.App) ([]delegation.Client, error) {
 			scopes = append(scopes, delegation.OpenID, delegation.Profile, "arcade:read")
 		}
 		out = append(out, delegation.Client{
-			ID: f.PartnerID, Name: f.DisplayName.En, Description: f.Description.En,
+			ID: f.PartnerID, Name: f.DisplayName.En, Description: f.Description.En, Development: publication(r) != "production", AllowedUserIDs: runtimeAudience(r),
 			RedirectURIs: f.DirectionA.RedirectURIs, Scopes: scopes,
 			SecretHash: r.GetString("secret_hash"),
 		})
@@ -815,7 +858,7 @@ func (s *Service) Providers(app core.App) ([]connections.Provider, error) {
 			services = append(services, connections.Service{ID: svc.ID, Name: ServiceName(svc.ID), Scopes: []string{svc.Scope}})
 		}
 		out = append(out, connections.Provider{
-			ID: f.PartnerID, Name: f.DisplayName.En, Issuer: f.DirectionB.Issuer,
+			ID: f.PartnerID, Name: f.DisplayName.En, Issuer: f.DirectionB.Issuer, Development: publication(r) != "production", AllowedUserIDs: runtimeAudience(r),
 			AuthorizationURL: f.DirectionB.AuthorizationURL, TokenURL: f.DirectionB.TokenURL, UserInfoURL: f.DirectionB.UserInfoURL,
 			SubjectField: "sub", ClientID: c.ClientID, ClientSecret: c.ClientSecret, RedirectURI: s.redirectURI(f.PartnerID),
 			ClientAuthMethod: "client_secret_basic", RequireIssuer: true, Scopes: []string{f.DirectionB.IdentityScope}, Services: services,
@@ -867,7 +910,7 @@ func (s *Service) Version(app core.App) (string, error) {
 	}
 	h := sha256.New()
 	for _, r := range rows {
-		h.Write([]byte(fmt.Sprint(s.activeOwner(app, r)) + "|" + r.GetString("partner_id") + "|" + r.GetString("approved_hash") + "|" + r.GetString("secret_hash") + "|" + hashSecret(r.GetString("direction_b_credentials")) + "|" + hashSecret(r.GetString("joint_credentials")) + "|" + r.GetString("partner_key_hash") + "\n"))
+		h.Write([]byte(fmt.Sprint(s.activeOwner(app, r)) + "|" + r.GetString("partner_id") + "|" + r.GetString("approved_hash") + "|" + r.GetString("secret_hash") + "|" + hashSecret(r.GetString("direction_b_credentials")) + "|" + hashSecret(r.GetString("joint_credentials")) + "|" + r.GetString("partner_key_hash") + "|" + publication(r) + "|" + strings.Join(audience(r), ",") + "\n"))
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -946,4 +989,90 @@ func (s *Service) AuthenticateRecordsKey(app core.App, key string) (string, erro
 		return "", invalid
 	}
 	return r.GetString("partner_id"), nil
+}
+
+func publication(r *core.Record) string {
+	if r.GetString("publication") == "production" {
+		return "production"
+	}
+	return "development"
+}
+func reviewStatus(r *core.Record) string {
+	if v := r.GetString("review_status"); v != "" {
+		return v
+	}
+	return "none"
+}
+func audience(r *core.Record) []string {
+	out := append([]string{r.GetString("owner")}, r.GetStringSlice("testers")...)
+	sort.Strings(out)
+	return out
+}
+func (s *Service) CanUse(app core.App, partnerID, userID string) bool {
+	r, err := app.FindFirstRecordByFilter(Applications, "partner_id={:p}", dbx.Params{"p": partnerID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return true
+	}
+	return err == nil && r.GetString("status") != StatusSuspended && s.activeOwner(app, r) && (publication(r) == "production" || containsID(audience(r), userID))
+}
+func (s *Service) IsProduction(app core.App, partnerID string) bool {
+	r, err := app.FindFirstRecordByFilter(Applications, "partner_id={:p}", dbx.Params{"p": partnerID})
+	return errors.Is(err, sql.ErrNoRows) || (err == nil && publication(r) == "production")
+}
+func containsID(ids []string, id string) bool {
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+func (s *Service) SetTesters(app core.App, ownerID, id string, usernames []string) (Application, error) {
+	if len(usernames) > 10 {
+		return Application{}, FieldErrors{"usernames": "count"}
+	}
+	var out Application
+	err := app.RunInTransaction(func(tx core.App) error {
+		r, err := owned(tx, ownerID, id)
+		if err != nil {
+			return err
+		}
+		if r.GetString("status") == StatusSuspended {
+			return ErrState
+		}
+		ids := []string{}
+		seen := map[string]bool{}
+		for _, name := range usernames {
+			name = strings.TrimSpace(name)
+			if name == "" || seen[name] {
+				return FieldErrors{"usernames": "invalid"}
+			}
+			seen[name] = true
+			u, err := tx.FindFirstRecordByFilter("user", "username={:n}", dbx.Params{"n": name})
+			if err != nil || u.Id == ownerID || u.GetBool("withdrawn") || (s.manager != nil && s.manager.CheckUser(tx, u) != nil) {
+				return FieldErrors{"usernames": "invalid"}
+			}
+			ids = append(ids, u.Id)
+		}
+		r.Set("testers", ids)
+		if err := tx.Save(r); err != nil {
+			return err
+		}
+		if err := logEvent(tx, r.Id, ownerID, "updated", ""); err != nil {
+			return err
+		}
+		out = s.project(tx, r, true)
+		return nil
+	})
+	if err != nil {
+		return Application{}, err
+	}
+	return out, s.Sync(app)
+}
+
+func runtimeAudience(r *core.Record) []string {
+	if publication(r) == "production" {
+		return nil
+	}
+	return audience(r)
 }

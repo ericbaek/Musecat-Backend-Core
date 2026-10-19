@@ -1,6 +1,7 @@
 package partnerapp
 
 import (
+	"net"
 	"net/mail"
 	"net/url"
 	"regexp"
@@ -78,7 +79,7 @@ type Joint struct {
 }
 
 // Form is the partner-authored part of the onboarding document. Credentials are
-// never part of it: Musecat-issued secrets are generated after approval, and
+// never part of it: Musecat-issued secrets are generated after development registration, and
 // partner-issued credentials are collected when their direction activates.
 type Form struct {
 	Spec         string      `json:"spec"`
@@ -162,7 +163,7 @@ func (f *Form) Validate() error {
 	for i, u := range f.DirectionA.RedirectURIs {
 		u = strings.TrimSpace(u)
 		f.DirectionA.RedirectURIs[i] = u
-		if !httpsURL(u) || seen[u] {
+		if (!httpsURL(u) && !loopbackRedirect(u)) || seen[u] {
 			errs["direction_a.redirect_uris."+itoa(i)] = "invalid"
 		}
 		seen[u] = true
@@ -237,4 +238,43 @@ func itoa(i int) string {
 		i /= 10
 	}
 	return string(b)
+}
+
+// loopbackRedirect permits exact local HTTP callbacks for development clients only.
+func loopbackRedirect(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
+}
+
+// ValidateProduction rejects local callback exceptions before production review.
+func (f *Form) ValidateProduction() error {
+	if err := f.Validate(); err != nil {
+		return err
+	}
+	for _, u := range f.DirectionA.RedirectURIs {
+		if !httpsURL(u) || isLoopbackHost(u) {
+			return FieldErrors{"direction_a.redirect_uris": "production_requires_https"}
+		}
+	}
+	return nil
+}
+
+func isLoopbackHost(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

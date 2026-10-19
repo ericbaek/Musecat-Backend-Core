@@ -25,7 +25,11 @@ import (
 func RegisterRoutes(se *core.ServeEvent, manager *connections.JointManager) {
 	se.Router.GET("/integrations/joint", func(re *core.RequestEvent) error {
 		re.Response.Header().Set("Cache-Control", "no-store")
-		return re.JSON(http.StatusOK, map[string]any{"items": manager.Partners()})
+		userID := ""
+		if re.Auth != nil && re.Auth.Collection().Name == "user" && !re.Auth.GetBool("withdrawn") {
+			userID = re.Auth.Id
+		}
+		return re.JSON(http.StatusOK, map[string]any{"items": manager.PartnersFor(userID)})
 	})
 
 	routes := se.Router.Group("/user/joint").Bind(apis.RequireAuth("user"), user.RequireActiveUser())
@@ -41,7 +45,7 @@ func RegisterRoutes(se *core.ServeEvent, manager *connections.JointManager) {
 		if err := decode(re, &in); err != nil {
 			return err
 		}
-		target, correlation, err := manager.BeginURL(in.Partner, in.ReturnTo)
+		target, correlation, err := manager.BeginURLFor(re.Auth.Id, in.Partner, in.ReturnTo)
 		return respond(re, map[string]string{"start_url": target, "correlation_id": correlation}, err)
 	}).Bind(apis.BodyLimit(4 << 10))
 	routes.POST("/lookup", func(re *core.RequestEvent) error {

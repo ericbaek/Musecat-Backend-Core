@@ -403,3 +403,36 @@ func TestParseJointConfig(t *testing.T) {
 		t.Fatal("registry without OAuth clients accepted")
 	}
 }
+
+func TestDevelopmentJointAudienceDiscoveryAndStart(t *testing.T) {
+	f, _, d, a := jointFixture(t)
+	p := provider("development")
+	p.Development = true
+	p.AllowedUserIDs = []string{f.user.Id}
+	if err := f.manager.Reload([]connections.Provider{p}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := connections.NewJointManager(f.manager, d, []connections.JointPartner{{ID: p.ID, ClientID: "chuni", Provider: p.ID, Services: []string{"chunithm"}, JointURL: "https://development.example/joint", ConnectStartURL: "https://development.example/start", Manifests: []string{connections.JointManifest}, OutboundKey: strings.Repeat("o", 43), InboundKeyHash: strings.Repeat("a", 64)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Partners()) != 0 || len(m.PartnersFor(f.user.Id)) != 1 {
+		t.Fatal("joint development discovery leaked or omitted")
+	}
+	if _, _, err := m.BeginURL(p.ID, "https://musecat.example/kr/connect/development"); err == nil {
+		t.Fatal("anonymous development start accepted")
+	}
+	if _, _, err := m.BeginURLFor(f.user.Id, p.ID, "https://musecat.example/kr/connect/development"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Start(f.app, a, p.ID, "verified"); err != nil {
+		t.Fatal(err)
+	}
+	p.AllowedUserIDs = nil
+	if err := f.manager.Reload([]connections.Provider{p}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Start(f.app, a, p.ID, "verified"); err == nil {
+		t.Fatal("removed tester joint start accepted")
+	}
+}

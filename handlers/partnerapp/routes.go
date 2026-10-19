@@ -62,6 +62,16 @@ func RegisterRoutes(se *core.ServeEvent, service *partnerapp.Service) {
 		app, err := service.Update(re.App, re.Auth.Id, re.Request.PathValue("id"), form)
 		return respond(re, app, err)
 	}).Bind(apis.BodyLimit(bodyLimit))
+	owner.PUT("/{id}/testers", func(re *core.RequestEvent) error {
+		var in struct {
+			Usernames []string `json:"usernames"`
+		}
+		if err := decode(re, &in); err != nil {
+			return err
+		}
+		out, err := service.SetTesters(re.App, re.Auth.Id, re.Request.PathValue("id"), in.Usernames)
+		return respond(re, out, err)
+	}).Bind(apis.BodyLimit(4096))
 	owner.POST("/{id}/submit", func(re *core.RequestEvent) error {
 		app, err := service.Submit(re.App, re.Auth.Id, re.Request.PathValue("id"))
 		return respond(re, app, err)

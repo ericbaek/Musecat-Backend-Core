@@ -1,7 +1,7 @@
-# Developer Center: immediate self-service registration
+# Developer Center: development registration and production review
 
 The Developer Center registers confidential server applications, external record providers,
-and reciprocal connections without moderator approval. Applications remain subject to user
+and reciprocal connections immediately in development mode. Production use by all users requires operator approval. Applications remain subject to user
 consent, structural validation, credential requirements, automated conformance reports and
 operator suspension. Each Musecat deployment has its own registrations and credentials.
 See [OpenAPI](openapi.yaml), [the partner protocol](partner-integration-spec.md), and
@@ -15,14 +15,14 @@ An active Musecat user may own up to eight applications. Submit the
 URLs must satisfy the HTTPS/host/path rules in the protocol. Credentials never belong in
 this document. Unknown fields and multiple JSON documents are rejected.
 
-A valid create/update immediately installs the active form. The existing wire/storage
+A valid create/update in development mode immediately installs the active form. Only its owner and up to ten designated test accounts can consent or use its tokens/connections. The existing wire/storage
 names `status: approved`, `approved_form`, `approved_hash`, `approved_by` and `approved_at`
 are retained for compatibility; they now record validated registration, normally by the
-owner, rather than an operator endorsement. Registration does not certify a provider.
+owner. `publication` separately distinguishes `development` from operator-approved `production`; `review_status` reports `none`, `submitted` or `rejected`. Registration does not certify a provider.
 
 | Capability | Required before use |
 | --- | --- |
-| Direction A: partner uses Musecat APIs | Exact HTTPS redirects and an owner-generated Musecat client secret |
+| Direction A: partner uses Musecat APIs | Exact HTTPS redirects (development also allows exact HTTP localhost/127.0.0.1/[::1]) and an owner-generated Musecat client secret |
 | Sign in with Musecat | Direction A plus `direction_a.login_enabled: true`; explicit `openid profile` consent |
 | Direction B: Musecat reads partner records | Declared OAuth/records endpoints and services; partner-issued Musecat client credentials |
 | B-only provider | Direction B alone; omit Direction A and Joint; no Musecat OAuth client or client secret |
@@ -39,26 +39,43 @@ is configured but cannot yet authenticate. Missing deployment keys are reported 
 
 ## Updates, suspension and compatibility
 
-`PUT /developer/apps/{id}` validates and activates a replacement atomically, including
-merged registry collision checks against executable-configured and other live providers.
-It never exposes a partially changed configuration. Once registered, `partner_id` cannot
-change. Suspended applications cannot be edited or generate new credentials.
+`PUT /developer/apps/{id}` validates a replacement atomically. Development changes activate
+immediately. Production changes remain in `submitted_form` while the reviewed
+`approved_form` continues serving users. Editing clears any pending review; operators cannot
+approve an obsolete requested snapshot. `partner_id` cannot change after registration.
 
-Changes to the live OAuth client fingerprint invalidate existing grants through persistent
-registration epochs; a partner must obtain user consent again. Changing provider identity,
-endpoints or scopes may invalidate existing connections. Secret rotation replaces the
-OAuth credential immediately. Changing display metadata can also change the OAuth client
-fingerprint; consult the returned live configuration rather than assuming old grants survive.
+`PUT /developer/apps/{id}/testers` accepts `{usernames: [exactUsername, ...]}` for up to ten
+active Musecat accounts. The owner is implicitly included and must not be repeated. Unknown,
+duplicate, withdrawn or restricted accounts are rejected. IDs are stored internally and
+returned with `tester_usernames` for editing. Audience changes invalidate development OAuth
+epochs and provider fingerprints; existing tokens and pending flows cannot bypass removal.
+Production access is unaffected by its optional tester list.
+
+`POST /developer/apps/{id}/submit` requests production review. All Direction-A callbacks
+must be public HTTPS URLs: HTTP loopback exceptions are rejected. Direction-B issuer,
+authorization/token/userinfo/records and Joint server endpoints remain public HTTPS even
+in development on hosted Musecat; use a tunnel or hosted partner server. Loopback is a
+callback exception, never permission for the hosted backend to fetch private addresses.
+
+Operators approve a pending request through `/moderation/developer/apps/{id}/approve`.
+Approval atomically installs the requested form, sets `publication: production` and clears
+review status. Rejection records a note and preserves the previously active audience/form.
+Conformance reports are visible independently and never fabricate user consent. Existing
+pre-policy active registrations are migrated as production to preserve live grants.
+
+Changing the live OAuth fingerprint invalidates grants through persistent epochs. Changing
+provider identity, endpoints, scopes or development audience can invalidate connections.
+Secret rotation replaces the OAuth credential immediately. Suspended applications cannot
+be edited or generate credentials; user consent is always required.
 
 Operators retain the application list, details, conformance reports and audit history under
 `/moderation/developer/apps`. They may suspend and reinstate registrations. Suspension
 removes live clients/providers; owner withdrawal disables owned registrations atomically.
 Reinstatement cannot bypass an inactive owner. Each mutation appends an immutable event.
 
-Legacy `POST /developer/apps/{id}/submit` activates valid old drafts/rejected forms and is
-idempotent for registered apps. Legacy operator `/approve` activates queued forms and is
-idempotent for registered apps. Neither action is required for new applications. `/reject`
-is retained only for old submitted forms, not as a gate for current registration.
+The legacy `status` field remains for active/suspended compatibility. Production review
+uses `review_status`, not `status`. `GET /moderation/developer/apps?status=submitted`
+selects pending production requests. Suspend/reinstate does not silently grant production.
 
 Registries reload immediately on the handling instance; other instances converge within
 one minute. Static executable IDs remain reserved. Registration needs no deployment.

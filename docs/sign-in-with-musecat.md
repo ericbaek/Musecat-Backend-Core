@@ -8,7 +8,7 @@ It follows [OIDC Core](https://openid.net/specs/openid-connect-core-1_0.html) an
 ## Enable an application
 
 In Developer Center, enable **Sign in with Musecat** (`direction_a.login_enabled: true`), register
-exact HTTPS callback URLs. Validated registration and updates activate immediately without operator review. Generate the client
+exact HTTPS callback URLs (development mode also permits exact `http://localhost`, `http://127.0.0.1` and `http://[::1]` callbacks with explicit ports/paths). Development registration and updates activate immediately for the owner and designated testers. Production publication and changes require operator review. Generate the client
 secret once and keep it on the partner server. Enabling login changes the client's allowed scopes/fingerprint and requires existing
 users to reconnect; a form with this flag absent/false keeps its previous registration unchanged.
 The deployment must configure persistent signing keys before OpenID requests can succeed.

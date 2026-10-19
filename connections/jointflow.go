@@ -73,8 +73,16 @@ func sha(v string) string { s := sha256.Sum256([]byte(v)); return hex.EncodeToSt
 
 // BeginURL builds the partner start URL for a connection initiated on Musecat (5.5).
 func (m *JointManager) BeginURL(partner, returnTo string) (string, string, error) {
+	return m.BeginURLFor("", partner, returnTo)
+}
+
+func (m *JointManager) BeginURLFor(userID, partner, returnTo string) (string, string, error) {
+	if m == nil || m.connections == nil {
+		return "", "", ErrUnavailable
+	}
 	p, ok := m.partner(partner)
-	if !ok || p.ConnectStartURL == "" {
+	provider, exists := m.connections.lookup(p.Provider)
+	if !ok || !exists || !provider.AllowsUser(userID) || p.ConnectStartURL == "" {
 		return "", "", ErrUnavailable
 	}
 	target, parseErr := url.Parse(returnTo)
@@ -173,6 +181,9 @@ func (m *JointManager) Lookup(ctx context.Context, app core.App, a Actor, partne
 	if err != nil {
 		return JointLookup{}, err
 	}
+	if !provider.AllowsUser(a.UserID) {
+		return JointLookup{}, ErrUnavailable
+	}
 	if p.JointURL == "" {
 		return JointLookup{}, ErrUnavailable
 	}
@@ -269,7 +280,7 @@ func (m *JointManager) Read(app core.App, a Actor, id string) (JointLookup, erro
 		return JointLookup{}, err
 	}
 	p, provider, config, err := m.config(app, r.GetString("partner"))
-	if err != nil || config != r.GetString("config_hash") || r.GetString("session_hash") != digest(a.Session) || r.GetString("status") != "pending" || !r.GetDateTime("expires").Time().After(time.Now()) {
+	if err != nil || !provider.AllowsUser(a.UserID) || config != r.GetString("config_hash") || r.GetString("session_hash") != digest(a.Session) || r.GetString("status") != "pending" || !r.GetDateTime("expires").Time().After(time.Now()) {
 		return JointLookup{}, ErrInvalid
 	}
 	services := []ServiceInfo{}
@@ -332,7 +343,7 @@ func (m *JointManager) Approve(ctx context.Context, app core.App, a Actor, id st
 		return "", err
 	}
 	p, provider, config, err := m.config(app, r.GetString("partner"))
-	if err != nil || config != r.GetString("config_hash") || r.GetString("session_hash") != digest(a.Session) || r.GetString("status") != "pending" || !r.GetDateTime("expires").Time().After(time.Now()) || r.GetString("intent") == "" {
+	if err != nil || !provider.AllowsUser(a.UserID) || config != r.GetString("config_hash") || r.GetString("session_hash") != digest(a.Session) || r.GetString("status") != "pending" || !r.GetDateTime("expires").Time().After(time.Now()) || r.GetString("intent") == "" {
 		return "", ErrInvalid
 	}
 	var intent string

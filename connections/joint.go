@@ -83,7 +83,9 @@ func (m *JointManager) Check(dynamic []JointPartner) error {
 }
 
 // Partners lists registered IDs with one-step capability (for UI entry points).
-func (m *JointManager) Partners() []string {
+func (m *JointManager) Partners() []string { return m.PartnersFor("") }
+
+func (m *JointManager) PartnersFor(userID string) []string {
 	if m == nil {
 		return []string{}
 	}
@@ -91,7 +93,8 @@ func (m *JointManager) Partners() []string {
 	defer m.mu.RUnlock()
 	out := []string{}
 	for id, p := range m.partners {
-		if p.JointURL != "" {
+		provider, exists := m.connections.lookup(p.Provider)
+		if exists && provider.AllowsUser(userID) && p.JointURL != "" {
 			out = append(out, id)
 		}
 	}
@@ -218,6 +221,9 @@ func (m *JointManager) Start(app core.App, a Actor, partner, verifiedPartnerSubj
 	if err != nil {
 		return JointStatus{}, err
 	}
+	if !provider.AllowsUser(a.UserID) {
+		return JointStatus{}, ErrUnavailable
+	}
 	if verifiedPartnerSubject == "" || len(verifiedPartnerSubject) > 1024 {
 		return JointStatus{}, ErrInvalid
 	}
@@ -284,7 +290,7 @@ func (m *JointManager) owned(app core.App, a Actor, id string) (*core.Record, er
 
 func (m *JointManager) accountValid(app core.App, r *core.Record, id string) bool {
 	p, provider, _, err := m.config(app, r.GetString("partner"))
-	if err != nil {
+	if err != nil || !provider.AllowsUser(r.GetString("user")) {
 		return false
 	}
 	c, err := app.FindRecordById(Accounts, id)

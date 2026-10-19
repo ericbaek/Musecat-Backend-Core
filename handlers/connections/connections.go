@@ -19,7 +19,11 @@ import (
 func RegisterRoutes(se *core.ServeEvent, manager *connections.Manager) {
 	se.Router.GET("/integrations/providers", func(re *core.RequestEvent) error {
 		re.Response.Header().Set("Cache-Control", "no-store")
-		return re.JSON(http.StatusOK, map[string]any{"items": manager.Providers()})
+		userID := ""
+		if re.Auth != nil && re.Auth.Collection().Name == "user" && !re.Auth.GetBool("withdrawn") {
+			userID = re.Auth.Id
+		}
+		return re.JSON(http.StatusOK, map[string]any{"items": manager.ProvidersFor(userID)})
 	})
 	// Public profile records: only services the user published and the partner marks public.
 	se.Router.GET("/user/records", func(re *core.RequestEvent) error {

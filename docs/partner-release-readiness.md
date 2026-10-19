@@ -13,7 +13,7 @@ or a claim that a real partner has passed interoperability checks.
 | Records and privacy | Strict typed envelope, verified subject, private defaults, both-side publication gate, stale/disabled public-cache suppression, persisted 429 backoff, post-I/O account checks |
 | Reciprocal connection | Lookup, one consent, independent PKCE code exchanges, matching generation evidence, partial failure rollback, reconnect; `jointflow_test.go` |
 | Revocation | Exact-generation local revoke, persistent outbox, stable retry ID/body, duplicate/old-generation protection, withdrawal delivery preservation |
-| Developer Center | Immediate validated self-service registration, operator suspension, one-time secrets, inbound key overlap, immediate local activation and cross-instance polling |
+| Developer Center | Immediate development registration, production review, operator suspension, one-time secrets, inbound key overlap, immediate local activation and cross-instance polling |
 | Conformance | Durable bounded worker, server probes, encrypted one-use fixtures, owner/reviewer access, results/history/staleness UI, no fabricated passes |
 | Lifecycle | Owner withdrawal atomically suspends apps/disables registrations/wipes credentials and queued fixtures; restricted owners excluded from registries |
 | Delivery | Full-owned guarded migrations through `1792030009`; Core fresh bootstrap only; Full pinned to committed Core and tested with `GOWORK=off` |
@@ -52,7 +52,7 @@ web callback, owner/reviewer access and a queued check completing through the no
 1. Partner registers fixed public HTTPS endpoints and exact Musecat callback, implements v1,
    and supplies Direction-B credentials plus its receiving-side server key.
 2. Owner registers the staging application, reveals Musecat-issued credentials once and
-   installs them in the partner server. No operator approval is required. Conformance reports
+   installs them in the partner server. Development testing needs no operator approval; production publication does. Conformance reports
    remain separate from activation and explicitly identify missing interactive evidence.
 3. A dedicated test user completes normal consent on both sites. Submit disposable public/private
    tokens, a separate refresh/revoke family, intent fixtures and the resulting joint attempt ID in

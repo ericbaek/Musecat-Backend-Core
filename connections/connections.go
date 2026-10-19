@@ -71,7 +71,7 @@ func (m *Manager) Start(app core.App, actor Actor, input StartInput) (StartResul
 		return StartResult{}, ErrUnavailable
 	}
 	p, ok := m.lookup(input.Provider)
-	if !ok {
+	if !ok || !p.AllowsUser(actor.UserID) {
 		return StartResult{}, ErrUnavailable
 	}
 	if len(input.Services) == 0 || len(input.Services) > 16 {
@@ -145,7 +145,7 @@ func (m *Manager) complete(ctx context.Context, app core.App, actor Actor, input
 		return Connection{}, ErrUnavailable
 	}
 	p, ok := m.lookup(input.Provider)
-	if !ok {
+	if !ok || !p.AllowsUser(actor.UserID) {
 		return Connection{}, ErrUnavailable
 	}
 	if len(input.State) != 43 || len(input.Code) > 4096 || len(input.Error) > 256 || ((input.Code == "") == (input.Error == "")) {
@@ -218,6 +218,10 @@ func (m *Manager) complete(ctx context.Context, app core.App, actor Actor, input
 	err = app.RunInTransaction(func(tx core.App) error {
 		if err := actor.check(tx); err != nil {
 			return err
+		}
+		currentProvider, current := m.lookup(p.ID)
+		if !current || !currentProvider.AllowsUser(actor.UserID) || fingerprint(currentProvider) != fingerprint(p) {
+			return ErrUnavailable
 		}
 		r, err := tx.FindRecordById(Requests, pending.Id)
 		if errors.Is(err, sql.ErrNoRows) {

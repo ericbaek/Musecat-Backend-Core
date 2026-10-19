@@ -169,6 +169,9 @@ func (m *Manager) ReadConsent(app core.App, a Actor, handle string) (Consent, er
 		if e != nil {
 			return e
 		}
+		if !c.AllowsUser(a.UserID) {
+			return &OAuthError{Code: "access_denied", Status: 403}
+		}
 		if r.GetString("user") != "" && (r.GetString("user") != a.UserID || r.GetString("session_hash") != hash(a.Session)) {
 			return &OAuthError{Code: "access_denied", Status: 403}
 		}
@@ -195,6 +198,9 @@ func (m *Manager) Decide(app core.App, a Actor, in Decision) (string, error) {
 		r, c, e := m.pending(tx, in.Request)
 		if e != nil {
 			return e
+		}
+		if !c.AllowsUser(a.UserID) {
+			return &OAuthError{Code: "access_denied", Status: 403}
 		}
 		if r.GetString("user") != a.UserID || r.GetString("session_hash") != hash(a.Session) {
 			return &OAuthError{Code: "access_denied", Status: 403}
@@ -271,7 +277,7 @@ func (m *Manager) activeGrant(app core.App, row *core.Record, clientID string) (
 		return nil, nil, oauthError("invalid_grant")
 	}
 	u, e := app.FindRecordById("user", grant.GetString("user"))
-	if e != nil || hash(u.TokenKey()) != grant.GetString("account_key") {
+	if e != nil || !c.AllowsUser(grant.GetString("user")) || hash(u.TokenKey()) != grant.GetString("account_key") {
 		return nil, nil, oauthError("invalid_grant")
 	}
 	if e = m.checkUser(app, u); e != nil {

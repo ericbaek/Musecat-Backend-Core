@@ -141,7 +141,7 @@ func TestDeveloperCenterRoutes(t *testing.T) {
 
 	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", owner, ""), 403)
 	queue := check(t, f.req("GET", "/moderation/developer/apps?status=submitted", operator, ""), 200)
-	if len(queue["items"].([]any)) != 0 {
+	if len(queue["items"].([]any)) != 1 {
 		t.Fatal("queue", queue)
 	}
 	approved := check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", operator, `{"note":"ok"}`), 200)
@@ -149,7 +149,7 @@ func TestDeveloperCenterRoutes(t *testing.T) {
 		t.Fatal("approved", approved)
 	}
 	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", operator, `{"note":"`+strings.Repeat("n", 2001)+`"}`), 400)
-	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", operator, ""), 200)
+	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/approve", operator, ""), 409)
 
 	secret := check(t, f.req("POST", "/developer/apps/"+id+"/secret", owner, ""), 200)
 	if secret["client_id"] != "newpartner" || len(secret["client_secret"].(string)) < 32 {
@@ -163,7 +163,7 @@ func TestDeveloperCenterRoutes(t *testing.T) {
 		t.Fatal("detail leaks or not live", detail)
 	}
 	events := check(t, f.req("GET", "/developer/apps/"+id+"/events", owner, ""), 200)
-	if len(events["items"].([]any)) != 2 {
+	if len(events["items"].([]any)) != 4 {
 		t.Fatal("events", events)
 	}
 	check(t, f.req("POST", "/moderation/developer/apps/"+id+"/suspend", operator, `{"note":"policy"}`), 200)

@@ -134,7 +134,7 @@ func TestLifecycleActivatesClientWithoutRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	queue, err := f.service.Queue(f.app, partnerapp.StatusSubmitted)
-	if err != nil || len(queue) != 0 {
+	if err != nil || len(queue) != 1 {
 		t.Fatal("queue", queue, err)
 	}
 	// Another user cannot see or act on it.
@@ -169,7 +169,7 @@ func TestLifecycleActivatesClientWithoutRestart(t *testing.T) {
 		t.Fatal("static client lost on reload")
 	}
 	events, err := f.service.OwnerEvents(f.app, f.owner.Id, app.ID)
-	if err != nil || len(events) != 2 || events[0].Kind != "secret_generated" || events[1].Kind != "created" {
+	if err != nil || len(events) != 4 || events[0].Kind != "secret_generated" || events[3].Kind != "created" {
 		t.Fatal("events", events, err)
 	}
 	// Rotation keeps the client live but changes the secret.
@@ -204,8 +204,8 @@ func TestLifecycleActivatesClientWithoutRestart(t *testing.T) {
 	if err != nil || edited.Status != partnerapp.StatusApproved || !edited.Live {
 		t.Fatal("edit approved", edited, err)
 	}
-	if info, _ := f.manager.Client("rhythm_info"); info.RedirectURIs[0] != "https://partner.example/new/callback" {
-		t.Fatal("validated edit did not activate")
+	if info, _ := f.manager.Client("rhythm_info"); info.RedirectURIs[0] != "https://partner.example/oauth/musecat/callback" {
+		t.Fatal("production edit activated before review")
 	}
 	renamed := changed
 	renamed.PartnerID = "other_id"
@@ -310,8 +310,8 @@ func TestDirectionBActivatesProviderWithCredentials(t *testing.T) {
 	if _, err := service.SetCredentials(f.app, f.owner.Id, app.ID, partnerapp.Credentials{ClientID: "x", ClientSecret: "short"}); err == nil {
 		t.Fatal("weak credentials accepted")
 	}
-	if len(conns.Providers()) != 1 {
-		t.Fatal("provider not live after credentials")
+	if len(conns.ProvidersFor(f.owner.Id)) != 1 || len(conns.Providers()) != 0 {
+		t.Fatal("development provider audience incorrect")
 	}
 	if _, err := service.Submit(f.app, f.owner.Id, app.ID); err != nil {
 		t.Fatal(err)
@@ -529,8 +529,8 @@ func TestLoginCapabilityChangesOnlyWithExplicitOwnerUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, _ = f.manager.Client("login_partner")
-	if len(info.Scopes) != 4 {
-		t.Fatal("owner update did not change capabilities")
+	if len(info.Scopes) != 1 {
+		t.Fatal("production edit activated scopes before review")
 	}
 	if _, err = f.service.Submit(f.app, f.owner.Id, app.ID); err != nil {
 		t.Fatal(err)
@@ -665,8 +665,8 @@ func TestRemovingDirectionADisablesExistingClient(t *testing.T) {
 	if _, err = service.Update(f.app, f.owner.Id, a.ID, form); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := f.manager.Client(form.PartnerID); ok {
-		t.Fatal("removing A did not disable client")
+	if _, ok := f.manager.Client(form.PartnerID); !ok {
+		t.Fatal("production edit disabled A before review")
 	}
 	if _, err = service.Submit(f.app, f.owner.Id, a.ID); err != nil {
 		t.Fatal(err)

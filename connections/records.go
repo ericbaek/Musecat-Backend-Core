@@ -458,6 +458,13 @@ func (m *Manager) ReadRecord(ctx context.Context, app core.App, actor Actor, con
 	if err != nil || account.GetString("user") != actor.UserID {
 		return RecordView{}, sql.ErrNoRows
 	}
+	if m == nil {
+		return RecordView{}, ErrUnavailable
+	}
+	provider, allowed := m.lookup(account.GetString("provider"))
+	if !allowed || provider.Issuer != account.GetString("issuer") || !provider.AllowsUser(actor.UserID) {
+		return RecordView{}, sql.ErrNoRows
+	}
 	if _, err := app.FindFirstRecordByFilter(Services, "connection = {:c} && service = {:s}", dbx.Params{"c": account.Id, "s": service}); err != nil {
 		return RecordView{}, sql.ErrNoRows
 	}
@@ -530,7 +537,7 @@ func (m *Manager) PublicRecords(app core.App, userID string) ([]PublicRecord, er
 			continue
 		}
 		current, enabled := m.lookup(account.GetString("provider"))
-		if !enabled || current.Issuer != account.GetString("issuer") {
+		if !enabled || current.Development || current.Issuer != account.GetString("issuer") {
 			continue
 		}
 		providerName = current.Name
@@ -606,6 +613,10 @@ func (m *Manager) store(app core.App, account *core.Record, service, status, err
 		current, err := tx.FindRecordById(Accounts, account.Id)
 		if err != nil {
 			return err
+		}
+		provider, allowed := m.lookup(current.GetString("provider"))
+		if !allowed || !provider.AllowsUser(current.GetString("user")) {
+			return sql.ErrNoRows
 		}
 		if current.GetString("authorization_generation") != account.GetString("authorization_generation") || current.GetString("credentials") != account.GetString("credentials") {
 			return ErrInvalid
@@ -706,7 +717,7 @@ func (m *Manager) InvalidateRecords(app core.App, provider, subject, service str
 func (m *Manager) fetch(ctx context.Context, app core.App, account *core.Record, service string) (*core.Record, error) {
 	started := time.Now().UTC().Truncate(time.Millisecond)
 	p, ok := m.lookup(account.GetString("provider"))
-	if !ok || p.Issuer != account.GetString("issuer") {
+	if !ok || !p.AllowsUser(account.GetString("user")) || p.Issuer != account.GetString("issuer") {
 		return m.store(app, account, service, RecordUnavailable, "provider_disabled", nil, started)
 	}
 	if p.RecordsURL == "" {

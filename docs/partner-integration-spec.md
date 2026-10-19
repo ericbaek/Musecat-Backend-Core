@@ -506,7 +506,7 @@ nonempty Direction A redirects; joint also requires Direction B. Apps offering b
 without one-step consent omit `joint` or set `joint.enabled` to `false`; users approve each
 direction independently on the respective site.
 
-Registration and updates activate immediately without moderator review. The `approved_form` field retains its historical name and is the active source of truth: the runtime derives the OAuth client, external provider
+Development registration and updates activate immediately for the owner and designated testers; production publication and changes require operator review. The `approved_form` field retains its historical name and is the active source of truth: the runtime derives the OAuth client, external provider
 and joint partner registrations from it directly (Developer Center §4). Environment variables
 remain only for Musecat's first-party clients and bootstrap.
 

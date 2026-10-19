@@ -3,6 +3,7 @@ package connections_test
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -116,4 +117,67 @@ func TestClaimBlocksASecondCompletionDuringExchange(t *testing.T) {
 	if f.exchanges != 1 {
 		t.Fatal("concurrent completion exchanged the same code twice")
 	}
+}
+
+func TestDevelopmentProviderAudienceDiscoveryAndExistingRecords(t *testing.T) {
+	f := newFixture(t)
+	p := provider("development")
+	p.Development = true
+	p.AllowedUserIDs = []string{f.user.Id}
+	if err := f.manager.Reload([]connections.Provider{p}); err != nil {
+		t.Fatal(err)
+	}
+	otherToken, _ := f.newUser()
+	for _, token := range []string{"", otherToken} {
+		items := f.request(token, "GET", "/integrations/providers", nil, 200)["items"].([]any)
+		if len(items) != 2 {
+			t.Fatal("development provider leaked", items)
+		}
+	}
+	if items := f.request(f.token, "GET", "/integrations/providers", nil, 200)["items"].([]any); len(items) != 3 {
+		t.Fatal("tester cannot discover development provider", items)
+	}
+	f.request(otherToken, "POST", "/user/connections/start", map[string]any{"provider": p.ID, "services": []string{"chunithm"}}, 503)
+	id := f.complete(f.start(f.token, p.ID, "chunithm"))
+	f.records = func(*http.Request) *http.Response { return status(200, envelope("chunithm", f.subject, "public")) }
+	f.request(f.token, "GET", "/user/connections/"+id+"/records/chunithm", nil, 200)
+	f.request(f.token, "PUT", "/user/connections/"+id+"/services/chunithm", map[string]string{"visibility": "public"}, 200)
+	if items := f.request("", "GET", "/user/records?user="+f.user.Id, nil, 200)["items"].([]any); len(items) != 0 {
+		t.Fatal("development test data became public", items)
+	}
+	pending := f.start(f.token, p.ID, "chunithm")
+	p.AllowedUserIDs = nil
+	if err := f.manager.Reload([]connections.Provider{p}); err != nil {
+		t.Fatal(err)
+	}
+	f.request(f.token, "GET", "/user/connections/"+id+"/records/chunithm", nil, 404)
+	f.request(f.token, "POST", "/user/connections/complete", pending, 503)
+	// Eligibility removal also applies to a fresh callback whose exchange is already running.
+	p.AllowedUserIDs = []string{f.user.Id}
+	if err := f.manager.Reload([]connections.Provider{p}); err != nil {
+		t.Fatal(err)
+	}
+	pending = f.start(f.token, p.ID, "chunithm")
+	f.hook = func() {
+		p.AllowedUserIDs = nil
+		if err := f.manager.Reload([]connections.Provider{p}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.request(f.token, "POST", "/user/connections/complete", pending, 503)
+	p.AllowedUserIDs = []string{f.user.Id}
+	if err := f.manager.Reload([]connections.Provider{p}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.InvalidateRecords(f.app, p.ID, f.subject, "chunithm"); err != nil {
+		t.Fatal(err)
+	}
+	f.records = func(*http.Request) *http.Response {
+		p.AllowedUserIDs = nil
+		if err := f.manager.Reload([]connections.Provider{p}); err != nil {
+			t.Fatal(err)
+		}
+		return status(200, envelope("chunithm", f.subject, "public"))
+	}
+	f.request(f.token, "GET", "/user/connections/"+id+"/records/chunithm", nil, 404)
 }

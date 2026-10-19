@@ -5,7 +5,7 @@ Management functions and account-security operations are excluded, including for
 The development environment uses [Musecat Preview](https://preview.musecat.app) and OAuth issuer
 `https://db-dev.musecat.app`. Register development applications in the
 [Developer Center](https://preview.musecat.app/kr/developer); application credentials are issued
-there immediately after validated registration. Other example domains in this guide are placeholders.
+there immediately for owner/tester development use; production use requires review. Other example domains in this guide are placeholders.
 Musecat is the OAuth authorization server for Direction A. Your server is the OAuth client.
 Direction B lets Musecat connect to your authorization server and read your users' records.
 Each direction has its own grant and tokens. The implemented reciprocal one-step flow coordinates
@@ -20,7 +20,7 @@ The readonly login scope bundle is `openid profile arcade:read`; the general API
 ## Register your application
 
 Create an application in Developer Center with an immutable partner ID, display name, contact
-and the direction you need. Direction A requires exact HTTPS callback URLs. Registration is immediately usable after structural validation; generate its Musecat client secret without operator review. Opt into Sign in with Musecat if
+and the direction you need. Direction A requires exact HTTPS callback URLs; development mode also accepts exact HTTP loopback callbacks at localhost, 127.0.0.1 or [::1]. Development registration is immediately usable by the owner and up to ten designated testers after structural validation; production use requires operator review. Generate the development client secret immediately. Opt into Sign in with Musecat if
 you need the readonly `openid profile arcade:read` scope bundle.
 
 A Direction B-only application needs no Direction A callback or Musecat-issued client secret.
@@ -30,7 +30,7 @@ requires both directions and its separate server keys. See
 [Developer Center](developer-center.md) for the registration contract.
 
 Keep client secrets, access tokens and refresh tokens on your server. Your browser should hold
-only your own application's session cookie. Developer Center registration requires an active Musecat account, but no operator approval; there is no unauthenticated OAuth dynamic registration, password
+only your own application's session cookie. Developer Center development registration requires an active Musecat account; production publication requires operator approval; there is no unauthenticated OAuth dynamic registration, password
 grant, implicit grant or browser-only client. No partner is hardcoded.
 A change to a client's registered configuration invalidates existing grants until users consent again.
 Registration epochs are persisted at startup; disabling a client and later restoring the same

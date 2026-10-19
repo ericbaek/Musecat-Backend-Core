@@ -1060,3 +1060,26 @@ only the bounded previous-key grace. UserInfo exposes optional absolute `picture
 with explicit `profile` scope. `/developer/v1/me` uses the same public avatar URL with its
 existing profile access requirement. URLs use the configured issuer, never untrusted Host;
 missing avatars are omitted, and emails remain excluded.
+
+### Development audience and production review
+
+New applications use publication development and immediately support only their owner plus
+up to ten explicitly designated active test accounts. Owner tester management resolves exact
+usernames to internal IDs. Dynamic OAuth clients and B providers carry Development plus
+AllowedUserIDs; persistent fingerprints/epochs bind audience changes. Consent read/decision,
+code/refresh exchange, resource/UserInfo access, B start/complete/fetch and Joint actor paths
+must enforce the audience. Anonymous provider discovery and public record reads hide development
+providers. Static executable registrations remain unrestricted by default.
+
+Publication production requires an explicit owner request and operator approval of the current
+submitted form. Production edits do not overwrite the reviewed active snapshot; any edit cancels
+pending review. Rejection preserves active configuration. publication and review_status are
+separate from the legacy status enum. Full adds these fields and testers through a guarded
+migration and preserves existing active registrations as production. Core defines fresh schema.
+Exact HTTP localhost, 127.0.0.1 and [::1] redirects are accepted for development callbacks only;
+production requests reject them. Remote B/Joint fetch destinations retain public HTTPS and
+SSRF rules. Audience restriction never replaces user consent or public-profile visibility.
+
+### Development partner audiences
+
+Developer Center applications begin in development publication and are available only to the owner and up to ten explicitly assigned testers. Production publication requires operator approval. Dynamic Direction-B provider configurations include the current audience in their configuration fingerprint. Discovery filters development metadata by the authenticated user; starts, callback completion (including after network exchange), cached owner records, and fetch persistence enforce the current audience. Removing a tester blocks cached reads and prevents in-flight exchanges/fetches from restoring access. Development records are never returned by anonymous public profile reads, even if the tester set the local publication switch. Joint entry/consent shares the audience rule; owners can still revoke or disconnect their own old connection. Static operator-supplied provider configuration retains its existing production audience unless explicitly marked development.
