@@ -18,6 +18,19 @@ It does not update `arcade.photo` directly.
 - Form fields:
   - `arcade` (string, required): target arcade id
   - `photos` (file, required, repeated): 1 to 10 files
+  - `captured_at` (string, optional): JSON string array in the same order as `photos`.
+    Each entry is an EXIF `DateTimeOriginal` formatted as `YYYY-MM-DDTHH:mm:ss`
+    with an optional EXIF UTC offset, or `""` when unavailable. Read the original
+    before image normalization. Offsetless dates use the arcade's IANA timezone,
+    falling back to UTC when the venue timezone is absent. Invalid/future dates
+    are ignored, without rejecting the image. A malformed array or length mismatch
+    returns 400 before writing any files.
+
+Capture dates are stored separately as `arcade_photo_atoms.captured_at` (UTC).
+The atom-list and expanded photo payloads include this optional date. Photo date
+labels and six-month photo-campaign freshness prefer it, falling back to `created`.
+Upload timestamps, gallery/editor ordering, immutable changelogs, and XP timestamps
+are unchanged. Capture metadata is user-supplied camera metadata, not verified proof.
 
 ### File Constraints
 - Allowed MIME types:

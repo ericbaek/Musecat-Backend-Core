@@ -418,3 +418,9 @@ Untouched revisions and rollback retain their original raw price JSON. New
 edits may have a legacy price in `before` and a versioned price in `after`.
 Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
 retains the existing representative-item policy.
+
+
+Photo `captured_at` metadata and Full's fill-only EXIF backfill do not create or
+rewrite changelog rows. `created` remains upload time; gallery date labels and
+photo campaign freshness prefer capture time. Photo membership/order and XP event
+timestamps retain their existing contracts.

@@ -2341,6 +2341,11 @@ func init() {
 						"presentable": false,
 						"system": false,
 						"type": "autodate"
+					},
+					{
+						"name": "captured_at",
+						"type": "date",
+						"required": false
 					}
 				],
 				"id": "pbc_2600901087",

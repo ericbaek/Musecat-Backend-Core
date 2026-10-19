@@ -241,12 +241,13 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 				}
 				createdByID := atom.GetString("createdBy")
 				items = append(items, map[string]any{
-					"id":        atom.Id,
-					"photo":     atom.GetString("photo"),
-					"file_url":  "/arcade/photo/file?id=" + url.QueryEscape(atom.Id),
-					"public":    atom.GetBool("public"),
-					"created":   atom.Get("created"),
-					"createdBy": buildPhotoCreatedBy(re.App, createdByID),
+					"id":          atom.Id,
+					"photo":       atom.GetString("photo"),
+					"file_url":    "/arcade/photo/file?id=" + url.QueryEscape(atom.Id),
+					"public":      atom.GetBool("public"),
+					"created":     atom.Get("created"),
+					"captured_at": atom.Get("captured_at"),
+					"createdBy":   buildPhotoCreatedBy(re.App, createdByID),
 				})
 			}
 			out["photo"] = map[string]any{

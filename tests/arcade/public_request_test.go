@@ -141,26 +141,11 @@ func TestRequestPublicArcade_Success(t *testing.T) {
 		if !arcadeRec.GetBool("public") {
 			tb.Fatalf("expected arcade.public=true")
 		}
-		if sentMessage == "" {
-			tb.Fatalf("expected telegram message to be sent")
+		if sentMessage != "" {
+			tb.Fatalf("publishing an arcade must not send a Telegram notification, got %q", sentMessage)
 		}
-		if !strings.Contains(sentMessage, "[arcade_public]") {
-			tb.Fatalf("telegram message should include collection tag, got %q", sentMessage)
-		}
-		if !strings.Contains(sentMessage, arcadeID) {
-			tb.Fatalf("telegram message should include arcade id %q, got %q", arcadeID, sentMessage)
-		}
-		if !strings.Contains(sentMessage, "Private Arcade") {
-			tb.Fatalf("telegram message should include arcade name %q, got %q", "Private Arcade", sentMessage)
-		}
-		if sentDiscordMessage == "" {
-			tb.Fatalf("expected discord message to be sent")
-		}
-		if !strings.Contains(sentDiscordMessage, "[arcade_public]") {
-			tb.Fatalf("discord message should include collection tag, got %q", sentDiscordMessage)
-		}
-		if !strings.Contains(sentDiscordMessage, arcadeID) {
-			tb.Fatalf("discord message should include arcade id %q, got %q", arcadeID, sentDiscordMessage)
+		if sentDiscordMessage != "" {
+			tb.Fatalf("publishing an arcade must not send a Discord notification, got %q", sentDiscordMessage)
 		}
 	}
 

@@ -1,11 +1,13 @@
 package photo
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
@@ -89,6 +91,20 @@ func UploadArcadePhotos(re *core.RequestEvent) error {
 		return re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
 	}
 
+	var capturedAt []string
+	if raw := re.Request.FormValue("captured_at"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &capturedAt); err != nil || len(capturedAt) != len(files) {
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "captured_at must be a JSON string array matching photos"})
+		}
+	}
+	captureTimes := make([]time.Time, len(files))
+	for i, raw := range capturedAt {
+		at, err := arcadeinternal.ParsePhotoCaptureTime(raw, arcade.GetString("timezone"), time.Now())
+		if err == nil {
+			captureTimes[i] = at
+		}
+	}
+
 	atomColl, err := re.App.FindCollectionByNameOrId(arcadeinternal.CollectionArcadePhotoAtoms)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
@@ -128,6 +144,9 @@ func UploadArcadePhotos(re *core.RequestEvent) error {
 		atom.Set("arcade", arcadeID)
 		atom.Set("photo", file)
 		atom.Set("public", false)
+		if !captureTimes[i].IsZero() {
+			atom.Set("captured_at", captureTimes[i])
+		}
 		if re.Auth != nil {
 			atom.Set("createdBy", re.Auth.Id)
 		}

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ericbaek/musecat-backend-core/handlers/arcade/campaign"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/tests"
 	pbtypes "github.com/pocketbase/pocketbase/tools/types"
@@ -108,5 +109,43 @@ func setPhotoAtomCreated(tb testing.TB, app *tests.TestApp, atomID string, at ti
 		"id":      atom.Id,
 	}).Execute(); err != nil {
 		tb.Fatal(err)
+	}
+}
+
+func TestPhotoCampaignUsesCaptureDateWithoutChangingUploadDate(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Old photo uploaded today", Address: "A"})
+	setArcadeVisibility(t, app, arcadeID, true, false)
+	atomID := seedPhotoAtom(t, app, arcadeID, user.Id, true)
+	seedPhotoMolecule(t, app, arcadeID, user.Id, []string{atomID})
+	atom, err := app.FindRecordById("arcade_photo_atoms", atomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := atom.GetString("created")
+	at := time.Now().UTC().AddDate(-1, 0, 0)
+	atom.Set("captured_at", at)
+	if err := app.Save(atom); err != nil {
+		t.Fatal(err)
+	}
+	status, err := campaign.GetPhotoCampaignStatus(app, arcadeID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Status != "stale" {
+		t.Fatalf("expected stale photo, got %#v", status)
+	}
+	atom, _ = app.FindRecordById("arcade_photo_atoms", atomID)
+	if atom.GetString("created") != created {
+		t.Fatal("capture metadata changed upload time")
+	}
+	atom.Set("captured_at", "")
+	if err := app.Save(atom); err != nil {
+		t.Fatal(err)
+	}
+	status, err = campaign.GetPhotoCampaignStatus(app, arcadeID, time.Now())
+	if err != nil || status.Status != "current" {
+		t.Fatalf("expected upload-date fallback: %#v %v", status, err)
 	}
 }

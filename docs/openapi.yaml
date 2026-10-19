@@ -927,7 +927,7 @@ components:
     ArcadePhotoExpanded:
       type: object
       additionalProperties: true
-      description: Expanded photo molecule payload.
+      description: Expanded photo molecule payload. Each item includes optional captured_at (UTC capture date, empty when unavailable), alongside its unchanged created upload timestamp.
     ArcadeBasicValue:
       oneOf:
         - type: string
@@ -1720,6 +1720,7 @@ components:
           format: uri-reference
           description: Representative photo URL. Empty when photo_status is missing.
         last_public_photo_at:
+          description: Newest current public photo capture timestamp, falling back to its upload timestamp when capture metadata is absent.
           oneOf:
             - {type: string, format: date-time}
             - {type: 'null'}
@@ -3071,6 +3072,9 @@ components:
           description: Custom API URL for this file. Clients must not construct PocketBase `/api/files` URLs.
         public: {type: boolean}
         createdBy: {type: string}
+        captured_at:
+          type: string
+          description: UTC EXIF capture date, empty when unavailable. Photo labels and campaign freshness prefer this over created; ordering remains unchanged.
         created: {type: string}
         updated: {type: string}
     ArcadePhotoAtomListResponse:
@@ -4721,6 +4725,9 @@ paths:
               properties:
                 arcade:
                   type: string
+                captured_at:
+                  type: string
+                  description: Optional JSON string array matching photos by index. Entries are DateTimeOriginal as YYYY-MM-DDTHH:mm:ss with optional UTC offset, or empty. Offsetless dates use venue timezone (UTC if absent). Invalid/future entries are ignored; malformed arrays or count mismatches return 400.
                 photos:
                   type: array
                   minItems: 1

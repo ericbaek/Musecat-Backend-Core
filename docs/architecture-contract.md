@@ -235,8 +235,8 @@ machines from campaign overview statistics/history.
 It returns only public/open arcades whose current `arcade.photo` molecule has
 no public atom (`photo_status=missing`) or whose newest public atom is at least
 six months old (`photo_status=stale`). The newest timestamp is read from an
-atom's `updated` value when available and otherwise its immutable `created`
-value. Photo atoms removed from the current gallery do not keep an arcade
+atom's EXIF `captured_at` when available and otherwise its immutable `created`
+upload timestamp. Photo atoms removed from the current gallery do not keep an arcade
 fresh. The response uses the standard `page`, `per_page`, `last_page`, `total`,
 and `items` envelope; missing targets sort before stale targets, and stale
 targets sort oldest first.
@@ -535,6 +535,7 @@ location. All external fallback calls happen before the mutation transaction.
 - XP is available only after the authenticated user has a non-empty `username`. Before one-time username setup, XP-producing actions retain their normal mutation semantics where applicable but award `0`; they must not create `user_level` or `user_level_log` state, and public-conversion XP previews must report no eligible XP.
 - Normal edit XP remains scoped by user, arcade, and part. Basic/hour/sns/gtk edits grant 2 XP with their existing seven-day cooldown. Photo atoms grant 2 XP each only when first published, with a rolling seven-day cap of 10 XP for a photo-campaign target and 4 XP for another public arcade; upload-only, reorder, removal, and reuse of a published atom grant 0. Game edits use a rolling seven-day window of distinct durable `arcade_game_id` values: the target is `min(10, 2*n)` and each request receives only the increase over XP already granted in that window. Revisiting an entry already counted in the window grants 0; entries become eligible again after they leave the window. Administrative bulk game-version updates and public-conversion backfill do not use this scale.
 - Passport visits grant 5 XP for a lifetime first visit to an arcade and 2 XP for a revisit. Attendance check-in grants 1 XP. Flag creation grants 5 XP; `issue_persist` reactions grant 2 XP, `fixed` reactions grant 3 XP, and `wrong` votes grant 0 XP. Deleting a rewarded reaction reverses the exact original ledger amount.
+- Publishing an arcade does not send Telegram or Discord notifications.
 - Notification delivery is after persistence and best-effort. A Telegram/Discord failure MUST NOT roll back a completed user request.
 - Review processing has no automated ban and no automated rollback.
 - Public `GET /arcade` detail loads record one `page_view` event best-effort. The direction-click event route is anonymous and accepts only `direction_click`. Its JSON body is capped at 2 KiB and at most ten distinct series IDs. After validating the arcade, it applies the rate limit before game-series database validation, so rejected series IDs consume quota rather than creating a lookup-amplification path. It retains no client identity: a process-local limiter keyed by the Core app instance and PocketBase `RealIP()` accepts at most 20 events per client in a rolling ten minutes and one event per client/arcade every 30 seconds. Expired per-arcade cooldown entries are removed on the next client request, and the limiter evicts the least recently active client when its 4,096-client memory cap is reached. `RealIP()` uses proxy headers only when PocketBase trusted-proxy settings permit them; otherwise it uses the direct remote IP. Limit rejection returns `429` with `Retry-After`. This is intentionally best-effort across process restarts and separate instances, preserving the no-IP-storage analytics contract; edge-level rate limiting remains required when deployment-wide enforcement is needed.
@@ -839,3 +840,18 @@ Untouched revisions and rollback retain their original raw price JSON. New
 edits may have a legacy price in `before` and a versioned price in `after`.
 Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
 retains the existing representative-item policy.
+
+
+## Photo capture dates
+
+Photo atoms keep `created` as their actual upload timestamp and store optional
+`captured_at` separately. The web client extracts EXIF DateTimeOriginal and
+OffsetTimeOriginal before normalization and sends an index-aligned JSON array to
+the photo upload endpoint. Offsetless camera times use the venue timezone, or UTC
+if absent. Invalid and future capture dates are ignored. No file modification date
+is used as evidence of capture. This metadata is user supplied, not verified proof.
+Photo labels and automatic campaign freshness use captured_at then created;
+updated is never evidence of a new photo. Gallery membership/order, pending-photo
+list order, audit history, and XP event timestamps do not change. Full owns the
+existing-data field migration and explicit offline, fill-only EXIF backfill. It
+must not rewrite immutable changelogs or fabricate dates for stripped images.
