@@ -19,6 +19,7 @@ type TokenInput struct {
 	RefreshToken string
 }
 type TokenResponse struct {
+	IDToken      string `json:"id_token,omitempty"`
 	AccessToken  string `json:"access_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
@@ -105,6 +106,9 @@ func (m *Manager) Exchange(app core.App, clientID string, in TokenInput) (TokenR
 			return err
 		}
 		out, err = m.issue(tx, grant, row.GetStringSlice("scopes"), until)
+		if err == nil && in.GrantType == "authorization_code" && contains(row.GetStringSlice("scopes"), OpenID) {
+			out.IDToken, err = m.signIDToken(grant, row.GetString("nonce"), out.ExpiresIn)
+		}
 		return err
 	})
 	if e != nil {
@@ -133,7 +137,9 @@ func (m *Manager) ResolveAccess(app core.App, raw, scope string) (*core.Record, 
 	if e != nil {
 		return nil, "", invalid
 	}
-	if !contains(row.GetStringSlice("scopes"), scope) && !contains(row.GetStringSlice("scopes"), AccountAccess) {
+	scopes := row.GetStringSlice("scopes")
+	allowed := contains(scopes, scope) || (scope == "profile:read" && contains(scopes, Profile)) || (scope != OpenID && scope != Profile && contains(scopes, AccountAccess))
+	if !allowed {
 		return nil, "", &OAuthError{Code: "insufficient_scope", Status: 403}
 	}
 	return u, grant.GetString("subject"), nil

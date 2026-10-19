@@ -521,3 +521,49 @@ func TestWithdrawnOwnerCannotKeepOrReactivateApplication(t *testing.T) {
 		t.Fatal("withdrawn owner reinstated", err)
 	}
 }
+
+func TestLoginCapabilityRequiresApprovalAndDoesNotUpgradeExistingClients(t *testing.T) {
+	f := newFixture(t)
+	form := validForm("login_partner")
+	app, err := f.service.Create(f.app, f.owner.Id, form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.service.Submit(f.app, f.owner.Id, app.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.service.Approve(f.app, f.operator.Id, app.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = f.service.GenerateSecret(f.app, f.owner.Id, app.ID); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := f.manager.Client("login_partner")
+	if len(info.Scopes) != 1 || info.Scopes[0] != delegation.AccountAccess {
+		t.Fatal("existing client upgraded", info)
+	}
+	form.DirectionA.LoginEnabled = true
+	if _, err = f.service.Update(f.app, f.owner.Id, app.ID, form); err != nil {
+		t.Fatal(err)
+	}
+	info, _ = f.manager.Client("login_partner")
+	if len(info.Scopes) != 1 {
+		t.Fatal("draft changed live capabilities")
+	}
+	if _, err = f.service.Submit(f.app, f.owner.Id, app.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.service.Approve(f.app, f.operator.Id, app.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	info, _ = f.manager.Client("login_partner")
+	seen := map[string]bool{}
+	for _, scope := range info.Scopes {
+		seen[scope] = true
+	}
+	for _, scope := range []string{delegation.OpenID, delegation.Profile, "arcade:read"} {
+		if !seen[scope] {
+			t.Fatal("login scope missing", scope)
+		}
+	}
+}

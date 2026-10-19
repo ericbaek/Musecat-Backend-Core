@@ -148,9 +148,39 @@ func RegisterRoutes(se *core.ServeEvent, m *delegation.Manager) {
 	se.Router.GET("/developer", func(re *core.RequestEvent) error {
 		return re.Blob(200, "text/html; charset=utf-8", apidocs.DeveloperHTML())
 	})
+	se.Router.GET("/developer/sign-in-with-musecat.md", func(re *core.RequestEvent) error {
+		return re.Blob(200, "text/markdown; charset=utf-8", apidocs.SignInGuide())
+	})
 	se.Router.GET("/developer/guide.md", func(re *core.RequestEvent) error {
 		return re.Blob(200, "text/markdown; charset=utf-8", apidocs.DeveloperGuide())
 	})
+	se.Router.GET("/.well-known/openid-configuration", func(re *core.RequestEvent) error {
+		v, err := m.OIDCMetadata()
+		if err != nil {
+			return respond(re, err)
+		}
+		return re.JSON(200, v)
+	}).BindFunc(noStore)
+	se.Router.GET("/oauth/jwks", func(re *core.RequestEvent) error {
+		v, err := m.JWKS()
+		if err != nil {
+			return respond(re, err)
+		}
+		return re.JSON(200, v)
+	})
+	userinfo := func(re *core.RequestEvent) error {
+		if re.Request.URL.RawQuery != "" || re.Request.ContentLength > 0 {
+			return invalid(re)
+		}
+		v, err := m.UserInfo(re.App, bearer(re.Request))
+		if err != nil {
+			return respond(re, err)
+		}
+		return re.JSON(200, v)
+	}
+	se.Router.GET("/oauth/userinfo", userinfo)
+	se.Router.POST("/oauth/userinfo", userinfo).Bind(apis.BodyLimit(1024))
+
 	se.Router.GET("/.well-known/oauth-authorization-server", func(re *core.RequestEvent) error {
 		re.Response.Header().Set("Cache-Control", "no-store")
 		if m == nil {
@@ -165,11 +195,14 @@ func RegisterRoutes(se *core.ServeEvent, m *delegation.Manager) {
 			return invalid(re)
 		}
 		for k, v := range q {
-			if len(v) != 1 || !strings.Contains("|client_id|redirect_uri|response_type|scope|state|code_challenge|code_challenge_method|", "|"+k+"|") {
+			if len(v) != 1 || !strings.Contains("|client_id|redirect_uri|response_type|scope|state|code_challenge|code_challenge_method|nonce|response_mode|", "|"+k+"|") {
 				return invalid(re)
 			}
 		}
-		target, e := m.Begin(re.App, delegation.AuthorizationInput{ClientID: q.Get("client_id"), RedirectURI: q.Get("redirect_uri"), ResponseType: q.Get("response_type"), Scope: strings.Fields(q.Get("scope")), State: q.Get("state"), Challenge: q.Get("code_challenge"), ChallengeMethod: q.Get("code_challenge_method")})
+		if q.Get("response_mode") != "" && q.Get("response_mode") != "query" {
+			return invalid(re)
+		}
+		target, e := m.Begin(re.App, delegation.AuthorizationInput{Nonce: q.Get("nonce"), ClientID: q.Get("client_id"), RedirectURI: q.Get("redirect_uri"), ResponseType: q.Get("response_type"), Scope: strings.Fields(q.Get("scope")), State: q.Get("state"), Challenge: q.Get("code_challenge"), ChallengeMethod: q.Get("code_challenge_method")})
 		if e != nil {
 			if target != "" {
 				return re.Redirect(302, target)

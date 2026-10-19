@@ -6,6 +6,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,7 @@ type Actor struct {
 	Session string
 }
 type AuthorizationInput struct {
+	Nonce           string
 	ClientID        string
 	RedirectURI     string
 	ResponseType    string
@@ -100,6 +102,16 @@ func (m *Manager) Begin(app core.App, in AuthorizationInput) (string, error) {
 	if e != nil {
 		return reject(e)
 	}
+	if contains(scopes, OpenID) {
+		if !m.OIDCEnabled() {
+			return reject(&OAuthError{Code: "temporarily_unavailable", Status: 503})
+		}
+		if len(in.Nonce) < 16 || len(in.Nonce) > 512 || strings.ContainsAny(in.Nonce, " \t\r\n") {
+			return reject(oauthError("invalid_request"))
+		}
+	} else if in.Nonce != "" || contains(scopes, Profile) {
+		return reject(oauthError("invalid_scope"))
+	}
 	handle := random()
 	r, e := newRecord(app, Requests)
 	if e != nil {
@@ -110,6 +122,7 @@ func (m *Manager) Begin(app core.App, in AuthorizationInput) (string, error) {
 	r.Set("config_hash", fingerprint)
 	r.Set("redirect_uri", in.RedirectURI)
 	r.Set("state", in.State)
+	r.Set("nonce", in.Nonce)
 	r.Set("challenge", in.Challenge)
 	r.Set("scopes", scopes)
 	r.Set("expires", time.Now().UTC().Add(5*time.Minute))
@@ -197,6 +210,9 @@ func (m *Manager) Decide(app core.App, a Actor, in Decision) (string, error) {
 			if e != nil {
 				return e
 			}
+			if contains(r.GetStringSlice("scopes"), OpenID) && !contains(selected, OpenID) {
+				return oauthError("invalid_scope")
+			}
 			grant, e := find(tx, Grants, "user={:user} && client={:client}", dbx.Params{"user": u.Id, "client": c.ID})
 			if errors.Is(e, sql.ErrNoRows) {
 				grant, e = newRecord(tx, Grants)
@@ -228,6 +244,7 @@ func (m *Manager) Decide(app core.App, a Actor, in Decision) (string, error) {
 			code.Set("code_hash", hash(raw))
 			code.Set("redirect_uri", r.GetString("redirect_uri"))
 			code.Set("challenge", r.GetString("challenge"))
+			code.Set("nonce", r.GetString("nonce"))
 			code.Set("expires", time.Now().UTC().Add(90*time.Second))
 			if e = tx.Save(code); e != nil {
 				return e

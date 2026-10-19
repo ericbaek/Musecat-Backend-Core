@@ -46,6 +46,9 @@ func configureRuntime(app *pocketbase.PocketBase) error {
 	if err != nil {
 		return fmt.Errorf("configure OAuth delegation: %w", err)
 	}
+	if err := oauthServer.ConfigureOIDC(os.Getenv("MUSECAT_OIDC_SIGNING_KEYS")); err != nil {
+		return err
+	}
 	jointPartners, err := connections.ParseJointConfig(os.Getenv("MUSECAT_JOINT_PARTNERS"), externalConnections, oauthServer)
 	if err != nil {
 		return fmt.Errorf("configure joint partners: %w", err)

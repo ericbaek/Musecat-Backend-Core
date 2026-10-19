@@ -994,3 +994,18 @@ credentials and service existence, preventing stale fetches from recreating disc
 The conformance runner and OAuth/record/joint adapters share the same default public-address-pinned,
 proxy-free HTTPS client. Full owns the independent guarded retry-column migration.
 See [release readiness](partner-release-readiness.md) for deployment and partner-dependent evidence.
+
+
+## Sign in with Musecat
+
+Approved applications may opt into `direction_a.login_enabled`. Only these dynamic clients gain
+`openid`, `profile` and `arcade:read` alongside their existing general API scope. OpenID requests
+require configured persistent RSA signing keys, session-bound nonce, PKCE S256 and explicit consent.
+Hidden nonce fields in the request/code ledgers bind the ID token to its initiating login. Full
+owns migration 1792030010; Core defines fresh bootstrap. Authorization-code exchange signs a
+ten-minute-or-shorter RS256 ID token inside the token-issuance transaction; failed signing cannot
+consume the code or leave tokens issued. Refresh does not reissue an ID token. Discovery and JWKS
+expose no private material. UserInfo requires an exact OpenID grant, reports only app-specific sub
+unless profile was approved, and shares the live revocation/account policy. General account access
+does not imply OpenID scope. ID tokens are rejected on resource APIs. Readonly login tokens cannot
+invoke the general write allowlist. See sign-in-with-musecat.md for the supported protocol profile.

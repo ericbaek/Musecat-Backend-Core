@@ -45,6 +45,7 @@ type Localized struct {
 }
 
 type DirectionA struct {
+	LoginEnabled bool     `json:"login_enabled,omitempty"`
 	RedirectURIs []string `json:"redirect_uris"`
 }
 

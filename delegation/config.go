@@ -29,6 +29,8 @@ const (
 )
 
 var scopeLabels = map[string]string{
+	OpenID:         "Sign in to this app with your Musecat account",
+	Profile:        "Read your basic Musecat profile",
 	AccountAccess:  "Connect your account for general user features; management and security settings excluded",
 	"profile:read": "Read your basic profile", "arcade:read": "Read public arcade information",
 	"arcade:report:create": "Create arcade fault reports", "arcade:report:react": "React to arcade fault reports",
@@ -60,6 +62,7 @@ type registeredClient struct {
 // dynamic set supplied through Reload. Lookups are lock-protected so approved
 // Developer Center applications activate without a restart.
 type Manager struct {
+	oidcKeys   []oidcKey
 	issuer     string
 	consentURL string
 	static     []Client
@@ -300,6 +303,9 @@ func (m *Manager) Metadata() map[string]any {
 	}
 	scopes := []string{}
 	for s := range scopeLabels {
+		if (s == OpenID || s == Profile) && !m.OIDCEnabled() {
+			continue
+		}
 		scopes = append(scopes, s)
 	}
 	sort.Strings(scopes)

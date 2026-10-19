@@ -36,6 +36,7 @@ func EnsureSchema(app core.App) error {
 		}
 		request := core.NewBaseCollection(Requests)
 		request.Fields.Add(&core.TextField{Name: "handle_hash", Required: true, Hidden: true, Max: 64}, &core.TextField{Name: "client", Required: true, Max: 128}, &core.TextField{Name: "config_hash", Required: true, Hidden: true, Max: 64}, &core.TextField{Name: "redirect_uri", Required: true, Max: 2048}, &core.TextField{Name: "state", Required: true, Hidden: true, Max: 512}, &core.TextField{Name: "challenge", Required: true, Hidden: true, Max: 128}, &core.JSONField{Name: "scopes", MaxSize: 4096}, &core.RelationField{Name: "user", CollectionId: users.Id, MaxSelect: 1, CascadeDelete: true}, &core.TextField{Name: "session_hash", Hidden: true, Max: 64}, &core.DateField{Name: "expires", Required: true})
+		request.Fields.Add(&core.TextField{Name: "nonce", Hidden: true, Max: 512})
 		request.AddIndex("idx_oauth_request_handle", true, "handle_hash", "")
 		request.AddIndex("idx_oauth_request_expires", false, "expires", "")
 		if err := ensureCollection(tx, request); err != nil {
@@ -45,6 +46,7 @@ func EnsureSchema(app core.App) error {
 			c := core.NewBaseCollection(name)
 			c.Fields.Add(&core.RelationField{Name: "grant", CollectionId: grant.Id, Required: true, MaxSelect: 1, CascadeDelete: true}, &core.TextField{Name: "generation", Required: true, Hidden: true, Max: 64}, &core.JSONField{Name: "scopes", MaxSize: 4096})
 			if name == Codes {
+				c.Fields.Add(&core.TextField{Name: "nonce", Hidden: true, Max: 512})
 				c.Fields.Add(&core.TextField{Name: "code_hash", Required: true, Hidden: true, Max: 64}, &core.TextField{Name: "redirect_uri", Required: true, Max: 2048}, &core.TextField{Name: "challenge", Required: true, Hidden: true, Max: 128}, &core.DateField{Name: "expires", Required: true}, &core.BoolField{Name: "consumed"})
 				c.AddIndex("idx_oauth_code_hash", true, "code_hash", "")
 			} else {
@@ -102,4 +104,30 @@ func ensureCollection(app core.App, want *core.Collection) error {
 		}
 	}
 	return nil
+}
+
+// EnsureOIDCSchema adds only hidden nonce storage to the locked OAuth ledgers.
+func EnsureOIDCSchema(app core.App) error {
+	return app.RunInTransaction(func(tx core.App) error {
+		for _, name := range []string{Requests, Codes} {
+			c, err := tx.FindCollectionByNameOrId(name)
+			if err != nil {
+				return err
+			}
+			if !c.IsBase() || c.System || c.ListRule != nil || c.ViewRule != nil || c.CreateRule != nil || c.UpdateRule != nil || c.DeleteRule != nil {
+				return fmt.Errorf("%s must be locked", name)
+			}
+			if f := c.Fields.GetByName("nonce"); f != nil {
+				if t, ok := f.(*core.TextField); !ok || !t.Hidden || t.Max != 512 || t.Required {
+					return fmt.Errorf("incompatible %s.nonce", name)
+				}
+				continue
+			}
+			c.Fields.Add(&core.TextField{Name: "nonce", Hidden: true, Max: 512})
+			if err := tx.Save(c); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

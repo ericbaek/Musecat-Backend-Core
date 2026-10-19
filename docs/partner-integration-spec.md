@@ -77,7 +77,9 @@ Normative reference: `developer-api.md` and `developer-openapi.yaml`. Summary of
 | Identity | `GET /developer/v1/me` → `{sub, username, nickname}` |
 | Resource surface | 83 allowlisted operations under `/developer/v1/account/*` |
 
-Partners MUST NOT request legacy narrow scopes for new integrations.
+For API delegation, partners use `account:access`. Applications approved with
+`direction_a.login_enabled: true` may instead request `openid profile arcade:read` for
+[Sign in with Musecat](sign-in-with-musecat.md), without write permissions.
 
 ## 3. Direction B: Musecat reads partner records (adapter implemented; partner profile fixed here)
 
@@ -418,16 +420,14 @@ Email matching, nickname matching and "same `sub` string at a different issuer" 
 
 A partner submits one document per Musecat deployment (development, production) through the
 Musecat Developer Center (`/{locale}/developer/apps`; design in
-[`developer-center.md`](developer-center.md)). Until the Developer Center ships, the same JSON
-is sent to the Musecat operator. The JSON below is the submitted form. Musecat client secrets and inbound server keys are
+[`developer-center.md`](developer-center.md)). The form is submitted directly through the Developer Center. The JSON below is the submitted form. Musecat client secrets and inbound server keys are
 generated separately in the Developer Center and revealed once. Partner-issued OAuth credentials
 and outbound server keys are entered separately and encrypted at rest. The callback displayed
 by the Developer Center must be registered exactly at the partner.
 
 Activation sequence: submit → structural validation → operator **Approve** → OAuth secret issuance
-and partner credential/key entry → live within one minute on every Musecat instance. Remote TLS,
-metadata/PKCE and bearer conformance checks remain a partner self-certification step until the
-automated conformance kit ships. No per-partner protocol negotiation is required.
+and partner credential/key entry → live within one minute on every Musecat instance. Remote TLS, metadata/PKCE and bearer checks run in the Developer Center; account-bound staging
+scenarios retain explicit unverified status until partner interoperability evidence is available. No per-partner protocol negotiation is required.
 
 ```json
 {

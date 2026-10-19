@@ -29,3 +29,8 @@ func DeveloperHTML() []byte    { return append([]byte(nil), developerHTML...) }
 var partnerIntegrationSpec []byte
 
 func PartnerIntegrationSpec() []byte { return append([]byte(nil), partnerIntegrationSpec...) }
+
+//go:embed sign-in-with-musecat.md
+var signInGuide []byte
+
+func SignInGuide() []byte { return append([]byte(nil), signInGuide...) }

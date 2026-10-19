@@ -753,9 +753,13 @@ func (s *Service) Clients(app core.App) ([]delegation.Client, error) {
 		if f == nil || !isLive(r) || !s.activeOwner(app, r) {
 			continue
 		}
+		scopes := []string{delegation.AccountAccess}
+		if f.DirectionA.LoginEnabled {
+			scopes = append(scopes, delegation.OpenID, delegation.Profile, "arcade:read")
+		}
 		out = append(out, delegation.Client{
 			ID: f.PartnerID, Name: f.DisplayName.En, Description: f.Description.En,
-			RedirectURIs: f.DirectionA.RedirectURIs, Scopes: []string{delegation.AccountAccess},
+			RedirectURIs: f.DirectionA.RedirectURIs, Scopes: scopes,
 			SecretHash: r.GetString("secret_hash"),
 		})
 	}

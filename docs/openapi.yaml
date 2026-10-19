@@ -44,6 +44,8 @@ components:
           tokenUrl: "/oauth/token"
           refreshUrl: "/oauth/token"
           scopes:
+            openid: Sign in with Musecat (opt-in application)
+            profile: Read basic OpenID profile
             account:access: General user features on behalf of the account; management and account-security operations excluded
             profile:read: Read your basic profile
             arcade:read: Read public arcade information
@@ -3245,6 +3247,7 @@ components:
           type: object
           required: [redirect_uris]
           properties:
+            login_enabled: {type: boolean, default: false, description: Enable Sign in with Musecat after operator approval.}
             redirect_uris: {type: array, minItems: 1, maxItems: 8, items: {type: string, format: uri}}
         direction_b:
           type: object
@@ -3385,6 +3388,46 @@ components:
         updated_at: {type: string, format: date-time}
         payload: {$ref: '#/components/schemas/ExternalRecordEnvelope'}
 paths:
+  /developer/sign-in-with-musecat.md:
+    get:
+      tags: [OAuth delegation]
+      summary: Sign in with Musecat integration guide and runnable partner example
+      responses:
+        '200': {description: Markdown guide, content: {text/markdown: {schema: {type: string}}}}
+  /.well-known/openid-configuration:
+    get:
+      tags: [OAuth delegation]
+      summary: Discover Sign in with Musecat endpoints and RS256 profile
+      responses:
+        '200': {description: OIDC discovery with issuer, authorization/token/userinfo endpoints, jwks_uri, pairwise subjects and RS256. Cache-Control no-store., content: {application/json: {schema: {type: object}}}}
+        '503': {description: OAuth or OIDC signing keys are not configured.}
+  /oauth/jwks:
+    get:
+      tags: [OAuth delegation]
+      summary: Public RSA signing keys for Musecat ID tokens
+      responses:
+        '200': {description: Public JWK Set. Private key fields are never included., content: {application/json: {schema: {type: object, required: [keys], properties: {keys: {type: array, items: {type: object, required: [kty, use, alg, kid, n, e]}}}}}}}
+        '503': {description: OIDC signing keys are not configured.}
+  /oauth/userinfo:
+    get:
+      tags: [OAuth delegation]
+      security: [{delegatedOAuth: [openid]}]
+      summary: Verified login identity and approved basic profile
+      description: Requires an opaque bearer access token with explicitly granted openid scope. Returns app-specific sub and, only with profile, preferred_username and nickname. No email or global user id. Live revocation and account restrictions apply. No query parameters or body allowed. Cache-Control no-store.
+      responses:
+        '200': {description: UserInfo, content: {application/json: {schema: {type: object, required: [sub], properties: {sub: {type: string}, preferred_username: {type: string}, nickname: {type: string}}}}}}
+        '400': {description: Invalid request.}
+        '401': {description: Invalid, expired or revoked bearer token.}
+        '403': {description: Missing explicit openid scope.}
+    post:
+      tags: [OAuth delegation]
+      security: [{delegatedOAuth: [openid]}]
+      summary: Read UserInfo with an empty POST and bearer Authorization header
+      responses:
+        '200': {description: Same UserInfo as GET. Cache-Control no-store.}
+        '400': {description: Query or non-empty body is not accepted.}
+        '401': {description: Invalid or revoked token.}
+        '403': {description: Missing explicit openid scope.}
   /search:
     get:
       tags: [Search]
@@ -8538,6 +8581,7 @@ paths:
                     type: string
   /oauth/authorize:
     get:
+      description: Authorization Code with PKCE S256. OpenID requests additionally require nonce (16-512 non-whitespace characters) and an application approved for login. The readonly login bundle is openid profile arcade:read. Optional response_mode must be query. Unsupported authorization parameters are rejected.
       tags:
       - OAuth delegation
       summary: Start authorization and redirect to the Musecat consent application
@@ -8598,6 +8642,13 @@ paths:
                 type: string
                 format: uri
       parameters:
+      - name: nonce
+        in: query
+        description: Required for openid. Random value bound to the partner login session and returned unchanged in the ID token.
+        schema: {type: string, minLength: 16, maxLength: 512}
+      - name: response_mode
+        in: query
+        schema: {type: string, enum: [query]}
       - name: client_id
         in: query
         required: true
@@ -8620,7 +8671,7 @@ paths:
         in: query
         required: false
         schema:
-          description: 'Space-separated registered scopes. Send account:access for new clients. Omitted/empty defaults to account:access only if registered for that client; otherwise invalid_scope.'
+          description: 'Space-separated registered scopes. Send openid profile arcade:read for login or account:access for general delegation. Omitted/empty defaults to account:access only if registered for that client; otherwise invalid_scope.'
           type: string
       - name: state
         in: query
@@ -8854,6 +8905,9 @@ paths:
                   expires_in:
                     type: integer
                     maximum: 600
+                  id_token:
+                    type: string
+                    description: RS256 login ID token, only for an explicitly approved openid authorization-code exchange. Validate signature, issuer, audience, expiry and original nonce. Never use as an API bearer token.
                   scope:
                     type: string
         '400':

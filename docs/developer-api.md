@@ -10,7 +10,8 @@ both under an explicit bilateral consent agreement; the current generic OAuth fl
 See [`joint-connections.md`](joint-connections.md) in the source handoff for design and implemented
 server-only state preparation. The implementation supports registered
 confidential server applications using Authorization Code with PKCE S256 and HTTP Basic client
-authentication. It is OAuth API delegation, not an OpenID Connect login or ID-token service.
+authentication. Opt-in OpenID Connect login is documented in [Sign in with Musecat](sign-in-with-musecat.md).
+The readonly login scope bundle is `openid profile arcade:read`; the general API delegation flow below uses `account:access`.
 
 ## Register your application
 
@@ -123,8 +124,7 @@ curl -H "Authorization: Bearer $MUSECAT_ACCESS_TOKEN" \
 verified external identity for this registered application. `sub` is stable across revocation
 and reauthorization for the same Musecat user and client; different clients receive different
 subjects. `/developer/v1/account/user/me` returns the normal profile projection, including its
-Musecat resource ID; do not confuse that `id` with the app-specific OAuth `sub`. Neither endpoint
-returns an ID token. Do not infer identity from email, nickname or a different app's subject.
+Musecat resource ID; do not confuse that `id` with the app-specific OAuth `sub`. These resource endpoints do not return an ID token; OpenID authorization-code exchange does. Do not infer identity from email, nickname or a different app's subject.
 
 An omitted/empty authorization `scope` defaults to `account:access` only when the registered
 client permits it. Send it explicitly in new integrations. Older narrow grants never acquire
