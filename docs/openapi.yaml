@@ -3479,6 +3479,7 @@ components:
                   id: {type: string, maxLength: 128}
                   title: {type: string, minLength: 1, maxLength: 256}
                   artist: {type: string, maxLength: 256}
+                  image_url: {type: [string, "null"], format: uri, maxLength: 2048, description: Optional HTTPS song cover URL without credentials. Null or empty is omitted from the cached projection; no cover is fabricated.}
               chart:
                 type: object
                 required: [difficulty]

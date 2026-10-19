@@ -85,9 +85,10 @@ type RecordPlay struct {
 	Fields   []RecordField `json:"fields"`
 }
 type RecordSong struct {
-	ID     string `json:"id,omitempty"`
-	Title  string `json:"title"`
-	Artist string `json:"artist,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Title    string `json:"title"`
+	Artist   string `json:"artist,omitempty"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 type RecordChart struct {
 	ID         string `json:"id,omitempty"`
@@ -250,7 +251,7 @@ func validRecordExtensions(e RecordEnvelope) bool {
 				seen[p.ID] = true
 			}
 			previous = p.PlayedAt
-			if len(p.Song.ID) > 128 || p.Song.Title == "" || len(p.Song.Title) > 256 || len(p.Song.Artist) > 256 || len(p.Chart.ID) > 128 || p.Chart.Difficulty == "" || len(p.Chart.Difficulty) > 64 || len(p.Chart.Level) > 32 || len(p.Chart.Mode) > 64 || !validRecordFields(p.Fields, 16) {
+			if len(p.Song.ID) > 128 || p.Song.Title == "" || len(p.Song.Title) > 256 || len(p.Song.Artist) > 256 || !httpsLink(p.Song.ImageURL) || len(p.Chart.ID) > 128 || p.Chart.Difficulty == "" || len(p.Chart.Difficulty) > 64 || len(p.Chart.Level) > 32 || len(p.Chart.Mode) > 64 || !validRecordFields(p.Fields, 16) {
 				return false
 			}
 		}

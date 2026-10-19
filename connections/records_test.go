@@ -333,6 +333,37 @@ func TestRecentPlaysAndSelectionContract(t *testing.T) {
 			t.Fatal("subject leaked")
 		}
 	})
+	for _, image := range []any{"https://cdn.example.org/covers/song-1.png", nil, ""} {
+		t.Run(fmt.Sprint("optional cover ", image), func(t *testing.T) {
+			data := makeEnvelope()
+			song := data["recent_plays"].(map[string]any)["plays"].([]any)[0].(map[string]any)["song"].(map[string]any)
+			song["image_url"] = image
+			raw, _ := json.Marshal(data)
+			parsed, err := connections.ParseEnvelope(raw, "chunithm", "player")
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected, _ := image.(string)
+			if parsed.RecentPlays.Plays[0].Song.ImageURL != expected {
+				t.Fatal("cover URL lost")
+			}
+			projected, _ := json.Marshal(parsed.RecentPlays.Plays[0].Song)
+			if expected == "" && strings.Contains(string(projected), `"image_url"`) {
+				t.Fatal("absent cover should be omitted", string(projected))
+			}
+		})
+	}
+	for _, image := range []string{"http://cdn.example.org/cover.png", "//cdn.example.org/cover.png", "javascript:alert(1)", "data:image/png;base64,test", "https://user:password@cdn.example.org/cover.png", "https:///cover.png", "https://cdn.example.org/" + strings.Repeat("a", 2048)} {
+		t.Run("invalid cover "+image[:min(len(image), 80)], func(t *testing.T) {
+			data := makeEnvelope()
+			data["recent_plays"].(map[string]any)["plays"].([]any)[0].(map[string]any)["song"].(map[string]any)["image_url"] = image
+			raw, _ := json.Marshal(data)
+			if _, err := connections.ParseEnvelope(raw, "chunithm", "player"); err == nil {
+				t.Fatal("unsafe cover URL accepted")
+			}
+		})
+	}
+
 	cases := map[string]func(map[string]any){
 		"unknown version": func(e map[string]any) { e["game_schema"] = "musecat-game/chunithm/v2" },
 		"wrong game":      func(e map[string]any) { e["game_schema"] = "musecat-game/sdvx/v1" },
