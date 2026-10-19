@@ -58,7 +58,7 @@ func EnsureSchema(app core.App) error {
 				return err
 			}
 		}
-		return nil
+		return EnsureUsageSchema(tx)
 	})
 }
 func ensureCollection(app core.App, want *core.Collection) error {

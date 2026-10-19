@@ -291,3 +291,24 @@ collaborators, daily usage rollups, contact notifications and ownership transfer
 protocol v1 and are not exposed by the current API. Owner withdrawal instead suspends applications
 and disables registrations atomically; a withdrawn owner cannot be reinstated. Full owns the guarded forward migrations for every new collection;
 Core supplies fresh-bootstrap schema only, as for the existing connection tables.
+
+## Application console
+
+The application page groups setup progress, credentials, integration settings, testing,
+activity and audit history using Musecat UIKit. Client IDs and callbacks remain copyable;
+secrets are visible once and rotation immediately invalidates earlier credentials/grants.
+Approved configuration remains separate from a draft awaiting review. Optional public
+HTTPS website, privacy, terms and support links are included in the reviewed form.
+
+`GET /developer/apps/{id}/console?page=1` is owner-only and returns deployed issuer,
+approved scopes/callbacks, 25 pairwise accounts per page and 14 days of UTC counters.
+Names require profile consent; no global user ID or email is projected. Counters begin at
+rollout, record attributed API/UserInfo, code and refresh attempts/errors, and retain 30 days.
+Unknown authentication cannot be attributed and is excluded. No raw secrets or request data
+are retained. Web test URL generation uses fresh state/nonce/PKCE, approved callbacks only,
+and an HttpOnly authenticated BFF session; the owner retains the verifier for the actual
+server-side exchange. It neither completes consent nor approves an application automatically.
+
+For Musecat-started joint flows, the optional fixed `completion_uri` is described in
+partner-integration-spec section 5.5. A partner must support and validate it and must finish
+both exchanges before returning. Existing partners continue to their own completion screen.

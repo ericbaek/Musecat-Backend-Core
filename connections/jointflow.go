@@ -86,6 +86,9 @@ func (m *JointManager) BeginURL(partner, returnTo string) (string, string, error
 	q := u.Query()
 	q.Set("correlation_id", correlation)
 	q.Set("return_to", returnTo)
+	// Optional final destination, fixed to Musecat settings rather than browser input.
+	locale := strings.Split(strings.TrimPrefix(target.Path, "/"), "/")[0]
+	q.Set("completion_uri", m.delegation.ConsentOrigin()+"/"+locale+"/settings/connections")
 	u.RawQuery = q.Encode()
 	return u.String(), correlation, nil
 }

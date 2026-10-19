@@ -360,7 +360,14 @@ Entry from the partner:
 
 Entry from Musecat:
 
-1. Musecat redirects the browser to `{connect_start_url}?correlation_id=<uuid>&return_to={musecat_web}/{locale}/connect/{partner_id}`.
+1. Musecat redirects the browser to `{connect_start_url}?correlation_id=<uuid>&return_to={musecat_web}/{locale}/connect/{partner_id}&completion_uri={musecat_web}/{locale}/settings/connections`.
+   `completion_uri` is an optional UX extension. A supporting partner keeps it in its
+   server-side correlation state and redirects there only after its code exchange and the
+   authenticated Musecat status check both succeed. Validate it against the registered
+   Musecat HTTPS web origin and exact `/{locale}/settings/connections` path; reject query,
+   fragment, credentials, and arbitrary origins. It never replaces the registered OAuth
+   callback or `return_to` consent address. Partners without support keep their existing
+   completion screen; local browser query flags never prove connection success.
 2. Partner signs its user in, creates an intent with that `correlation_id`, and redirects to
    `return_to` with `?intent=<handle>`. Flow continues at step 2 above.
 

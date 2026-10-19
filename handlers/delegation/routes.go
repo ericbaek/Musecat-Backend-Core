@@ -173,6 +173,7 @@ func RegisterRoutes(se *core.ServeEvent, m *delegation.Manager) {
 			return invalid(re)
 		}
 		v, err := m.UserInfo(re.App, bearer(re.Request))
+		m.RecordUsage(re.App, m.AccessClient(re.App, bearer(re.Request)), "api", usageStatus(re, err))
 		if err != nil {
 			return respond(re, err)
 		}
@@ -257,6 +258,11 @@ func RegisterRoutes(se *core.ServeEvent, m *delegation.Manager) {
 			return invalid(re)
 		}
 		out, e := m.Exchange(re.App, id, delegation.TokenInput{GrantType: f.Get("grant_type"), Code: f.Get("code"), RedirectURI: f.Get("redirect_uri"), Verifier: f.Get("code_verifier"), RefreshToken: f.Get("refresh_token")})
+		kind := "code"
+		if f.Get("grant_type") == "refresh_token" {
+			kind = "refresh"
+		}
+		m.RecordUsage(re.App, id, kind, usageStatus(re, e))
 		if e != nil {
 			return respond(re, e)
 		}
@@ -315,7 +321,9 @@ func domain(h func(*core.RequestEvent) error) func(*core.RequestEvent, string) e
 	return func(re *core.RequestEvent, _ string) error { return h(re) }
 }
 func resource(m *delegation.Manager, scope string, h func(*core.RequestEvent, string) error) func(*core.RequestEvent) error {
-	return func(re *core.RequestEvent) error {
+	return func(re *core.RequestEvent) (result error) {
+		clientID := m.AccessClient(re.App, bearer(re.Request))
+		defer func() { m.RecordUsage(re.App, clientID, "api", usageStatus(re, result)) }()
 		u, sub, e := m.ResolveAccess(re.App, bearer(re.Request), scope)
 		if e != nil {
 			var oe *delegation.OAuthError
@@ -345,4 +353,18 @@ func AccountResource(m *delegation.Manager) *hook.Handler[*core.RequestEvent] {
 			return re.Next()
 		})(re)
 	}}
+}
+
+func usageStatus(re *core.RequestEvent, err error) int {
+	if err != nil {
+		var oauth *delegation.OAuthError
+		if errors.As(err, &oauth) {
+			return oauth.Status
+		}
+		return 500
+	}
+	if re.Status() > 0 {
+		return re.Status()
+	}
+	return 200
 }

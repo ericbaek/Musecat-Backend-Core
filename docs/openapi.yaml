@@ -3243,6 +3243,10 @@ components:
         display_name: {$ref: '#/components/schemas/PartnerLocalized'}
         description: {$ref: '#/components/schemas/PartnerLocalized'}
         contact_email: {type: string, format: email}
+        website: {type: string, format: uri, maxLength: 2048}
+        privacy_url: {type: string, format: uri, maxLength: 2048}
+        terms_url: {type: string, format: uri, maxLength: 2048}
+        support_url: {type: string, format: uri, maxLength: 2048}
         direction_a:
           type: object
           required: [redirect_uris]
@@ -15350,6 +15354,45 @@ paths:
         '404': {description: Application not found.}
         '409': {description: Suspended application.}
         '429': {description: checks_busy; active run or cooldown.}
+
+  /developer/apps/{id}/console:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+      - {name: page, in: query, schema: {type: integer, minimum: 1, maximum: 10000, default: 1}}
+    get:
+      tags: [Developer Center]
+      summary: Read owned application activity and integration settings
+      security: [{bearerAuth: []}]
+      description: >-
+        Owner-only, outside delegated account access. Returns issuer, approved active scopes and redirect_uris,
+        connected_count for non-revoked current-config grants with unexpired token families,
+        and at most 25 accounts (subject, optional name, scopes, connected). Each subject is pairwise for this
+        app; names require profile consent and never include email or a global user ID. Account entries also
+        verify account restrictions and token-key binding. Fourteen UTC usage rows expose day, api, codes,
+        refreshes and errors. API includes userinfo and delegated resources. Counters start at rollout;
+        unauthenticated/unattributable requests are excluded. No raw tokens, IPs, queries or bodies are stored.
+        Aggregates are retained for 30 days. Responses use Cache-Control no-store.
+      responses:
+        '200':
+          description: Console data; issuer, scopes, redirect_uris, connected_count, accounts, page, usage.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issuer, scopes, redirect_uris, connected_count, accounts, page, usage]
+                properties:
+                  issuer: {type: string, format: uri}
+                  scopes: {type: array, items: {type: string}}
+                  redirect_uris: {type: array, items: {type: string, format: uri}}
+                  connected_count: {type: integer, minimum: 0}
+                  page: {type: integer, minimum: 1}
+                  accounts: {type: array, maxItems: 25, items: {type: object, required: [subject, scopes, connected], properties: {subject: {type: string}, name: {type: string}, scopes: {type: array, items: {type: string}}, connected: {type: string, format: date-time}}}}
+                  usage: {type: array, minItems: 14, maxItems: 14, items: {type: object, required: [day, api, codes, refreshes, errors], properties: {day: {type: string, format: date}, api: {type: integer}, codes: {type: integer}, refreshes: {type: integer}, errors: {type: integer}}}}
+        '400': {description: Invalid pagination.}
+        '401': {description: User session required.}
+        '403': {description: Restricted account.}
+        '404': {description: Missing or another owner's application.}
+        '503': {description: OAuth delegation unavailable.}
 
 x-musecat-joint-connection:
   status: implemented

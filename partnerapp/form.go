@@ -86,6 +86,10 @@ type Form struct {
 	DisplayName  Localized   `json:"display_name"`
 	Description  Localized   `json:"description"`
 	ContactEmail string      `json:"contact_email"`
+	Website      string      `json:"website,omitempty"`
+	PrivacyURL   string      `json:"privacy_url,omitempty"`
+	TermsURL     string      `json:"terms_url,omitempty"`
+	SupportURL   string      `json:"support_url,omitempty"`
 	DirectionA   DirectionA  `json:"direction_a"`
 	DirectionB   *DirectionB `json:"direction_b,omitempty"`
 	Joint        *Joint      `json:"joint,omitempty"`
@@ -139,6 +143,11 @@ func (f *Form) Validate() error {
 	f.ContactEmail = strings.TrimSpace(f.ContactEmail)
 	if a, err := mail.ParseAddress(f.ContactEmail); f.ContactEmail == "" || err != nil || a.Address != f.ContactEmail || len(f.ContactEmail) > 254 {
 		errs["contact_email"] = "invalid"
+	}
+	for key, value := range map[string]string{"website": f.Website, "privacy_url": f.PrivacyURL, "terms_url": f.TermsURL, "support_url": f.SupportURL} {
+		if value != "" && !httpsURL(value) {
+			errs[key] = "invalid"
+		}
 	}
 	if n := len(f.DirectionA.RedirectURIs); n == 0 || n > 8 {
 		errs["direction_a.redirect_uris"] = "count"

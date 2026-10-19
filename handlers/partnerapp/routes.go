@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -119,6 +120,18 @@ func RegisterRoutes(se *core.ServeEvent, service *partnerapp.Service) {
 		out, err := service.QueueChecks(re.App, re.Auth.Id, re.Request.PathValue("id"), false, in)
 		return respondStatus(re, http.StatusAccepted, out, err)
 	}).Bind(apis.BodyLimit(16 << 10))
+	owner.GET("/{id}/console", func(re *core.RequestEvent) error {
+		page := 1
+		if raw := re.Request.URL.Query().Get("page"); raw != "" {
+			var err error
+			page, err = strconv.Atoi(raw)
+			if err != nil || page < 1 || page > 10000 {
+				return re.BadRequestError("Invalid page.", nil)
+			}
+		}
+		out, err := service.Console(re.App, re.Auth.Id, re.Request.PathValue("id"), page)
+		return respond(re, out, err)
+	})
 	owner.GET("/{id}/events", func(re *core.RequestEvent) error {
 		items, err := service.OwnerEvents(re.App, re.Auth.Id, re.Request.PathValue("id"))
 		return respond(re, map[string]any{"items": items}, err)

@@ -195,3 +195,21 @@ func TestConformanceRoutesAreOwnerAndReviewerOnly(t *testing.T) {
 	check(t, f.req("GET", operatorPath, operator, ""), 200)
 	check(t, f.req("POST", operatorPath, operator, "{}"), 429)
 }
+
+func TestConsoleOwnershipAndPagination(t *testing.T) {
+	f := newFixture(t)
+	owner, stranger := f.user(), f.user()
+	created := check(t, f.req("POST", "/developer/apps", owner, fmt.Sprintf(form, "console_app")), 201)
+	path := "/developer/apps/" + created["id"].(string) + "/console"
+	check(t, f.req("GET", path, "", ""), 401)
+	check(t, f.req("GET", path, stranger, ""), 404)
+	check(t, f.req("GET", path+"?page=0", owner, ""), 400)
+	check(t, f.req("GET", path+"?page=1.5", owner, ""), 400)
+	result := check(t, f.req("GET", path, owner, ""), 200)
+	if result["connected_count"] != float64(0) || len(result["usage"].([]any)) != 14 || len(result["accounts"].([]any)) != 0 {
+		t.Fatal(result)
+	}
+	if strings.Contains(fmt.Sprint(result), "secret_hash") {
+		t.Fatal("console leaked credentials")
+	}
+}

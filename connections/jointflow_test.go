@@ -214,3 +214,23 @@ func TestWithdrawalPreservesRevocationAndRetryIdentity(t *testing.T) {
 		t.Fatal("revocation not delivered", deliveries)
 	}
 }
+
+func TestMusecatEntryHasFixedCompletionDestination(t *testing.T) {
+	_, m, _, _, _, _ := flowFixture(t)
+	target, _, err := m.BeginURL("rhythm", "https://musecat.example/kr/connect/rhythm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Query().Get("completion_uri") != "https://musecat.example/kr/settings/connections" {
+		t.Fatal("unexpected completion destination", u.Query().Get("completion_uri"))
+	}
+	for _, bad := range []string{"https://evil.example/kr/connect/rhythm", "https://musecat.example/kr/connect/rhythm?completion_uri=https://evil.example"} {
+		if _, _, err := m.BeginURL("rhythm", bad); err == nil {
+			t.Fatal("accepted untrusted destination")
+		}
+	}
+}

@@ -28,7 +28,8 @@ func CleanupExpired(app core.App) error {
 				}
 			}
 		}
-		return nil
+		_, err := tx.DB().NewQuery("DELETE FROM oauth_client_usage WHERE day < {:day}").Bind(dbx.Params{"day": now.AddDate(0, 0, -30).Format("2006-01-02")}).Execute()
+		return err
 	})
 }
 func RegisterCleanupCron(app *pocketbase.PocketBase) {

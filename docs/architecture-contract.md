@@ -933,6 +933,18 @@ existing user connections remain listed and locally disconnectable. Joint declar
 are outside the delegated `account:access` allowlist. Core bootstraps fresh schema; Full owns the
 guarded forward migration. See [`developer-center.md`](developer-center.md) for the full design.
 
+The owner-only `/developer/apps/{id}/console` exposes approved settings, paginated pairwise
+account identifiers and 14 UTC days of aggregate activity. Names require profile consent;
+account/token/generation restrictions still apply. `oauth_client_usage` is locked and stores
+only client, day, kind (`api`, `code`, `refresh`), requests and errors. Attributable failures
+count as errors; unknown credentials are not attributed. API includes UserInfo and delegated
+resources. Counters are best-effort and never roll back authentication or domain operations;
+no tokens, IPs, URLs, query strings or request bodies enter these aggregates. Cleanup retains
+30 days. Full owns the forward migration; Core creates only fresh bootstrap schema.
+Optional HTTPS website/privacy/terms/support URLs belong to the submitted and approved form;
+omitting them preserves old form hashes. Credential issuance history contains timestamps and
+rotation events, not recoverable secrets or a fabricated grace period.
+
 ## Reciprocal connection orchestration
 
 Approved joint registrations drive `/user/joint/*` and `/partner/v1/*` through
