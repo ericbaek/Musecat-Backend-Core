@@ -100,6 +100,12 @@ func TestChuniInfoOAuthAndOwnerRecords(t *testing.T) {
 	input := f.start(f.token, "chuniinfo", "chunithm")
 	input.Issuer = "" // provider's documented OAuth2 callback has no iss
 	id := f.complete(input)
+	accounts := f.request(f.token, "GET", "/user/connections", nil, 200)
+	items := accounts["items"].([]any)
+	services := items[0].(map[string]any)["services"].([]any)
+	if services[0].(map[string]any)["visibility"] != "public" {
+		t.Fatal("native CHUNITHM Info connection must publish after consent", accounts)
+	}
 	view := f.request(f.token, "GET", "/user/connections/"+id+"/records/chunithm", nil, 200)
 	if view["status"] != "ok" || calls != 2 {
 		t.Fatal(view, calls)

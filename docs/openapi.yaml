@@ -3108,6 +3108,7 @@ components:
           items: {$ref: '#/components/schemas/ExternalService'}
     ExternalServiceConnection:
       type: object
+      description: Native CHUNITHM Info grants are public after OAuth consent; other providers default to private. Upstream privacy and development audience restrictions still apply.
       required: [service, visibility, fields]
       properties:
         service: {type: string}

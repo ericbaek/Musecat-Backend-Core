@@ -300,7 +300,12 @@ func (m *Manager) complete(ctx context.Context, app core.App, actor Actor, input
 			record := core.NewRecord(collection)
 			record.Set("connection", account.Id)
 			record.Set("service", service.ID)
-			record.Set("visibility", "private")
+			visibility := "private"
+			// Native CHUNITHM Info consent publishes the profile's CHUNITHM section.
+			if p.IsChuniInfo() && service.ID == "chunithm" {
+				visibility = "public"
+			}
+			record.Set("visibility", visibility)
 			record.Set("fields", []string{})
 			if err := tx.Save(record); err != nil {
 				return err
