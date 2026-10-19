@@ -278,8 +278,8 @@ accounts; it does not award XP.
 
 The mutation promotes pending atoms and awards XP only for atoms whose
 `public` flag was false before the transaction. Each newly published atom is
-worth 2 XP, capped over a rolling seven-day window at 10 XP for an automatic
-photo-campaign target and 4 XP for another public arcade. Uploading a pending
+worth 2 XP, capped over a rolling seven-day window at 20 XP for an automatic
+photo-campaign target and 10 XP for another public arcade. Uploading a pending
 atom, changing order, removing a gallery member, or re-adding an already
 published atom does not award XP. Aggregate pointer, atom promotion, changelog,
 and XP ledger updates commit atomically.

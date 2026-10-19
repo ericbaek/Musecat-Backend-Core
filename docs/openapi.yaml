@@ -1714,7 +1714,7 @@ components:
         photo_status:
           type: string
           enum: [missing, stale]
-          description: Missing means the current gallery has no public photo; stale means its newest public photo is at least six months old.
+          description: Missing means the current gallery has no public photo; stale means its newest public photo is at least one year old.
         photo_url:
           type: string
           format: uri-reference
@@ -4855,7 +4855,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: /arcade/photo
-      description: Pending atoms receive 2 XP each when first published, up to 10 XP per campaign target or 4 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      description: Pending atoms receive 2 XP each when first published, up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
       requestBody:
@@ -4869,7 +4869,7 @@ paths:
               photos: [atom_1, atom_2]
       responses:
         '200':
-          description: "Photo relation updated. XP is awarded only when pending atoms are first published: 2 XP per atom, up to 10 XP per campaign target or 4 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a published atom awards no XP."
+          description: "Photo relation updated. XP is awarded only when pending atoms are first published: 2 XP per atom, up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a published atom awards no XP."
           content:
             application/json:
               schema:
@@ -7653,7 +7653,7 @@ paths:
       summary: Photo update campaign targets
       description: |
         Returns public/open arcades whose current photo gallery has no public
-        photo or whose newest public photo is at least six months old. The
+        photo or whose newest public photo is at least one year old. The
         result is computed from the current `arcade.photo` molecule and is
         paginated like the public arcade list. Missing-photo targets are listed
         first, followed by stale targets from oldest to newest.
