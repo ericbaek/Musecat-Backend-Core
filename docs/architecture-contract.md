@@ -150,6 +150,35 @@ Community achievement posts require at least one attached photo. Creation reject
 text-only achievements with 400. Updates count retained and newly attached photos
 inside the author mutation transaction and reject a photo-less conversion with 400.
 
+### Community conversations and likes
+
+`community_comment` owns comments and one-level replies; `parent` always points to
+its root and `reply_to` identifies the active comment being addressed in the same
+post. Custom APIs alone expose these collections. Comments require text (up to 2000 Unicode characters after trimming) or at least
+one photo, a live post and an active author. Comments and replies accept at most
+three JPEG/PNG/WebP/GIF images, at most 10 MiB each. Updates retain existing images
+when omitted; explicit `keep_photos` must be a unique subset of the current filenames.
+Retained plus new images cannot exceed three. Only the author may
+edit before the original five-minute deadline or delete at any time. Actual edits
+set `edited_at` and do not extend the deadline; text changes invalidate cached translations.
+Deletion erases the body, photos and translations. A deleted root is returned with blank
+identity/body only while active replies remain; an active reply beneath that root
+can still receive replies. Deleted posts make the whole conversation inaccessible.
+
+`community_post_like` and `community_comment_like` enforce unique target/author
+pairs. PUT sets and DELETE removes a like idempotently inside a transaction which
+also validates current target visibility. Reads aggregate counts and viewer state
+in batches and return `Cache-Control: private, no-store`; omitted authentication
+is a guest read. `comment_count` counts active root comments and replies. Root and
+reply wire pages contain up to 20 newest-first items with a stable created/id older
+cursor; the web client reverses loaded reply pages for chronological display.
+
+The existing OpenAI worker processes up to 25 posts and 25 comments independently
+per run. Photo-only comments are ready immediately without an OpenAI call. Comments use empty titles and the same Korean-to-English/Japanese cache,
+leases, source hashes, retry bounds and five-minute delay. Claim, completion and
+failure check the parent post as well as the comment, so deleted content cannot
+be published by an in-flight translation. Credentials remain executable-owned.
+
 ## Visibility and role matrix
 
 Definitions:

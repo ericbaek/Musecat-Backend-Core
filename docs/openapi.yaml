@@ -146,6 +146,10 @@ components:
         id: {type: string}
         author: {type: string}
         author_name: {type: string, description: Public nickname or username.}
+        author_avatar_url: {type: string}
+        like_count: {type: integer, minimum: 0}
+        liked: {type: boolean}
+        comment_count: {type: integer, minimum: 0, description: Active comments and replies.}
         game_series: {type: string}
         photos: {type: array, items: {type: string}, maxItems: 8, description: Ordered stored filenames.}
         title: {type: string}
@@ -165,6 +169,51 @@ components:
             - {type: string, maxLength: 0}
         created: {type: string, format: date-time}
         updated: {type: string, format: date-time}
+    CommunityLike:
+      type: object
+      required: [like_count, liked]
+      properties:
+        like_count: {type: integer, minimum: 0}
+        liked: {type: boolean}
+    CommunityCommentInput:
+      type: object
+      required: [body]
+      properties:
+        post: {type: string, description: Required on creation.}
+        parent: {type: string, description: Top-level comment id for a reply.}
+        reply_to: {type: string, description: Active comment or reply in the same post.}
+        body: {type: string, maxLength: 2000, description: Text or at least one new/retained photo is required.}
+        photos: {type: array, maxItems: 3, items: {type: string, format: binary}, description: Multipart JPEG/PNG/WebP/GIF; at most 10 MiB each.}
+        keep_photos: {type: array, maxItems: 3, items: {type: string}, description: Update-only retained filenames; omitted preserves existing photos.}
+    CommunityComment:
+      allOf:
+        - {$ref: '#/components/schemas/CommunityLike'}
+        - type: object
+          properties:
+            id: {type: string}
+            post: {type: string}
+            parent: {type: string}
+            reply_to: {type: string}
+            reply_to_name: {type: string}
+            author: {type: string}
+            author_name: {type: string}
+            author_avatar_url: {type: string}
+            body: {type: string}
+            photos: {type: array, maxItems: 3, items: {type: string}}
+            deleted: {type: boolean}
+            created: {type: string, format: date-time}
+            editable_until: {type: string, format: date-time}
+            edited_at: {type: string, description: Empty until the body is edited.}
+            locale: {type: string, enum: [ko-KR, en-US, ja-JP]}
+            translated: {type: boolean}
+            translation_status: {type: string, enum: [pending, processing, ready, failed]}
+            reply_count: {type: integer, minimum: 0}
+    CommunityCommentsPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/CommunityComment'}}
+        next_cursor: {type: string, description: Opaque older-page cursor; empty when exhausted.}
     CommunityPostList:
       type: object
       required: [page, per_page, last_page, total, items]
@@ -3560,6 +3609,159 @@ components:
         updated_at: {type: string, format: date-time}
         payload: {$ref: '#/components/schemas/ExternalRecordEnvelope'}
 paths:
+  /community/comments:
+    get:
+      tags: [Community]
+      summary: List root comments or replies with optional viewer personalization
+      description: Twenty items per page, newest first with an opaque older cursor. Deleted roots remain only while active replies exist. Deleted posts are inaccessible. Responses are private and no-store.
+      parameters:
+        - {name: post, in: query, required: true, schema: {type: string}}
+        - {name: parent, in: query, schema: {type: string}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: locale, in: query, schema: {type: string, enum: [ko-KR, en-US, ja-JP]}}
+      responses:
+        '200':
+          description: Comment page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityCommentsPage'}
+        '400': {description: Invalid parent, cursor or locale}
+        '404': {description: Post not found}
+  /community/comment:
+    get:
+      tags: [Community]
+      summary: Read an active comment or its original
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+        - {name: locale, in: query, schema: {type: string, enum: [ko-KR, en-US, ja-JP]}}
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityComment'}
+        '400': {description: Invalid input}
+        '404': {description: Comment or post not found}
+    post:
+      tags: [Community]
+      summary: Create a comment or one-level reply
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommunityCommentInput'}
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/CommunityCommentInput'}
+      responses:
+        '201':
+          description: Successful operation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityComment'}
+        '400': {description: Invalid input}
+        '404': {description: Comment or post not found}
+        '401': {description: Sign-in required}
+        '403': {description: Author-only operation or inactive account}
+    put:
+      tags: [Community]
+      summary: Edit own comment within five minutes
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommunityCommentInput'}
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/CommunityCommentInput'}
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityComment'}
+        '400': {description: Invalid input}
+        '404': {description: Comment or post not found}
+        '401': {description: Sign-in required}
+        '403': {description: Author-only operation or inactive account}
+        '409': {description: Five-minute edit window closed}
+    delete:
+      tags: [Community]
+      summary: Delete own comment at any time
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '204':
+          description: Successful operation
+        '400': {description: Invalid input}
+        '404': {description: Comment or post not found}
+        '401': {description: Sign-in required}
+        '403': {description: Author-only operation or inactive account}
+  /community/post/like:
+    put:
+      tags: [Community]
+      summary: Set a post like idempotently
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Authoritative current count and viewer state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityLike'}
+        '401': {description: Sign-in required}
+        '403': {description: Inactive account}
+        '404': {description: Target or parent post not active}
+    delete:
+      tags: [Community]
+      summary: Remove a post like idempotently
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Authoritative current count and viewer state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityLike'}
+        '401': {description: Sign-in required}
+        '403': {description: Inactive account}
+        '404': {description: Target or parent post not active}
+  /community/comment/like:
+    put:
+      tags: [Community]
+      summary: Set a comment like idempotently
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Authoritative current count and viewer state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityLike'}
+        '401': {description: Sign-in required}
+        '403': {description: Inactive account}
+        '404': {description: Target or parent post not active}
+    delete:
+      tags: [Community]
+      summary: Remove a comment like idempotently
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Authoritative current count and viewer state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityLike'}
+        '401': {description: Sign-in required}
+        '403': {description: Inactive account}
+        '404': {description: Target or parent post not active}
   /developer/sign-in-with-musecat.md:
     get:
       tags: [OAuth delegation]

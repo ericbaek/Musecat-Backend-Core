@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -59,6 +58,8 @@ func RegisterRoutes(se *core.ServeEvent) { RegisterAccountRoutes(se.Router.Route
 func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	api.GET("/community/posts", ListPosts)
 	api.GET("/community/post", GetPost)
+	api.GET("/community/comments", ListComments)
+	api.GET("/community/comment", GetComment)
 	auth := api.Group("/community").Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
@@ -66,6 +67,13 @@ func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	auth.POST("/post", CreatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
 	auth.PUT("/post", UpdatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
 	auth.DELETE("/post", DeletePost)
+	auth.POST("/comment", CreateComment).Bind(apis.BodyLimit(MaxCommentBodyBytes))
+	auth.PUT("/comment", UpdateComment).Bind(apis.BodyLimit(MaxCommentBodyBytes))
+	auth.DELETE("/comment", DeleteComment)
+	auth.PUT("/post/like", LikePost)
+	auth.DELETE("/post/like", LikePost)
+	auth.PUT("/comment/like", LikeComment)
+	auth.DELETE("/comment/like", LikeComment)
 }
 
 func CreatePost(re *core.RequestEvent) error {
@@ -112,7 +120,7 @@ func CreatePost(re *core.RequestEvent) error {
 	if err := re.App.Save(record); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to create community post", "details": err.Error()})
 	}
-	return re.JSON(http.StatusCreated, buildPostResponse(re.App, record, OriginalLocale))
+	return servePost(re, record, OriginalLocale, http.StatusCreated)
 }
 
 func UpdatePost(re *core.RequestEvent) error {
@@ -190,7 +198,7 @@ func UpdatePost(re *core.RequestEvent) error {
 			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to update community post", "details": err.Error()})
 		}
 	}
-	return re.JSON(http.StatusOK, buildPostResponse(re.App, updated, OriginalLocale))
+	return servePost(re, updated, OriginalLocale, http.StatusOK)
 }
 
 // DeletePost hides the post from all public reads and drops its public files.
@@ -216,7 +224,19 @@ func DeletePost(re *core.RequestEvent) error {
 		record.Set("translations", map[string]any{})
 		record.Set("translation_started_at", "")
 		record.Set("translation_error", "")
-		return tx.Save(record)
+		if err := tx.Save(record); err != nil {
+			return err
+		}
+		comments, err := tx.FindAllRecords(CollectionComment, dbx.HashExp{"post": id})
+		if err != nil {
+			return err
+		}
+		for _, comment := range comments {
+			if err = eraseComment(tx, comment); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		switch err.Error() {
@@ -244,7 +264,7 @@ func GetPost(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
 	}
-	return re.JSON(http.StatusOK, buildPostResponse(re.App, record, locale))
+	return servePost(re, record, locale, http.StatusOK)
 }
 
 func ListPosts(re *core.RequestEvent) error {
@@ -318,10 +338,11 @@ func ListPosts(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to list community posts", "details": err.Error()})
 	}
-	items := make([]map[string]any, 0, len(records))
-	for _, record := range records {
-		items = append(items, buildPostResponse(re.App, record, locale))
+	items, err := postResponses(re.App, records, locale, viewerID(re))
+	if err != nil {
+		return err
 	}
+	privateSocialResponse(re)
 	lastPage := 0
 	if total > 0 {
 		lastPage = int((total + int64(perPage) - 1) / int64(perPage))
@@ -360,22 +381,8 @@ func decodePostInput(re *core.RequestEvent) (postInput, error) {
 }
 
 func validatePostInput(app core.App, input postInput) error {
-	if len(input.Photos) > MaxPostPhotos {
-		return fmt.Errorf("photos must have at most 8 items")
-	}
-	for _, file := range input.Photos {
-		if file.Size > MaxPostPhotoBytes {
-			return fmt.Errorf("each photo must be at most 10 MB")
-		}
-		reader, err := file.Reader.Open()
-		if err != nil {
-			return fmt.Errorf("failed to read photo")
-		}
-		mime, err := mimetype.DetectReader(reader)
-		reader.Close()
-		if err != nil || (mime.String() != "image/jpeg" && mime.String() != "image/png" && mime.String() != "image/webp" && mime.String() != "image/gif") {
-			return fmt.Errorf("photos must be JPEG, PNG, WebP or GIF images")
-		}
+	if err := validatePhotos(input.Photos, MaxPostPhotos); err != nil {
+		return err
 	}
 	if input.Body == "" {
 		return fmt.Errorf("body is required")
@@ -399,13 +406,6 @@ func validatePostInput(app core.App, input postInput) error {
 
 func buildPostResponse(app core.App, record *core.Record, requested string) map[string]any {
 	authorName := record.GetString("author")
-	if author, err := app.FindRecordById("user", authorName); err == nil {
-		if nickname := author.GetString("nickname"); nickname != "" {
-			authorName = nickname
-		} else if username := author.GetString("username"); username != "" {
-			authorName = username
-		}
-	}
 	title := record.GetString("title")
 	body := record.GetString("body")
 	servedLocale := OriginalLocale
