@@ -4582,6 +4582,30 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+    delete:
+      tags: [Community]
+      summary: Delete the author's post at any time
+      description: Retains a private tombstone, removes attached public files and cached translations, and excludes the post from detail, feeds, galleries, counts and translation jobs. Repeated deletion by the author returns 204.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '204':
+          description: Deleted, or already deleted by this author.
+        '400':
+          description: Missing id.
+        '401':
+          description: Authentication required.
+        '403':
+          description: Not the author, withdrawn, or banned.
+        '404':
+          description: Post not found.
+        '502':
+          description: Failed to delete post.
   /user:
     get:
       tags: [Users]

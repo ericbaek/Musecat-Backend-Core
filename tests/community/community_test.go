@@ -30,6 +30,12 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+type translatorFunc func(context.Context, community.SourceContent) (community.TranslationResult, error)
+
+func (f translatorFunc) Translate(ctx context.Context, source community.SourceContent) (community.TranslationResult, error) {
+	return f(ctx, source)
+}
+
 type fakeTranslator struct {
 	result community.TranslationResult
 	err    error
@@ -311,105 +317,166 @@ func decodeTranslationsForTest(t *testing.T, record *core.Record) community.Tran
 	return result
 }
 
-func TestGeminiTranslator_RequestAndResponseContract(t *testing.T) {
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.Path != "/models/gemini-2.5-flash-lite:generateContent" {
-			t.Errorf("unexpected Gemini path %q", request.URL.Path)
-		}
-		if request.Header.Get("x-goog-api-key") != "test-key" {
-			t.Errorf("missing API key header")
-		}
-		var body map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			t.Errorf("decode Gemini request: %v", err)
-		}
-		instruction, _ := json.Marshal(body["system_instruction"])
-		if !strings.Contains(string(instruction), "기체=machine cabinet") || !strings.Contains(string(instruction), "maimai DX") {
-			t.Errorf("expected built-in and custom glossary in prompt: %s", instruction)
-		}
-		translation := `{"en-US":{"title":"Arcade tip","body":"The maimai DX cabinet is on the second floor."},"ja-JP":{"title":"ゲームセンターのヒント","body":"maimai DXの筐体は2階にあります。"}}`
-		encoded, _ := json.Marshal(map[string]any{
-			"candidates": []any{
-				map[string]any{
-					"content": map[string]any{
-						"parts": []any{map[string]any{"text": translation}},
-					},
-				},
-			},
+func TestOpenAITranslator_RequestAndResponseContract(t *testing.T) {
+	for _, effort := range []string{"none", "low"} {
+		t.Run(effort, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.String() != "https://openai.test/v1/chat/completions" || request.Header.Get("Authorization") != "Bearer test-key" {
+					t.Fatal("incorrect OpenAI endpoint or authentication")
+				}
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if body["model"] != "gpt-6-luna" || body["reasoning_effort"] != effort || body["max_completion_tokens"] != float64(16384) || body["store"] != false {
+					t.Fatalf("incorrect model settings: %#v", body)
+				}
+				if _, ok := body["thinking"]; ok {
+					t.Fatal("legacy provider payload retained")
+				}
+				format := body["response_format"].(map[string]any)
+				if format["type"] != "json_schema" || format["json_schema"].(map[string]any)["strict"] != true {
+					t.Fatal("strict JSON schema required")
+				}
+				messages, _ := json.Marshal(body["messages"])
+				if !strings.Contains(string(messages), "maimai DX") || !strings.Contains(string(messages), "기체=machine cabinet") {
+					t.Fatal("glossary missing")
+				}
+				translation := `{"en-US":{"title":"Cabinet condition","body":"CHUNITHM SUN costs 1000원."},"ja-JP":{"title":"筐体の状態","body":"CHUNITHM SUNは1000원です。"}}`
+				encoded, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"finish_reason": "stop", "message": map[string]any{"content": translation}}}})
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(encoded)), Header: http.Header{}}, nil
+			})}
+			translator, err := community.NewConfiguredTranslator(community.TranslationConfig{APIKey: "test-key", BaseURL: "https://openai.test/v1", Model: "gpt-6-luna", ReasoningEffort: effort, Glossary: "maimai DX"}, client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := translator.Translate(context.Background(), community.SourceContent{Title: "기체 상태", Body: "CHUNITHM SUN 1000원"})
+			if err != nil || result["ja-JP"].Body == "" {
+				t.Fatalf("translation failed: %v", err)
+			}
 		})
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(string(encoded))),
-			Request:    request,
-		}, nil
-	})}
-
-	translator, err := community.NewGeminiTranslator(community.TranslationConfig{
-		APIKey: "test-key", BaseURL: "https://translation.test", Model: "gemini-2.5-flash-lite", Glossary: "maimai DX: preserve official spelling",
-	}, client)
-	if err != nil {
-		t.Fatalf("create Gemini translator: %v", err)
-	}
-	result, err := translator.Translate(context.Background(), community.SourceContent{Title: "오락실 팁", Body: "maimai DX 기체는 2층에 있습니다."})
-	if err != nil {
-		t.Fatalf("translate: %v", err)
-	}
-	if result["en-US"].Title != "Arcade tip" || result["ja-JP"].Body == "" {
-		t.Fatalf("unexpected translation result: %#v", result)
 	}
 }
 
-func TestDeepSeekTranslator_RequestAndResponseContract(t *testing.T) {
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.String() != "https://api.deepseek.test/chat/completions" {
-			t.Errorf("unexpected DeepSeek URL %q", request.URL.String())
+func TestOpenAITranslator_RejectsIncompleteAndFailedResponses(t *testing.T) {
+	for _, body := range []string{
+		`{"choices":[]}`, `{"choices":[{"finish_reason":"length","message":{"content":"{}"}}]}`,
+		`{"choices":[{"finish_reason":"stop","message":{"refusal":"refused","content":"{}"}}]}`,
+		`{"choices":[{"finish_reason":"stop","message":{"content":"{\"en-US\":{\"title\":\"\",\"body\":\"test\"}}"}}]}`,
+	} {
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})}
+		translator, _ := community.NewConfiguredTranslator(community.TranslationConfig{APIKey: "test"}, client)
+		if _, err := translator.Translate(context.Background(), community.SourceContent{Body: "본문"}); err == nil {
+			t.Fatalf("accepted incomplete response: %s", body)
 		}
-		if request.Header.Get("Authorization") != "Bearer deepseek-test-key" {
-			t.Errorf("missing DeepSeek bearer token")
+	}
+}
+
+func TestCommunityPost_AuthorMutationsAndDeletion(t *testing.T) {
+	app := newCommunityTestApp(t)
+	token, author := createCommunityUser(t, app)
+	other, _ := createCommunityUser(t, app)
+	id, _ := createCommunityPost(t, app, token)
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		for _, tc := range []struct {
+			token  string
+			status int
+		}{{"", 401}, {other, 403}} {
+			res := communityRequest(t, app, method, "/community/post?id="+id, `{"body":"changed"}`, tc.token)
+			if res.StatusCode != tc.status {
+				t.Fatalf("%s unauthorized mutation: got %d want %d", method, res.StatusCode, tc.status)
+			}
+			res.Body.Close()
 		}
-		var body map[string]any
-		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-			t.Errorf("decode DeepSeek request: %v", err)
+	}
+	record, _ := app.FindRecordById(community.CollectionPost, id)
+	deadline := record.GetString("editable_until")
+	res := communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"title":"수정","body":"수정된 본문","flair":"achievement"}`, token)
+	if res.StatusCode != 200 {
+		t.Fatalf("update: %d", res.StatusCode)
+	}
+	res.Body.Close()
+	record, _ = app.FindRecordById(community.CollectionPost, id)
+	if record.GetString("editable_until") != deadline || record.GetString("body") != "수정된 본문" {
+		t.Fatal("update must preserve fixed edit deadline")
+	}
+	record.Set("editable_until", time.Now().Add(-time.Hour))
+	record.Set("translate_after", time.Now().Add(-time.Hour))
+	record.Set("translations", map[string]any{"en-US": map[string]string{"body": "cached"}})
+	if err := app.Save(record); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		res = communityRequest(t, app, http.MethodDelete, "/community/post?id="+id, "", token)
+		if res.StatusCode != 204 {
+			t.Fatalf("author deletion must be idempotent after edit deadline: %d", res.StatusCode)
 		}
-		if body["model"] != "deepseek-v4-flash" {
-			t.Errorf("unexpected DeepSeek model %#v", body["model"])
+		res.Body.Close()
+	}
+	res = communityRequest(t, app, http.MethodGet, "/community/post?id="+id, "", "")
+	if res.StatusCode != 404 {
+		t.Fatalf("deleted post visible: %d", res.StatusCode)
+	}
+	res.Body.Close()
+	res = communityRequest(t, app, http.MethodGet, "/community/posts?author="+author.Id+"&flair=achievement", "", "")
+	payload := decodeBody(t, res)
+	if payload["total"] != float64(0) {
+		t.Fatal("deleted post remains in gallery/count")
+	}
+	res = communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"body":"resurrect"}`, token)
+	if res.StatusCode != 404 {
+		t.Fatalf("deleted post can be edited: %d", res.StatusCode)
+	}
+	res.Body.Close()
+	record, _ = app.FindRecordById(community.CollectionPost, id)
+	if len(record.GetStringSlice("photos")) != 0 || len(record.GetString("translations")) > 2 {
+		t.Fatal("deleted public media/cache retained")
+	}
+	translator := &fakeTranslator{}
+	count, err := community.RunDueTranslations(context.Background(), app, translator, time.Now())
+	if err != nil || count != 0 || translator.calls != 0 {
+		t.Fatal("deleted post must not translate")
+	}
+	for _, target := range []string{"/community/post", "/community/post?id=missing"} {
+		res = communityRequest(t, app, http.MethodDelete, target, "", token)
+		expected := 400
+		if strings.Contains(target, "id=") {
+			expected = 404
 		}
-		thinking, _ := body["thinking"].(map[string]any)
-		if thinking["type"] != "disabled" {
-			t.Errorf("expected non-thinking mode: %#v", body["thinking"])
+		if res.StatusCode != expected {
+			t.Fatalf("delete %s returned %d", target, res.StatusCode)
 		}
-		if body["max_tokens"] != float64(16384) {
-			t.Errorf("unexpected DeepSeek output limit %#v", body["max_tokens"])
+		res.Body.Close()
+	}
+}
+
+func TestCommunityDeletion_DuringTranslationCannotRepublish(t *testing.T) {
+	app := newCommunityTestApp(t)
+	token, _ := createCommunityUser(t, app)
+	id, _ := createCommunityPost(t, app, token)
+	translator := translatorFunc(func(context.Context, community.SourceContent) (community.TranslationResult, error) {
+		response := communityRequest(t, app, http.MethodDelete, "/community/post?id="+id, "", token)
+		if response.StatusCode != 204 {
+			t.Fatalf("delete during translation: %d", response.StatusCode)
 		}
-		format, _ := body["response_format"].(map[string]any)
-		if format["type"] != "json_object" {
-			t.Errorf("expected JSON output mode: %#v", body["response_format"])
-		}
-		translation := `{"en-US":{"title":"Cabinet condition","body":"The CHUNITHM SUN cabinet is on the second floor."},"ja-JP":{"title":"筐体の状態","body":"CHUNITHM SUNの筐体は2階にあります。"}}`
-		encoded, _ := json.Marshal(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": translation}}},
-		})
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(string(encoded))),
-			Request:    request,
-		}, nil
-	})}
-	translator, err := community.NewConfiguredTranslator(community.TranslationConfig{
-		Provider: "deepseek", APIKey: "deepseek-test-key", BaseURL: "https://api.deepseek.test", Model: "deepseek-v4-flash",
-	}, client)
+		response.Body.Close()
+		return community.TranslationResult{"en-US": {Body: "cached"}, "ja-JP": {Body: "cached"}}, nil
+	})
+	_, err := community.RunDueTranslations(context.Background(), app, translator, time.Now().Add(6*time.Minute))
 	if err != nil {
-		t.Fatalf("create DeepSeek translator: %v", err)
+		t.Fatal(err)
 	}
-	result, err := translator.Translate(context.Background(), community.SourceContent{Title: "기체 상태", Body: "CHUNITHM SUN 기체는 2층에 있습니다."})
-	if err != nil {
-		t.Fatalf("translate with DeepSeek: %v", err)
+	record, _ := app.FindRecordById(community.CollectionPost, id)
+	if record.GetString("status") != "deleted" || record.GetString("translation_status") == "ready" {
+		t.Fatal("translation republished a deleted post")
 	}
-	if result["en-US"].Title != "Cabinet condition" || result["ja-JP"].Body == "" {
-		t.Fatalf("unexpected DeepSeek translation result: %#v", result)
+	response := communityRequest(t, app, http.MethodGet, "/community/post?id="+id, "", "")
+	if response.StatusCode != 404 {
+		t.Fatal("post visible after translation completion")
 	}
+	response.Body.Close()
 }
 
 func TestCommunitySchemaAndCronAreLocked(t *testing.T) {
@@ -565,4 +632,18 @@ func TestCommunityPost_MultiplePhotosAndAchievementGallery(t *testing.T) {
 			t.Fatalf("invalid upload accepted: %d", response.StatusCode)
 		}
 	}
+	response = communityRequest(t, app, http.MethodDelete, "/community/post?id="+id, "", token)
+	if response.StatusCode != 204 {
+		t.Fatalf("delete image post: %d", response.StatusCode)
+	}
+	response.Body.Close()
+	record, _ := app.FindRecordById(community.CollectionPost, id)
+	if len(record.GetStringSlice("photos")) != 0 {
+		t.Fatal("deleted post retains public photos")
+	}
+	response = communityRequest(t, app, http.MethodGet, "/community/posts?author="+user.Id+"&flair=achievement&has_images=true", "", "")
+	if decodeBody(t, response)["total"] != float64(0) {
+		t.Fatal("deleted images remain in achievement gallery")
+	}
+
 }

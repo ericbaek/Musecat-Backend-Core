@@ -113,7 +113,7 @@ position's address or response coordinates. Non-finite coordinates are rejected.
 
 `community_post` is the source of truth for the first community vertical slice.
 Its raw PocketBase REST rules are locked; clients use only `GET /community/posts`,
-`GET /community/post`, `POST /community/post`, and `PUT /community/post`.
+`GET /community/post`, `POST /community/post`, `PUT /community/post`, and `DELETE /community/post`.
 
 - List reads accept repeated `game_series` IDs and apply their union before
   counting and pagination. Omitted filters include all active posts.
@@ -122,6 +122,10 @@ Its raw PocketBase REST rules are locked; clients use only `GET /community/posts
   may publish, and active posts are publicly readable immediately after persistence.
 - An author may edit the original only until `editable_until`, exactly five
   minutes after creation. Editing does not extend the deadline.
+- An active author may delete a post at any time. Deletion retains a private
+  tombstone, clears public photos and cached translations, and excludes the post
+  from public detail, feeds, galleries, counts and translation jobs. An author
+  retry returns 204. Other users cannot edit or delete the post.
 - `translate_after` initially equals `editable_until`. The translation worker
   creates English (`en-US`) and Japanese (`ja-JP`) variants from the final
   Korean source after that time; it never delays or removes the Korean post.
@@ -137,7 +141,8 @@ Its raw PocketBase REST rules are locked; clients use only `GET /community/posts
   before the non-Korean experience is launched.
 - Translation providers are selected by the executable and injected into the
   worker. The reference runner reads server environment variables; reusable
-  DeepSeek and Gemini adapters are available. Prompts preserve official arcade,
+  OpenAI is the only translation adapter; `OPENAI_API_KEY` selects availability.
+  The default model is `gpt-6-luna` with reasoning effort `none` (`low` is optional). Prompts preserve official arcade,
   game, cabinet, version, product, username, URL, price, and mention values and
   may include an operator-maintained Musecat glossary.
 

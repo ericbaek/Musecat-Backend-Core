@@ -65,6 +65,7 @@ func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	)
 	auth.POST("/post", CreatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
 	auth.PUT("/post", UpdatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
+	auth.DELETE("/post", DeletePost)
 }
 
 func CreatePost(re *core.RequestEvent) error {
@@ -180,6 +181,44 @@ func UpdatePost(re *core.RequestEvent) error {
 		}
 	}
 	return re.JSON(http.StatusOK, buildPostResponse(re.App, updated, OriginalLocale))
+}
+
+// DeletePost hides the post from all public reads and drops its public files.
+// The tombstone is retained so retries by its author are idempotent.
+func DeletePost(re *core.RequestEvent) error {
+	id := strings.TrimSpace(re.Request.URL.Query().Get("id"))
+	if id == "" {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "id is required"})
+	}
+	err := re.App.RunInTransaction(func(tx core.App) error {
+		record, err := tx.FindRecordById(CollectionPost, id)
+		if err != nil {
+			return fmt.Errorf("not_found")
+		}
+		if record.GetString("author") != re.Auth.Id {
+			return fmt.Errorf("forbidden")
+		}
+		if record.GetString("status") == "deleted" {
+			return nil
+		}
+		record.Set("status", "deleted")
+		record.Set("photos", []string{})
+		record.Set("translations", map[string]any{})
+		record.Set("translation_started_at", "")
+		record.Set("translation_error", "")
+		return tx.Save(record)
+	})
+	if err != nil {
+		switch err.Error() {
+		case "not_found":
+			return re.JSON(http.StatusNotFound, map[string]any{"error": "community post not found"})
+		case "forbidden":
+			return re.JSON(http.StatusForbidden, map[string]any{"error": "only the author can delete this post"})
+		default:
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to delete community post"})
+		}
+	}
+	return re.NoContent(http.StatusNoContent)
 }
 
 func GetPost(re *core.RequestEvent) error {

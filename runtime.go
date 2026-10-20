@@ -86,23 +86,11 @@ func documentationConfig() coreapp.DocumentationConfig {
 }
 
 func translationConfig() community.TranslationConfig {
-	provider := strings.ToLower(strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_PROVIDER")))
-	if provider == "" {
-		provider = "gemini"
-	}
-	apiKey := strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_API_KEY"))
-	if apiKey == "" {
-		if provider == "deepseek" {
-			apiKey = strings.TrimSpace(os.Getenv("DEEPSEEK_API_KEY"))
-		} else {
-			apiKey = strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
-		}
-	}
 	return community.TranslationConfig{
-		Provider: provider,
-		APIKey:   apiKey,
-		BaseURL:  strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_BASE_URL")),
-		Model:    strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_MODEL")),
-		Glossary: strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_GLOSSARY")),
+		APIKey:          strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
+		BaseURL:         strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_BASE_URL")),
+		Model:           strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_MODEL")),
+		Glossary:        strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_GLOSSARY")),
+		ReasoningEffort: strings.TrimSpace(os.Getenv("MUSECAT_TRANSLATION_REASONING_EFFORT")),
 	}
 }
