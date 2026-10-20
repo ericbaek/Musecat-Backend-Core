@@ -159,16 +159,23 @@ func TestPhotoPublicationWeeklyCaps(t *testing.T) {
 		t.Run(fmt.Sprintf("campaign=%t", target), func(t *testing.T) {
 			app := newArcadeTestApp(t)
 			_, user := createAuthUser(t, app)
-			capExp := 10
+			capExp, perPhoto := 10, 2
 			if target {
-				capExp = 20
+				capExp, perPhoto = 20, 4
 			}
 			atoms := make([]string, 12)
 			for i := range atoms {
 				atoms[i] = fmt.Sprintf("photo%d", i)
 			}
 			err := app.RunInTransaction(func(tx core.App) error {
-				exp, granted, err := xp.AwardArcadePhotoExpTx(tx, user.Id, "arcade", atoms, target, 0, time.Now().UTC())
+				exp, granted, err := xp.AwardArcadePhotoExpTx(tx, user.Id, "arcade", atoms[:1], target, 0, time.Now().UTC())
+				if err != nil {
+					return err
+				}
+				if !granted || exp != perPhoto {
+					t.Fatalf("expected %d XP per photo, got %d (granted=%t)", perPhoto, exp, granted)
+				}
+				exp, granted, err = xp.AwardArcadePhotoExpTx(tx, user.Id, "arcade", atoms, target, exp, time.Now().UTC())
 				if err != nil {
 					return err
 				}

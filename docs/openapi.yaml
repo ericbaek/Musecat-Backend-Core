@@ -4855,7 +4855,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: /arcade/photo
-      description: Pending atoms receive 2 XP each when first published, up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      description: Pending atoms receive 4 XP each for campaign targets (double the normal 2 XP) when first published, up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
       requestBody:
@@ -4869,7 +4869,7 @@ paths:
               photos: [atom_1, atom_2]
       responses:
         '200':
-          description: "Photo relation updated. XP is awarded only when pending atoms are first published: 2 XP per atom, up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a published atom awards no XP."
+          description: "Photo relation updated. XP is awarded only when pending atoms are first published: 4 XP per atom for campaign targets (double the normal 2 XP), up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a published atom awards no XP."
           content:
             application/json:
               schema:
