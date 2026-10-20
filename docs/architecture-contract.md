@@ -146,6 +146,10 @@ Its raw PocketBase REST rules are locked; clients use only `GET /community/posts
   game, cabinet, version, product, username, URL, price, and mention values and
   may include an operator-maintained Musecat glossary.
 
+Community achievement posts require at least one attached photo. Creation rejects
+text-only achievements with 400. Updates count retained and newly attached photos
+inside the author mutation transaction and reject a photo-less conversion with 400.
+
 ## Visibility and role matrix
 
 Definitions:

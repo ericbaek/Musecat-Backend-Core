@@ -82,6 +82,10 @@ func CreatePost(re *core.RequestEvent) error {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "validation failed", "details": err.Error()})
 	}
 
+	if input.Flair == "achievement" && len(input.Photos) == 0 {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "achievement posts require at least one photo"})
+	}
+
 	collection, err := re.App.FindCollectionByNameOrId(CollectionPost)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load community post schema", "details": err.Error()})
@@ -143,6 +147,10 @@ func UpdatePost(re *core.RequestEvent) error {
 			return fmt.Errorf("edit_window_closed")
 		}
 
+		if input.Flair == "achievement" && len(record.GetStringSlice("photos"))+len(input.Photos) == 0 {
+			return fmt.Errorf("achievement_photo_required")
+		}
+
 		record.Set("game_series", input.GameSeries)
 		record.Set("title", input.Title)
 		record.Set("body", input.Body)
@@ -172,6 +180,8 @@ func UpdatePost(re *core.RequestEvent) error {
 			return re.JSON(http.StatusNotFound, map[string]any{"error": "community post not found"})
 		case "forbidden":
 			return re.JSON(http.StatusForbidden, map[string]any{"error": "only the author can edit this post"})
+		case "achievement_photo_required":
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "achievement posts require at least one photo"})
 		case "too_many_photos":
 			return re.JSON(http.StatusBadRequest, map[string]any{"error": "photos must have at most 8 items"})
 		case "edit_window_closed":

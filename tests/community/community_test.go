@@ -393,7 +393,7 @@ func TestCommunityPost_AuthorMutationsAndDeletion(t *testing.T) {
 	}
 	record, _ := app.FindRecordById(community.CollectionPost, id)
 	deadline := record.GetString("editable_until")
-	res := communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"title":"수정","body":"수정된 본문","flair":"achievement"}`, token)
+	res := communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"title":"수정","body":"수정된 본문","flair":"tip"}`, token)
 	if res.StatusCode != 200 {
 		t.Fatalf("update: %d", res.StatusCode)
 	}
@@ -420,7 +420,7 @@ func TestCommunityPost_AuthorMutationsAndDeletion(t *testing.T) {
 		t.Fatalf("deleted post visible: %d", res.StatusCode)
 	}
 	res.Body.Close()
-	res = communityRequest(t, app, http.MethodGet, "/community/posts?author="+author.Id+"&flair=achievement", "", "")
+	res = communityRequest(t, app, http.MethodGet, "/community/posts?author="+author.Id+"&flair=tip", "", "")
 	payload := decodeBody(t, res)
 	if payload["total"] != float64(0) {
 		t.Fatal("deleted post remains in gallery/count")
@@ -603,11 +603,16 @@ func TestCommunityPost_MultiplePhotosAndAchievementGallery(t *testing.T) {
 		t.Fatalf("missing photos: %#v", payload)
 	}
 	id := payload["id"].(string)
-	// Text-only achievements, other categories, and another author's images must not leak into this gallery.
+	// Text-only achievements are rejected; other categories and authors stay outside the gallery.
+	response = communityPhotoRequest(t, app, token, "achievement", nil)
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("text-only achievement accepted: %d", response.StatusCode)
+	}
 	for _, input := range []struct {
 		token, flair string
 		files        [][]byte
-	}{{token, "achievement", nil}, {token, "chitchat", files[:1]}, {otherToken, "achievement", files[:1]}} {
+	}{{token, "chitchat", files[:1]}, {otherToken, "achievement", files[:1]}} {
 		res := communityPhotoRequest(t, app, input.token, input.flair, input.files)
 		data := decodeBody(t, res)
 		if res.StatusCode != http.StatusCreated {
@@ -619,7 +624,7 @@ func TestCommunityPost_MultiplePhotosAndAchievementGallery(t *testing.T) {
 	if response.StatusCode != 200 || payload["total"] != float64(1) || payload["items"].([]any)[0].(map[string]any)["id"] != id {
 		t.Fatalf("gallery: %d %#v", response.StatusCode, payload)
 	}
-	response = communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"body":"사진은 그대로 유지"}`, token)
+	response = communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"body":"사진은 그대로 유지","flair":"achievement"}`, token)
 	payload = decodeBody(t, response)
 	if response.StatusCode != 200 || len(payload["photos"].([]any)) != 8 {
 		t.Fatalf("edit: %d %#v", response.StatusCode, payload)
@@ -646,4 +651,25 @@ func TestCommunityPost_MultiplePhotosAndAchievementGallery(t *testing.T) {
 		t.Fatal("deleted images remain in achievement gallery")
 	}
 
+}
+
+func TestCommunityPost_RejectTextOnlyAchievementUpdate(t *testing.T) {
+	app := newCommunityTestApp(t)
+	defer app.Cleanup()
+	token, _ := createCommunityUser(t, app)
+	response := communityRequest(t, app, http.MethodPost, "/community/post", `{"body":"사진 없는 잡담"}`, token)
+	payload := decodeBody(t, response)
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d %#v", response.StatusCode, payload)
+	}
+	id := payload["id"].(string)
+	response = communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"body":"사진 없는 업적","flair":"achievement"}`, token)
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("text-only achievement update accepted: %d", response.StatusCode)
+	}
+	record, err := app.FindRecordById(community.CollectionPost, id)
+	if err != nil || record.GetString("flair") != "chitchat" || record.GetString("body") != "사진 없는 잡담" {
+		t.Fatalf("rejected update changed post: %v", err)
+	}
 }

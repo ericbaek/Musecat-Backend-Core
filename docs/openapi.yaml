@@ -135,7 +135,7 @@ components:
           type: array
           maxItems: 8
           items: {type: string, format: binary}
-          description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes.
+          description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes. Achievement posts require at least one photo; updates count retained photos.
         game_series:
           type: string
           description: Optional canonical game_series id.
