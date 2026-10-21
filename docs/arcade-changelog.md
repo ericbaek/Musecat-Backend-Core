@@ -425,3 +425,18 @@ Photo `captured_at` metadata and Full's fill-only EXIF backfill do not create or
 rewrite changelog rows. `created` remains upload time; gallery date labels and
 photo campaign freshness prefer capture time. Photo membership/order and XP event
 timestamps retain their existing contracts.
+
+### Report destination settings
+
+`PUT /arcade/report-settings` is operational configuration, like moderation status. It changes no immutable content revision, awards no XP and writes no arcade_changelog. External mode hides existing reports without deleting them. Subscription registration/deletion and push delivery receipts likewise do not produce content changelog rows.
+
+Support inquiry replies update support status only; they never write arcade changelog or arcade XP. Reply and recipient notifications are atomic in their private support transaction.
+
+- A `fixed` flag reaction from a current developer/moderator or the official owner assigned to that arcade resolves immediately regardless of level. The reaction attribution and notification/XP transaction are preserved; other users retain the existing resolution-voting delay.
+
+Explicit inquiry resolve/reopen changes only private support status; no arcade changelog or XP is created. The author, current scoped official, or strict staff may act through the authenticated thread API.
+
+`PUT /arcade/inquiry-settings` is operational configuration independent of fault-report routing.
+It awards no XP and creates no arcade changelog/content revision. External mode only redirects
+new inquiries; disabled mode blocks new official inquiries. Missing configuration defaults to OFF,
+and explicit internal/external/disabled choices are retained. Settings changes create no history or XP; existing private conversations remain intact.

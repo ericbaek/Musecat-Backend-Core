@@ -62,6 +62,37 @@ components:
       schema:
         type: string
   schemas:
+    InquirySettings:
+      type: object
+      required: [mode, contactType, contactValue, guide, loginRequired, configured]
+      properties:
+        mode: {type: string, enum: [internal, external, disabled], default: disabled}
+        contactType: {type: string}
+        contactValue: {type: string, maxLength: 2048}
+        guide: {type: string, maxLength: 2000}
+        loginRequired: {type: boolean, default: false}
+        configured: {type: boolean, readOnly: true, description: Derived from a persisted valid mode; false for missing or invalid configuration.}
+
+    ArcadeReportSettings:
+      type: object
+      required: [mode, contactType, contactValue, guide]
+      properties:
+        mode: {type: string, enum: [internal, external]}
+        contactType: {type: string, enum: ['', url, phone]}
+        contactValue: {type: string, maxLength: 2048}
+        guide: {type: string, maxLength: 2000}
+      description: Internal is the default. External requires a valid HTTP(S) URL without credentials or a phone number. Existing reports are hidden, not deleted. String limits count Unicode code points; settings storage accommodates UTF-8 and JSON escaping.
+    ReportPushSubscription:
+      type: object
+      required: [endpoint, keys]
+      properties:
+        endpoint: {type: string, format: uri, maxLength: 2048}
+        keys:
+          type: object
+          required: [p256dh, auth]
+          properties:
+            p256dh: {type: string, description: Base64url encoded uncompressed P-256 public key.}
+            auth: {type: string, description: Base64url encoded 16-byte auth secret.}
     ErrorResponse:
       type: object
       required: [error]
@@ -478,6 +509,12 @@ components:
       type: object
       required: [id, public, closed, country, timezone, createdBy, created, updated]
       properties:
+        reportSettings:
+          $ref: '#/components/schemas/ArcadeReportSettings'
+        canManageReports:
+          type: boolean
+          description: Active developer/moderator, or an official account owning this arcade.
+
         id:
           type: string
         public:
@@ -5488,7 +5525,7 @@ paths:
     post:
       tags: [Support]
       summary: /support_feedback
-      description: Default per-client-IP limit is 10 requests per 600 seconds, shared by anonymous and authenticated users. Operator-configured limits and PocketBase exemptions may override the defaults. Accepts at most 3 images of 15000000 bytes each; the total encoded body is limited to 46048576 bytes (45 MB of photos plus 1 MiB of form overhead).
+      description: Default per-client-IP limit is 10 requests per 600 seconds, shared by anonymous and authenticated users. With no official account, arcade-scoped inquiries accept guests through moderator fallback. With a current official account, missing configuration defaults to OFF and disabled mode rejects creation with 409 INQUIRY_DISABLED; loginRequired rejects anonymous submissions with 401 LOGIN_REQUIRED; external mode rejects creation with 409 INQUIRY_EXTERNAL. Private arcades remain inaccessible to guests. Guest submissions preserve existing initial-receipt semantics and do not grant authenticated conversation access. Operator-configured limits and PocketBase exemptions may override the defaults. Accepts at most 3 images of 15000000 bytes each; the total encoded body is limited to 46048576 bytes (45 MB of photos plus 1 MiB of form overhead).
       requestBody:
         required: true
         content:
@@ -5533,6 +5570,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': {description: LOGIN_REQUIRED for a scoped inquiry requiring sign-in, or inactive account.}
+        '404': {description: Missing or inaccessible arcade.}
+        '409': {description: INQUIRY_DISABLED for OFF or unconfigured official arcades; INQUIRY_EXTERNAL for official arcades using external contact.}
         '413':
           description: File exceeds 15000000 bytes or encoded request body exceeds 46048576 bytes.
           content:
@@ -6847,6 +6887,444 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /arcade/report-settings:
+    get:
+      tags: [Arcade Mutations]
+      summary: GET /arcade/report-settings
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{bearerAuth: []}]
+      parameters:
+        - in: query
+          name: arcade
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeReportSettings'
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
+    put:
+      tags: [Arcade Mutations]
+      summary: PUT /arcade/report-settings
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ArcadeReportSettings'
+                - type: object
+                  required: [arcade]
+                  properties:
+                    arcade: {type: string}
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeReportSettings'
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
+  /user/feedback/thread/photo:
+    get:
+      tags: [User]
+      summary: Download a private original or reply attachment as a current inquiry participant
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: id
+          schema: {type: string}
+          description: Reply message id. Supply exactly one of id or feedbackId.
+        - in: query
+          name: feedbackId
+          schema: {type: string}
+          description: Original inquiry id. Supply exactly one of id or feedbackId.
+        - in: query
+          name: file
+          required: true
+          schema: {type: string}
+          description: Exact filename returned in the selected original inquiry or reply photos array.
+      responses:
+        '200':
+          description: Attachment bytes, private no-store. Raw PocketBase file URLs remain locked.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '400': {description: Missing or ambiguous attachment record selector}
+        '401': {description: Authentication required}
+        '404': {description: Missing file or inaccessible parent inquiry}
+  /user/feedback/thread:
+    get:
+      tags: [User]
+      summary: Read a private inquiry conversation (author, current scoped official, or strict staff)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: {type: string}
+        - in: query
+          name: before
+          schema: {type: string}
+          description: Oldest reply id from the preceding page; replies are returned chronologically, 50 per page.
+      responses:
+        '200':
+          description: Original inquiry, attachment filenames, chronological items and older-page cursor. Private no-store.
+        '401': {description: Authentication required}
+        '404': {description: Missing or inaccessible inquiry}
+    post:
+      tags: [User]
+      summary: Append an immutable reply and atomically notify the other participant
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [feedbackId, message]
+              properties:
+                feedbackId: {type: string}
+                message: {type: string, minLength: 1, maxLength: 4000}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [feedbackId]
+              properties:
+                feedbackId: {type: string}
+                message: {type: string, maxLength: 4000}
+                photos:
+                  type: array
+                  maxItems: 3
+                  items: {type: string, format: binary}
+                  description: Images (content-sniffed, matching initial inquiry uploads); at most 15,000,000 bytes per file. Text or at least one photo is required.
+      responses:
+        '201': {description: Persisted reply with server-derived author, staff/official role, and photos filename array. Reply photo bytes require the private thread/photo endpoint.}
+        '400': {description: Invalid reply}
+        '401': {description: Authentication required}
+        '404': {description: Missing or inaccessible inquiry}
+        '413': {description: Photo or total multipart body exceeds upload limits}
+    patch:
+      tags: [User]
+      summary: Resolve or reopen an inquiry as its author, current scoped official, or strict staff
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [feedbackId, status]
+              properties:
+                feedbackId: {type: string}
+                status: {type: string, enum: [solved, waiting]}
+      responses:
+        '200': {description: Persisted id and status. Private no-store. No reply is created.}
+        '400': {description: Invalid status}
+        '401': {description: Authentication required}
+        '404': {description: Missing or inaccessible inquiry}
+        '413': {description: Request exceeds 4 KiB}
+  /user/notifications:
+    get:
+      summary: List the authenticated user's notifications
+      description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. Does not expose endpoints or subscription credentials.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: before, in: query, schema: {type: string}, description: Last notification id from the previous page.}
+      responses:
+        '200':
+          description: Inbox page and unread count.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, unread, next]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, kind, read, created, arcadeName, gameName, message, reaction, url]
+                      properties:
+                        id: {type: string}
+                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply]}
+                        read: {type: boolean}
+                        created: {type: string}
+                        arcadeName: {type: string}
+                        gameName: {type: string}
+                        message: {type: string}
+                        reaction: {type: string}
+                        url: {type: string, description: Server-generated relative deep link.}
+                  unread: {type: integer, minimum: 0}
+                  next: {type: string, description: Empty at the end of the inbox.}
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+  /user/notifications/read:
+    post:
+      summary: Persist read state for one or all own notifications
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: {type: string}
+                all: {type: boolean}
+      responses:
+        '200': {description: Own notifications marked read. A foreign id cannot modify another account.}
+        '400': {description: Notification id or all=true required.}
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+        '413': {description: Request exceeds 4 KiB.}
+  /user/notifications/device:
+    post:
+      summary: Read whether the current account registered this device
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint]
+              properties:
+                endpoint: {type: string, maxLength: 2048}
+      responses:
+        '200':
+          description: Private, no-store device status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+        '400': {description: Invalid endpoint.}
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+        '413': {description: Request exceeds 4 KiB.}
+    put:
+      summary: Register this browser endpoint for the authenticated account
+      description: Transfers a shared browser endpoint away from the previous account, including legacy arcade subscriptions. No browser permission is granted by this API; the browser must explicitly subscribe first.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subscription]
+              properties:
+                subscription: {$ref: '#/components/schemas/ReportPushSubscription'}
+                locale: {type: string, enum: [ko, en, ja]}
+      responses:
+        '200': {description: Device registered idempotently; enabled=true.}
+        '400': {description: Invalid subscription.}
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+        '413': {description: Request exceeds 16 KiB.}
+    delete:
+      summary: Disable this account's notifications on one device
+      description: Removes this caller's canonical device and its related arcade preferences; pending deliveries cascade away. Other devices and accounts are unaffected.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint]
+              properties:
+                endpoint: {type: string, maxLength: 2048}
+      responses:
+        '200': {description: Device unregistered; enabled=false.}
+        '400': {description: Invalid endpoint.}
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+        '413': {description: Request exceeds 4 KiB.}
+    patch:
+      tags: [User]
+      summary: Synchronize locale on this account's already registered device
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint, locale]
+              properties:
+                endpoint: {type: string, maxLength: 2048}
+                locale: {type: string, enum: [ko, en, ja]}
+      responses:
+        '200': {description: Existing-device enabled status. Never registers, enables or transfers an endpoint.}
+        '400': {description: Invalid endpoint or locale}
+        '401': {description: Authentication required}
+  /user/notifications/test:
+    post:
+      summary: Send an account notification test to this device (Full only)
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint]
+              properties:
+                endpoint: {type: string, maxLength: 2048}
+      responses:
+        '202': {description: Push provider accepted the test. Does not confirm display on the device.}
+        '400': {description: Invalid endpoint or subscription.}
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+        '404': {description: Own device registration not found.}
+        '410': {description: Expired device registration removed.}
+        '413': {description: Request exceeds 4 KiB.}
+        '502': {description: Push provider rejected the request.}
+        '503': {description: VAPID delivery is not configured.}
+  /arcade/report-subscription/status:
+    post:
+      tags: [Arcade Mutations]
+      summary: Read current device report subscription status
+      description: Active arcade managers only. Returns only the caller's subscription status for the supplied arcade and device endpoint. No subscription credentials are returned. Endpoint stays in the bounded request body, never a URL query.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, endpoint]
+              properties:
+                arcade: {type: string}
+                endpoint: {type: string, maxLength: 2048}
+      responses:
+        '200':
+          description: Private, no-store current device status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+        '400': {description: Invalid subscription.}
+        '401': {description: Authentication required.}
+        '403': {description: Arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Request exceeds 4 KiB.}
+  /arcade/report-subscription/test:
+    post:
+      tags: [Arcade Mutations]
+      summary: Send a test notification to the caller's current device (Full only)
+      description: Registered by Full's report push delivery module. Requires current arcade management access, internal report mode, and an existing subscription matching the caller, arcade and endpoint. Sends through the same VAPID sender as real reports. Success confirms provider acceptance, not display on the device. No arcade flag, changelog or XP is created.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, endpoint]
+              properties:
+                arcade: {type: string}
+                endpoint: {type: string, maxLength: 2048}
+      responses:
+        '202': {description: Push provider accepted the test notification.}
+        '400': {description: Invalid subscription.}
+        '401': {description: Authentication required.}
+        '403': {description: Arcade management access required.}
+        '404': {description: Arcade or caller device subscription not found.}
+        '409': {description: Arcade uses external reporting.}
+        '410': {description: Expired subscription removed; enable alerts again.}
+        '413': {description: Request exceeds 4 KiB.}
+        '502': {description: Push provider rejected the test notification.}
+        '503': {description: VAPID delivery is not configured.}
+  /arcade/report-subscription:
+    put:
+      tags: [Arcade Mutations]
+      summary: PUT /arcade/report-subscription
+      description: Compatibility entry that upserts one canonical device and enables its per-arcade preference. Credentials are not duplicated per arcade.
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, subscription]
+              properties:
+                arcade: {type: string}
+                subscription:
+                  $ref: '#/components/schemas/ReportPushSubscription'
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {type: boolean}
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
+    delete:
+      tags: [Arcade Mutations]
+      summary: DELETE /arcade/report-subscription
+      description: Stores an explicit per-arcade opt-out and cancels pending report pushes for this arcade and device. The canonical device remains enabled for personal activity and other arcades.
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, endpoint]
+              properties:
+                arcade: {type: string}
+                endpoint: {type: string}
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {type: boolean}
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
   /arcade/flag:
     post:
       tags: [Arcade Mutations]
@@ -6882,6 +7360,8 @@ paths:
                     type: string
                     format: binary
       responses:
+        '409':
+          description: Arcade uses external reporting. The response code is REPORT_EXTERNAL; no mutation or XP is committed.
         '200':
           description: Flag created and linked to the durable game entry.
           content:
@@ -6964,7 +7444,7 @@ paths:
     post:
       tags: [Arcade Mutations]
       summary: /arcade/flag/reaction
-      description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold.
+      description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold. A fixed reaction by a developer, moderator, or the official owner assigned to this arcade resolves immediately regardless of level; other users retain resolution voting.
       security:
         - bearerAuth: []
       requestBody:
@@ -6974,6 +7454,8 @@ paths:
             schema:
               $ref: '#/components/schemas/FlagReactionRequest'
       responses:
+        '409':
+          description: Arcade uses external reporting. The response code is REPORT_EXTERNAL; no mutation or XP is committed.
         '200':
           description: Reaction state updated. The response includes the authoritative resolution summary, current user vote, and newest-first report history.
           content:
@@ -8090,3 +8572,35 @@ paths:
         '403': {description: Inactive account.}
         '404': {description: Private, missing or withdrawn target profile.}
         '502': {description: Failed to load passport.}
+  /arcade/inquiry-settings:
+    put:
+      tags: [Arcade]
+      summary: Configure arcade inquiry destination
+      description: Current official owners assigned to this arcade and strict developer/moderator accounts only. Independent of fault-report settings. External mode requires an HTTP(S) URL or phone. Missing/invalid saved mode defaults to disabled with configured false. Explicit modes return derived configured true; client configured is ignored and never persisted. Disabled requires no contact. Existing conversations remain readable and replyable. No XP or arcade changelog.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, mode]
+              properties:
+                arcade: {type: string}
+                mode: {type: string, enum: [internal, external, disabled]}
+                loginRequired: {type: boolean, default: false, description: Require an authenticated account for new internal arcade inquiries while a current official account exists.}
+                contactType: {type: string, enum: [url, phone]}
+                contactValue: {type: string, maxLength: 2048}
+                guide: {type: string, maxLength: 2000}
+      responses:
+        '200':
+          description: Saved settings with derived configured true.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InquirySettings'
+        '400': {description: Invalid or missing external contact.}
+        '401': {description: Authentication required.}
+        '403': {description: Not an assigned official owner or strict staff.}
+        '404': {description: Arcade not found.}

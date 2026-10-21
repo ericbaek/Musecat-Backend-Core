@@ -8,15 +8,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pocketbase/dbx"
-	"github.com/pocketbase/pocketbase/core"
-
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadgtk "github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
 	arcadehour "github.com/ericbaek/musecat-backend-core/handlers/arcade/hour"
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/arcadereport"
+	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
+	"github.com/pocketbase/dbx"
+	"github.com/pocketbase/pocketbase/core"
 )
 
 // GetArcadeValues handles GET /arcade?id=... (or ?arcade=...)
@@ -95,6 +96,9 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 	photoId, _ := arcadeinternal.AsString(rec.Get("photo"))
 	admin := map[string]any{
 		"officialAccountIds": officialAccountIDs,
+		"reportSettings":     arcadereport.Read(rec),
+		"inquirySettings":    supportfeedback.InquirySettings(rec),
+		"canManageReports":   arcadereport.CanManage(re.Auth, rec),
 		"id":                 rec.Id,
 		"public":             rec.GetBool("public"),
 		"closed":             rec.GetBool("closed"),

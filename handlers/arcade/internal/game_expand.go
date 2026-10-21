@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ericbaek/musecat-backend-core/service/arcadereport"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -258,6 +259,10 @@ func expandFlag(app core.App, flagID string, flagRec *core.Record, userID string
 		if err != nil {
 			return map[string]any{"id": flagID}, true
 		}
+	}
+	arcade, err := app.FindRecordById(CollectionArcade, flagRec.GetString("arcade"))
+	if err != nil || arcadereport.Read(arcade).Mode == "external" {
+		return nil, false
 	}
 	if flagRec.GetBool("solved") {
 		return nil, false

@@ -4,17 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"net/http"
 	"strings"
 
+	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
+	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	"github.com/ericbaek/musecat-backend-core/service/arcadereport"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
-
-	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
-	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 var validDisruptions = map[string]struct{}{
@@ -128,6 +129,9 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
+		if arcadereport.Read(arcadeRec).Mode == "external" {
+			return arcadereport.ErrExternal
+		}
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
 		}
@@ -170,6 +174,9 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 		if err := txApp.Save(flagRec); err != nil {
 			return fmt.Errorf("failed to create arcade_flag: %w", err)
 		}
+		if err := usernotification.ReportCreatedTx(txApp, flagRec, arcadeRec); err != nil {
+			return err
+		}
 		newFlagID = flagRec.Id
 		if err := arcadeanalytics.RecordFaultReportTx(txApp, body.Arcade, newFlagID); err != nil {
 			return fmt.Errorf("failed to record fault report analytics: %w", err)
@@ -195,6 +202,9 @@ func CreateArcadeFlag(re *core.RequestEvent) error {
 		xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
 		return nil
 	}); err != nil {
+		if errors.Is(err, arcadereport.ErrExternal) {
+			return re.JSON(http.StatusConflict, map[string]any{"error": err.Error(), "code": "REPORT_EXTERNAL"})
+		}
 		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
 			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
 		}
