@@ -1603,6 +1603,10 @@ components:
       type: object
       required: [arcade, game, status]
       properties:
+        review_expires_at:
+          type: string
+          format: date-time
+          description: UTC expiry for an updated arcade detail prompt. Three days after the first verified updated report, otherwise seven days after the first unverified updated report, following the latest still_old report. Omitted outside updated detail prompts.
         status: {type: string, enum: [pending, still_old, updated]}
         can_revert: {type: boolean, description: Whether the latest updated report can be reverted within seven days.}
         reports:
@@ -8034,7 +8038,7 @@ paths:
     get:
       tags: [Arcades]
       summary: List active campaign prompts for an arcade
-      description: Returns campaign prompts for the requested public/open arcade to an authenticated active user. Includes current from_version machines and current to_version machines with an updated report for the same campaign and arcade/game created less than seven days ago. Already-updated machines without a campaign update report and reports aged seven days or more are excluded. Each item includes current target status and report history; expiry leaves game state and campaign overview history intact.
+      description: Returns campaign prompts for the requested public/open arcade to an authenticated active user. Includes current from_version machines and current to_version machines within their review window. After the latest still_old (Wrong) report, the first location-verified updated report starts a three-day window; until then the first unverified updated report starts a seven-day window. Later confirmations do not extend either anchor. Two location-verified updated reports after the latest Wrong hide the prompt immediately. Wrong resets the verified count and both anchors. Updated targets include review_expires_at for the countdown. Already-updated machines without a campaign update report are excluded. Each item includes current target status and report history; expiry leaves game state and campaign overview history intact.
       security: [{bearerAuth: []}]
       parameters:
         - name: id
@@ -8066,7 +8070,7 @@ paths:
     get:
       tags: [Arcades]
       summary: List campaign-target game ids for an arcade
-      description: Returns only game ids with active campaign prompts for a public/open arcade, using the same eligibility as /arcade/campaigns (current from_version machines or current to_version machines with an updated campaign report created less than seven days ago). Already-updated machines without reports and updates aged seven days or more are excluded. Campaign configuration, rewards, locations, and reports are omitted so anonymous detail pages can show campaign presence safely.
+      description: Returns only game ids with active campaign prompts for a public/open arcade, using the same eligibility as /arcade/campaigns (current from_version machines or current to_version machines within three days of the first verified updated report, otherwise seven days of the first unverified updated report, after the latest Wrong report). Two verified updated reports after the latest Wrong hide presence immediately; Wrong resets the verified count. Later confirmations do not extend these anchors. Already-updated machines without reports and expired reviews are excluded. Campaign configuration, rewards, locations, and reports are omitted so anonymous detail pages can show campaign presence safely.
       parameters:
         - name: id
           in: query
@@ -8184,7 +8188,10 @@ paths:
         verified visit at the public/open arcade. `bypass_location=true` skips
         only that visit check and requires level 10 or above; an updated result
         through this path awards 1 XP; clients must obtain two warning
-        confirmations before sending it.
+        confirmations before sending it. A user may append a location-verified
+        updated report after their unverified updated report, starting the
+        three-day prompt review window without awarding update XP again.
+        Repeated confirmations with the same verification do not append reports.
       security:
         - bearerAuth: []
       requestBody:

@@ -223,13 +223,22 @@ are included. The report view includes only currently public/open arcades.
 
 Arcade detail prompts (`GET /arcade/campaigns`) and anonymous presence
 (`GET /arcade/campaigns/presence`) use a narrower target set: current
-`from_version` machines plus current `to_version` machines with an `updated`
-report for that campaign and arcade/game created less than seven days ago.
-Machines already on `to_version` without a campaign update report never show
-a prompt. Once the update report's seven-day review window expires, the
-machine is accepted as updated and its prompt/presence disappears on the next
-read. Expiry does not mutate the game, delete reports, or remove updated
-machines from campaign overview statistics/history.
+`from_version` machines plus current `to_version` machines within their report
+review window. After the most recent `still_old` (Wrong) report, the first
+location-verified `updated` report starts a three-day window. Until a verified
+report exists, the first unverified `updated` report starts a seven-day window.
+A verified report after an unverified report starts its own three-day window,
+including when the same user returns with location verification;
+later confirmations of either kind do not extend an established verified window.
+Two or more location-verified updated reports after the latest Wrong hide
+the prompt immediately, regardless of remaining time. A Wrong report resets
+the verified count and both anchors; old-version targets remain visible until
+updated again. Updated targets expose `review_expires_at` (UTC RFC 3339) for
+the detail countdown. Machines already on `to_version` without a campaign
+update report never show a prompt. At expiry the prompt/presence disappears
+on the next read, while the client countdown also hides the prompt at zero.
+Expiry does not mutate the game, delete reports, or remove updated machines
+from campaign overview statistics/history.
 
 `GET /campaign/photo` is the automatic photo-update campaign discovery route.
 It returns only public/open arcades whose current `arcade.photo` molecule has
