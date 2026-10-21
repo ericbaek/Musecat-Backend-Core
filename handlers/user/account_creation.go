@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -108,6 +109,11 @@ func createManagedAccount(re *core.RequestEvent, official bool) error {
 				return duplicate
 			}
 			return err
+		}
+		if official {
+			if err := usernotification.EnsureArcadeSetupNoticeTx(app, account); err != nil {
+				return err
+			}
 		}
 		profiles, err := app.FindCollectionByNameOrId(CollectionUserInfo)
 		if err != nil {

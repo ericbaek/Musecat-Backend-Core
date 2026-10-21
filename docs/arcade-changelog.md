@@ -439,4 +439,10 @@ Explicit inquiry resolve/reopen changes only private support status; no arcade c
 `PUT /arcade/inquiry-settings` is operational configuration independent of fault-report routing.
 It awards no XP and creates no arcade changelog/content revision. External mode only redirects
 new inquiries; disabled mode blocks new official inquiries. Missing configuration defaults to OFF,
-and explicit internal/external/disabled choices are retained. Settings changes create no history or XP; existing private conversations remain intact.
+and explicit internal/external/disabled choices are retained. The read-only owner onboarding
+endpoint and settings changes create no history or XP; existing private conversations remain intact.
+
+
+The one-time `arcade_setup` account notification and notification-initiated dashboard setup funnel
+create no arcade history or XP. Existing OFF/internal/external settings are preserved, and current
+owners may review all their arcades through the scoped setup endpoint.

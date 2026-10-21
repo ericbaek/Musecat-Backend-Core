@@ -202,6 +202,7 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
 	// Public user profile read endpoint
 	se.Router.GET("/user", userhandler.GetUserByID)
+	se.Router.GET("/user/arcade-inquiry-onboarding", arcadereporting.InquiryOnboarding).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
 	se.Router.GET("/user/activity", userhandler.GetUserActivity)
 	// Public user-scoped changelog read endpoint; private arcade rows are
 	// returned only to their owner or strict reviewers.

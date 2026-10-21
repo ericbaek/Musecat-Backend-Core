@@ -7044,7 +7044,7 @@ paths:
   /user/notifications:
     get:
       summary: List the authenticated user's notifications
-      description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. Does not expose endpoints or subscription credentials.
+      description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. The durable arcade_setup notice remains visible to current active exact arcade_owner accounts regardless of saved inquiry/report modes; reading it never changes settings. Does not expose endpoints or subscription credentials.
       security: [{bearerAuth: []}]
       parameters:
         - {name: before, in: query, schema: {type: string}, description: Last notification id from the previous page.}
@@ -7064,14 +7064,14 @@ paths:
                       required: [id, kind, read, created, arcadeName, gameName, message, reaction, url]
                       properties:
                         id: {type: string}
-                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply]}
+                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup]}
                         read: {type: boolean}
                         created: {type: string}
                         arcadeName: {type: string}
                         gameName: {type: string}
                         message: {type: string}
                         reaction: {type: string}
-                        url: {type: string, description: Server-generated relative deep link.}
+                        url: {type: string, description: Server-generated relative deep link. arcade_setup opens /account/arcade-dashboard/setup.}
                   unread: {type: integer, minimum: 0}
                   next: {type: string, description: Empty at the end of the inbox.}
         '401': {description: Authentication required.}
@@ -8572,6 +8572,42 @@ paths:
         '403': {description: Inactive account.}
         '404': {description: Private, missing or withdrawn target profile.}
         '502': {description: Failed to load passport.}
+  /user/arcade-inquiry-onboarding:
+    get:
+      tags: [Users, Arcade]
+      summary: List current official owner's inquiry settings
+      description: Active authenticated users only; reloads current exact arcade_owner role and owns relations. All currently owned arcades are returned, including configured arcades, including scoped private names. Staff-only and ordinary accounts receive empty items. Missing arcade relations are skipped; missing basic relations yield an empty name. Private no-store response.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Unconfigured currently owned arcades.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [arcadeId, arcadeName, settings, reportSettings]
+                      properties:
+                        arcadeId: {type: string}
+                        arcadeName: {type: string}
+                        settings:
+                          $ref: '#/components/schemas/InquirySettings'
+                        reportSettings:
+                          type: object
+                          required: [mode, contactType, contactValue, guide]
+                          properties:
+                            mode: {type: string, enum: [internal, external]}
+                            contactType: {type: string}
+                            contactValue: {type: string, maxLength: 2048}
+                            guide: {type: string, maxLength: 2000}
+        '401': {description: Authentication required.}
+        '403': {description: Inactive account.}
   /arcade/inquiry-settings:
     put:
       tags: [Arcade]

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/ericbaek/musecat-backend-core/coreapp"
+	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"github.com/ericbaek/musecat-backend-core/testutil"
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -51,6 +53,10 @@ func TestCreateArcadeAccount(t *testing.T) {
 		}
 		if _, err := app.FindRecordById("user_info", user.Id); err != nil {
 			t.Fatal("profile missing:", err)
+		}
+		notices, err := app.FindRecordsByFilter(usernotification.Inbox, "user={:user} && event_key={:event}", "", 0, 0, dbx.Params{"user": user.Id, "event": usernotification.ArcadeSetupEvent})
+		if err != nil || len(notices) != 1 {
+			t.Fatalf("official setup notice missing: %v %v", notices, err)
 		}
 		if result["arcadeId"] != arcade.Id || result["password"] != nil || result["token"] != nil {
 			t.Fatal("invalid or sensitive response:", result)
@@ -102,5 +108,9 @@ func TestCreateArcadeAccountRollsBack(t *testing.T) {
 	}
 	if _, err := app.FindAuthRecordByEmail("user", "rollback@example.com"); err == nil {
 		t.Fatal("partial official account persisted")
+	}
+	notices, err := app.FindRecordsByFilter(usernotification.Inbox, "event_key={:event}", "", 0, 0, dbx.Params{"event": usernotification.ArcadeSetupEvent})
+	if err != nil || len(notices) != 0 {
+		t.Fatalf("rolled-back account retained notice: %v %v", notices, err)
 	}
 }

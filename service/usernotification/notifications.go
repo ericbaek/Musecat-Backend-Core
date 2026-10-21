@@ -118,6 +118,17 @@ func ReactionCreatedTx(app core.App, flag *core.Record, actor, reactionID string
 	return CreateTx(app, flag.GetString("createdBy"), actor, "report_reaction", "reaction:"+reactionID, flag, reactionID)
 }
 func Visible(app core.App, user, row *core.Record) bool {
+	if row.GetString("kind") == ArcadeSetupKind {
+		if user == nil || row.GetString("user") != user.Id {
+			return false
+		}
+		current, err := app.FindRecordById("user", user.Id)
+		if err != nil {
+			return false
+		}
+		active, err := activeSetupOwner(app, current)
+		return err == nil && active
+	}
 	if row.GetString("kind") == "feedback_reply" || row.GetString("kind") == "feedback_created" {
 		return feedbackVisible(app, user, row)
 	}
@@ -134,6 +145,9 @@ func Visible(app core.App, user, row *core.Record) bool {
 	return arcade.GetBool("public") || arcadereport.CanManage(user, arcade)
 }
 func Item(app core.App, row *core.Record) map[string]any {
+	if row.GetString("kind") == ArcadeSetupKind {
+		return arcadeSetupItem(row)
+	}
 	if row.GetString("kind") == "feedback_reply" || row.GetString("kind") == "feedback_created" {
 		return feedbackItem(app, row)
 	}

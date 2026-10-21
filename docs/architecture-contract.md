@@ -959,3 +959,24 @@ cleanup records archive completion proofs before deletion, and inbox event ident
 continues to prevent duplicate enqueue. Unread inbox events and pending/exhausted
 receipts are never retention-deleted. Inbox reads use indexed keyset batches plus
 unread-only visibility scans, not a full read-history load.
+
+
+`GET /user/arcade-inquiry-onboarding` requires an active authenticated user and reloads their current
+role and ownership. Only exact `arcade_owner` accounts receive their currently owned
+arcades, including already configured arcades as `{items: [{arcadeId, arcadeName, settings, reportSettings}]}`. Staff-only accounts receive an empty list.
+Private names are available only within this ownership scope; missing arcades are skipped and missing
+basic relations produce an empty name. The response is private/no-store. Existing explicitly configured internal/external/disabled choices are preserved without data rewrites.
+The independent `reportSettings` is the current report routing settings read from each owned arcade.
+This setup endpoint supports the notification-initiated dashboard funnel; login does not open a dialog.
+
+
+The account-scoped `arcade_setup` notification invites every active exact `arcade_owner` account to
+set up the new admin dashboard, independently of saved reporting/inquiry modes. Its generic message
+is `새 관리자 대시보드를 설정해주세요` and destination is `/account/arcade-dashboard/setup`.
+`usernotification.EnsureArcadeSetupNoticeTx` rechecks the current user, withdrawal, exact role, and
+active bans, then inserts at most one `arcade_dashboard_setup:v1` event per user with no actor or
+arcade relation. Existing notices and their read state are untouched on reruns. Canonical registered
+devices receive deliveries in the same transaction. Notification visibility rechecks the current
+active owner role and is independent of OFF settings. Future official account provisioning inserts
+this notice atomically. Core only defines fresh bootstrap schema; Full owns the existing-account
+backfill migration. No inquiry/report settings are rewritten.

@@ -32,7 +32,7 @@ func listInbox(app core.App, user *core.Record, before string) ([]*core.Record, 
 		kind, source := row.GetString("kind"), row.GetString("arcade")
 		if kind == "feedback_reply" || kind == "feedback_created" {
 			kind, source = "feedback", row.GetString("feedback")
-		} else if kind != "report_created" {
+		} else if kind != "report_created" && kind != usernotification.ArcadeSetupKind {
 			kind = "report_reaction"
 		}
 		key := kind + ":" + source
