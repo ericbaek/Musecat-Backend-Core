@@ -100,3 +100,59 @@ func TestValidatePriceType(t *testing.T) {
 		}
 	}
 }
+
+func TestPaseliPriceOptionalAndValidated(t *testing.T) {
+	base := float32(100)
+	p := Price{Currency: "JPY", Type: "gamemode", Accept: []string{"Cash", "PASELI"}, List: []PriceItem{{Title: "Standard", Value: &base}}}
+	if err := validatePrice(p); err != nil {
+		t.Fatal(err)
+	}
+	paseli := float32(95)
+	p.List[0].PaseliValue = &paseli
+	if err := validatePrice(p); err != nil {
+		t.Fatal(err)
+	}
+	normalized := NormalizePriceForStorage(p)
+	if normalized.List[0].PaseliValue == nil || *normalized.List[0].PaseliValue != 95 {
+		t.Fatal("PASELI amount lost")
+	}
+	p.List[0].Value = nil
+	if err := validatePrice(p); err != nil {
+		t.Fatal("PASELI-only price rejected:", err)
+	}
+	for _, amount := range []float32{0, -1} {
+		p.List[0].PaseliValue = &amount
+		if validatePrice(p) == nil {
+			t.Fatal("invalid PASELI amount accepted")
+		}
+	}
+	p.List[0].PaseliValue = &paseli
+	p.Accept = []string{"Cash"}
+	if validatePrice(p) == nil {
+		t.Fatal("PASELI price without acceptance")
+	}
+	p.Accept = []string{"PASELI"}
+	p.Currency = "KRW"
+	if validatePrice(p) == nil {
+		t.Fatal("PASELI price with wrong currency")
+	}
+}
+
+func TestPaseliNumericPriceTypes(t *testing.T) {
+	amount := float32(95)
+	for _, typ := range []string{"gamemode", "credit", "song", "time", "custom", "custom_v1", "free"} {
+		t.Run(typ, func(t *testing.T) {
+			p := Price{Currency: "JPY", Type: typ, Accept: []string{"PASELI"}, List: []PriceItem{{Title: "1", PaseliValue: &amount}}}
+			err := validatePrice(p)
+			if typ == "free" {
+				if err == nil {
+					t.Fatal("free prices cannot have PASELI amounts")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

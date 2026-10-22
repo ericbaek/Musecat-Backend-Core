@@ -2712,6 +2712,10 @@ components:
             - type: number
               format: float
             - type: 'null'
+        paseli_value:
+          type: number
+          exclusiveMinimum: 0
+          description: Optional PASELI price for a numeric JPY row with PASELI acceptance (gamemode, credit, song, time, custom_v1 or legacy object-form custom). Unavailable for free or text prices. Omit when unknown.
         mode_key:
           type: string
         represent:
@@ -2754,7 +2758,7 @@ components:
           type: array
           items:
             type: string
-            enum: ['Credit Card', 'Prepaid Card', Cash]
+            enum: ['Credit Card', 'Prepaid Card', Cash, PASELI]
     TagItem:
       type: object
       required: [category, note]

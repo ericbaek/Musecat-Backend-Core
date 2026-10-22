@@ -989,3 +989,11 @@ devices receive deliveries in the same transaction. Notification visibility rech
 active owner role and is independent of OFF settings. Future official account provisioning inserts
 this notice atomically. Core only defines fresh bootstrap schema; Full owns the existing-account
 backfill migration. No inquiry/report settings are rewritten.
+
+## Optional PASELI numeric prices
+
+`price.accept` accepts `PASELI`. A numeric row (`gamemode`, `credit`, `song`, `time`, `custom_v1`, or legacy object-form `custom`) may include optional
+`paseli_value` (> 0), in JPY and with PASELI acceptance. Omission means unknown,
+not the base price. Base `value` may remain null for a PASELI-only price. Existing
+prices and immutable history are not migrated. Representative guest rows retain
+the PASELI amount alongside the base amount.

@@ -446,3 +446,11 @@ endpoint and settings changes create no history or XP; existing private conversa
 The one-time `arcade_setup` account notification and notification-initiated dashboard setup funnel
 create no arcade history or XP. Existing OFF/internal/external settings are preserved, and current
 owners may review all their arcades through the scoped setup endpoint.
+
+## Optional PASELI numeric prices
+
+`price.accept` accepts `PASELI`. A numeric row (`gamemode`, `credit`, `song`, `time`, `custom_v1`, or legacy object-form `custom`) may include optional
+`paseli_value` (> 0), in JPY and with PASELI acceptance. Omission means unknown,
+not the base price. Base `value` may remain null for a PASELI-only price. Existing
+prices and immutable history are not migrated. Representative guest rows retain
+the PASELI amount alongside the base amount.
