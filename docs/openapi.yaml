@@ -1508,7 +1508,7 @@ components:
         bypass_location:
           type: boolean
           default: false
-          description: Skips same-day verified-visit validation. Requires level 10 or above. A still_old result awards 1 XP per report; an updated result through this path awards 1 XP.
+          description: Skips same-day verified-visit validation at any user level. A still_old result awards no XP; an updated result through this path awards 1 XP.
     CampaignCheckResponse:
       type: object
       required: [result, updated, gained_exp, exp, level, state_id, xp_feedback]
@@ -1606,7 +1606,7 @@ components:
         review_expires_at:
           type: string
           format: date-time
-          description: UTC expiry for an updated arcade detail prompt. Three days after the first verified updated report, otherwise seven days after the first unverified updated report, following the latest still_old report. Omitted outside updated detail prompts.
+          description: UTC expiry for an updated arcade detail prompt. Seven days after the first unverified updated report following the latest still_old report. One verified or two unverified updated reports hide the prompt immediately. Omitted outside updated detail prompts.
         status: {type: string, enum: [pending, still_old, updated]}
         can_revert: {type: boolean, description: Whether the latest updated report can be reverted within seven days.}
         reports:
@@ -8042,7 +8042,7 @@ paths:
     get:
       tags: [Arcades]
       summary: List active campaign prompts for an arcade
-      description: Returns campaign prompts for the requested public/open arcade to an authenticated active user. Includes current from_version machines and current to_version machines within their review window. After the latest still_old (Wrong) report, the first location-verified updated report starts a three-day window; until then the first unverified updated report starts a seven-day window. Later confirmations do not extend either anchor. Two location-verified updated reports after the latest Wrong hide the prompt immediately. Wrong resets the verified count and both anchors. Updated targets include review_expires_at for the countdown. Already-updated machines without a campaign update report are excluded. Each item includes current target status and report history; expiry leaves game state and campaign overview history intact.
+      description: Returns campaign prompts for the requested public/open arcade to an authenticated active user. Includes current from_version machines and current to_version machines within their review window. After the latest still_old (Wrong) report, one location-verified updated report or two unverified updated reports hide the prompt immediately. A single unverified updated report starts a seven-day window. Wrong resets the report counts and expiry anchor. Updated targets include review_expires_at for the countdown. Already-updated machines without a campaign update report are excluded. Each item includes current target status and report history; expiry leaves game state and campaign overview history intact.
       security: [{bearerAuth: []}]
       parameters:
         - name: id
@@ -8074,7 +8074,7 @@ paths:
     get:
       tags: [Arcades]
       summary: List campaign-target game ids for an arcade
-      description: Returns only game ids with active campaign prompts for a public/open arcade, using the same eligibility as /arcade/campaigns (current from_version machines or current to_version machines within three days of the first verified updated report, otherwise seven days of the first unverified updated report, after the latest Wrong report). Two verified updated reports after the latest Wrong hide presence immediately; Wrong resets the verified count. Later confirmations do not extend these anchors. Already-updated machines without reports and expired reviews are excluded. Campaign configuration, rewards, locations, and reports are omitted so anonymous detail pages can show campaign presence safely.
+      description: Returns only game ids with active campaign prompts for a public/open arcade, using the same eligibility as /arcade/campaigns (current from_version machines or current to_version machines within seven days of the first unverified updated report after the latest Wrong report). One verified updated report or two unverified updated reports after the latest Wrong hide presence immediately; Wrong resets the report counts and expiry anchor. Already-updated machines without reports and expired reviews are excluded. Campaign configuration, rewards, locations, and reports are omitted so anonymous detail pages can show campaign presence safely.
       parameters:
         - name: id
           in: query
@@ -8187,14 +8187,15 @@ paths:
       summary: /campaign/check
       description: |
         Confirms whether one active update-campaign target is still on the old
-        version or has been updated. A `still_old` result awards 1 XP once per
-        user and target. The default request requires a same-day
+        version or has been updated. A location-verified `still_old` result awards the configured campaign XP once
+        per user and target; unverified `still_old` reports award no XP. The default request requires a same-day
         verified visit at the public/open arcade. `bypass_location=true` skips
-        only that visit check and requires level 10 or above; an updated result
+        only that visit check at any user level; an updated result
         through this path awards 1 XP; clients must obtain two warning
         confirmations before sending it. A user may append a location-verified
-        updated report after their unverified updated report, starting the
-        three-day prompt review window without awarding update XP again.
+        updated report after their unverified updated report, hiding the
+        prompt immediately without awarding update XP again. A verified still_old
+        report after an unverified still_old report can earn the campaign reward.
         Repeated confirmations with the same verification do not append reports.
       security:
         - bearerAuth: []
@@ -8205,7 +8206,7 @@ paths:
             schema: {$ref: '#/components/schemas/CampaignCheckRequest'}
       responses:
         '200':
-          description: Campaign check persisted; still_old results award 1 XP, while updated results atomically move the game state and award campaign XP, or 1 XP when location is bypassed.
+          description: Campaign check persisted; verified still_old results award campaign XP once per user and target, unverified still_old results award no XP. Updated results atomically move the game state and award campaign XP, or 1 XP when location is bypassed.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/CampaignCheckResponse'}
@@ -8220,7 +8221,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '403':
-          description: Active user is missing the required visit or level 10 access for a location bypass.
+          description: Active user is missing the required visit without a location bypass.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}

@@ -203,15 +203,18 @@ moves return `403` with `location_move_distance_exceeded`,
 
 Update campaign checks use `POST /campaign/check`. An active authenticated user
 may confirm whether a public/open campaign target is still old or updated. A
-`still_old` result awards 1 XP once per user and campaign target; an updated
+location-verified `still_old` result awards the configured campaign XP once per
+user and campaign target; an unverified `still_old` result awards no XP. An updated
 result awards the campaign XP atomically with the game-state mutation. The
 default path requires a same-day verified arcade visit. The
-optional `bypass_location=true` path is restricted to users at level 10 or
-above; it skips only the visit-location check and does not relax campaign,
+optional `bypass_location=true` path is available at any level; it skips only the
+visit-location check and does not relax campaign,
 arcade, or target validation. An updated result through the bypass path awards
 1 XP instead of the campaign's configured reward. Clients must show a two-step
 warning confirmation before sending the bypass flag. Campaign checks are
-append-only reports with a per-report location-verification flag. A
+append-only reports with a per-report location-verification flag. A user may
+follow an unverified `still_old` report with a verified report to receive the
+campaign reward; repeated verified reports do not award XP again. A
 `still_old` report can revert the latest update for seven days after the
 update, subject to the same campaign and visit/bypass validation. `GET
 /campaign?id=...` returns the remaining old-version targets, current
@@ -224,16 +227,11 @@ are included. The report view includes only currently public/open arcades.
 Arcade detail prompts (`GET /arcade/campaigns`) and anonymous presence
 (`GET /arcade/campaigns/presence`) use a narrower target set: current
 `from_version` machines plus current `to_version` machines within their report
-review window. After the most recent `still_old` (Wrong) report, the first
-location-verified `updated` report starts a three-day window. Until a verified
-report exists, the first unverified `updated` report starts a seven-day window.
-A verified report after an unverified report starts its own three-day window,
-including when the same user returns with location verification;
-later confirmations of either kind do not extend an established verified window.
-Two or more location-verified updated reports after the latest Wrong hide
-the prompt immediately, regardless of remaining time. A Wrong report resets
-the verified count and both anchors; old-version targets remain visible until
-updated again. Updated targets expose `review_expires_at` (UTC RFC 3339) for
+review window. After the most recent `still_old` (Wrong) report, one
+location-verified `updated` report or two unverified `updated` reports hide the
+prompt immediately. A single unverified update starts a seven-day window.
+A Wrong report resets the report counts and expiry anchor; old-version targets
+remain visible until updated again. Updated targets expose `review_expires_at` (UTC RFC 3339) for
 the detail countdown. Machines already on `to_version` without a campaign
 update report never show a prompt. At expiry the prompt/presence disappears
 on the next read, while the client countdown also hides the prompt at zero.

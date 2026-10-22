@@ -107,21 +107,23 @@ func TestArcadeCampaignPromptsReviewWindow(t *testing.T) {
 		{name: "unverified within seven days", reports: []report{{age: 7*day - time.Hour}}, wantPrompt: true},
 		{name: "unverified exactly seven days", reports: []report{{age: 7 * day}}},
 		{name: "unverified expired", reports: []report{{age: 8 * day}}},
-		{name: "verified within three days", reports: []report{{age: 3*day - time.Hour, verified: true}}, wantPrompt: true},
+		{name: "one verified report hides immediately", reports: []report{{age: time.Minute, verified: true}}},
 		{name: "verified exactly three days", reports: []report{{age: 3 * day, verified: true}}},
 		{name: "verified expired", reports: []report{{age: 4 * day, verified: true}}},
 		{name: "later unverified does not extend", reports: []report{{age: 8 * day}, {age: day}}},
 		{name: "later verified does not extend", reports: []report{{age: 4 * day, verified: true}, {age: day, verified: true}}},
-		{name: "verified starts a new three day deadline", reports: []report{{age: 4 * day}, {age: 2 * day, verified: true}}, wantPrompt: true},
+		{name: "verified after unverified hides immediately", reports: []report{{age: 4 * day}, {age: time.Minute, verified: true}}},
 		{name: "verified replaces unverified deadline", reports: []report{{age: 5 * day}, {age: 4 * day, verified: true}}},
 		{name: "unverified cannot extend verified deadline", reports: []report{{age: 4 * day, verified: true}, {age: day}}},
 		{name: "two verified reports hide immediately", reports: []report{{age: 2 * day, verified: true}, {age: day, verified: true}}},
-		{name: "two unverified reports keep first deadline", reports: []report{{age: 2 * day}, {age: day}}, wantPrompt: true},
-		{name: "wrong resets verified report count", reports: []report{{age: 5 * day, verified: true}, {age: 4 * day, verified: true}, {age: 3 * day, wrong: true}, {age: 2 * day, verified: true}}, wantPrompt: true},
+		{name: "two unverified reports hide immediately", reports: []report{{age: 2 * day}, {age: time.Minute}}},
+		{name: "verified after wrong hides immediately", reports: []report{{age: 5 * day, verified: true}, {age: 4 * day, verified: true}, {age: 3 * day, wrong: true}, {age: time.Minute, verified: true}}},
 		{name: "two verified after wrong hide immediately", reports: []report{{age: 5 * day, verified: true}, {age: 4 * day, wrong: true}, {age: 2 * day, verified: true}, {age: day, verified: true}}},
 		{name: "wrong resets verified deadline", reports: []report{{age: 5 * day, verified: true}, {age: 4 * day, wrong: true}, {age: day}}, wantPrompt: true},
+		{name: "wrong resets unverified count", reports: []report{{age: 5 * day}, {age: 4 * day}, {age: 3 * day, wrong: true}, {age: day}}, wantPrompt: true},
+		{name: "two unverified after wrong hide immediately", reports: []report{{age: 5 * day}, {age: 4 * day, wrong: true}, {age: 2 * day}, {age: time.Minute}}},
 		{name: "wrong resets unverified deadline", reports: []report{{age: 9 * day}, {age: 8 * day, wrong: true}, {age: 6 * day}}, wantPrompt: true},
-		{name: "verified after wrong expires in three days", reports: []report{{age: 9 * day}, {age: 8 * day, wrong: true}, {age: 5 * day}, {age: 4 * day, verified: true}}},
+		{name: "verified after wrong hides even after four days", reports: []report{{age: 9 * day}, {age: 8 * day, wrong: true}, {age: 5 * day}, {age: 4 * day, verified: true}}},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			app := newArcadeTestApp(t)
@@ -224,15 +226,11 @@ func TestArcadeCampaignPromptsReviewWindow(t *testing.T) {
 									anchor = nil
 									continue
 								}
-								if anchor == nil || (!anchor.verified && input.verified) {
+								if anchor == nil {
 									anchor = input
 								}
 							}
-							window := 7 * day
-							if anchor.verified {
-								window = 3 * day
-							}
-							expected := time.Now().UTC().Add(window - anchor.age)
+							expected := time.Now().UTC().Add(7*day - anchor.age)
 							if delta := deadline.Sub(expected); delta < -time.Second || delta > time.Second {
 								t.Fatalf("expected deadline near %s, got %s", expected, deadline)
 							}
@@ -295,7 +293,7 @@ func TestPhotoCampaignListsOnlyPublicOpenArcadesWithoutPhotos(t *testing.T) {
 	}
 }
 
-func TestCampaignLocationBypassRequiresLevel10(t *testing.T) {
+func TestCampaignLocationBypassWithoutLevelRestriction(t *testing.T) {
 	app := newArcadeTestApp(t)
 	token, arcadeID, campaignID, gameID, initialStateID := seedCampaignCheckFixture(t, app, nil)
 
@@ -303,25 +301,25 @@ func TestCampaignLocationBypassRequiresLevel10(t *testing.T) {
 		"Authorization": "Bearer " + token,
 	})
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected below-level-10 bypass to be rejected, got %d", response.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected below-level-10 bypass to succeed, got %d", response.StatusCode)
 	}
 
 	arcade, err := app.FindRecordById("arcade", arcadeID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if arcade.GetString("game_v2") != initialStateID {
-		t.Fatal("rejected bypass moved the game state")
+	if arcade.GetString("game_v2") == initialStateID {
+		t.Fatal("expected bypass to move the game state")
 	}
 }
 
-func TestCampaignStillOldAwardsOneXPOnlyOnce(t *testing.T) {
+func TestCampaignStillOldBypassAwardsNoXP(t *testing.T) {
 	app := newArcadeTestApp(t)
 	token, arcadeID, campaignID, gameID, _ := seedCampaignCheckFixture(t, app, []string{"supporter"})
 	body := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"still_old","bypass_location":true}`, campaignID, arcadeID, gameID)
 
-	for index, wantExp := range []int{1, 0} {
+	for index, wantExp := range []int{0, 0} {
 		response := executeJSONRequest(t, app, http.MethodPost, "/campaign/check", body, map[string]string{
 			"Authorization": "Bearer " + token,
 		})
@@ -337,6 +335,55 @@ func TestCampaignStillOldAwardsOneXPOnlyOnce(t *testing.T) {
 		}
 		if responseBody.GainedExp != wantExp {
 			t.Fatalf("request %d: expected %d XP, got %d", index+1, wantExp, responseBody.GainedExp)
+		}
+	}
+}
+
+func TestCampaignStillOldVerifiedAwardsCampaignXPOnlyOnce(t *testing.T) {
+	for _, rollback := range []bool{false, true} {
+		for _, initialUnverified := range []bool{false, true} {
+			t.Run(fmt.Sprintf("rollback=%t/initial_unverified=%t", rollback, initialUnverified), func(t *testing.T) {
+				app := newArcadeTestApp(t)
+				token, arcadeID, campaignID, gameID, _ := seedCampaignCheckFixture(t, app, nil)
+				headers := map[string]string{"Authorization": "Bearer " + token}
+				if initialUnverified {
+					body := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"still_old","bypass_location":true}`, campaignID, arcadeID, gameID)
+					payload := decodeJSONMap(t, executeJSONRequest(t, app, http.MethodPost, "/campaign/check", body, headers))
+					if payload["gained_exp"] != float64(0) {
+						t.Fatalf("unverified report awarded XP: %#v", payload)
+					}
+				}
+				if rollback {
+					body := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"updated","bypass_location":true}`, campaignID, arcadeID, gameID)
+					assertContractStatus(t, executeJSONRequest(t, app, http.MethodPost, "/campaign/check", body, headers), http.StatusOK)
+				}
+				arcade, err := app.FindRecordById("arcade", arcadeID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				userID := arcade.GetString("createdBy")
+				visitAt := time.Now().UTC()
+				seedArcadeVisit(t, app, userID, arcadeID, visitAt)
+				zone, err := time.LoadLocation(arcade.GetString("timezone"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				visit, err := app.FindFirstRecordByFilter("arcade_visit", "user={:user} && arcade={:arcade}", dbx.Params{"user": userID, "arcade": arcadeID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				visit.Set("visit_day", visitAt.In(zone).Format("2006-01-02"))
+				if err := app.Save(visit); err != nil {
+					t.Fatal(err)
+				}
+				body := fmt.Sprintf(`{"campaign":%q,"arcade":%q,"game_id":%q,"result":"still_old"}`, campaignID, arcadeID, gameID)
+				for _, wantXP := range []float64{10, 0} {
+					payload := decodeJSONMap(t, executeJSONRequest(t, app, http.MethodPost, "/campaign/check", body, headers))
+					if payload["gained_exp"] != wantXP {
+						t.Fatalf("expected %v XP, got %#v", wantXP, payload)
+					}
+				}
+			})
 		}
 	}
 }
@@ -379,8 +426,8 @@ func TestCampaignStillOldRevertsRecentUpdateAndKeepsReportHistory(t *testing.T) 
 	if err := json.NewDecoder(response.Body).Decode(&responseBody); err != nil {
 		t.Fatalf("failed to decode rollback response: %v", err)
 	}
-	if !responseBody.RolledBack || responseBody.GainedExp != 1 {
-		t.Fatalf("expected rollback and 1 XP, got %#v", responseBody)
+	if !responseBody.RolledBack || responseBody.GainedExp != 0 {
+		t.Fatalf("expected rollback and no XP, got %#v", responseBody)
 	}
 
 	arcade, err = app.FindRecordById("arcade", arcadeID)
