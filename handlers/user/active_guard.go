@@ -44,6 +44,15 @@ var staffAccessTags = map[string]struct{}{
 	"moderator": {},
 }
 
+// IsActiveAccount shares foreground account restrictions with background work.
+func IsActiveAccount(app core.App, auth *core.Record) (bool, error) {
+	if auth == nil || auth.Collection().Name != CollectionUser {
+		return false, nil
+	}
+	_, code, err := checkAccountRestrictionWithBan(app, auth, userBanNow())
+	return err == nil && code == "", err
+}
+
 func HasStaffAccess(auth *core.Record) bool {
 	if auth == nil {
 		return false

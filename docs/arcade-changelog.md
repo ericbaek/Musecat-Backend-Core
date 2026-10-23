@@ -38,6 +38,11 @@ Each row uses these common columns:
 
 ## API Matrix
 
+Native photo publication, report/reaction, history, campaign-check and rollback
+adapters reuse these same handlers under `/native`. They do not add categories,
+change revision IDs, or make uploads themselves publishable history. Photo upload
+remains a pending atom action; only gallery publication creates a `photo` row.
+
 Draft deletion never removes required campaign/visit history. An aggregate made
 private after a recorded campaign action remains protected by its required
 references; deletion returns `409 draft_referenced` and creates no changelog or

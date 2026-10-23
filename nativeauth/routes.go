@@ -17,6 +17,8 @@ import (
 	"github.com/pocketbase/pocketbase/tools/router"
 )
 
+const SessionContextKey = "nativeSessionID"
+
 // RegisterRoutes returns the active-native-session group for domain route composition.
 // A disabled client allowlist returns nil and installs no routes.
 func RegisterRoutes(se *core.ServeEvent, clients []Client) *router.RouterGroup[*core.RequestEvent] {
@@ -24,7 +26,7 @@ func RegisterRoutes(se *core.ServeEvent, clients []Client) *router.RouterGroup[*
 		return nil
 	}
 	s := Service{Clients: clients}
-	headers := &hook.Handler[*core.RequestEvent]{Func: func(e *core.RequestEvent) error {
+	headers := &hook.Handler[*core.RequestEvent]{Id: "nativeNoStore", Priority: apis.DefaultRateLimitMiddlewarePriority - 1, Func: func(e *core.RequestEvent) error {
 		e.Response.Header().Set("Cache-Control", "no-store")
 		return e.Next()
 	}}
@@ -90,11 +92,12 @@ func RegisterRoutes(se *core.ServeEvent, clients []Client) *router.RouterGroup[*
 		if !strings.HasPrefix(auth, "Bearer ") {
 			return e.UnauthorizedError("Native session required", nil)
 		}
-		u, err := s.Authenticate(e.App, strings.TrimPrefix(auth, "Bearer "))
+		u, sessionID, err := s.AuthenticateSession(e.App, strings.TrimPrefix(auth, "Bearer "))
 		if err != nil {
 			return e.UnauthorizedError("Native session required", nil)
 		}
 		e.Auth = u
+		e.Set(SessionContextKey, sessionID)
 		return e.Next()
 	}}
 	secured := g.Group("").Bind(guard, user.RequireActiveUser())

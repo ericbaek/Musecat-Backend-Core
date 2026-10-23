@@ -146,7 +146,7 @@ func DownloadArcadePhotoAtom(re *core.RequestEvent) error {
 			}
 		}
 	}
-	if arcade.GetBool("public") && atom.GetBool("public") {
+	if arcade.GetBool("public") && atom.GetBool("public") && !strings.Contains(re.Response.Header().Get("Cache-Control"), "no-store") {
 		re.Response.Header().Set("Cache-Control", "private, max-age=300")
 	} else {
 		re.Response.Header().Set("Cache-Control", "private, no-store")

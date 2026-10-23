@@ -51,18 +51,15 @@ func enqueueDevicesTx(app core.App, row *core.Record, userID string) error {
 	}
 	for _, device := range devices {
 		if row.GetString("kind") == "report_created" {
-			preferences, err := app.FindRecordsByFilter(arcadereport.Subscriptions, "arcade={:arcade} && device={:device}", "", 1, 0, dbx.Params{"arcade": row.GetString("arcade"), "device": device.Id})
-			if err != nil {
-				return err
-			}
 			user, err := app.FindRecordById("user", userID)
 			if err != nil {
 				return err
 			}
-			if len(preferences) > 0 && !preferences[0].GetBool("enabled") {
-				continue
+			enabled, err := ReportDeviceEnabled(app, user, row.GetString("arcade"), device.Id)
+			if err != nil {
+				return err
 			}
-			if !slices.Contains(user.GetStringSlice("owns"), row.GetString("arcade")) && len(preferences) == 0 {
+			if !enabled {
 				continue
 			}
 		}
@@ -74,6 +71,20 @@ func enqueueDevicesTx(app core.App, row *core.Record, userID string) error {
 		}
 	}
 	return nil
+}
+
+// ReportDeviceEnabled is shared by event enqueueing, provider delivery and the
+// native device preference status API. Ownership defaults to enabled; explicit
+// device preferences override that default and permit eligible non-owner staff.
+func ReportDeviceEnabled(app core.App, user *core.Record, arcadeID, deviceID string) (bool, error) {
+	preferences, err := app.FindRecordsByFilter(arcadereport.Subscriptions, "arcade={:arcade} && device={:device}", "", 1, 0, dbx.Params{"arcade": arcadeID, "device": deviceID})
+	if err != nil {
+		return false, err
+	}
+	if len(preferences) > 0 {
+		return preferences[0].GetBool("enabled"), nil
+	}
+	return user != nil && slices.Contains(user.GetStringSlice("owns"), arcadeID), nil
 }
 func ReportCreatedTx(app core.App, flag, arcade *core.Record) error {
 	recipients := map[string]bool{}
@@ -178,7 +189,7 @@ func Item(app core.App, row *core.Record) map[string]any {
 	return map[string]any{"id": row.Id, "kind": row.GetString("kind"), "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": name, "gameName": game, "message": message, "reaction": reaction, "url": fmt.Sprintf("/arcade/%s?report=%s#report-%s", row.GetString("arcade"), row.GetString("flag"), row.GetString("flag"))}
 }
 
-// UpsertDeviceTx accepts a validated subscription from either registration API.
+// UpsertDeviceTx accepts a validated browser or native registration.
 // Canonical credentials are stored once, while preferences reference this row.
 func UpsertDeviceTx(app core.App, userID, endpoint string, subscription any, locale string) (*core.Record, error) {
 	if err := ReleaseOtherEndpointOwnersTx(app, userID, endpoint); err != nil {
@@ -225,7 +236,7 @@ func RemoveDeviceTx(app core.App, userID, endpoint string) error {
 }
 
 // ReleaseOtherEndpointOwnersTx transfers the endpoint and cascading preferences
-// together, so a browser never retains credentials belonging to another account.
+// together, so a device never retains credentials belonging to another account.
 func ReleaseOtherEndpointOwnersTx(app core.App, userID, endpoint string) error {
 	rows, err := app.FindRecordsByFilter(Devices, "endpoint={:endpoint} && user!={:user}", "", 0, 0, dbx.Params{"user": userID, "endpoint": endpoint})
 	if err != nil {

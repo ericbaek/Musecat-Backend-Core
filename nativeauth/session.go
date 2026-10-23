@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"regexp"
@@ -108,7 +109,13 @@ type sessionRow struct {
 
 func account(app core.App, id, key string) (*core.Record, error) {
 	u, e := app.FindRecordById("user", id)
-	if e != nil || u.GetBool("withdrawn") || !equal(hash(u.TokenKey()), key) {
+	if e != nil {
+		if errors.Is(e, sql.ErrNoRows) {
+			return nil, ErrInvalid
+		}
+		return nil, e
+	}
+	if u.GetBool("withdrawn") || !equal(hash(u.TokenKey()), key) {
 		return nil, ErrInvalid
 	}
 	return u, nil
@@ -211,14 +218,42 @@ func (s Service) Refresh(app core.App, token string) (Credentials, error) {
 	return out, e
 }
 func (s Service) Authenticate(app core.App, token string) (*core.Record, error) {
+	u, _, err := s.AuthenticateSession(app, token)
+	return u, err
+}
+
+// AuthenticateSession additionally returns the server-owned session family ID.
+// It is never a client-supplied identifier or an access credential.
+func (s Service) AuthenticateSession(app core.App, token string) (*core.Record, string, error) {
 	if !challengePattern.MatchString(token) {
-		return nil, ErrInvalid
+		return nil, "", ErrInvalid
 	}
 	var f sessionRow
 	if e := app.DB().NewQuery(`SELECT * FROM native_auth_session WHERE access_hash={:hash}`).Bind(dbx.Params{"hash": hash(token)}).One(&f); e != nil {
-		return nil, ErrInvalid
+		return nil, "", ErrInvalid
 	}
 	if f.Revoked != 0 || f.Expires <= s.now() || f.AccessExpires <= s.now() {
+		return nil, "", ErrInvalid
+	}
+	u, err := account(app, f.UserID, f.AccountKey)
+	return u, f.ID, err
+}
+
+// SessionUser validates a push registration's session family, independent of
+// the short-lived access token. Logout, family expiry and account credential
+// changes invalidate background delivery as well as foreground API access.
+func (s Service) SessionUser(app core.App, sessionID string) (*core.Record, error) {
+	if !challengePattern.MatchString(sessionID) {
+		return nil, ErrInvalid
+	}
+	var f sessionRow
+	if err := app.DB().NewQuery(`SELECT * FROM native_auth_session WHERE id={:id}`).Bind(dbx.Params{"id": sessionID}).One(&f); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrInvalid
+		}
+		return nil, err
+	}
+	if f.Revoked != 0 || f.Expires <= s.now() {
 		return nil, ErrInvalid
 	}
 	return account(app, f.UserID, f.AccountKey)

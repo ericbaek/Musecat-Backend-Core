@@ -8,6 +8,7 @@ import (
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/router"
 
 	"github.com/ericbaek/musecat-backend-core/docs"
 	"github.com/ericbaek/musecat-backend-core/geo"
@@ -43,7 +44,10 @@ import (
 // environment variables, registers migrations, or starts scheduled jobs.
 // A nil GeoResolver deliberately disables geographic lookup (fail closed).
 type Config struct {
-	NativeAuthClients     []nativeauth.Client
+	NativeAuthClients []nativeauth.Client
+	// NativeRoutes lets the executable compose its own domain handlers behind
+	// the same opaque-session and active-account guard as Core's native API.
+	NativeRoutes          func(*router.RouterGroup[*core.RequestEvent])
 	GeoResolver           *geo.OfflineResolver
 	Documentation         DocumentationConfig
 	ClientIPForwardSecret string
@@ -70,17 +74,19 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se)
-		RegisterNativeAPIRoutes(se, config.NativeAuthClients)
+		if nativeRoutes := RegisterNativeAPIRoutes(se, config.NativeAuthClients); nativeRoutes != nil && config.NativeRoutes != nil {
+			config.NativeRoutes(nativeRoutes)
+		}
 		return se.Next()
 	})
 }
 
 // RegisterNativeAPIRoutes composes existing domain handlers behind native session guards.
 // An empty client allowlist leaves every native route disabled.
-func RegisterNativeAPIRoutes(se *core.ServeEvent, clients []nativeauth.Client) {
+func RegisterNativeAPIRoutes(se *core.ServeEvent, clients []nativeauth.Client) *router.RouterGroup[*core.RequestEvent] {
 	nativeRoutes := nativeauth.RegisterRoutes(se, clients)
 	if nativeRoutes == nil {
-		return
+		return nil
 	}
 	nativeRoutes.GET("/user/notifications", usernotifications.List)
 	nativeRoutes.POST("/user/notifications/read", usernotifications.Read)
@@ -97,6 +103,8 @@ func RegisterNativeAPIRoutes(se *core.ServeEvent, clients []nativeauth.Client) {
 	nativeRoutes.POST("/arcade/notice", arcadenotice.CreateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
 	nativeRoutes.PUT("/arcade/notice", arcadenotice.UpdateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
 	nativeRoutes.DELETE("/arcade/notice", arcadenotice.DeleteArcadeNotice)
+	registerNativeParityRoutes(nativeRoutes)
+	return nativeRoutes
 }
 
 func configureDefaultRateLimits(app core.App) {
@@ -110,7 +118,11 @@ func configureDefaultRateLimits(app core.App) {
 		{Label: "GET /reverse_geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geo", MaxRequests: 60, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /support_feedback", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /native/support_feedback", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/feedback/thread", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /native/user/feedback/thread", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "PUT /native/user/notifications/apns", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /native/user/notifications/apns/test", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 	}
 	for _, rule := range defaults {
 		found := false

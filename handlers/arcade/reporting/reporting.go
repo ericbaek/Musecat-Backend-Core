@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 func target(re *core.RequestEvent, id string) (*core.Record, error) {
@@ -105,24 +104,7 @@ func SaveSubscription(re *core.RequestEvent) error {
 		if err != nil {
 			return err
 		}
-		rows, err := tx.FindRecordsByFilter(arcadereport.Subscriptions, "arcade={:arcade} && device={:device}", "", 1, 0, dbx.Params{"arcade": arcade.Id, "device": device.Id})
-		if err != nil {
-			return err
-		}
-		var row *core.Record
-		if len(rows) > 0 {
-			row = rows[0]
-		} else {
-			col, err := tx.FindCollectionByNameOrId(arcadereport.Subscriptions)
-			if err != nil {
-				return err
-			}
-			row = core.NewRecord(col)
-		}
-		row.Set("arcade", arcade.Id)
-		row.Set("device", device.Id)
-		row.Set("enabled", true)
-		return tx.Save(row)
+		return setDevicePreferenceTx(tx, arcade.Id, device.Id, true)
 	})
 	if err != nil {
 		return err
@@ -147,38 +129,7 @@ func DeleteSubscription(re *core.RequestEvent) error {
 		if len(devices) == 0 {
 			return nil
 		}
-		rows, err := tx.FindRecordsByFilter(arcadereport.Subscriptions, "arcade={:arcade} && device={:device}", "", 1, 0, dbx.Params{"arcade": body.Arcade, "device": devices[0].Id})
-		if err != nil {
-			return err
-		}
-		var pref *core.Record
-		if len(rows) > 0 {
-			pref = rows[0]
-		} else {
-			col, err := tx.FindCollectionByNameOrId(arcadereport.Subscriptions)
-			if err != nil {
-				return err
-			}
-			pref = core.NewRecord(col)
-			pref.Set("arcade", body.Arcade)
-			pref.Set("device", devices[0].Id)
-		}
-		pref.Set("enabled", false)
-		if err := tx.Save(pref); err != nil {
-			return err
-		}
-		pending, err := tx.FindRecordsByFilter(usernotification.Deliveries, "device={:device} && notification.arcade={:arcade} && notification.kind='report_created' && done=false", "", 0, 0, dbx.Params{"device": devices[0].Id, "arcade": body.Arcade})
-		if err != nil {
-			return err
-		}
-		for _, row := range pending {
-			row.Set("done", true)
-			row.Set("completed_at", time.Now().UTC())
-			if err := tx.Save(row); err != nil {
-				return err
-			}
-		}
-		return nil
+		return setDevicePreferenceTx(tx, body.Arcade, devices[0].Id, false)
 	})
 	if err != nil {
 		return err

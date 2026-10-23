@@ -1261,3 +1261,112 @@ read-only. Notice POST is non-idempotent. Clients must not automatically replay
 mutations after a transport failure; refresh and reconcile before another save.
 An empty native client allowlist registers none of these routes. No schema or
 production data migration is added by these adapters.
+
+## Native web-domain adapters
+
+`coreapp/native_routes.go` is an explicit allowlist of existing custom web domain
+handlers for native sessions. It adds photo atom upload/list/download/delete and
+gallery publication; reports/reactions; authenticated detail and history; review
+requests and rollback; account profile/preferences/country/privacy/withdrawal;
+support conversations and inquiry settings; campaigns, supporter and moderation
+tools; and community post reads/writes. The method, query, body and response of
+each alias are unchanged from the corresponding path without `/native`, as
+documented in OpenAPI. It is not an unrestricted forwarding endpoint. Public
+signed-out reads and guest feedback creation retain their existing public paths.
+
+Aliases require opaque native credentials and an active account. Web JWT and
+partner credentials are rejected. Domain ownership is resolved from that account;
+caller-supplied user IDs do not select an owner. Admin, strict-reviewer and catalog
+tool middleware are retained on the same operations as the web router. They
+re-evaluate current roles for every request. Native feedback creation and reply
+paths receive the same rate-limit defaults as their web counterparts.
+
+The new aliases use the web default 32 MiB body ceiling, overridden by the same
+existing per-route limits: photo upload 220 MiB; profile 35 MiB; feedback/report
+photos 46048576 bytes; community posts 81 MiB; subway map 24 MiB; settings 64 KiB;
+catalog/game preferences 128 KiB; credential/subscription/test-account 16 KiB;
+subscription status/deletion and feedback status 4 KiB. Existing v1/draft limits
+remain unchanged. Responses remain no-store, including authorized photo bytes.
+Public photo download responses retain their existing private five-minute cache.
+
+Photo upload creates only pending atoms and awards no XP. `captured_at` is an
+optional JSON string array matching multipart `photos`; main validates dates in
+the arcade timezone. PNG/APNG/JPEG and the existing per-file 20 MiB limit apply,
+with at most ten files. Upload returns 200/207/422 for complete/partial/no success.
+Only `PUT /native/arcade/photo` with `{arcade,photos:[atomIDs]}` publishes a nonempty
+gallery, immutable molecule/history and first-publication XP atomically. An own
+pending atom may be deleted; published atoms return 409. Returned `file_url`
+stays `/arcade/photo/file?id=...`; authenticated clients select the explicit
+`/native/arcade/photo/file` alias for pending/private bytes. No raw collection
+access is introduced. Invalid/private foreign scope remains denied by main policy.
+
+Feedback multipart/JSON and photo filenames are unchanged. High-level developer
+inquiry/official-request message prefixes and reply-email formatting are existing
+web client transforms, not new server fields. Main thread participant checks,
+official ownership, reopen/resolve behavior and notifications are reused. Report
+vote windows/cooldowns and rollback target/fallback semantics stay unchanged.
+These adapters add no new CAS or idempotency semantics. Clients must reconcile
+uncertain mutations rather than automatically replay uploads, creates or XP actions.
+
+Core `Config.NativeRoutes` receives the already guarded native route group only
+when clients are enabled. Full composes its own passport trust/reset/review
+handlers there; Core does not import Full or own its migrations. Browser push
+subscription routes retain their WebPush endpoint/key schema. Full supplies the
+separate APNs provider adapter described below; browser subscriptions are not
+interpreted as native device tokens.
+No migration is needed for these aliases. Passport map/daily summaries are client
+projections of the existing authoritative passport and paginated stamps endpoints.
+
+## Native APNs device and delivery contract
+
+Full composes `GET|PUT|DELETE /native/user/notifications/apns` on the existing
+opaque-session and active-account group. GET returns `{available:false}` when
+provider configuration is absent, otherwise `{available:true,environment,topic}`.
+Check availability and exact app topic before requesting notification permission.
+PUT accepts only the OS-provided hexadecimal `token` and `locale=ko|en|ja`; it
+returns `{enabled:true,device}`. Device tokens have variable lengths, with a
+1024-character hexadecimal input ceiling. Topic, environment, account, native
+session family, registration nonce and registration time are server-owned.
+DELETE accepts `{device}` and returns `{enabled:false}`; missing or foreign device
+IDs are no-ops. Own removal remains available with provider configuration disabled.
+All bodies have a 4 KiB ceiling, all responses are no-store (including early body
+limit/rate-limit rejection), and native registration/test paths are rate limited.
+
+APNs uses the existing locked `user_notification_device` collection. Its internal
+endpoint is `apns://<environment>/<topic>/<token>` and its subscription JSON is
+tagged `provider=apns`. It has no user-selected network destination. The existing
+unique endpoint/owner transfer and cascade behavior removes old-account delivery
+receipts and report preferences before registering the new owner. Token rotation within the same native session and topic/environment preserves the
+device ID, report preferences and pending receipts. Adopting an endpoint from a
+different session creates a new device ID and cascades prior delivery/preferences,
+so stale cleanup cannot delete the new registration. Registration revalidates the
+family inside its transaction. It does not backfill old inbox events. Clients remove
+a registration on disable or sign-out; the server also checks
+family expiry/revocation, account token-key changes, bans and withdrawal before
+background sending. Access-token refresh does not expire the family registration.
+
+`POST /native/arcade/apns-subscription/status` and
+`PUT|DELETE /native/arcade/apns-subscription` accept `{arcade,device}`. Status
+returns `{enabled}` from the same effective policy used by event enqueueing and
+delivery: owners default to enabled, explicit preferences override that default,
+and eligible non-owner managers require opt-in. Status/enabling retain existing
+arcade-management checks and only accept the current account's APNs device.
+Disabling remains possible after management access is lost and cancels pending
+report-created deliveries for that device/arcade without disabling other events.
+Mutation receipts are `{ok:true}`. These native adapters and existing browser
+handlers share preference persistence and opt-out cancellation helpers.
+
+Full's APNs transport consumes the same `user_notification_delivery` rows, existing
+event keys, current visibility rules, localized payloads and receipt retention.
+There is no second event pipeline or migration. Disabled/mismatched providers leave
+their work pending without blocking other providers' batches. Provider network I/O
+stays outside transactions. Accepted notifications complete existing receipts;
+bounded retries retain the five-attempt limit and APNs 5xx retries wait at least
+15 minutes. Invalid-token responses remove only the unchanged registration, with
+APNs invalidation timestamps and a server nonce protecting newer registrations.
+Provider errors do not log device tokens, request URLs, JWTs or private keys.
+
+Report attachment bytes are available through native-only
+`GET /native/arcade/flag/photo?id=<flag>&file=<exact stored filename>` with no-store
+and nosniff headers. It validates filename membership and the same public/private
+creator/strict-staff scope as report editing; it is not a generic file proxy.

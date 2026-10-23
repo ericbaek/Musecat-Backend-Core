@@ -104,7 +104,7 @@ func directRouteOperations(file ast.Node, prefixes map[string]string) map[string
 			return true
 		}
 		method := methodName(call)
-		if method != "GET" && method != "POST" && method != "PUT" && method != "DELETE" {
+		if method != "GET" && method != "POST" && method != "PUT" && method != "PATCH" && method != "DELETE" {
 			return true
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
@@ -171,11 +171,55 @@ func documentedOperations(spec string) map[string]bool {
 		}
 		path := spec[match[2]:match[3]]
 		section := spec[match[0]:end]
-		for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
+		for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
 			if regexp.MustCompile(`(?m)^    ` + strings.ToLower(method) + `:$`).MatchString(section) {
 				operations[method+" "+path] = true
 			}
 		}
 	}
 	return operations
+}
+
+// Native aliases intentionally reuse web handlers and DTOs. Keep the explicit
+// routing inventory and security contract in sync as either surface grows.
+func TestOpenAPIDocumentsNativeParityRoutes(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	root := filepath.Dir(filepath.Dir(thisFile))
+	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, "coreapp", "native_routes.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := os.ReadFile(filepath.Join(root, "docs", "openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	operations := documentedOperations(string(spec))
+	var body *ast.BlockStmt
+	for _, declaration := range file.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == "registerNativeParityRoutes" {
+			body = function.Body
+		}
+	}
+	if body == nil {
+		t.Fatal("native composition missing")
+	}
+	prefixes := routerGroupPrefixes(body)
+	for operation := range directRouteOperations(body, prefixes) {
+		method, path, _ := strings.Cut(operation, " ")
+		nativePath := "/native" + path
+		if !operations[method+" "+nativePath] {
+			t.Errorf("OpenAPI missing %s %s", method, nativePath)
+		}
+		start := strings.Index(string(spec), "\n  "+nativePath+":\n")
+		if start < 0 {
+			continue
+		}
+		section := string(spec)[start+1:]
+		if next := strings.Index(section, "\n  /"); next >= 0 {
+			section = section[:next]
+		}
+		if strings.Contains(section, "bearerAuth: []") || !strings.Contains(section, "nativeBearer: []") {
+			t.Errorf("invalid native security %s", nativePath)
+		}
+	}
 }

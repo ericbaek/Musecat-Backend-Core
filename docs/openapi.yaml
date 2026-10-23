@@ -1924,7 +1924,7 @@ components:
           type: integer
           minimum: 0
           maximum: 4
-          description: Heatmap intensity uses fixed logarithmic daily-count buckets: 0 for no activity, 1 for one activity, 2 for 2–3, 3 for 4–7, and 4 for 8 or more. It is independent of the maximum count in the requested range.
+          description: "Heatmap intensity uses fixed logarithmic daily-count buckets: 0 for no activity, 1 for one activity, 2 for 2–3, 3 for 4–7, and 4 for 8 or more. It is independent of the maximum count in the requested range."
         changelog_count:
           type: integer
         flag_count:
@@ -10235,3 +10235,3888 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /native/arcade:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade. Responses are no-store.
+    get:
+      security:
+        - nativeBearer: []
+      tags: [Arcades]
+      summary: /arcade
+      description: |
+        Returns only a public arcade (open or closed) and relation ids by default.
+        Private arcades always return `404`; use authenticated `GET /arcade/draft` for a creator or developer/moderator draft read.
+        When `expand=game`, each `game.items[]` entry includes `version`, `series`, `updated`, and the editable game fields.
+        Unauthenticated callers receive redacted sensitive data: `tag` is null, `location` and `updated` are empty strings, `price` retains only representative items with `hasHiddenPrices=true` and `accept=null`, and `expand=hour` returns only today's schedule for the arcade timezone.
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+          description: Arcade id.
+        - name: arcade
+          in: query
+          schema:
+            type: string
+          description: Alias for `id`.
+        - name: expand
+          in: query
+          schema:
+            type: string
+          description: |
+            `none` or empty returns relation ids only. `all` expands every section.
+            Comma-separated values such as `basic,hour` expand only the requested sections.
+        - name: source
+          in: query
+          schema:
+            type: string
+            enum: [direct, search, nearby, other, poster, google, naver, bing]
+            default: direct
+          description: Optional acquisition source recorded with the page view. search is internal site search; poster is poster QR; google, naver, and bing are external search referrals. Missing or unknown values use direct.
+        - name: game_series
+          in: query
+          description: Optional repeated or comma-separated series IDs used to reach the arcade.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: Arcade metadata with relation ids or expanded relation payloads.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeValueResponse'
+              examples:
+                idsOnly:
+                  value:
+                    admin:
+                      id: arcade_123
+                      public: true
+                      closed: false
+                      country: AU
+                      timezone: Australia/Sydney
+                      createdBy: user_123
+                      created: "2026-04-01 12:00:00.000Z"
+                      updated: "2026-04-10 09:00:00.000Z"
+                    basic: basic_rel
+                    hour: hour_rel
+                    sns: sns_rel
+                    gtk: gtk_rel
+                    game: game_rel
+                    photo: photo_rel
+                expanded:
+                  value:
+                    admin:
+                      id: arcade_123
+                      public: true
+                      closed: false
+                      country: AU
+                      timezone: Australia/Sydney
+                      createdBy: user_123
+                      created: "2026-04-01 12:00:00.000Z"
+                      updated: "2026-04-10 09:00:00.000Z"
+                    basic:
+                      id: basic_rel
+                      name: Sydney Arcade
+                      address: 123 George St, Sydney NSW
+                      direction: Level 2
+                      nickname: [Town Hall]
+                      subway_line: [T1]
+                      location:
+                        lat: -33.8708
+                        lon: 151.2062
+                    hour:
+                      id: hour_rel
+                      Monday:
+                        start: 1000
+                        end: 2300
+                      Thursday:
+                        start: 0
+                        end: 0
+                      Sunday: 499
+                      Note: Late night on Thursdays
+                    sns:
+                      id: sns_rel
+                      items:
+                        - type: instagram
+                          link: https://instagram.com/example
+                          name: Official account
+                    gtk:
+                      id: gtk_rel
+                      items:
+                        - type: smoking
+                          bool: false
+                    game:
+                      id: game_rel
+                      items:
+                        - id: atom_123
+                          updated: "2026-04-10 09:00:00.000Z"
+                          version:
+                            id: version_123
+                            series: series_123
+                            released_on: "2025-01-01"
+                            en: Version A
+                            kr: Version A
+                            jp: Version A
+                            price_default: null
+                          series:
+                            id: series_123
+                            seriesNumber: 1
+                            en: Series A
+                            kr: Series A
+                            jp: Series A
+                            en_short: A
+                            kr_short: A
+                            jp_short: A
+                            manufacturer: null
+                          location: 2F
+                          quantity: 1
+                          price:
+                            currency: KRW
+                            type: custom
+                            list:
+                              - value: 500
+                            accept: [Cash]
+                          tag: []
+                    photo:
+                      id: photo_rel
+        '400':
+          description: Missing target arcade id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/arcade/changelog:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/changelog. Responses are no-store.
+    get:
+      tags: [Arcades]
+      summary: /arcade/changelog
+      description: Detailed changelog requires an active authenticated user, including for public open/closed arcades. Private history is available only to the creator or a developer/moderator.
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: changed
+          in: query
+          description: Optional arcade part filter. Omit to return all supported categories.
+          schema:
+            type: string
+            enum: [basic, game, hour, sns, gtk, photo, memo]
+      responses:
+        '200':
+          description: Immutable changelog page.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeChangelogPage'}
+        '400':
+          description: Invalid pagination, missing arcade id, or unsupported changed category.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid user authentication.
+        '403':
+          description: User is inactive.
+        '404':
+          description: Arcade does not exist or private history is inaccessible.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/arcades/updates/history:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcades/updates/history. Responses are no-store.
+    get:
+      tags: [Arcades]
+      summary: Authenticated recent change history
+      security:
+        - nativeBearer: []
+      description: Historical public open arcade activity, excluding passport verifications before block grouping and pagination. Requires a user session.
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CountryQuery'
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 1000000, default: 1}
+      responses:
+        '200':
+          description: Historical block pagination envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, per_page, last_page, total]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ArcadeUpdateSummary'}
+                  page: {type: integer}
+                  per_page: {type: integer}
+                  last_page: {type: integer}
+                  total: {type: integer}
+        '400':
+          description: Invalid limit or page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: User authentication required.
+        '502':
+          description: Failed to build update list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/arcade/analytics:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/analytics. Responses are no-store.
+    get:
+      tags: [Arcades]
+      summary: /arcade/analytics
+      description: |
+        Returns cumulative analytics for a public, open arcade. Anonymous and ordinary
+        contributors below level 15 receive only `page_views`, `fault_reports`, and `edit_count`.
+        Level-15+ users additionally receive `page_views_by_source` and `series_filter_entries`
+        when `page_views` exceeds 1000. These breakdowns remain available to privileged users.
+        `direction_clicks`,
+        `visit_verifications`, and `distinct_visitors` are omitted unless the bearer
+        user has both the `arcade_owner` tag and the arcade ID in `owns`, or has the
+        `developer` or `moderator` tag. The `createdBy` relation alone is insufficient.
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Public-safe or privileged cumulative analytics response.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeAnalyticsResponse'}
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist, is private, or is closed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/arcade/analytics/event:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/analytics/event. Responses are no-store.
+    post:
+      security:
+        - nativeBearer: []
+      tags: [Arcade Mutations]
+      summary: /arcade/analytics/event
+      description: |
+        Records an anonymous direction-click analytics event. The request body is limited to
+        2 KiB and accepts at most ten distinct game-series IDs. To limit anonymous metric
+        manipulation, each client IP may record at most 20 events per rolling 10 minutes and
+        may record an event for the same arcade only once every 30 seconds. Once the arcade is
+        validated, rejected series IDs also consume this quota before their database lookup. The server does
+        not persist the client IP, user agent, or identity; limits are process-local and retain
+        no more than 4,096 active clients.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ArcadeAnalyticsEventRequest'}
+      responses:
+        '200':
+          description: Analytics event recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recorded]
+                properties:
+                  recorded: {type: boolean, const: true}
+        '400':
+          description: Invalid event body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '413':
+          description: Analytics event body exceeds 2 KiB.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: Anonymous client exceeded the per-arcade cooldown or rolling event limit. The `Retry-After` header is included.
+          headers:
+            Retry-After:
+              schema: {type: integer, minimum: 1}
+              description: Seconds until this anonymous client may retry.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist or is private.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Analytics event persistence failure.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/arcade/photo/atoms:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/photo/atoms. Responses are no-store.
+    get:
+      tags: [Arcade Mutations]
+      summary: /arcade/photo/atoms
+      description: Lists photo atoms through the custom API. Use each `file_url` for file delivery. Public arcades are available to active contributors; private drafts require creator or developer/moderator access.
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Photo atom list.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadePhotoAtomListResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '404':
+          description: Arcade does not exist or private draft is inaccessible.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/arcade/photo/file:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/photo/file. Responses are no-store.
+    get:
+      security:
+        - nativeBearer: []
+      tags: [Arcades]
+      summary: /arcade/photo/file
+      description: Streams one photo through the custom API. A published photo of a public arcade is anonymous-readable and privately browser-cacheable for five minutes. Pending or draft photos require a bearer token with atom-list access and are never cached. Clients must use the returned `file_url`, not PocketBase `/api/files` URLs. Supported thumbnail queries return the configured derivative and never silently fall back to the original file.
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: thumb
+          in: query
+          required: false
+          schema: {type: string, enum: [96x96, 384x384, 680x0]}
+          description: Returns a configured square crop or a 680px-wide aspect-preserving thumbnail.
+      responses:
+        '200':
+          description: Photo bytes.
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+            image/jpeg:
+              schema: {type: string, format: binary}
+        '400':
+          description: Missing photo atom id or unsupported thumbnail size.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Photo atom does not exist or is inaccessible.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/arcade/photo/atom:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/photo/atom. Responses are no-store.
+    delete:
+      tags: [Arcade Mutations]
+      summary: /arcade/photo/atom
+      description: Deletes a pending photo atom only for its uploader or developer/moderator. Published atoms are immutable and return `409`.
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Pending atom deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted]
+                properties:
+                  id: {type: string}
+                  deleted: {type: boolean}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Atom is not owned by the caller.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Published atoms cannot be deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/arcade/photo/upload:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/photo/upload. Responses are no-store.
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/photo/upload
+      description: Uploads pending photo atoms. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [arcade, photos]
+              properties:
+                arcade:
+                  type: string
+                captured_at:
+                  type: string
+                  description: Optional JSON string array matching photos by index. Entries are DateTimeOriginal as YYYY-MM-DDTHH:mm:ss with optional UTC offset, or empty. Offsetless dates use venue timezone (UTC if absent). Invalid/future entries are ignored; malformed arrays or count mismatches return 400.
+                photos:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: string
+                    format: binary
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: All files uploaded successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadePhotoUploadResponse'
+              example:
+                arcade: arcade_123
+                summary:
+                  total: 2
+                  success: 2
+                  failed: 0
+                uploaded:
+                  - index: 0
+                    atomId: atom_1
+                    filename: ok.png
+                  - index: 1
+                    atomId: atom_2
+                    filename: ok2.jpg
+                failed: []
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 5
+                  diff_exp: 5
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 25
+                  previous_level: 0
+                  new_level: 1
+                  level_diff: 1
+                  remaining_exp_to_next_level: 3
+                  remaining_percent_to_next_level: 75
+        '207':
+          description: Partial success.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadePhotoUploadResponse'
+              example:
+                arcade: arcade_123
+                summary:
+                  total: 2
+                  success: 1
+                  failed: 1
+                uploaded:
+                  - index: 0
+                    atomId: atom_1
+                    filename: ok.png
+                failed:
+                  - index: 1
+                    filename: bad.gif
+                    reason: unsupported mime type - image/gif
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 5
+                  diff_exp: 5
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 25
+                  previous_level: 0
+                  new_level: 1
+                  level_diff: 1
+                  remaining_exp_to_next_level: 3
+                  remaining_percent_to_next_level: 75
+        '400':
+          description: Invalid multipart body or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: All files failed validation or persistence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadePhotoUploadResponse'
+              example:
+                arcade: arcade_123
+                summary:
+                  total: 2
+                  success: 0
+                  failed: 2
+                uploaded: []
+                failed:
+                  - index: 0
+                    filename: bad1.gif
+                    reason: unsupported mime type - image/gif
+                  - index: 1
+                    filename: bad2.gif
+                    reason: unsupported mime type - image/gif
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 0
+                  diff_exp: 0
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 0
+                  previous_level: 0
+                  new_level: 0
+                  level_diff: 0
+                  remaining_exp_to_next_level: 4
+                  remaining_percent_to_next_level: 100
+
+  /native/arcade/photo:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/photo. Responses are no-store.
+    put:
+      tags: [Arcade Mutations]
+      summary: /arcade/photo
+      description: Pending atoms receive 4 XP each for campaign targets (double the normal 2 XP) when first published, up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadePhotoRequest'
+            example:
+              arcade: arcade_123
+              photos: [atom_1, atom_2]
+      responses:
+        '200':
+          description: "Photo relation updated. XP is awarded only when pending atoms are first published: 4 XP per atom for campaign targets (double the normal 2 XP), up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a published atom awards no XP."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateArcadePhotoResponse'
+              example:
+                arcade: arcade_123
+                photo: photo_molecule_123
+                count: 2
+                xp_feedback:
+                  previous_exp: 0
+                  new_exp: 2
+                  diff_exp: 2
+                  previous_percent_to_next_level: 0
+                  new_percent_to_next_level: 50
+                  previous_level: 0
+                  new_level: 0
+                  level_diff: 0
+                  remaining_exp_to_next_level: 2
+                  remaining_percent_to_next_level: 50
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/arcade/flag:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/flag. Responses are no-store.
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/flag
+      description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold. Accepts at most 3 images, 15000000 bytes each, within a 46048576-byte encoded request body.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateArcadeFlagRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              required: [arcade, game_id, disruption, message]
+              properties:
+                arcade:
+                  type: string
+                game_id:
+                  type: string
+                disruption:
+                  type: string
+                  enum: [unplayable, major, bearable, minor]
+                message:
+                  type: string
+                photos:
+                  type: array
+                  maxItems: 3
+                  description: Images only; at most 15000000 bytes per file. Server verifies contents.
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        '409':
+          description: Arcade uses external reporting. The response code is REPORT_EXTERNAL; no mutation or XP is committed.
+        '200':
+          description: Flag created and linked to the durable game entry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, game_id, flag, game, xp_feedback]
+                properties:
+                  arcade:
+                    type: string
+                  game_id:
+                    type: string
+                  flag:
+                    type: string
+                  game:
+                    $ref: '#/components/schemas/ArcadeGameExpanded'
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Invalid body or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413': {description: File or encoded request body exceeds its limit.}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/arcade/flag/delete:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/flag/delete. Responses are no-store.
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/flag/delete
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlagActionRequest'
+      responses:
+        '200':
+          description: Flag deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flag, deleted, game, xp_feedback]
+                properties:
+                  flag:
+                    type: string
+                  deleted:
+                    type: boolean
+                  game:
+                    $ref: '#/components/schemas/ArcadeGameExpanded'
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '400':
+          description: Invalid body or delete rule failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+
+  /native/arcade/flag/reaction:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/flag/reaction. Responses are no-store.
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/flag/reaction
+      description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold. A fixed reaction by a developer, moderator, or the official owner assigned to this arcade resolves immediately regardless of level; other users retain resolution voting.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlagReactionRequest'
+      responses:
+        '409':
+          description: Arcade uses external reporting. The response code is REPORT_EXTERNAL; no mutation or XP is committed.
+        '200':
+          description: Reaction state updated. The response includes the authoritative resolution summary, current user vote, and newest-first report history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flag, reaction, action, reaction_id, solved, game, xp_feedback, resolution, reportHistory]
+                properties:
+                  flag:
+                    type: string
+                  reaction:
+                    type: string
+                  action:
+                    type: string
+                  reaction_id:
+                    type: string
+                  solved:
+                    type: boolean
+                  game:
+                    $ref: '#/components/schemas/ArcadeGameExpanded'
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+                  resolution:
+                    $ref: '#/components/schemas/ArcadeFlagResolution'
+                  reportHistory:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ArcadeFlagReportHistoryItem'
+        '400':
+          description: Invalid body or reaction rule failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: The reaction transaction succeeded but the authoritative resolution response could not be built.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/arcade/request_admin:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/request_admin. Responses are no-store.
+    get:
+      tags: [Support]
+      summary: /arcade/request_admin
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: arcade
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Matching admin requests.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEnvelope'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Support]
+      summary: /arcade/request_admin
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateArcadeRequestAdminRequest'
+      responses:
+        '200':
+          description: Created admin request.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/arcade/edit_report:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/edit_report. Responses are no-store.
+    post:
+      tags: [Arcade Mutations]
+      summary: /arcade/edit_report
+      description: Creates an independent abuse report linked to one immutable changelog row. The server derives the reported editor; unresolved duplicates for the same arcade/changelog return `409`.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateArcadeEditReportRequest'}
+      responses:
+        '200':
+          description: Edit report queued for manual review. This endpoint does not roll back or ban automatically.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeEditReport'}
+        '400':
+          description: Invalid parent id, message, or urgency.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '404':
+          description: Arcade/changelog mismatch or inaccessible private arcade.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: An unresolved report already exists for this changelog.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/arcade/rollback:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/rollback. Responses are no-store.
+    post:
+      tags: [Support]
+      summary: /arcade/rollback
+      description: Applies an immediate rollback. With `report=true`, it atomically creates a `rollback_report` linked to the cited changelog; it never auto-bans the cited editor. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackArcadeRequest'
+      responses:
+        '200':
+          description: Rollback applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Validation or rollback rule failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: An unresolved report already exists for the cited changelog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Rollback transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/arcade/report-settings:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/report-settings. Responses are no-store.
+    get:
+      tags: [Arcade Mutations]
+      summary: GET /arcade/report-settings
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{nativeBearer: []}]
+      parameters:
+        - in: query
+          name: arcade
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeReportSettings'
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
+    put:
+      tags: [Arcade Mutations]
+      summary: PUT /arcade/report-settings
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ArcadeReportSettings'
+                - type: object
+                  required: [arcade]
+                  properties:
+                    arcade: {type: string}
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeReportSettings'
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
+
+  /native/arcade/inquiry-settings:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/inquiry-settings. Responses are no-store.
+    put:
+      tags: [Arcade]
+      summary: Configure arcade inquiry destination
+      description: Current official owners assigned to this arcade and strict developer/moderator accounts only. Independent of fault-report settings. External mode requires an HTTP(S) URL or phone. Missing/invalid saved mode defaults to disabled with configured false. Explicit modes return derived configured true; client configured is ignored and never persisted. Disabled requires no contact. Existing conversations remain readable and replyable. No XP or arcade changelog.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, mode]
+              properties:
+                arcade: {type: string}
+                mode: {type: string, enum: [internal, external, disabled]}
+                loginRequired: {type: boolean, default: false, description: Require an authenticated account for new internal arcade inquiries while a current official account exists.}
+                contactType: {type: string, enum: [url, phone]}
+                contactValue: {type: string, maxLength: 2048}
+                guide: {type: string, maxLength: 2000}
+      responses:
+        '200':
+          description: Saved settings with derived configured true.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InquirySettings'
+        '400': {description: Invalid or missing external contact.}
+        '401': {description: Authentication required.}
+        '403': {description: Not an assigned official owner or strict staff.}
+        '404': {description: Arcade not found.}
+
+  /native/arcade/report-subscription/status:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/report-subscription/status. Responses are no-store.
+    post:
+      tags: [Arcade Mutations]
+      summary: Read current device report subscription status
+      description: Active arcade managers only. Returns only the caller's subscription status for the supplied arcade and device endpoint. No subscription credentials are returned. Endpoint stays in the bounded request body, never a URL query.
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, endpoint]
+              properties:
+                arcade: {type: string}
+                endpoint: {type: string, maxLength: 2048}
+      responses:
+        '200':
+          description: Private, no-store current device status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+        '400': {description: Invalid subscription.}
+        '401': {description: Authentication required.}
+        '403': {description: Arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Request exceeds 4 KiB.}
+
+  /native/arcade/report-subscription:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/report-subscription. Responses are no-store.
+    put:
+      tags: [Arcade Mutations]
+      summary: PUT /arcade/report-subscription
+      description: Compatibility entry that upserts one canonical device and enables its per-arcade preference. Credentials are not duplicated per arcade.
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, subscription]
+              properties:
+                arcade: {type: string}
+                subscription:
+                  $ref: '#/components/schemas/ReportPushSubscription'
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {type: boolean}
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
+    delete:
+      tags: [Arcade Mutations]
+      summary: DELETE /arcade/report-subscription
+      description: Stores an explicit per-arcade opt-out and cancels pending report pushes for this arcade and device. The canonical device remains enabled for personal activity and other arcades.
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, endpoint]
+              properties:
+                arcade: {type: string}
+                endpoint: {type: string}
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {type: boolean}
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
+
+  /native/user:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user. Responses are no-store.
+    get:
+      security:
+        - nativeBearer: []
+      tags: [Users]
+      summary: /user
+      description: Public profile by ID or username. Active developers and moderators receive owner-level fields with private, no-store caching. Restricted staff receive the public projection.
+      parameters:
+        - $ref: '#/components/parameters/UserIdQuery'
+        - $ref: '#/components/parameters/UsernameQuery'
+      responses:
+        '200':
+          description: Normalized public profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                id: toq3to4ncbf5ubd
+                created: "2026-03-30 10:15:00.000Z"
+                username: public_user_toq3to4ncbf5ubd
+                nickname: public_nick
+                countries: [KR]
+                primary_country: KR
+                bio: public bio
+                avatar: ""
+                background: ""
+                tag: []
+                sns:
+                  items: []
+                withdrawn: false
+                series_public: false
+        '400':
+          description: Missing id and username.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to build profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/user/activity:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/activity. Responses are no-store.
+    get:
+      security:
+        - nativeBearer: []
+      tags: [Users]
+      summary: /user/activity
+      parameters:
+        - $ref: '#/components/parameters/UserIdQuery'
+        - $ref: '#/components/parameters/UsernameQuery'
+        - name: tz
+          in: query
+          description: IANA timezone. Defaults to `UTC`.
+          schema:
+            type: string
+        - name: days
+          in: query
+          description: Integer between 1 and 365. Defaults to 365.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+      responses:
+        '200':
+          description: User profile plus activity counts and heatmap buckets. Heatmap intensity uses fixed logarithmic daily-count buckets so an outlier does not flatten the rest of the range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserActivityResponse'
+              example:
+                user:
+                  id: toq3to4ncbf5ubd
+                  created: "2026-03-30 10:15:00.000Z"
+                  username: public_user_toq3to4ncbf5ubd
+                  nickname: public_nick
+                  bio: public bio
+                  avatar: ""
+                  background: ""
+                  tag: []
+                  sns:
+                    items: []
+                  withdrawn: false
+                  series_public: false
+                  level: 0
+                range:
+                  start_date: "2025-03-30"
+                  end_date: "2026-03-29"
+                  tz: Asia/Seoul
+                  days: 365
+                totals:
+                  total_count: 18
+                  changelog_count: 9
+                  flag_count: 5
+                  legacy_ticket_count: 4
+                  attendance_count: 0
+                  max_daily_count: 3
+                days:
+                  - date: "2026-03-29"
+                    total_count: 2
+                    level: 2
+                    changelog_count: 1
+                    flag_count: 1
+                    legacy_ticket_count: 0
+                    attendance_count: 0
+        '400':
+          description: Invalid id/username combination, timezone, or day count.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to build activity response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/user/changelog:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/changelog. Responses are no-store.
+    get:
+      security:
+        - nativeBearer: []
+      tags: [Users]
+      summary: /user/changelog
+      description: |
+        Returns the user's edits in reverse chronological order. Anonymous callers
+        receive only arcade and changed-category summaries from public
+        arcades only. An authenticated caller may additionally receive rows
+        from private arcades they own; `developer` and `moderator` callers may
+        audit private rows. The endpoint never exposes flags, visits, or legacy
+        tickets; those remain activity aggregates rather than changelog rows.
+        Authenticated user accounts receive revision detail only for rows allowed
+        by the existing arcade visibility filter. Responses use private, no-store
+        caching. Invalid bearer credentials receive 401.
+        Rows whose arcade aggregate was deleted are omitted, and withdrawn
+        users receive an empty page.
+      parameters:
+        - name: user
+          in: query
+          required: true
+          description: User id whose server-authored changelog rows are requested.
+          schema: {type: string}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+        - name: changed
+          in: query
+          description: Optional arcade part filter. Omit to return all supported categories.
+          schema:
+            type: string
+            enum: [basic, game, hour, sns, gtk, photo, memo]
+      responses:
+        '200':
+          description: User-scoped immutable changelog page.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserChangelogPage'}
+        '400':
+          description: Missing user id, invalid pagination, or unsupported changed category.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Invalid bearer credentials.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: User does not exist.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Failed to query the user changelog.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/user/passport/stamps:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/passport/stamps. Responses are no-store.
+    get:
+      tags: [User]
+      summary: Owner or shared passport
+      description: Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; withdrawn profiles return 404. Private profiles return 404 except for active developers and moderators, who receive full visit dates. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
+      security: [{nativeBearer: []}, {}]
+      parameters:
+        - in: query
+          name: user
+          description: Target profile ID. Omit for the authenticated owner.
+          schema: {type: string}
+        - in: query
+          name: year
+          schema: {type: string, default: all, pattern: '^(all|[0-9]{4})$'}
+        - in: query
+          name: country
+          schema: {type: string, pattern: "^[A-Z]{2}$"}
+        - in: query
+          name: city
+          schema: {type: string}
+        - in: query
+          name: sort
+          schema: {type: string, enum: [recent, first, visits], default: recent}
+        - in: query
+          name: page
+          schema: {type: integer, minimum: 1, maximum: 1000000, default: 1}
+        - in: query
+          name: per_page
+          schema: {type: integer, minimum: 1, maximum: 100, default: 24}
+      responses:
+        '200':
+          description: Passport result. Stable sort ties use arcade ID.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PassportStampPage'}
+        '400': {description: Invalid filter or pagination.}
+        '401': {description: Missing or invalid authentication.}
+        '403': {description: Inactive account.}
+        '404': {description: Private, missing or withdrawn target profile.}
+        '502': {description: Failed to load passport.}
+
+  /native/user/profile:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/profile. Responses are no-store.
+    put:
+      tags: [Users]
+      summary: Update the authenticated user's profile
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nickname]
+              properties:
+                nickname: {type: string, minLength: 1, maxLength: 25}
+                bio: {type: string, maxLength: 100}
+                sns: {$ref: '#/components/schemas/UserProfileSns'}
+                avatar: {type: 'null', description: Null deletes the current avatar.}
+                background: {type: 'null', description: Null deletes the current background; requires level 15.}
+                background_position: {$ref: '#/components/schemas/UserProfile/properties/background_position'}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [nickname]
+              properties:
+                nickname: {type: string, minLength: 1, maxLength: 25}
+                bio: {type: string, maxLength: 100}
+                sns: {type: string, description: JSON encoded UserProfileSns object.}
+                avatar: {type: string, format: binary, description: PNG or JPEG up to 15 MB; empty or "null" text deletes.}
+                background: {type: string, format: binary, description: PNG or JPEG up to 15 MB; empty or "null" text deletes. Requires level 15.}
+                background_position: {type: string, description: "JSON encoded x/y percentages (0 to 100), optional zoom (1 to 4) and rotation (0/90/180/270); requires level 15."}
+      responses:
+        '200':
+          description: Updated self profile, including private series.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserProfile'}
+        '400':
+          description: Invalid profile input.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Inactive user or background access requires level 15.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Missing user_info record.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Storage or profile read failed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/user/game-preferences:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/game-preferences. Responses are no-store.
+    put:
+      tags: [Users]
+      summary: Replace the authenticated user's preferred game series and visibility
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [series, series_public]
+              properties:
+                series:
+                  type: array
+                  items: {type: string}
+                series_public: {type: boolean}
+                warp: {type: boolean, description: Omit to retain the current value.}
+      responses:
+        '200':
+          description: Saved preferences with duplicate and blank series IDs removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, series, series_public, warp]
+                properties:
+                  success: {type: boolean}
+                  series: {type: array, items: {type: string}}
+                  series_public: {type: boolean}
+                  warp: {type: boolean}
+        '400':
+          description: Invalid preferences or unknown game series.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Inactive user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Missing user_info record.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Storage failure.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/user/signup:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/signup. Responses are no-store.
+    post:
+      tags: [Users]
+      summary: /user/signup
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignUpJsonRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username:
+                  type: string
+                  maxLength: 15
+                nickname:
+                  type: string
+                bio:
+                  type: string
+                avatar:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Signup initialized.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, profile]
+                properties:
+                  success:
+                    type: boolean
+                  profile:
+                    $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: Invalid body or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PocketBaseAuthError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Withdrawn or banned account cannot sign up.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - $ref: '#/components/schemas/AccountBannedResponse'
+        '409':
+          description: Username or user_info already initialized, or username already taken.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Signup transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/user/check-in:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/check-in. Responses are no-store.
+    post:
+      tags: [Users]
+      summary: /user/check-in
+      security:
+        - nativeBearer: []
+      responses:
+        '200':
+          description: Check-in state and XP feedback.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checked_in, already_checked_in, gained_exp, exp, level, day, xp_feedback]
+                properties:
+                  checked_in:
+                    type: boolean
+                  already_checked_in:
+                    type: boolean
+                  gained_exp:
+                    type: integer
+                  exp:
+                    type: integer
+                  level:
+                    type: integer
+                  day:
+                    type: string
+                    description: KST date in `YYYY-MM-DD` format.
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PocketBaseAuthError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Check-in transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/user/countries:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/countries. Responses are no-store.
+    put:
+      tags: [Users]
+      summary: /user/countries
+      description: Replaces the authenticated user's ordered profile country list and display mode. Empty is allowed. Accounts below level 15 may select zero or one country; accounts at level 15 or above may select up to three. Supporter and staff tags do not change this limit.
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProfileCountriesRequest'}
+      responses:
+        '200':
+          description: Updated normalized profile countries.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProfileCountriesResponse'}
+        '400':
+          description: Invalid JSON, duplicate, invalid country code, or more than three countries.
+        '401':
+          description: Missing or invalid bearer token.
+        '403':
+          description: Multiple countries require level 15 or above, or the account is inactive.
+        '409':
+          description: The account has not initialized user_info.
+        '502':
+          description: Failed to save profile countries.
+
+  /native/user/visit-visibility:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/visit-visibility. Responses are no-store.
+    put:
+      tags: [Users]
+      summary: /user/visit-visibility
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/VisitVisibilityRequest'}
+      responses:
+        '200':
+          description: Updated public visit visibility.
+
+  /native/user/favorite-visibility:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/favorite-visibility. Responses are no-store.
+    put:
+      tags: [Users]
+      summary: /user/favorite-visibility
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [favorite_visibility]
+              properties:
+                favorite_visibility: {type: string, enum: [private, public]}
+      responses:
+        '200':
+          description: Updated favorite arcade visibility.
+
+  /native/user/withdraw:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/withdraw. Responses are no-store.
+    post:
+      tags: [Users]
+      summary: /user/withdraw
+      description: Official arcade accounts require their exact current password even when an OAuth provider is linked. Successful official withdrawal removes arcade_owner and clears owns so the arcade is no longer officially managed by the withdrawn account.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawRequest'
+      responses:
+        '200':
+          description: Account withdrawn successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, withdrawnAt]
+                properties:
+                  success:
+                    type: boolean
+                  withdrawnAt:
+                    type: string
+        '400':
+          description: Invalid JSON or password missing for password accounts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing auth or invalid password.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PocketBaseAuthError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Account already withdrawn.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Withdraw transaction failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/user/arcade-account/credentials:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/arcade-account/credentials. Responses are no-store.
+    put:
+      tags: [Users]
+      summary: Change the authenticated official arcade account email or password
+      description: Active arcade_owner accounts only. Requires the exact current password and at least one changed credential. Revokes every existing session on success; email changes clear email verification and visibility. Does not change username, roles, ownership, or arcade content.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword]
+              properties:
+                currentPassword: {type: string, writeOnly: true}
+                email: {type: string, format: email, maxLength: 254}
+                newPassword: {type: string, minLength: 8, maxLength: 71, writeOnly: true}
+      responses:
+        '200':
+          description: Credentials updated atomically. All prior session tokens are invalid; sign in again.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success: {type: boolean}
+        '400': {description: Invalid input or no changes (code invalid_input or no_changes).}
+        '401': {description: Missing auth or incorrect current password (code invalid_password).}
+        '403': {description: Restricted or non-official account (code not_official_account).}
+        '409': {description: Email already in use (code duplicate_email).}
+        '413': {description: Body exceeds 16 KiB.}
+        '502': {description: Failed to update credentials.}
+
+  /native/user/report:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/report. Responses are no-store.
+    get:
+      tags: [Support]
+      summary: /user/report
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: user
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Matching user reports.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEnvelope'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Support]
+      summary: /user/report
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserReportRequest'
+      responses:
+        '200':
+          description: User report created.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Withdrawn or banned user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/user/arcade-inquiry-onboarding:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/arcade-inquiry-onboarding. Responses are no-store.
+    get:
+      tags: [Users, Arcade]
+      summary: List current official owner's inquiry settings
+      description: Active authenticated users only; reloads current exact arcade_owner role and owns relations. All currently owned arcades are returned, including configured arcades, including scoped private names. Staff-only and ordinary accounts receive empty items. Missing arcade relations are skipped; missing basic relations yield an empty name. Private no-store response.
+      security:
+        - nativeBearer: []
+      responses:
+        '200':
+          description: Unconfigured currently owned arcades.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [arcadeId, arcadeName, settings, reportSettings]
+                      properties:
+                        arcadeId: {type: string}
+                        arcadeName: {type: string}
+                        settings:
+                          $ref: '#/components/schemas/InquirySettings'
+                        reportSettings:
+                          type: object
+                          required: [mode, contactType, contactValue, guide]
+                          properties:
+                            mode: {type: string, enum: [internal, external]}
+                            contactType: {type: string}
+                            contactValue: {type: string, maxLength: 2048}
+                            guide: {type: string, maxLength: 2000}
+        '401': {description: Authentication required.}
+        '403': {description: Inactive account.}
+
+  /native/user/feedback:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/feedback. Responses are no-store.
+    get:
+      tags: [Support, Users]
+      summary: List the authenticated user's own feedback
+      description: Active users only. Ownership is forced from the bearer token; createdBy query values are ignored. Anonymous submissions and other users' records are never returned. Includes all statuses unless filtered, with id, message, status, createdBy, photos (filenames), created and updated. This does not grant file access or open the reviewer queue.
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: Own records ordered newest first, with items and total; an empty history returns an empty array.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ListEnvelope'}
+        '401': {description: Missing or invalid user token.}
+        '403': {description: Withdrawn or banned user.}
+        '502': {description: List failure.}
+
+  /native/user/feedback/thread:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/feedback/thread. Responses are no-store.
+    get:
+      tags: [User]
+      summary: Read a private inquiry conversation (author, current scoped official, or strict staff)
+      security:
+        - nativeBearer: []
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: {type: string}
+        - in: query
+          name: before
+          schema: {type: string}
+          description: Oldest reply id from the preceding page; replies are returned chronologically, 50 per page.
+      responses:
+        '200':
+          description: Original inquiry, attachment filenames, chronological items and older-page cursor. Private no-store.
+        '401': {description: Authentication required}
+        '404': {description: Missing or inaccessible inquiry}
+    post:
+      tags: [User]
+      summary: Append an immutable reply and atomically notify the other participant
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [feedbackId, message]
+              properties:
+                feedbackId: {type: string}
+                message: {type: string, minLength: 1, maxLength: 4000}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [feedbackId]
+              properties:
+                feedbackId: {type: string}
+                message: {type: string, maxLength: 4000}
+                photos:
+                  type: array
+                  maxItems: 3
+                  items: {type: string, format: binary}
+                  description: Images (content-sniffed, matching initial inquiry uploads); at most 15,000,000 bytes per file. Text or at least one photo is required.
+      responses:
+        '201': {description: Persisted reply with server-derived author, staff/official role, and photos filename array. Reply photo bytes require the private thread/photo endpoint.}
+        '400': {description: Invalid reply}
+        '401': {description: Authentication required}
+        '404': {description: Missing or inaccessible inquiry}
+        '413': {description: Photo or total multipart body exceeds upload limits}
+    patch:
+      tags: [User]
+      summary: Resolve or reopen an inquiry as its author, current scoped official, or strict staff
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [feedbackId, status]
+              properties:
+                feedbackId: {type: string}
+                status: {type: string, enum: [solved, waiting]}
+      responses:
+        '200': {description: Persisted id and status. Private no-store. No reply is created.}
+        '400': {description: Invalid status}
+        '401': {description: Authentication required}
+        '404': {description: Missing or inaccessible inquiry}
+        '413': {description: Request exceeds 4 KiB}
+
+  /native/user/feedback/thread/photo:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /user/feedback/thread/photo. Responses are no-store.
+    get:
+      tags: [User]
+      summary: Download a private original or reply attachment as a current inquiry participant
+      security:
+        - nativeBearer: []
+      parameters:
+        - in: query
+          name: id
+          schema: {type: string}
+          description: Reply message id. Supply exactly one of id or feedbackId.
+        - in: query
+          name: feedbackId
+          schema: {type: string}
+          description: Original inquiry id. Supply exactly one of id or feedbackId.
+        - in: query
+          name: file
+          required: true
+          schema: {type: string}
+          description: Exact filename returned in the selected original inquiry or reply photos array.
+      responses:
+        '200':
+          description: Attachment bytes, private no-store. Raw PocketBase file URLs remain locked.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '400': {description: Missing or ambiguous attachment record selector}
+        '401': {description: Authentication required}
+        '404': {description: Missing file or inaccessible parent inquiry}
+
+  /native/support_feedback:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /support_feedback. Responses are no-store.
+    get:
+      tags: [Support]
+      summary: /support_feedback
+      description: Strict support review queue. Requires an active `developer` or `moderator`; supporter tags are insufficient.
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: createdBy
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Matching support feedback entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListEnvelope'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Active developer or moderator access required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      security:
+        - nativeBearer: []
+      tags: [Support]
+      summary: /support_feedback
+      description: Default per-client-IP limit is 10 requests per 600 seconds, shared by anonymous and authenticated users. With no official account, arcade-scoped inquiries accept guests through moderator fallback. With a current official account, missing configuration defaults to OFF and disabled mode rejects creation with 409 INQUIRY_DISABLED; loginRequired rejects anonymous submissions with 401 LOGIN_REQUIRED; external mode rejects creation with 409 INQUIRY_EXTERNAL. Private arcades remain inaccessible to guests. Guest submissions preserve existing initial-receipt semantics and do not grant authenticated conversation access. Operator-configured limits and PocketBase exemptions may override the defaults. Accepts at most 3 images of 15000000 bytes each; the total encoded body is limited to 46048576 bytes (45 MB of photos plus 1 MiB of form overhead).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSupportFeedbackRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateSupportFeedbackMultipartRequest'
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: Created support feedback record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, message, status, createdBy, photos, created, updated]
+                properties:
+                  id:
+                    type: string
+                  message:
+                    type: string
+                  status:
+                    type: string
+                  createdBy:
+                    type: string
+                  created:
+                    type: string
+                  updated:
+                    type: string
+                  photos:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401': {description: LOGIN_REQUIRED for a scoped inquiry requiring sign-in, or inactive account.}
+        '404': {description: Missing or inaccessible arcade.}
+        '409': {description: INQUIRY_DISABLED for OFF or unconfigured official arcades; INQUIRY_EXTERNAL for official arcades using external contact.}
+        '413':
+          description: File exceeds 15000000 bytes or encoded request body exceeds 46048576 bytes.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '429':
+          description: Client IP request limit exceeded, including authenticated requests.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '502':
+          description: Create failure.
+    put:
+      tags: [Support]
+      summary: Review a support feedback record
+      description: Strict support review queue. Requires an active developer or moderator.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, status]
+              properties:
+                id: {type: string}
+                status: {type: string, enum: [waiting, recognised, solved]}
+      responses:
+        '200':
+          description: Updated support feedback record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, message, status, createdBy, photos, created, updated]
+                properties:
+                  id: {type: string}
+                  message: {type: string}
+                  status: {type: string}
+                  createdBy: {type: string}
+                  created: {type: string}
+                  updated: {type: string}
+                  photos: {type: array, items: {type: string}}
+        '400': {description: Validation failed.}
+        '401': {description: Missing or invalid user token.}
+        '403': {description: Developer or moderator access required.}
+        '404': {description: Support feedback was not found.}
+        '502':
+          description: Update failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/rankings:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /rankings. Responses are no-store.
+    get:
+      security:
+        - nativeBearer: []
+      tags: [Users]
+      summary: /rankings
+      parameters:
+        - name: metric
+          in: query
+          required: true
+          schema: {type: string, enum: [explorer, visits, xp, level, photographer, arcade_visits]}
+        - name: period
+          in: query
+          required: true
+          schema: {type: string, enum: [week, month, half_year, year, all]}
+        - name: Authorization
+          in: header
+          required: false
+          description: Optional bearer token used to include the requesting user's own rank.
+          schema: {type: string}
+      responses:
+        '200':
+          description: Public user and arcade rankings. Level rankings accept only the all period. The arcade_visits metric displays completed visit-verification counts and ranks public arcades by the total XP awarded by those verifications; public closed arcades remain eligible as historical venues.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RankingResponse'
+        '400':
+          description: Invalid metric or period.
+
+  /native/arcade/ranking:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/ranking. Responses are no-store.
+    get:
+      security:
+        - nativeBearer: []
+      tags: [Arcades]
+      summary: /arcade/ranking
+      description: Returns up to five users ranked by XP earned from this public arcade. The total metric combines completed visit verifications and positive arcade edit grants; edit and passport rank those sources separately. Public closed arcades remain eligible. Private arcades return 404, and visit XP with private visit visibility is omitted.
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+        - name: metric
+          in: query
+          required: false
+          schema: {type: string, enum: [total, edit, passport], default: total}
+      responses:
+        '200':
+          description: Top five contributors for the arcade.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeVisitRankingResponse'}
+        '400':
+          description: Missing arcade id or invalid metric.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist or is private.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Ranking query failure.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/arcade/campaigns:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/campaigns. Responses are no-store.
+    get:
+      tags: [Arcades]
+      summary: List active campaign prompts for an arcade
+      description: Returns campaign prompts for the requested public/open arcade to an authenticated active user. Includes current from_version machines and current to_version machines within their review window. After the latest still_old (Wrong) report, one location-verified updated report or two unverified updated reports hide the prompt immediately. A single unverified updated report starts a seven-day window. Wrong resets the report counts and expiry anchor. Updated targets include review_expires_at for the countdown. Already-updated machines without a campaign update report are excluded. Each item includes current target status and report history; expiry leaves game state and campaign overview history intact.
+      security: [{nativeBearer: []}]
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Current campaign prompts for the arcade.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeCampaignListResponse'}
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token, or inactive user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Campaign targets could not be loaded.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/campaign/check:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /campaign/check. Responses are no-store.
+    post:
+      tags: [Arcade Mutations]
+      summary: /campaign/check
+      description: |
+        Confirms whether one active update-campaign target is still on the old
+        version or has been updated. A location-verified `still_old` result awards the configured campaign XP once
+        per user and target; unverified `still_old` reports award no XP. The default request requires a same-day
+        verified visit at the public/open arcade. `bypass_location=true` skips
+        only that visit check at any user level; an updated result
+        through this path awards 1 XP; clients must obtain two warning
+        confirmations before sending it. A user may append a location-verified
+        updated report after their unverified updated report, hiding the
+        prompt immediately without awarding update XP again. A verified still_old
+        report after an unverified still_old report can earn the campaign reward.
+        Repeated confirmations with the same verification do not append reports.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignCheckRequest'}
+      responses:
+        '200':
+          description: Campaign check persisted; verified still_old results award campaign XP once per user and target, unverified still_old results award no XP. Updated results atomically move the game state and award campaign XP, or 1 XP when location is bypassed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignCheckResponse'}
+        '400':
+          description: Invalid campaign check body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Active user is missing the required visit without a location bypass.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Campaign or public arcade was not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Campaign is inactive, target is outside scope, or game state is no longer eligible.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Campaign check transaction failed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/supporter/score:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /supporter/score. Responses are no-store.
+    get:
+      tags: [Support]
+      summary: /supporter/score
+      security:
+        - nativeBearer: []
+      responses:
+        '200':
+          description: Current supporter XP ledger timeline.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupporterScoreResponse'
+              example:
+                total_exp: 341
+                attendance_exp: 2
+                qualified: true
+                threshold: 300
+                can_request: true
+                entries:
+                  - id: log_124
+                    kind: xp:attendance:service:2026-04-30
+                    source: attendance
+                    action: check_in
+                    exp: 2
+                    previous_exp: 10
+                    new_exp: 12
+                    created: "2026-04-30 10:05:00.000Z"
+                    detail:
+                      day: "2026-04-30"
+                  - id: log_123
+                    kind: xp:arcade-public:arcade_123
+                    source: arcade
+                    action: public
+                    exp: 10
+                    previous_exp: 0
+                    new_exp: 10
+                    created: "2026-04-30 10:00:00.000Z"
+                    arcade_id: arcade_123
+                    arcade_name: Sample Arcade
+                    target_id: arcade_123
+                latest_request:
+                  id: req_123
+                  status: rejected
+                  exp_total: 341
+                  qualified: true
+                  created: "2026-04-30 10:30:00.000Z"
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: Failed to build supporter XP.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/supporter/request:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /supporter/request. Responses are no-store.
+    post:
+      tags: [Support]
+      summary: /supporter/request
+      security:
+        - nativeBearer: []
+      responses:
+        '200':
+          description: Supporter request created and notifications sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSupporterRequestResponse'
+        '400':
+          description: XP threshold not met.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '409':
+          description: Existing pending or approved supporter request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to create supporter request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/community/posts:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /community/posts. Responses are no-store.
+    get:
+      security:
+        - nativeBearer: []
+      tags: [Community]
+      summary: List immediately public community posts
+      parameters:
+        - name: game_series
+          in: query
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 50
+            items: {type: string, minLength: 1}
+          description: Include posts matching any selected game series; omit to list all posts. Applied before pagination.
+        - name: author
+          in: query
+          schema: {type: string}
+          description: Restrict to this author before pagination.
+        - name: flair
+          in: query
+          schema: {type: string, enum: [achievement, question, tip, news, event, art, chitchat]}
+        - name: has_images
+          in: query
+          schema: {type: string, enum: ["true"]}
+          description: Only posts with photos, applied before pagination.
+        - name: locale
+          in: query
+          schema: {type: string, enum: [ko-KR, en-US, ja-JP], default: ko-KR}
+          description: Requested display locale. Non-Korean variants fall back to ko-KR until translation publication is enabled.
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 30}
+      responses:
+        '200':
+          description: Paginated active posts.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityPostList'}
+        '400':
+          description: Invalid locale or pagination.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Failed to load posts.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/community/post:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /community/post. Responses are no-store.
+    get:
+      security:
+        - nativeBearer: []
+      tags: [Community]
+      summary: Get an immediately public community post
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: locale
+          in: query
+          schema: {type: string, enum: [ko-KR, en-US, ja-JP], default: ko-KR}
+      responses:
+        '200':
+          description: Active post, localized only when translation publication is enabled and ready.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityPost'}
+        '400':
+          description: Missing id or invalid locale.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Post not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    post:
+      tags: [Community]
+      summary: Publish a Korean community post immediately
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommunityPostInput'}
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/CommunityPostInput'}
+      responses:
+        '201':
+          description: Korean original is public immediately; translation is scheduled five minutes later.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityPost'}
+        '400':
+          description: Invalid body, flair, or game series.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Authentication required.
+        '403':
+          description: Withdrawn or banned user.
+        '502':
+          description: Failed to create post.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    put:
+      tags: [Community]
+      summary: Edit the author's Korean original within five minutes
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommunityPostInput'}
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/CommunityPostInput'}
+      responses:
+        '200':
+          description: Updated Korean original. The original translation deadline is unchanged.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityPost'}
+        '400':
+          description: Invalid request.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Authentication required.
+        '403':
+          description: Not the author, withdrawn, or banned.
+        '404':
+          description: Post not found.
+        '409':
+          description: Five-minute edit window has closed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Failed to update post.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/moderation/user/arcade-account:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/user/arcade-account. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: Create an official arcade account and linked profile
+      description: Active developer, moderator, or designer only. Atomically sets arcade_owner and owns for an existing public arcade. Does not verify email or replace the caller session.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, username, password, nickname, arcadeId]
+              properties:
+                arcadeId: {type: string, minLength: 1}
+                email: {type: string, format: email, maxLength: 254}
+                username: {type: string, minLength: 4, maxLength: 15, pattern: '^[A-Za-z0-9]+$'}
+                password: {type: string, minLength: 8, maxLength: 71, writeOnly: true}
+                nickname: {type: string, minLength: 1, maxLength: 25}
+      responses:
+        '201':
+          description: Account and profile created; no session token or password returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, username, nickname, arcadeId]
+                properties:
+                  arcadeId: {type: string}
+                  id: {type: string}
+                  email: {type: string, format: email}
+                  username: {type: string}
+                  nickname: {type: string}
+        '400':
+          description: Invalid input (code invalid_input).
+        '401':
+          description: Authentication required.
+        '403':
+          description: Active developer, moderator, or designer required.
+        '404':
+          description: Public arcade not found (code arcade_not_found).
+        '409':
+          description: Email or case-insensitive username exists (code duplicate_identity).
+        '413':
+          description: Body exceeds 16 KiB.
+        '502':
+          description: Transaction or authorization lookup failed.
+
+  /native/campaign:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /campaign. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: Create an update campaign
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignMutationRequest'}
+      responses:
+        '201':
+          description: Campaign created.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignMutationResponse'}
+        '400': {description: Invalid campaign input.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '502': {description: Campaign could not be created.}
+    put:
+      tags: [Moderator]
+      summary: Update an update campaign
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignMutationRequest'}
+      responses:
+        '200':
+          description: Campaign updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignMutationResponse'}
+        '400': {description: Invalid campaign input or missing id.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '404': {description: Campaign was not found.}
+        '502': {description: Campaign could not be updated.}
+
+  /native/campaign/end:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /campaign/end. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: End an update campaign
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CampaignEndRequest'}
+      responses:
+        '200':
+          description: Campaign marked ended.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CampaignMutationResponse'}
+        '400':
+          description: Invalid request body or missing id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Active user lacks administrator access.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Campaign was not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: Campaign could not be ended.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/arcade/game/bulk_version:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/game/bulk_version. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: /arcade/game/bulk_version
+      description: |
+        Requires an authenticated user with `developer` or `moderator` access. The selected stable game entries may span multiple arcades. Each affected arcade receives an immutable game-state batch and its own `changed=game` changelog row. This administrative version swap records only the resulting game-state change.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkUpdateArcadeGameVersionRequest'
+      responses:
+        '200':
+          description: Bulk update applied through immutable game-state batches.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, count, changed]
+                properties:
+                  from:
+                    type: string
+                  to:
+                    type: string
+                  count:
+                    type: integer
+                  changed:
+                    type: string
+                    description: Always `game`.
+        '400':
+          description: Invalid JSON or validation failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Developer or moderator access required.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Transaction or notification failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/subway/map:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /subway/map. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: Create a subway map version
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [region, releaseDate]
+              properties:
+                region: {type: string, enum: [center, busan]}
+                releaseDate: {type: string, format: date}
+                changelog: {type: string, description: JSON string array, maxLength: 2000000}
+                lightSVG: {type: string, format: binary}
+                darkSVG: {type: string, format: binary}
+                image: {type: string, format: binary}
+                file: {type: string, format: binary}
+      responses:
+        '201': {description: Map version created.}
+        '400': {description: Invalid multipart input or no display asset.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+    put:
+      tags: [Moderator]
+      summary: Update a subway map version
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: {type: string}
+                region: {type: string, enum: [center, busan]}
+                releaseDate: {type: string, format: date}
+                changelog: {type: string, description: JSON string array, maxLength: 2000000}
+                lightSVG: {type: string, format: binary}
+                darkSVG: {type: string, format: binary}
+                image: {type: string, format: binary}
+                file: {type: string, format: binary}
+      responses:
+        '200': {description: Map version updated.}
+        '400': {description: Invalid multipart input or no display asset.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '404': {description: Map version was not found.}
+    delete:
+      tags: [Moderator]
+      summary: Delete a subway map version
+      security: [{nativeBearer: []}]
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Map version deleted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SubwayMapDeleteResponse'}
+        '400': {description: Missing map id.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '404': {description: Map version was not found.}
+        '502': {description: Map deletion failed.}
+
+  /native/subway/map/history:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /subway/map/history. Responses are no-store.
+    get:
+      tags: [Moderator]
+      summary: Get subway map version history
+      security: [{nativeBearer: []}]
+      parameters:
+        - name: region
+          in: query
+          required: false
+          schema: {type: string, enum: [center, busan]}
+      responses:
+        '200':
+          description: List of subway map versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/SubwayMap'}
+                  total: {type: integer}
+        '400': {description: Unsupported region.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Active user lacks administrator access.}
+        '502': {description: Map lookup failed.}
+
+  /native/arcade/games:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /arcade/games. Responses are no-store.
+    get:
+      tags: [Moderator]
+      summary: /arcade/games
+      description: &gameToolsAccessDescription |
+        Requires an authenticated user with `developer` or `moderator` access, or a `supporter` or `founding_supporter` role at level 30 or above.
+      security:
+        - nativeBearer: []
+      parameters:
+        - $ref: '#/components/parameters/CountryQuery'
+        - name: game_series
+          in: query
+          description: Repeat the query param or pass comma-separated series ids.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: game_series_version
+          in: query
+          description: Repeat the query param or pass comma-separated version ids.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+      responses:
+        '200':
+          description: Matching machine rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ArcadeGameItem'
+              example:
+                - id: atom_123
+                  arcade:
+                    id: arcade_123
+                    country: KR
+                    name: Seoul Arcade
+                    address: 123 Seoul Road
+                    location:
+                      lat: 37.5665
+                      lon: 126.978
+                  game: game_123
+                  cabinet:
+                    id: cabinet_gold
+                    en: CHUNITHM GOLD
+                    kr: 츄니즘 골드
+                    jp: チュウニズム ゴールド
+                  location: 2F
+                  quantity: 1
+                  price:
+                    currency: KRW
+                    type: custom
+                    list:
+                      - value: 1000
+                    accept: []
+                  tag:
+                    - category: 기타
+                      quantity: 1
+                      note: ok
+                  version:
+                    id: version_123
+                    series: series_123
+                    released_on: "2025-06-01"
+                    en: Filter Version
+                    kr: Filter Version
+                    jp: Filter Version
+                    price_default: {}
+                  series:
+                    id: series_123
+                    seriesNumber: 7
+                    en: Filter Series
+                    kr: Filter Series
+                    jp: Filter Series
+                    en_short: Filter Series
+                    kr_short: Filter Series
+                    jp_short: Filter Series
+                    manufacturer: manufacturer_123
+        '502':
+          description: Failed to load matching machines.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /native/moderation/game/catalog:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/game/catalog. Responses are no-store.
+    get:
+      tags: [Moderator]
+      summary: Read protected game catalog management data
+      description: Active developer or moderator, or an active supporter or founding supporter at level 30 or above. Historical version aliases (non-empty alias_of) are omitted from the versions list without deleting their records or historical references. Cabinets are ordered by the earliest release date among active compatible versions, newest first.
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: locale
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [en-US, ko-KR, ja-JP]
+      responses:
+        '200':
+          description: Full catalog management view.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    post:
+      tags: [Moderator]
+      summary: Create a catalog item
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
+      responses:
+        '200':
+          description: Created item and immutable audit change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+        '409': { description: Duplicate or conflicting operation. }
+    put:
+      tags: [Moderator]
+      summary: Update a catalog item with optimistic concurrency
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
+      responses:
+        '200':
+          description: Updated item and immutable audit change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+        '409': { description: Stale revision or dependency conflict. }
+    delete:
+      tags: [Moderator]
+      summary: Archive a catalog item
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
+      responses:
+        '200':
+          description: Archived item and immutable audit change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+        '409': { description: Item is referenced by active data. }
+
+  /native/moderation/game/catalog/restore:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/game/catalog/restore. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: Restore an archived catalog item
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
+      responses:
+        '200':
+          description: Restored item and immutable audit change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+
+  /native/moderation/game/catalog/compatibilities:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/game/catalog/compatibilities. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: Atomically replace a version's compatible cabinet set
+      description: Reconciles creates, restores, and archives in one transaction. The expected active revisions reject stale checklist submissions.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogCompatibilityMutationRequest'
+      responses:
+        '200':
+          description: The complete resulting compatibility set and immutable audit rows.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameCatalogCompatibilityMutationResponse'
+        '409': { description: Stale checklist, incompatible cabinet, or a link referenced by active data. }
+
+  /native/moderation/game/catalog/changes:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/game/catalog/changes. Responses are no-store.
+    get:
+      tags: [Moderator]
+      summary: List immutable game catalog changes
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: entity
+          in: query
+          schema: {type: string}
+        - name: entity_id
+          in: query
+          schema: {type: string}
+        - name: actor
+          in: query
+          schema: {type: string}
+        - name: action
+          in: query
+          schema: {type: string}
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: per_page
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: Paginated catalog audit evidence.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /native/moderation/game/catalog/changes/revert:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/game/catalog/changes/revert. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: Revert a catalog change as a new audited operation
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GameCatalogMutationRequest'
+      responses:
+        '200':
+          description: Reverted item and new immutable audit change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GameCatalogMutationResponse'
+        '409': { description: Current item cannot safely be reverted. }
+
+  /native/moderation/arcade/requests:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/arcade/requests. Responses are no-store.
+    get:
+      tags: [Support]
+      summary: List all arcade inquiries and edit reports (strict reviewer only)
+      security: [{nativeBearer: []}]
+      responses:
+        '200':
+          description: Newest-first requests from all creators
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ArcadeModerationRequest'}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+
+  /native/moderation/arcade/request:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/arcade/request. Responses are no-store.
+    put:
+      tags: [Support]
+      summary: Resolve an arcade inquiry or report (strict reviewer only)
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewArcadeEditReportRequest'}
+      responses:
+        '200':
+          description: Resolved request including review actor, timestamp, outcome and note
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeModerationRequest'}
+        '400': {description: Invalid input}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Request not found}
+        '409': {description: Already resolved}
+
+  /native/moderation/arcade/status:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/arcade/status. Responses are no-store.
+    get:
+      tags: [Arcade]
+      summary: Read arcade admin settings (strict reviewer only)
+      security: [{nativeBearer: []}]
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Arcade visibility, closure, country and timezone
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, public, closed, country, timezone]
+                properties:
+                  arcade: {type: string}
+                  public: {type: boolean}
+                  closed: {type: boolean}
+                  country: {type: string, description: ISO 3166-1 alpha-2 code; trimmed and uppercased}
+                  timezone: {type: string, description: Valid IANA timezone name; Local is rejected}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Arcade not found}
+    put:
+      tags: [Arcade]
+      summary: Set arcade admin settings (strict reviewer only; no XP)
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, public, closed, country, timezone]
+              properties:
+                arcade: {type: string, minLength: 15, maxLength: 15}
+                public: {type: boolean}
+                closed: {type: boolean}
+                country: {type: string, description: ISO 3166-1 alpha-2 code; trimmed and uppercased}
+                timezone: {type: string, description: Valid IANA timezone name; Local is rejected}
+      responses:
+        '200':
+          description: Updated arcade admin settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  arcade: {type: string}
+                  public: {type: boolean}
+                  closed: {type: boolean}
+                  country: {type: string, description: ISO 3166-1 alpha-2 code; trimmed and uppercased}
+                  timezone: {type: string, description: Valid IANA timezone name; Local is rejected}
+        '400': {description: Invalid input}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Arcade not found}
+
+  /native/moderation/arcade/edit-reports:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/arcade/edit-reports. Responses are no-store.
+    get:
+      tags: [Moderator]
+      summary: /moderation/arcade/edit-reports
+      description: Strict manual review queue. Requires `developer` or `moderator`; supporter tags are insufficient.
+      security:
+        - nativeBearer: []
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [waiting, processing, done]}
+      responses:
+        '200':
+          description: Review queue records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ArcadeEditReport'}
+                  total: {type: integer}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Developer or moderator access required.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/moderation/arcade/edit-report:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/arcade/edit-report. Responses are no-store.
+    put:
+      tags: [Moderator]
+      summary: /moderation/arcade/edit-report
+      description: Records a manual decision only. It never performs an automatic ban or rollback.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReviewArcadeEditReportRequest'}
+      responses:
+        '200':
+          description: Report resolved with reviewer metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeEditReport'}
+        '400':
+          description: Invalid resolution payload.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Developer or moderator access required.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Edit report not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: Report is already resolved.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /native/moderation/supporter/requests:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/supporter/requests. Responses are no-store.
+    get:
+      tags: [Support]
+      summary: List supporter applications (active developer or moderator only)
+      security: [{nativeBearer: []}]
+      responses:
+        '200':
+          description: Newest-first applications from all users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/SupporterReviewRequest'}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+
+  /native/moderation/supporter/request:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/supporter/request. Responses are no-store.
+    get:
+      tags: [Support]
+      summary: Read applicant contribution counts and XP ledger (strict reviewer only)
+      security: [{nativeBearer: []}]
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Application, joined date, current XP ledger and all authored arcade changes grouped by arcade
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SupporterReviewDetail'}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Application or applicant not found}
+    put:
+      tags: [Support]
+      summary: Approve or reject a pending supporter application
+      description: Approval atomically appends founding_supporter to user.tags without removing existing tags. Rejection does not change tags. Already decided applications return 409.
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, status, reason]
+              properties:
+                id: {type: string, minLength: 15, maxLength: 15}
+                status: {type: string, enum: [approved, rejected]}
+                reason: {type: string, maxLength: 1200}
+      responses:
+        '200':
+          description: Saved decision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SupporterReviewRequest'}
+        '400': {description: Invalid input}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Application not found}
+        '409': {description: Already reviewed or applicant withdrawn or missing}
+        '502': {description: Save failed; application and tags are both unchanged}
+
+  /native/moderation/user/test-account:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/user/test-account. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: Create an ordinary test account and profile
+      description: Active developer or moderator only. Does not change collection-wide password authentication or verify email.
+      security:
+        - nativeBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, username, password, nickname]
+              properties:
+                email: {type: string, format: email, maxLength: 254}
+                username: {type: string, minLength: 4, maxLength: 15, pattern: '^[A-Za-z0-9]+$'}
+                password: {type: string, minLength: 8, maxLength: 71, writeOnly: true}
+                nickname: {type: string, minLength: 1, maxLength: 25}
+      responses:
+        '201':
+          description: Account and profile created; no session token or password returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, email, username, nickname]
+                properties:
+                  id: {type: string}
+                  email: {type: string, format: email}
+                  username: {type: string}
+                  nickname: {type: string}
+        '400':
+          description: Invalid input (code invalid_input).
+        '401':
+          description: Authentication required.
+        '403':
+          description: Active developer or moderator required.
+        '409':
+          description: Email or case-insensitive username exists (code duplicate_identity).
+        '413':
+          description: Body exceeds 16 KiB.
+        '502':
+          description: Transaction or authorization lookup failed.
+
+  /native/moderation/user/reports:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/user/reports. Responses are no-store.
+    get:
+      tags: [Moderator]
+      summary: List user reports
+      security: [{nativeBearer: []}]
+      parameters:
+        - name: status
+          in: query
+          schema: {type: string, enum: [waiting, processing, done]}
+      responses:
+        '200':
+          description: List of user reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, user, reason, status, createdBy, created, updated]
+                      properties:
+                        id: {type: string}
+                        user: {type: string}
+                        reason: {type: string}
+                        status: {type: string}
+                        createdBy: {type: string}
+                        created: {type: string}
+                        updated: {type: string}
+                  total: {type: integer}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Developer or moderator access required.}
+        '502': {description: Lookup failed.}
+
+  /native/moderation/user/report:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/user/report. Responses are no-store.
+    put:
+      tags: [Moderator]
+      summary: Review a user report
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, status]
+              properties:
+                id: {type: string}
+                status: {type: string, enum: [waiting, processing, done]}
+      responses:
+        '200':
+          description: Updated user report.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, user, reason, status, createdBy, created, updated]
+                properties:
+                  id: {type: string}
+                  user: {type: string}
+                  reason: {type: string}
+                  status: {type: string}
+                  createdBy: {type: string}
+                  created: {type: string}
+                  updated: {type: string}
+        '400': {description: Validation failed.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Developer or moderator access required.}
+        '404': {description: User report not found.}
+        '502': {description: Update failed.}
+
+  /native/moderation/user/bans:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/user/bans. Responses are no-store.
+    get:
+      tags: [Moderator]
+      summary: List banned users
+      security: [{nativeBearer: []}]
+      responses:
+        '200':
+          description: List of user bans.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, user, reason, permanent, created, updated]
+                      properties:
+                        id: {type: string}
+                        user: {type: string}
+                        username: {type: string}
+                        reason: {type: string}
+                        until: {type: string, description: Future RFC3339 timestamp; omitted for a permanent ban.}
+                        permanent: {type: boolean}
+                        created: {type: string}
+                        updated: {type: string}
+                  total: {type: integer}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Developer or moderator access required.}
+        '502': {description: Lookup failed.}
+
+  /native/moderation/user/ban:
+    description: Active opaque native session required; same domain handlers, fields, ownership and role policy as /moderation/user/ban. Responses are no-store.
+    post:
+      tags: [Moderator]
+      summary: Create or update a user ban
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user, reason]
+              properties:
+                user: {type: string}
+                reason: {type: string}
+                until: {type: string, description: Future RFC3339 timestamp; omitted for a permanent ban.}
+      responses:
+        '200':
+          description: Saved user ban.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, user, reason, permanent, created, updated]
+                properties:
+                  id: {type: string}
+                  user: {type: string}
+                  username: {type: string}
+                  reason: {type: string}
+                  until: {type: string, description: Future RFC3339 timestamp; omitted for a permanent ban.}
+                  permanent: {type: boolean}
+                  created: {type: string}
+                  updated: {type: string}
+        '400': {description: Validation failed.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Developer or moderator access required.}
+        '404': {description: User not found.}
+        '502': {description: Save failed.}
+    delete:
+      tags: [Moderator]
+      summary: Remove a user ban
+      security: [{nativeBearer: []}]
+      parameters:
+        - name: user
+          in: query
+          required: false
+          schema: {type: string}
+      responses:
+        '200':
+          description: Ban removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user, deleted]
+                properties:
+                  user: {type: string}
+                  deleted: {type: boolean}
+        '400': {description: Validation failed.}
+        '401': {description: Missing or invalid bearer token.}
+        '403': {description: Developer or moderator access required.}
+        '404': {description: Ban not found.}
+        '502': {description: Delete failed.}
+
+  /native/arcade/flag/photo:
+    get:
+      tags: [Arcades]
+      summary: Read an exact report attachment through native authorization
+      security: [{nativeBearer: []}]
+      parameters:
+        - {in: query, name: id, required: true, schema: {type: string}, description: Report record ID.}
+        - {in: query, name: file, required: true, schema: {type: string}, description: Exact stored photos filename belonging to that report.}
+      responses:
+        '200':
+          description: Image bytes, private no-store. Public arcade or private draft creator/strict staff only.
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        '401': {description: Active opaque native session required.}
+        '403': {description: Account restricted.}
+        '404': {description: Report, scope or exact attachment unavailable.}
+  /native/user/notifications/apns:
+    description: Full supplies explicit APNs provider configuration. All routes require opaque native sessions, active accounts, no-store responses and at most 4096 encoded body bytes. No provider key or raw device token is returned.
+    get:
+      tags: [Users]
+      summary: Check APNs availability before requesting OS notification permission
+      security: [{nativeBearer: []}]
+      responses:
+        '200':
+          description: Configuration availability, not proof that a particular device has registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available: {type: boolean}
+                  environment: {type: string, enum: [sandbox, production], description: Present only when available.}
+                  topic: {type: string, description: Configured bundle identifier; present only when available.}
+        '401': {description: Active opaque native session required.}
+    put:
+      tags: [Users]
+      summary: Register a real APNs device token for this native account and session family
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, locale]
+              properties:
+                token: {type: string, minLength: 2, maxLength: 1024, pattern: '^(?:[a-fA-F0-9]{2})+$', description: Variable-length hexadecimal device token obtained from the OS callback.}
+                locale: {type: string, enum: [ko, en, ja]}
+      responses:
+        '200':
+          description: Device registered or refreshed. Token rotation within one native session and topic/environment retains the device ID, preferences and pending deliveries. A different session adopting the same endpoint receives a new device ID; old queued deliveries and preferences cascade on transfer. Existing inbox events are not backfilled.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, device]
+                properties:
+                  enabled: {type: boolean, const: true}
+                  device: {type: string, description: Account-scoped device record ID, retained by the client for removal and testing.}
+        '400': {description: Invalid token or locale.}
+        '401': {description: Active opaque native session required.}
+        '413': {description: Body exceeds 4096 bytes.}
+        '429': {description: Registration rate limit exceeded.}
+        '503': {description: APNs configuration absent; code APNS_UNAVAILABLE. No registration is written.}
+    delete:
+      tags: [Users]
+      summary: Remove only this account's APNs device and cascading queued deliveries/preferences
+      security: [{nativeBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device]
+              properties:
+                device: {type: string, maxLength: 15}
+      responses:
+        '200':
+          description: Own registration removed; missing/foreign/non-APNs device IDs are harmless no-ops. Removal remains available when provider configuration is disabled.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean, const: false}
+        '400': {description: Device is required.}
+        '401': {description: Active opaque native session required.}
+        '413': {description: Body exceeds 4096 bytes.}
+  /native/arcade/apns-subscription/status:
+    post:
+      tags: [Users]
+      security: [{nativeBearer: []}]
+      summary: Read effective current APNs report delivery preference including the owner default
+      description: Uses the same device-linked report preference and delivery policy as browser notifications. Status and enabling require arcade management access. Removal only requires ownership of the APNs device and cancels queued report deliveries for this arcade. Body limit 4096 bytes; no-store.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, device]
+              properties:
+                arcade: {type: string, maxLength: 15}
+                device: {type: string, maxLength: 15}
+      responses:
+        '200':
+          description: Effective delivery preference.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled]
+                properties:
+                  enabled: {type: boolean}
+        '400': {description: Arcade and device are required.}
+        '401': {description: Active opaque native session required.}
+        '403': {description: Arcade management access required for status and enabling.}
+        '404': {description: Arcade unavailable or device is not this account's APNs registration.}
+        '413': {description: Body exceeds 4096 bytes.}
+  /native/arcade/apns-subscription:
+    put:
+      tags: [Users]
+      security: [{nativeBearer: []}]
+      summary: Enable APNs report delivery for an eligible manager
+      description: Uses the same device-linked report preference and delivery policy as browser notifications. Status and enabling require arcade management access. Removal only requires ownership of the APNs device and cancels queued report deliveries for this arcade. Body limit 4096 bytes; no-store.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, device]
+              properties:
+                arcade: {type: string, maxLength: 15}
+                device: {type: string, maxLength: 15}
+      responses:
+        '200':
+          description: Preference saved atomically.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {type: boolean}
+        '400': {description: Arcade and device are required.}
+        '401': {description: Active opaque native session required.}
+        '403': {description: Arcade management access required for status and enabling.}
+        '404': {description: Arcade unavailable or device is not this account's APNs registration.}
+        '413': {description: Body exceeds 4096 bytes.}
+    delete:
+      tags: [Users]
+      security: [{nativeBearer: []}]
+      summary: Opt this device out of arcade reports without disabling other notifications
+      description: Uses the same device-linked report preference and delivery policy as browser notifications. Status and enabling require arcade management access. Removal only requires ownership of the APNs device and cancels queued report deliveries for this arcade. Body limit 4096 bytes; no-store.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, device]
+              properties:
+                arcade: {type: string, maxLength: 15}
+                device: {type: string, maxLength: 15}
+      responses:
+        '200':
+          description: Preference saved atomically.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {type: boolean}
+        '400': {description: Arcade and device are required.}
+        '401': {description: Active opaque native session required.}
+        '403': {description: Arcade management access required for status and enabling.}
+        '404': {description: Arcade unavailable or device is not this account's APNs registration.}
+        '413': {description: Body exceeds 4096 bytes.}

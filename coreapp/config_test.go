@@ -7,7 +7,10 @@ import (
 	"testing"
 
 	apidocs "github.com/ericbaek/musecat-backend-core/docs"
+	"github.com/ericbaek/musecat-backend-core/nativeauth"
+	"github.com/ericbaek/musecat-backend-core/testutil"
 	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
 )
@@ -23,6 +26,48 @@ func TestConfigureDoesNotRegisterMigrationsOrJobs(t *testing.T) {
 		if command.Name() == "migrate" {
 			t.Fatal("Core must leave migration registration to the executable")
 		}
+	}
+}
+
+func TestNativeExecutableCompositionRequiresAllowlistAndOpaqueSession(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "disabled", true: "enabled"}[enabled], func(t *testing.T) {
+			app := testutil.NewTestApp(t)
+			var clients []nativeauth.Client
+			if enabled {
+				clients = []nativeauth.Client{{ID: "ios", Callback: "musecat-test://auth/callback"}}
+			}
+			called := false
+			Configure(&pocketbase.PocketBase{App: app}, Config{NativeAuthClients: clients, NativeRoutes: func(group *router.RouterGroup[*core.RequestEvent]) {
+				called = true
+				group.GET("/full/probe", func(e *core.RequestEvent) error { return e.NoContent(204) })
+			}})
+			r, err := apis.NewRouter(app)
+			if err != nil {
+				t.Fatal(err)
+			}
+			event := &core.ServeEvent{App: app, Router: r}
+			if err = app.OnServe().Trigger(event, func(e *core.ServeEvent) error { return e.Next() }); err != nil {
+				t.Fatal(err)
+			}
+			if called != enabled {
+				t.Fatal("native executable routes ignored allowlist")
+			}
+			mux, err := r.BuildMux()
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest("GET", "/native/full/probe", nil)
+			res := httptest.NewRecorder()
+			mux.ServeHTTP(res, req)
+			want := 404
+			if enabled {
+				want = 401
+			}
+			if res.Code != want {
+				t.Fatalf("unguarded executable extension: %d want %d", res.Code, want)
+			}
+		})
 	}
 }
 
