@@ -28,7 +28,6 @@ const (
 	campaignBypassRewardExp = 1
 	campaignReportLimit     = 500
 	campaignRollbackWindow  = 7 * 24 * time.Hour
-	campaignBypassLevel     = 10
 )
 
 type campaignMutationBody struct {
@@ -72,17 +71,18 @@ type campaignConfig struct {
 }
 
 type candidateRow struct {
-	ArcadeID       string
-	Country        string
-	Name           string
-	Address        string
-	ArcadeLocation string
-	StateID        string
-	GameID         string
-	VersionID      string
-	CabinetID      string
-	GameLocation   string
-	Quantity       int
+	ArcadeID        string
+	Country         string
+	Name            string
+	Address         string
+	ArcadeLocation  string
+	StateID         string
+	GameID          string
+	VersionID       string
+	CabinetID       string
+	GameLocation    string
+	Quantity        int
+	ReviewExpiresAt string
 }
 
 type campaignCheckRow struct {
@@ -264,6 +264,9 @@ func ListArcadeCampaigns(re *core.RequestEvent) error {
 				return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to build campaign target", "details": err.Error()})
 			}
 			target := targets[0]
+			if row.ReviewExpiresAt != "" {
+				target["review_expires_at"] = row.ReviewExpiresAt
+			}
 			key := campaignTargetKey(row.ArcadeID, row.GameID)
 			if row.VersionID == config.ToVersion {
 				target["status"] = resultUpdated
@@ -438,15 +441,6 @@ func CheckCampaign(re *core.RequestEvent) error {
 	if body.Result != resultStillOld && body.Result != resultUpdated {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "result must be still_old or updated"})
 	}
-	if body.BypassLocation {
-		allowed, err := hasCampaignLocationBypassAccess(re.App, re.Auth.Id)
-		if err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to verify campaign bypass access", "details": err.Error()})
-		}
-		if !allowed {
-			return re.JSON(http.StatusForbidden, map[string]any{"error": "level 10 is required to bypass location verification"})
-		}
-	}
 
 	var response map[string]any
 	err := re.App.RunInTransaction(func(tx core.App) error {
@@ -524,9 +518,12 @@ func CheckCampaign(re *core.RequestEvent) error {
 				if err != nil {
 					return err
 				}
-				currentExp, granted, err := userhandler.AwardExpTx(tx, re.Auth.Id, campaignStillOldXPKind(config.ID, body.GameID), 1, baseExp)
-				if err != nil {
-					return err
+				currentExp, granted := baseExp, false
+				if !body.BypassLocation {
+					currentExp, granted, err = userhandler.AwardExpTx(tx, re.Auth.Id, campaignStillOldXPKind(config.ID, body.GameID), config.RewardExp, baseExp)
+					if err != nil {
+						return err
+					}
 				}
 				if err := saveCampaignCheck(tx, nil, config.ID, body.Arcade, body.GameID, re.Auth.Id, resultStillOld, stateID, !body.BypassLocation); err != nil {
 					return err
@@ -534,13 +531,16 @@ func CheckCampaign(re *core.RequestEvent) error {
 				response = campaignCheckResponse(baseExp, currentExp, granted, resultStillOld, stateID, map[string]any{"arcade": body.Arcade, "game_id": body.GameID, "rolled_back": true})
 				return nil
 			}
-			if check != nil && check.GetString("result") == resultStillOld {
+			if check != nil && check.GetString("result") == resultStillOld && (check.GetBool("location_verified") || body.BypassLocation) {
 				response = campaignCheckResponse(baseExp, baseExp, false, resultStillOld, stateID, nil)
 				return nil
 			}
-			currentExp, granted, err := userhandler.AwardExpTx(tx, re.Auth.Id, campaignStillOldXPKind(config.ID, body.GameID), 1, baseExp)
-			if err != nil {
-				return err
+			currentExp, granted := baseExp, false
+			if !body.BypassLocation {
+				currentExp, granted, err = userhandler.AwardExpTx(tx, re.Auth.Id, campaignStillOldXPKind(config.ID, body.GameID), config.RewardExp, baseExp)
+				if err != nil {
+					return err
+				}
 			}
 			if err := saveCampaignCheck(tx, nil, config.ID, body.Arcade, body.GameID, re.Auth.Id, resultStillOld, stateID, !body.BypassLocation); err != nil {
 				return err
@@ -585,9 +585,15 @@ func CheckCampaign(re *core.RequestEvent) error {
 				return err
 			}
 		}
-		if check != nil && check.GetString("result") == resultUpdated && revision.GetString("version") == config.ToVersion {
-			response = campaignCheckResponse(baseExp, baseExp, false, resultUpdated, currentStateID, map[string]any{"arcade": body.Arcade, "game_id": body.GameID})
-			return nil
+		if check != nil && check.GetString("result") == resultUpdated && revision.GetString("version") == config.ToVersion && (check.GetBool("location_verified") || body.BypassLocation) {
+			lastWrong, err := findLatestCampaignCheckByTarget(tx, config.ID, body.Arcade, body.GameID, resultStillOld)
+			if err != nil {
+				return err
+			}
+			if lastWrong == nil || check.GetDateTime("created").Time().After(lastWrong.GetDateTime("created").Time()) {
+				response = campaignCheckResponse(baseExp, baseExp, false, resultUpdated, currentStateID, map[string]any{"arcade": body.Arcade, "game_id": body.GameID})
+				return nil
+			}
 		}
 		if err := saveCampaignCheck(tx, nil, config.ID, body.Arcade, body.GameID, re.Auth.Id, resultUpdated, currentStateID, !body.BypassLocation); err != nil {
 			return err
@@ -821,6 +827,7 @@ func loadCampaignRowsByVersion(app core.App, config campaignConfig, versionID st
 		"r.version = {:version}",
 	}
 	params := dbx.Params{"version": versionID}
+	reviewProjection := ""
 	if requireTargetCompatibility {
 		clauses = append(clauses, "(TRIM(COALESCE(r.cabinet, '')) = '' OR EXISTS (SELECT 1 FROM game_series_version_cabinet target_support WHERE target_support.version = {:to_version} AND target_support.cabinet = r.cabinet))")
 		params["to_version"] = config.ToVersion
@@ -829,17 +836,33 @@ func loadCampaignRowsByVersion(app core.App, config campaignConfig, versionID st
 		clauses = append(clauses, "a.id = {:arcade_id}")
 		params["arcade_id"] = arcadeID
 		if versionID == config.ToVersion {
-			// Arcade prompts retain updates only during their report review window.
-			// The campaign overview still includes all current to-version targets.
-			clauses = append(clauses, `EXISTS (
-SELECT 1 FROM arcade_campaign_check c
+			// The first unverified update anchors expiry. One verified update or
+			// two unverified updates after the last wrong report end review immediately.
+			reviewProjection = `, (
+SELECT strftime('%Y-%m-%dT%H:%M:%fZ', c.created, '+7 days')
+FROM arcade_campaign_check c
 WHERE c.campaign = {:campaign} AND c.arcade = a.id AND c.game_id = r.entry
-  AND c.result = 'updated' AND c.created > {:report_cutoff} AND c.created <= {:report_now}
-)`)
-			now := time.Now().UTC()
+  AND c.result = 'updated' AND c.created <= {:report_now}
+  AND c.created > COALESCE((
+    SELECT MAX(w.created) FROM arcade_campaign_check w
+    WHERE w.campaign = c.campaign AND w.arcade = c.arcade AND w.game_id = c.game_id
+      AND w.result = 'still_old' AND w.created <= {:report_now}
+  ), '')
+ORDER BY c.created ASC, c.id ASC
+LIMIT 1
+) AS review_expires_at`
+			clauses = append(clauses, "julianday(review_expires_at) > julianday({:report_now})", `(
+SELECT COALESCE(SUM(CASE WHEN c.location_verified = 1 THEN 2 ELSE 1 END), 0) FROM arcade_campaign_check c
+WHERE c.campaign = {:campaign} AND c.arcade = a.id AND c.game_id = r.entry
+  AND c.result = 'updated' AND c.created <= {:report_now}
+  AND c.created > COALESCE((
+    SELECT MAX(w.created) FROM arcade_campaign_check w
+    WHERE w.campaign = c.campaign AND w.arcade = c.arcade AND w.game_id = c.game_id
+      AND w.result = 'still_old' AND w.created <= {:report_now}
+  ), '')
+) < 2`)
 			params["campaign"] = config.ID
-			params["report_cutoff"], _ = pbtypes.ParseDateTime(now.Add(-campaignRollbackWindow))
-			params["report_now"], _ = pbtypes.ParseDateTime(now)
+			params["report_now"], _ = pbtypes.ParseDateTime(time.Now().UTC())
 		}
 	}
 	if config.CabinetScope == "include" {
@@ -868,7 +891,7 @@ WHERE c.campaign = {:campaign} AND c.arcade = a.id AND c.game_id = r.entry
 SELECT a.id AS arcade_id, a.country, a.game_v2 AS state_id,
        b.name, b.address, b.location AS arcade_location,
        r.entry AS game_id, r.version AS version_id, r.cabinet AS cabinet_id,
-       r.location AS game_location, r.quantity
+       r.location AS game_location, r.quantity` + reviewProjection + `
 FROM arcade a
 INNER JOIN arcade_basic b ON b.id = a.basic
 INNER JOIN arcade_game_history r ON r.batch = a.game_v2
@@ -886,7 +909,8 @@ ORDER BY UPPER(TRIM(a.country)), b.name, a.id, r.entry`
 			return nil, err
 		}
 		result = append(result, candidateRow{
-			ArcadeID: nullString(raw, "arcade_id"), Country: nullString(raw, "country"), Name: nullString(raw, "name"), Address: nullString(raw, "address"), ArcadeLocation: nullString(raw, "arcade_location"), StateID: nullString(raw, "state_id"), GameID: nullString(raw, "game_id"), VersionID: nullString(raw, "version_id"), CabinetID: nullString(raw, "cabinet_id"), GameLocation: nullString(raw, "game_location"), Quantity: nullInt(raw, "quantity"),
+			ReviewExpiresAt: nullString(raw, "review_expires_at"),
+			ArcadeID:        nullString(raw, "arcade_id"), Country: nullString(raw, "country"), Name: nullString(raw, "name"), Address: nullString(raw, "address"), ArcadeLocation: nullString(raw, "arcade_location"), StateID: nullString(raw, "state_id"), GameID: nullString(raw, "game_id"), VersionID: nullString(raw, "version_id"), CabinetID: nullString(raw, "cabinet_id"), GameLocation: nullString(raw, "game_location"), Quantity: nullInt(raw, "quantity"),
 		})
 	}
 	return result, rows.Err()
@@ -1172,14 +1196,6 @@ func requireSameDayVisit(app core.App, userID string, arcade *core.Record) error
 		return fmt.Errorf("a verified visit is required before campaign check")
 	}
 	return nil
-}
-
-func hasCampaignLocationBypassAccess(app core.App, userID string) (bool, error) {
-	exp, err := userhandler.LoadCurrentExp(app, userID)
-	if err != nil {
-		return false, err
-	}
-	return userhandler.LevelFromExp(exp) >= campaignBypassLevel, nil
 }
 
 func findCampaignCheck(app core.App, campaignID, userID, gameID string) (*core.Record, error) {

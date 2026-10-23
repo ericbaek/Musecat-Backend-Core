@@ -4,15 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"net/http"
 	"strings"
 	"time"
 
+	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	"github.com/ericbaek/musecat-backend-core/service/arcadereport"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
-
-	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
-	"github.com/ericbaek/musecat-backend-core/service/xp"
 )
 
 const (
@@ -100,6 +101,9 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 		if err != nil {
 			return fmt.Errorf("arcade not found: %w", err)
 		}
+		if arcadereport.Read(arcadeRec).Mode == "external" {
+			return arcadereport.ErrExternal
+		}
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
 		}
@@ -164,7 +168,22 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 				currentExp = nextExp
 			}
 			xpFeedback = xp.BuildExpFeedback(baseExp, currentExp)
-			if _, err = arcadeinternal.ReconcileFlagResolutionTx(txApp, flagRec, now, true); err != nil {
+			actor, err := txApp.FindRecordById("user", re.Auth.Id)
+			if err != nil {
+				return err
+			}
+			if body.Reaction == "fixed" && arcadereport.CanManage(actor, arcadeRec) {
+				// Keep the actor's fixed reaction for attribution, but bypass voting delays.
+				flagRec.Set("solved", true)
+				flagRec.Set("resolution_vote_state", arcadeinternal.FlagResolutionStateIdle)
+				flagRec.Set("resolution_vote_resolve_at", "")
+				if err := txApp.Save(flagRec); err != nil {
+					return err
+				}
+			} else if _, err = arcadeinternal.ReconcileFlagResolutionTx(txApp, flagRec, now, true); err != nil {
+				return err
+			}
+			if err := usernotification.ReactionCreatedTx(txApp, flagRec, re.Auth.Id, reactionID); err != nil {
 				return err
 			}
 			return touchFlagActivityTx(txApp, flagRec)
@@ -209,6 +228,9 @@ func UpdateArcadeFlagReaction(re *core.RequestEvent) error {
 		return touchFlagActivityTx(txApp, flagRec)
 	})
 	if err != nil {
+		if errors.Is(err, arcadereport.ErrExternal) {
+			return re.JSON(http.StatusConflict, map[string]any{"error": err.Error(), "code": "REPORT_EXTERNAL"})
+		}
 		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
 			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
 		}

@@ -568,3 +568,11 @@ Delta mutations validate fields and catalog references only for submitted add/mo
 items. Untouched active revisions are copied without revalidating their price,
 tags, or cabinet compatibility. The resulting list still enforces durable-entry
 and version/cabinet uniqueness, and base-state concurrency checks remain required.
+
+## Optional PASELI numeric prices
+
+`price.accept` accepts `PASELI`. A numeric row (`gamemode`, `credit`, `song`, `time`, `custom_v1`, or legacy object-form `custom`) may include optional
+`paseli_value` (> 0), in JPY and with PASELI acceptance. Omission means unknown,
+not the base price. Base `value` may remain null for a PASELI-only price. Existing
+prices and immutable history are not migrated. Representative guest rows retain
+the PASELI amount alongside the base amount.

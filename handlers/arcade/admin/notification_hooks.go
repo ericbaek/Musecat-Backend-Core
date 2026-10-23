@@ -15,12 +15,11 @@ import (
 )
 
 const (
-	telegramNotifyHookHandlerID       = "__telegramNotifyOnRecordCreate__"
-	telegramArcadePublicHookHandlerID = "__telegramNotifyOnArcadePublicUpdate__"
-	collectionUser                    = "user"
-	collectionUserBan                 = "user_ban"
-	collectionUserReport              = "user_report"
-	collectionArcadeRequestAtom       = "arcade_request_atom"
+	telegramNotifyHookHandlerID = "__telegramNotifyOnRecordCreate__"
+	collectionUser              = "user"
+	collectionUserBan           = "user_ban"
+	collectionUserReport        = "user_report"
+	collectionArcadeRequestAtom = "arcade_request_atom"
 )
 
 var telegramNotifyCollections = []string{
@@ -70,36 +69,6 @@ func RegisterTelegramNotifyHooks(app core.App) {
 			return nil
 		},
 	})
-
-	app.OnRecordAfterUpdateSuccess(arcadeinternal.CollectionArcade).Bind(&hook.Handler[*core.RecordEvent]{
-		Id: telegramArcadePublicHookHandlerID,
-		Func: func(e *core.RecordEvent) error {
-			if err := e.Next(); err != nil {
-				return err
-			}
-
-			rec := e.Record
-			if rec == nil || rec.Collection() == nil {
-				return nil
-			}
-			if !isArcadePublicTransition(rec) {
-				return nil
-			}
-
-			message := buildArcadePublicTelegramMessage(e.App, rec)
-			if strings.TrimSpace(message) == "" {
-				return nil
-			}
-
-			if err := notifyTelegram(context.Background(), message); err != nil {
-				e.App.Logger().Warn("telegram notification on arcade public update failed",
-					slog.String("recordId", rec.Id),
-					slog.String("error", err.Error()),
-				)
-			}
-			return nil
-		},
-	})
 }
 
 func SetTelegramSenderForTest(sender TelegramSenderFunc) func() {
@@ -140,12 +109,6 @@ type userSummary struct {
 	Email    string
 }
 
-type arcadeBasicSummary struct {
-	ID      string
-	Name    string
-	Address string
-}
-
 func loadUserSummary(app core.App, userID string) userSummary {
 	userID = strings.TrimSpace(userID)
 	if app == nil || userID == "" {
@@ -164,37 +127,6 @@ func loadUserSummary(app core.App, userID string) userSummary {
 	}
 }
 
-func loadArcadeBasicSummary(app core.App, basicID string) arcadeBasicSummary {
-	basicID = strings.TrimSpace(basicID)
-	if app == nil || basicID == "" {
-		return arcadeBasicSummary{ID: basicID}
-	}
-
-	rec, err := app.FindRecordById(arcadeinternal.CollectionArcadeBasic, basicID)
-	if err != nil || rec == nil {
-		return arcadeBasicSummary{ID: basicID}
-	}
-
-	return arcadeBasicSummary{
-		ID:      basicID,
-		Name:    strings.TrimSpace(rec.GetString("name")),
-		Address: strings.TrimSpace(rec.GetString("address")),
-	}
-}
-
-func isArcadePublicTransition(rec *core.Record) bool {
-	if rec == nil || !rec.GetBool("public") {
-		return false
-	}
-
-	original := rec.Original()
-	if original == nil {
-		return false
-	}
-
-	return !original.GetBool("public")
-}
-
 func buildCollectionCreateTelegramMessage(app core.App, rec *core.Record) (string, bool) {
 	collectionName := rec.Collection().Name
 	switch collectionName {
@@ -211,27 +143,6 @@ func buildCollectionCreateTelegramMessage(app core.App, rec *core.Record) (strin
 	default:
 		return "", false
 	}
-}
-
-func buildArcadePublicTelegramMessage(app core.App, rec *core.Record) string {
-	createdByID := strings.TrimSpace(rec.GetString("createdBy"))
-	createdBy := loadUserSummary(app, createdByID)
-	basic := loadArcadeBasicSummary(app, strings.TrimSpace(rec.GetString("basic")))
-
-	var b strings.Builder
-	b.WriteString("[arcade_public]\n")
-	appendTelegramField(&b, "id", rec.Id)
-	appendTelegramField(&b, "basic", basic.ID)
-	appendTelegramField(&b, "name", basic.Name)
-	appendTelegramField(&b, "address", basic.Address)
-	appendTelegramField(&b, "country", strings.TrimSpace(rec.GetString("country")))
-	appendTelegramField(&b, "timezone", strings.TrimSpace(rec.GetString("timezone")))
-	appendTelegramField(&b, "public", "true")
-	appendTelegramField(&b, "createdBy", createdByID)
-	appendTelegramField(&b, "createdByUsername", createdBy.Username)
-	appendTelegramField(&b, "createdByEmail", createdBy.Email)
-	appendTelegramField(&b, "updated", strings.TrimSpace(rec.GetString("updated")))
-	return b.String()
 }
 
 func buildArcadeRequestTelegramMessage(app core.App, rec *core.Record, collectionName string) string {

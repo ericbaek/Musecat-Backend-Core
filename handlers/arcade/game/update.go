@@ -19,10 +19,11 @@ import (
 var ErrGameStateConflict = errors.New("game state conflict")
 
 type PriceItem struct {
-	Title     any      `json:"title,omitempty"`
-	Value     *float32 `json:"value"`
-	ModeKey   *string  `json:"mode_key,omitempty"`
-	Represent *bool    `json:"represent,omitempty"`
+	Title       any      `json:"title,omitempty"`
+	Value       *float32 `json:"value"`
+	PaseliValue *float32 `json:"paseli_value,omitempty"`
+	ModeKey     *string  `json:"mode_key,omitempty"`
+	Represent   *bool    `json:"represent,omitempty"`
 }
 type Price struct {
 	Currency   string      `json:"currency"`
@@ -271,6 +272,17 @@ func validatePrice(p Price) error {
 		return fmt.Errorf("price.list must have at least 1 item")
 	}
 	for i, it := range p.List {
+		if it.PaseliValue != nil {
+			acceptsPaseli := false
+			for _, method := range p.Accept {
+				if method == "PASELI" {
+					acceptsPaseli = true
+				}
+			}
+			if *it.PaseliValue <= 0 || p.Type == "free" || p.Type == "custom_v2" || p.Currency != "JPY" || !acceptsPaseli {
+				return fmt.Errorf("price.list[%d].paseli_value requires a positive JPY numeric amount and PASELI acceptance", i)
+			}
+		}
 		switch it.Title.(type) {
 		case nil, string, float64:
 		default:

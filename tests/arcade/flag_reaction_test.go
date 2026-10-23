@@ -290,3 +290,51 @@ func setUserLevel(tb testing.TB, app *tests.TestApp, userID string, level int) {
 		tb.Fatalf("save user level: %v", err)
 	}
 }
+
+func TestUpdateArcadeFlagReaction_PrivilegedFixedResolvesImmediately(t *testing.T) {
+	for _, tc := range []struct {
+		name, tag string
+		owns      bool
+		solved    bool
+	}{
+		{"developer at level zero", "developer", false, true},
+		{"moderator at level zero", "moderator", false, true},
+		{"official for this arcade", "arcade_owner", true, true},
+		{"unassigned official", "arcade_owner", false, false},
+		{"ordinary user", "", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app := newArcadeTestApp(t)
+			t.Cleanup(app.Cleanup)
+			_, creator := createAuthUser(t, app)
+			token, actor := createAuthUser(t, app)
+			setUserLevel(t, app, actor.Id, 0)
+			arcadeID, _ := seedPublicArcade(t, app, creator.Id, arcadeSeed{Name: "Immediate Resolution", Address: "Resolution Street", Location: location{Lat: 37.5665, Lon: 126.978}})
+			actor.Set("tags", []string{tc.tag})
+			if tc.owns {
+				actor.Set("owns", []string{arcadeID})
+			}
+			if err := app.Save(actor); err != nil {
+				t.Fatal(err)
+			}
+			flagID := createFlagWithReactions(t, app, arcadeID, creator.Id, time.Now().UTC(), nil)
+			response := postFlagReaction(t, app, token, flagID, "fixed", "add")
+			assertStatus(t, response, http.StatusOK)
+			var payload map[string]any
+			decodeResponse(t, response, &payload)
+			if payload["solved"] != tc.solved {
+				t.Fatalf("unexpected solved: %#v", payload)
+			}
+			flag, err := app.FindRecordById("arcade_flag", flagID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if flag.GetBool("solved") != tc.solved {
+				t.Fatal("persisted resolution differs")
+			}
+			if tc.solved && (flag.GetString("resolution_vote_state") != "idle" || flag.GetString("resolution_vote_resolve_at") != "") {
+				t.Fatal("privileged resolution retained a voting delay")
+			}
+		})
+	}
+}

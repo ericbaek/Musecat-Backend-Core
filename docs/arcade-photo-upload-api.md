@@ -18,6 +18,19 @@ It does not update `arcade.photo` directly.
 - Form fields:
   - `arcade` (string, required): target arcade id
   - `photos` (file, required, repeated): 1 to 10 files
+  - `captured_at` (string, optional): JSON string array in the same order as `photos`.
+    Each entry is an EXIF `DateTimeOriginal` formatted as `YYYY-MM-DDTHH:mm:ss`
+    with an optional EXIF UTC offset, or `""` when unavailable. Read the original
+    before image normalization. Offsetless dates use the arcade's IANA timezone,
+    falling back to UTC when the venue timezone is absent. Invalid/future dates
+    are ignored, without rejecting the image. A malformed array or length mismatch
+    returns 400 before writing any files.
+
+Capture dates are stored separately as `arcade_photo_atoms.captured_at` (UTC).
+The atom-list and expanded photo payloads include this optional date. Photo date
+labels and one-year photo-campaign freshness prefer it, falling back to `created`.
+Upload timestamps, gallery/editor ordering, immutable changelogs, and XP timestamps
+are unchanged. Capture metadata is user-supplied camera metadata, not verified proof.
 
 ### File Constraints
 - Allowed MIME types:
@@ -97,8 +110,8 @@ After upload completes, call the existing `PUT /arcade/photo`:
 This creates/updates the molecule and sets `arcade.photo`.
 
 Uploading creates pending atoms and awards no XP. The confirm request awards
-2 XP per atom only when it publishes that atom for the first time, capped over
-the rolling seven-day window at 10 XP for a photo-campaign target and 4 XP for
-another public arcade. Reordering, removal, and reuse of a previously
+4 XP per atom for a photo-campaign target (double the normal 2 XP) only when it
+publishes that atom for the first time, capped over the rolling seven-day window
+at 20 XP for a campaign target and 10 XP for another public arcade. Reordering, removal, and reuse of a previously
 published atom award no XP. The authoritative amount is returned in the
 confirm response's `xp_feedback` object.

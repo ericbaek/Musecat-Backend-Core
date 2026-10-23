@@ -463,7 +463,7 @@ func parseNativeGamePrice(raw json.RawMessage) (Price, error) {
 		}
 		for key := range rowMembers {
 			switch key {
-			case "title", "value", "mode_key", "represent":
+			case "title", "value", "paseli_value", "mode_key", "represent":
 			default:
 				return Price{}, nativeGameBadRequest("unsupported_field")
 			}

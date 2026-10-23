@@ -307,3 +307,8 @@ go test ./tests/user -run TestNativeGamesV1 -count=1 -v
 go test ./handlers/arcade/game ./handlers/arcade/internal ./tests/arcade -count=1
 go test ./... -count=1
 ```
+
+Numeric prices accept the optional `paseli_value` row member and `PASELI`
+payment method with the shared web rules: the amount must be positive, use JPY
+and explicitly accept PASELI. Omitted values remain unknown; old-client saves
+that omit price keep the complete stored price, including PASELI amounts.

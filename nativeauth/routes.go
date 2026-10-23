@@ -14,11 +14,14 @@ import (
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
+	"github.com/pocketbase/pocketbase/tools/router"
 )
 
-func RegisterRoutes(se *core.ServeEvent, clients []Client) {
+// RegisterRoutes returns the active-native-session group for domain route composition.
+// A disabled client allowlist returns nil and installs no routes.
+func RegisterRoutes(se *core.ServeEvent, clients []Client) *router.RouterGroup[*core.RequestEvent] {
 	if len(clients) == 0 {
-		return
+		return nil
 	}
 	s := Service{Clients: clients}
 	headers := &hook.Handler[*core.RequestEvent]{Func: func(e *core.RequestEvent) error {
@@ -111,6 +114,7 @@ func RegisterRoutes(se *core.ServeEvent, clients []Client) {
 	secured.PUT("/arcade/favorite", user.UpdateArcadeFavorite)
 	secured.PUT("/arcade/favorite/order", user.UpdateArcadeFavoriteOrder)
 	secured.POST("/arcade/visit", user.VisitArcade)
+	return secured
 }
 func activeCredentials(e *core.RequestEvent, s Service, out Credentials) error {
 	u, err := s.Authenticate(e.App, out.AccessToken)
