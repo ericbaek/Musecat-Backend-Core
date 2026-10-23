@@ -1,6 +1,8 @@
 package query
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -67,7 +69,10 @@ func DeleteMyArcadeDraft(re *core.RequestEvent) error {
 		if record.GetString("createdBy") != re.Auth.Id {
 			return errDraftDeleteForbidden
 		}
-		return txApp.Delete(record)
+		if err := txApp.Delete(record); err != nil {
+			return fmt.Errorf("%w: %v", errDraftDeleteFailed, err)
+		}
+		return nil
 	})
 	if err != nil {
 		switch err {
@@ -76,6 +81,14 @@ func DeleteMyArcadeDraft(re *core.RequestEvent) error {
 		case errDraftDeleteForbidden:
 			return re.JSON(http.StatusForbidden, map[string]any{"error": "only the draft creator can delete it"})
 		default:
+			if errors.Is(err, errDraftDeleteFailed) {
+				// PocketBase exposes required-reference deletion conflicts as an
+				// untyped error. Preserve the dependent audit/history records.
+				if strings.Contains(err.Error(), "part of a required reference") {
+					return re.JSON(http.StatusConflict, map[string]any{"code": "draft_referenced", "error": "arcade draft is referenced by other records"})
+				}
+				return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to delete arcade draft"})
+			}
 			return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade draft not found"})
 		}
 	}
@@ -86,6 +99,7 @@ func DeleteMyArcadeDraft(re *core.RequestEvent) error {
 var (
 	errPublishedDraftDelete = &draftDeleteError{"published"}
 	errDraftDeleteForbidden = &draftDeleteError{"forbidden"}
+	errDraftDeleteFailed    = &draftDeleteError{"delete failed"}
 )
 
 type draftDeleteError struct{ reason string }

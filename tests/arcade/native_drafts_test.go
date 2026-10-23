@@ -146,6 +146,7 @@ func TestNativeDraftLifecycleOwnershipAndPublication(t *testing.T) {
 	}
 	request("GET", "/arcade?id="+id, "", "", 200)
 	second := request("POST", "/native/arcade/new", token, body, 200)["id"].(string)
+	request("PATCH", "/native/v1/arcades/"+second+"/games", token, fmt.Sprintf(`{"revision":"","add":[{"game":%q,"location":"1F","quantity":1,"price":{"currency":"KRW","type":"custom_v2","list":["QA text price"],"accept":["Cash"]},"tag":[]}]}`, version), 200)
 	if removed := request("DELETE", "/native/arcade/draft?id="+second, token, "", 200); removed["deleted"] != true || removed["id"] != second {
 		t.Fatal("delete result changed", removed)
 	}

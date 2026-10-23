@@ -1211,6 +1211,11 @@ updated descending; it does not use a pagination cursor. Detail accepts `id` and
 optional `expand=all` with the existing arcade DTO; only the creator or strict
 reviewer may read a private draft. Even staff cannot delete someone else's draft.
 DELETE returns `{id,deleted:true}`; public records return 409 and are preserved.
+Required dependent records (such as completed campaign checks on a venue later
+made private) also prevent deletion: both web and native routes return 409 with
+`code:"draft_referenced"`. The failed transaction preserves the aggregate,
+game revisions, audit records and XP. Other storage failures return 502 rather
+than pretending the existing draft was not found.
 
 Preview accepts `arcade` in the query and returns the current creator level,
 `requirements:[{kind,satisfied}]`, `location_verified` and `xp_preview`. It does

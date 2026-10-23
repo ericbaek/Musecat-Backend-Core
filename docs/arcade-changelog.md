@@ -38,6 +38,11 @@ Each row uses these common columns:
 
 ## API Matrix
 
+Draft deletion never removes required campaign/visit history. An aggregate made
+private after a recorded campaign action remains protected by its required
+references; deletion returns `409 draft_referenced` and creates no changelog or
+XP entry. A failed delete cannot be reported as a missing draft.
+
 | Endpoint | `changed` value | Row count | Log shape | Notes |
 | --- | --- | --- | --- | --- |
 | `PUT /arcade/basic` | `basic` | one row per request | `basic_diff` | Creates a new `arcade_basic` version and points `arcade.basic` to it. |
