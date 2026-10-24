@@ -683,6 +683,21 @@ not change arcade visibility, author/reviewer permissions, XP or history semanti
 
 `background_position` stores x/y cover anchors (0–100), optional zoom (1–4, default 1), and clockwise rotation (0/90/180/270, default 0). Anchors apply after rotation. Preserve the full image; these are rendering transforms. Legacy x/y-only JSON remains valid within the existing 128-byte field, so no schema migration or data backfill is required. Publish this Core contract before updating Full’s pinned Core dependency and deploying frontend transform writes.
 
+## Public aggregate execution
+
+`GET /stats` caches successful public aggregate snapshots for 30 minutes per
+application process. Concurrent cache misses share one refresh; errors are not
+cached. A refresh has a 12-second database deadline and survives an individual
+viewer's disconnect, while that viewer stops waiting immediately. Counts may
+therefore lag underlying mutations by up to 30 minutes.
+
+Both arcade-update aggregates remain uncached, propagate request cancellation
+to SQLite, and cap database work at 12 seconds, below the web transport's
+15-second timeout. Failed result iteration must not return a partial success.
+History pages obtain their total from the same query as the selected blocks;
+only an empty page needs a separate count. The aggregate connection is released
+before detail enrichment borrows another connection.
+
 ## Public arcade summary timestamps
 
 `ArcadeSummary.updated` exposes the persisted `arcade.updated` aggregate timestamp, including in `GET /arcades`. Content mutations and rollbacks save the aggregate root, so sitemap consumers can use this value as the page modification time. Candidate snapshot rebuilds and read requests never substitute the current clock time. The existing public/closed/private visibility rules are unchanged.

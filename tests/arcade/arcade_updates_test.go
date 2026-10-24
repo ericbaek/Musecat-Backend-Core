@@ -521,6 +521,19 @@ func TestListArcadeUpdates_HistoricalPagination(t *testing.T) {
 			t.Fatalf("page %s: %d", page, res.StatusCode)
 		}
 	}
+	res := executeJSONRequest(t, app, http.MethodGet, "/arcades/updates/history?page=4&limit=1&country=KR", "", map[string]string{"Authorization": "Bearer " + token})
+	defer res.Body.Close()
+	var emptyPage struct {
+		Items    []any `json:"items"`
+		Total    int   `json:"total"`
+		LastPage int   `json:"last_page"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&emptyPage); err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK || len(emptyPage.Items) != 0 || emptyPage.Total != 3 || emptyPage.LastPage != 3 {
+		t.Fatalf("out-of-range page lost its total: status=%d payload=%+v", res.StatusCode, emptyPage)
+	}
 }
 
 func TestListArcadeUpdates_SummaryGuaranteesForeignArcade(t *testing.T) {
