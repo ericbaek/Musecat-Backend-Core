@@ -205,15 +205,7 @@ func GetMyVisits(re *core.RequestEvent) error {
 	if re.Auth == nil {
 		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
 	}
-	includeDates := true
-	if publicProfileAudience(re) {
-		_, visibility, status, err := passportAudienceForUser(re, re.Auth.Id)
-		if err != nil {
-			return re.JSON(status, map[string]any{"error": err.Error()})
-		}
-		includeDates = visibility == "full"
-	}
-	stats, err := LoadVisitStats(re.App, re.Auth.Id, includeDates)
+	stats, err := LoadVisitStats(re.App, re.Auth.Id, true)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load visit stats"})
 	}

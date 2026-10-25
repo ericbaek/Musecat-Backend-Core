@@ -11,26 +11,3 @@ var openAPISpec []byte
 func OpenAPISpec() []byte {
 	return append([]byte(nil), openAPISpec...)
 }
-
-//go:embed developer-openapi.yaml
-var developerSpec []byte
-
-//go:embed developer-api.md
-var developerGuide []byte
-
-//go:embed developer.html
-var developerHTML []byte
-
-func DeveloperOpenAPI() []byte { return append([]byte(nil), developerSpec...) }
-func DeveloperGuide() []byte   { return append([]byte(nil), developerGuide...) }
-func DeveloperHTML() []byte    { return append([]byte(nil), developerHTML...) }
-
-//go:embed partner-integration-spec.md
-var partnerIntegrationSpec []byte
-
-func PartnerIntegrationSpec() []byte { return append([]byte(nil), partnerIntegrationSpec...) }
-
-//go:embed sign-in-with-musecat.md
-var signInGuide []byte
-
-func SignInGuide() []byte { return append([]byte(nil), signInGuide...) }

@@ -1,7 +1,6 @@
 package user
 
 import (
-	"github.com/pocketbase/pocketbase/apis"
 	"net/http"
 	"strings"
 
@@ -65,19 +64,4 @@ func HasActiveStaffAccess(app core.App, auth *core.Record) (bool, error) {
 	}
 	_, code, err := checkAccountRestrictionWithBan(app, auth, userBanNow())
 	return err == nil && code == "", err
-}
-
-// CheckActiveUser is the transaction-safe account restriction check used after external I/O.
-func CheckActiveUser(app core.App, auth *core.Record) error {
-	if auth == nil {
-		return apis.NewUnauthorizedError("Authentication required.", nil)
-	}
-	_, code, err := checkAccountRestrictionWithBan(app, auth, userBanNow())
-	if err != nil {
-		return err
-	}
-	if code != "" {
-		return apis.NewForbiddenError("Account is restricted.", map[string]any{"code": code})
-	}
-	return nil
 }

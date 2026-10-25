@@ -297,11 +297,7 @@ func passportAudience(re *core.RequestEvent) (string, string, int, error) {
 		}
 		id = re.Auth.Id
 	}
-	return passportAudienceForUser(re, id)
-}
-
-func passportAudienceForUser(re *core.RequestEvent, id string) (string, string, int, error) {
-	if !publicProfileAudience(re) && re.Auth != nil && re.Auth.Id == id {
+	if re.Auth != nil && re.Auth.Id == id {
 		message, code, err := checkArcadeWriteRestriction(re.App, re.Auth, userBanNow())
 		if err != nil {
 			return "", "", 502, errors.New("failed to verify account")
@@ -334,7 +330,7 @@ func passportAudienceForUser(re *core.RequestEvent, id string) (string, string, 
 		if err != nil {
 			return "", "", 502, errors.New("failed to verify account restriction")
 		}
-		if isStaff && !publicProfileAudience(re) {
+		if isStaff {
 			return id, "full", 0, nil
 		}
 		return "", "", 404, errors.New("passport not found")

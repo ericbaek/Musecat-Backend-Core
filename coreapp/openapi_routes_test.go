@@ -33,14 +33,9 @@ func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
 	}
 
 	operations := documentedOperations(string(spec))
-	directOps := map[string]bool{}
-	for _, name := range []string{"registerSessionRoutes", "registerAccountRoutes"} {
-		routeDecl := routeFunction(t, file, name)
-		prefixes := routerGroupPrefixes(routeDecl.Body)
-		for op := range directRouteOperations(routeDecl.Body, prefixes) {
-			directOps[op] = true
-		}
-	}
+	routeDecl := routeFunction(t, file, "RegisterAPIRoutes")
+	prefixes := routerGroupPrefixes(routeDecl.Body)
+	directOps := directRouteOperations(routeDecl.Body, prefixes)
 	if len(directOps) == 0 {
 		t.Fatal("expected non-empty direct route operations")
 	}

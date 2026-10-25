@@ -133,7 +133,7 @@ func UpdateProfile(re *core.RequestEvent) error {
 	if err := re.App.Save(rec); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to update profile", "details": err.Error()})
 	}
-	profile, err := profileForRequest(re)
+	profile, err := BuildProfileFromAuth(re.App, re.Auth)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load updated profile"})
 	}

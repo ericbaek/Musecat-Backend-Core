@@ -3,9 +3,6 @@ package user
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ericbaek/musecat-backend-core/connections"
-	"github.com/ericbaek/musecat-backend-core/delegation"
-	"github.com/ericbaek/musecat-backend-core/partnerapp"
 	"net/http"
 	"strings"
 	"time"
@@ -148,18 +145,6 @@ func Withdraw(re *core.RequestEvent) error {
 		userInfoRec.Set("avatar", []string{})
 		if err := txApp.Save(userInfoRec); err != nil {
 			return fmt.Errorf("failed to update user_info: %w", err)
-		}
-
-		if err := partnerapp.SuspendOwnedApplications(txApp, userRec.Id); err != nil {
-			return fmt.Errorf("failed to suspend owned applications: %w", err)
-		}
-
-		if err := connections.DeleteUserData(txApp, userRec.Id); err != nil {
-			return fmt.Errorf("failed to unlink external accounts: %w", err)
-		}
-
-		if err := delegation.DeleteUserData(txApp, userRec.Id); err != nil {
-			return fmt.Errorf("failed to revoke delegated apps: %w", err)
 		}
 
 		// Unlink all OAuth providers so the same external account can sign up again later.
