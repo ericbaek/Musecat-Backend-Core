@@ -5,12 +5,14 @@ import (
 	"net/http"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
+	"github.com/pocketbase/pocketbase/tools/security"
 	"strings"
 	"unicode/utf8"
 )
@@ -26,6 +28,14 @@ func feedbackMessageItem(record *core.Record) map[string]any {
 	return map[string]any{"id": record.Id, "message": record.GetString("message"), "author": record.GetString("author"), "staff": record.GetBool("staff"), "official": record.GetBool("official"), "created": record.GetString("created"), "photos": append([]string{}, record.GetStringSlice("photos")...)}
 }
 func GetSupportFeedbackThread(re *core.RequestEvent) error {
+	if cid := mappedFeedback(re, re.Request.URL.Query().Get("id")); cid != "" {
+		out, err := messaging.LegacyThread(re.App, re.Auth.Id, cid, re.Request.URL.Query().Get("before"))
+		if err != nil {
+			return err
+		}
+		re.Response.Header().Set("Cache-Control", "private, no-store")
+		return re.JSON(200, out)
+	}
 	record, err := feedbackThreadAccess(re, re.Request.URL.Query().Get("id"))
 	if err != nil {
 		return err
@@ -64,7 +74,7 @@ func GetSupportFeedbackThread(re *core.RequestEvent) error {
 		}
 	}
 	re.Response.Header().Set("Cache-Control", "private, no-store")
-	return re.JSON(200, map[string]any{"feedback": map[string]any{"id": record.Id, "message": record.GetString("message"), "status": record.GetString("status"), "arcadeId": arcadeID, "arcadeName": arcadeName, "arcadeHasOfficial": supportfeedback.HasOfficialAccount(re.App, arcadeID), "createdBy": record.GetString("createdBy"), "photos": record.GetStringSlice("photos"), "created": record.GetString("created")}, "items": items, "next": next})
+	return re.JSON(200, map[string]any{"conversationId": nil, "feedback": map[string]any{"id": record.Id, "message": record.GetString("message"), "status": record.GetString("status"), "arcadeId": arcadeID, "arcadeName": arcadeName, "arcadeHasOfficial": supportfeedback.HasOfficialAccount(re.App, arcadeID), "createdBy": record.GetString("createdBy"), "photos": record.GetStringSlice("photos"), "created": record.GetString("created")}, "items": items, "next": next})
 }
 
 type replySupportFeedbackBody struct {
@@ -102,6 +112,13 @@ func ReplySupportFeedback(re *core.RequestEvent) error {
 			return apis.ErrRequestEntityTooLarge
 		}
 		return re.BadRequestError("invalid reply", nil)
+	}
+	if cid := mappedFeedback(re, body.ID); cid != "" {
+		m, _, err := messaging.Send(re.App, re.Auth.Id, cid, messaging.SendInput{Text: body.Message, ClientMessageID: "legacy:" + security.RandomString(24), Photos: body.Photos, ActingAs: messaging.LegacySender(re.App, re.Auth.Id, cid)})
+		if err != nil {
+			return err
+		}
+		return re.JSON(201, messaging.LegacyMessage(m))
 	}
 	body.Message = strings.TrimSpace(body.Message)
 	if (body.Message == "" && len(body.Photos) == 0) || utf8.RuneCountInString(body.Message) > 4000 {
@@ -174,6 +191,13 @@ func UpdateSupportFeedbackThreadStatus(re *core.RequestEvent) error {
 	if err := re.BindBody(&body); err != nil || (body.Status != "solved" && body.Status != "waiting") {
 		return re.BadRequestError("status must be solved or waiting", nil)
 	}
+	if cid := mappedFeedback(re, body.ID); cid != "" {
+		s, err := messaging.SetStatus(re.App, re.Auth.Id, cid, body.Status)
+		if err != nil {
+			return err
+		}
+		return re.JSON(200, map[string]any{"id": body.ID, "status": *s.Status})
+	}
 	if _, err := feedbackThreadAccess(re, body.ID); err != nil {
 		return err
 	}
@@ -202,6 +226,9 @@ func GetSupportFeedbackReplyPhoto(re *core.RequestEvent) error {
 	query := re.Request.URL.Query()
 	if query.Has("id") == query.Has("feedbackId") || (query.Get("id") == "" && query.Get("feedbackId") == "") {
 		return re.BadRequestError("exactly one reply id or feedbackId is required", nil)
+	}
+	if handled, err := messagingFeedbackPhoto(re); handled {
+		return err
 	}
 	var record *core.Record
 	var err error

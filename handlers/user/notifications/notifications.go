@@ -12,26 +12,37 @@ import (
 const inboxBatchSize = 100
 
 func List(re *core.RequestEvent) error {
-	rows, unread, next, err := listInbox(re.App, re.Auth, re.Request.URL.Query().Get("before"))
+	rows, unread, next, err := listInbox(re.App, re.Auth, re.Request.URL.Query().Get("before"), re.Request.URL.Query().Get("locale"))
 	if err != nil {
 		return err
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, usernotification.Item(re.App, row))
+		items = append(items, usernotification.ItemLocalized(re.App, row, re.Request.URL.Query().Get("locale")))
 	}
 	re.Response.Header().Set("Cache-Control", "private, no-store")
 	return re.JSON(http.StatusOK, map[string]any{"items": items, "unread": unread, "next": next})
 }
 
-func listInbox(app core.App, user *core.Record, before string) ([]*core.Record, int, string, error) {
+func listInbox(app core.App, user *core.Record, before string, locales ...string) ([]*core.Record, int, string, error) {
+	locale := "ko"
+	if len(locales) > 0 {
+		locale = locales[0]
+	}
 	// Visibility depends on current source permissions, not the event's historical
 	// role. Reuse decisions only within this request, with bounded cache storage.
 	visibility := map[string]bool{}
 	visible := func(row *core.Record) bool {
 		kind, source := row.GetString("kind"), row.GetString("arcade")
-		if kind == "feedback_reply" || kind == "feedback_created" {
+		if kind == "message" {
+			source = row.GetString("conversation")
+		} else if kind == "feedback_reply" || kind == "feedback_created" {
 			kind, source = "feedback", row.GetString("feedback")
+		} else if kind == usernotification.AnnouncementKind {
+			if !usernotification.AnnouncementLocaleAllowed(row, locale) {
+				return false
+			}
+			source = row.GetString("announcement")
 		} else if kind != "report_created" && kind != usernotification.ArcadeSetupKind {
 			kind = "report_reaction"
 		}

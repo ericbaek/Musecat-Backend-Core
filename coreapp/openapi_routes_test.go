@@ -33,7 +33,7 @@ func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
 	}
 
 	operations := documentedOperations(string(spec))
-	routeDecl := routeFunction(t, file)
+	routeDecl := routeFunction(t, file, "RegisterAPIRoutes")
 	prefixes := routerGroupPrefixes(routeDecl.Body)
 	directOps := directRouteOperations(routeDecl.Body, prefixes)
 	if len(directOps) == 0 {
@@ -46,15 +46,15 @@ func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
 	}
 }
 
-func routeFunction(t *testing.T, file *ast.File) *ast.FuncDecl {
+func routeFunction(t *testing.T, file *ast.File, name string) *ast.FuncDecl {
 	t.Helper()
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
-		if ok && function.Name.Name == "RegisterAPIRoutes" {
+		if ok && function.Name.Name == name {
 			return function
 		}
 	}
-	t.Fatal("RegisterAPIRoutes function not found")
+	t.Fatalf("route declaration %s not found", name)
 	return nil
 }
 
@@ -104,7 +104,7 @@ func directRouteOperations(file ast.Node, prefixes map[string]string) map[string
 			return true
 		}
 		method := methodName(call)
-		if method != "GET" && method != "POST" && method != "PUT" && method != "DELETE" {
+		if method != "GET" && method != "POST" && method != "PUT" && method != "PATCH" && method != "DELETE" {
 			return true
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
@@ -171,11 +171,35 @@ func documentedOperations(spec string) map[string]bool {
 		}
 		path := spec[match[2]:match[3]]
 		section := spec[match[0]:end]
-		for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
+		for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
 			if regexp.MustCompile(`(?m)^    ` + strings.ToLower(method) + `:$`).MatchString(section) {
 				operations[method+" "+path] = true
 			}
 		}
 	}
 	return operations
+}
+
+func TestOpenAPIDocumentsMessagingRoutes(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	root := filepath.Dir(filepath.Dir(thisFile))
+	source, err := os.ReadFile(filepath.Join(root, "handlers", "messaging", "routes.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), "routes.go", source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := os.ReadFile(filepath.Join(root, "docs", "openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	function := routeFunction(t, parsed, "RegisterRoutes")
+	operations := documentedOperations(string(spec))
+	for operation := range directRouteOperations(function.Body, routerGroupPrefixes(function.Body)) {
+		if !operations[operation] {
+			t.Errorf("Messaging OpenAPI missing %s", operation)
+		}
+	}
 }

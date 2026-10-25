@@ -24,7 +24,7 @@ func CreateArcadeAccount(re *core.RequestEvent) error {
 }
 
 func createManagedAccount(re *core.RequestEvent, official bool) error {
-	allowed, err := hasActiveStaffAccess(re.App, re.Auth)
+	allowed, err := HasActiveStaffAccess(re.App, re.Auth)
 	if official && !allowed && err == nil && re.Auth != nil && re.Auth.Collection().Name == CollectionUser {
 		for _, tag := range re.Auth.GetStringSlice("tags") {
 			if strings.EqualFold(strings.TrimSpace(tag), "designer") {

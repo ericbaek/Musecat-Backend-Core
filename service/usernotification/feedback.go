@@ -2,6 +2,7 @@ package usernotification
 
 import (
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -50,7 +51,7 @@ func FeedbackReplyTx(app core.App, feedback, message *core.Record) error {
 			return err
 		}
 		for _, user := range users {
-			if supportfeedback.IsStaff(user) || supportfeedback.IsOfficial(app, user, feedback) {
+			if feedbackResponderNotified(app, user, feedback) {
 				recipients[user.Id] = true
 			}
 		}
@@ -59,7 +60,7 @@ func FeedbackReplyTx(app core.App, feedback, message *core.Record) error {
 		if id == "" || id == actor {
 			continue
 		}
-		user, err := app.FindRecordById("user", id)
+		user, err := messaging.ActiveUser(app, id)
 		if err != nil || !supportfeedback.CanAccess(app, user, feedback) {
 			continue
 		}
@@ -107,7 +108,7 @@ func feedbackItem(app core.App, row *core.Record) map[string]any {
 			}
 		}
 	}
-	return map[string]any{"id": row.Id, "kind": row.GetString("kind"), "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": arcadeName, "gameName": "", "reaction": "", "message": message, "url": "/support/feedback/" + row.GetString("feedback")}
+	return map[string]any{"id": row.Id, "kind": row.GetString("kind"), "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": arcadeName, "gameName": "", "reaction": "", "message": message, "url": "/updates/feedback?thread=" + row.GetString("feedback")}
 }
 
 func FeedbackCreatedTx(app core.App, feedback *core.Record) error {
@@ -119,7 +120,10 @@ func FeedbackCreatedTx(app core.App, feedback *core.Record) error {
 		return err
 	}
 	for _, user := range users {
-		if user.Id == feedback.GetString("createdBy") || (!supportfeedback.IsStaff(user) && !supportfeedback.IsOfficial(app, user, feedback)) {
+		if _, err := messaging.ActiveUser(app, user.Id); err != nil {
+			continue
+		}
+		if user.Id == feedback.GetString("createdBy") || !feedbackResponderNotified(app, user, feedback) {
 			continue
 		}
 		col, err := app.FindCollectionByNameOrId(Inbox)
@@ -140,4 +144,40 @@ func FeedbackCreatedTx(app core.App, feedback *core.Record) error {
 		}
 	}
 	return nil
+}
+
+// Arcade legacy/guest inquiries have no mention metadata. Staff notification is
+// opt-in only through canonical messaging mentions; official owners still receive.
+func feedbackResponderNotified(app core.App, user, feedback *core.Record) bool {
+	return supportfeedback.IsOfficial(app, user, feedback) || (feedback.GetString("arcade") == "" && supportfeedback.IsStaff(user))
+}
+
+// FeedbackNotificationDeliverable suppresses old queued staff-only arcade alerts
+// while keeping their original rows readable through the access-only inbox policy.
+func FeedbackNotificationDeliverable(app core.App, user, row *core.Record) bool {
+	if user == nil || row.GetString("user") != user.Id {
+		return false
+	}
+	current, err := messaging.ActiveUser(app, user.Id)
+	if err != nil {
+		return false
+	}
+	feedback, err := app.FindRecordById("support_feedback", row.GetString("feedback"))
+	if err != nil || !supportfeedback.CanAccess(app, current, feedback) {
+		return false
+	}
+	switch row.GetString("kind") {
+	case "feedback_created":
+		return current.Id != feedback.GetString("createdBy") && feedback.GetString("arcade") != "" && feedbackResponderNotified(app, current, feedback)
+	case "feedback_reply":
+		message, err := app.FindRecordById(supportfeedback.Messages, row.GetString("feedback_message"))
+		if err != nil || message.GetString("feedback") != feedback.Id || current.Id == message.GetString("author") {
+			return false
+		}
+		if message.GetString("author") != feedback.GetString("createdBy") && (message.GetBool("staff") || message.GetBool("official")) {
+			return current.Id == feedback.GetString("createdBy")
+		}
+		return feedbackResponderNotified(app, current, feedback)
+	}
+	return false
 }

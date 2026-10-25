@@ -45,7 +45,7 @@ func GetMe(re *core.RequestEvent) error {
 func GetUserByID(re *core.RequestEvent) error {
 	id := strings.TrimSpace(re.Request.URL.Query().Get("id"))
 	username := strings.TrimSpace(re.Request.URL.Query().Get("username"))
-	isStaff, staffErr := hasActiveStaffAccess(re.App, re.Auth)
+	isStaff, staffErr := HasActiveStaffAccess(re.App, re.Auth)
 	if staffErr != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to verify account restriction"})
 	}

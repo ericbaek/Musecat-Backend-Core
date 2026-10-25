@@ -56,8 +56,8 @@ Deployment-injected environment variables take precedence over `.env`, including
 
 The community translation prototype publishes Korean originals immediately and
 queues English/Japanese translations five minutes later. Set
-`MUSECAT_TRANSLATION_PROVIDER=deepseek` and `DEEPSEEK_API_KEY` (or the generic
-`MUSECAT_TRANSLATION_API_KEY`) to enable the development worker. Leave
+`OPENAI_API_KEY` to enable the development worker. Translation uses OpenAI
+`gpt-6-luna` with `MUSECAT_TRANSLATION_REASONING_EFFORT=none` by default. Leave
 `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC=false` while reviewing stored results;
 switch it to `true` when `locale=en-US|ja-JP` should serve them. The optional
 `MUSECAT_TRANSLATION_GLOSSARY` adds deployment-specific arcade terminology to

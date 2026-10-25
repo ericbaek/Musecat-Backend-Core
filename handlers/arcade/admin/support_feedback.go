@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ericbaek/musecat-backend-core/service/arcadereport"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"github.com/pocketbase/dbx"
@@ -100,6 +101,9 @@ func CreateSupportFeedback(re *core.RequestEvent) error {
 		})
 	}
 
+	if re.Auth != nil {
+		return createMessagingFeedback(re, body)
+	}
 	body.Arcade = strings.TrimSpace(body.Arcade)
 	if body.Arcade != "" {
 		if re.Auth != nil && re.Auth.GetBool("withdrawn") {
@@ -247,8 +251,16 @@ func listSupportFeedback(re *core.RequestEvent, createdByID string) error {
 		})
 	}
 
-	items := make([]map[string]any, 0, len(recs))
+	canonical, err := messaging.LegacyList(re.App, re.Auth.Id, createdByID, re.Request.URL.Query().Get("arcade"), status)
+	if err != nil {
+		return err
+	}
+	items := make([]map[string]any, 0, len(recs)+len(canonical))
+	items = append(items, canonical...)
 	for _, rec := range recs {
+		if mappedFeedback(re, rec.Id) != "" {
+			continue
+		}
 		if !supportfeedback.CanAccess(re.App, re.Auth, rec) {
 			continue
 		}
@@ -303,6 +315,17 @@ func ReviewSupportFeedback(re *core.RequestEvent) error {
 		})
 	}
 
+	if cid := mappedFeedback(re, body.ID); cid != "" {
+		s, err := messaging.SetStatus(re.App, re.Auth.Id, cid, body.Status)
+		if err != nil {
+			return err
+		}
+		item, err := messaging.LegacyItem(re.App, s)
+		if err != nil {
+			return err
+		}
+		return re.JSON(200, item)
+	}
 	record, err := re.App.FindRecordById(arcadeinternal.CollectionSupportFeedback, body.ID)
 	if err != nil {
 		return re.JSON(http.StatusNotFound, map[string]any{

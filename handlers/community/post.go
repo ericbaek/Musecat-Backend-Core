@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
+	"github.com/pocketbase/pocketbase/tools/router"
 	"github.com/pocketbase/pocketbase/tools/types"
 
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
@@ -52,15 +52,28 @@ type postInput struct {
 	Photos     []*filesystem.File `json:"-"`
 }
 
-func RegisterRoutes(se *core.ServeEvent) {
-	se.Router.GET("/community/posts", ListPosts)
-	se.Router.GET("/community/post", GetPost)
-	auth := se.Router.Group("/community").Bind(
+func RegisterRoutes(se *core.ServeEvent) { RegisterAccountRoutes(se.Router.RouterGroup) }
+
+// RegisterAccountRoutes shares the same guards and body limits on both transports.
+func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
+	api.GET("/community/posts", ListPosts)
+	api.GET("/community/post", GetPost)
+	api.GET("/community/comments", ListComments)
+	api.GET("/community/comment", GetComment)
+	auth := api.Group("/community").Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
 	auth.POST("/post", CreatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
 	auth.PUT("/post", UpdatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
+	auth.DELETE("/post", DeletePost)
+	auth.POST("/comment", CreateComment).Bind(apis.BodyLimit(MaxCommentBodyBytes))
+	auth.PUT("/comment", UpdateComment).Bind(apis.BodyLimit(MaxCommentBodyBytes))
+	auth.DELETE("/comment", DeleteComment)
+	auth.PUT("/post/like", LikePost)
+	auth.DELETE("/post/like", LikePost)
+	auth.PUT("/comment/like", LikeComment)
+	auth.DELETE("/comment/like", LikeComment)
 }
 
 func CreatePost(re *core.RequestEvent) error {
@@ -75,6 +88,10 @@ func CreatePost(re *core.RequestEvent) error {
 	}
 	if err := validatePostInput(re.App, input); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "validation failed", "details": err.Error()})
+	}
+
+	if input.Flair == "achievement" && len(input.Photos) == 0 {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "achievement posts require at least one photo"})
 	}
 
 	collection, err := re.App.FindCollectionByNameOrId(CollectionPost)
@@ -103,7 +120,7 @@ func CreatePost(re *core.RequestEvent) error {
 	if err := re.App.Save(record); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to create community post", "details": err.Error()})
 	}
-	return re.JSON(http.StatusCreated, buildPostResponse(re.App, record, OriginalLocale))
+	return servePost(re, record, OriginalLocale, http.StatusCreated)
 }
 
 func UpdatePost(re *core.RequestEvent) error {
@@ -138,6 +155,10 @@ func UpdatePost(re *core.RequestEvent) error {
 			return fmt.Errorf("edit_window_closed")
 		}
 
+		if input.Flair == "achievement" && len(record.GetStringSlice("photos"))+len(input.Photos) == 0 {
+			return fmt.Errorf("achievement_photo_required")
+		}
+
 		record.Set("game_series", input.GameSeries)
 		record.Set("title", input.Title)
 		record.Set("body", input.Body)
@@ -167,6 +188,8 @@ func UpdatePost(re *core.RequestEvent) error {
 			return re.JSON(http.StatusNotFound, map[string]any{"error": "community post not found"})
 		case "forbidden":
 			return re.JSON(http.StatusForbidden, map[string]any{"error": "only the author can edit this post"})
+		case "achievement_photo_required":
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "achievement posts require at least one photo"})
 		case "too_many_photos":
 			return re.JSON(http.StatusBadRequest, map[string]any{"error": "photos must have at most 8 items"})
 		case "edit_window_closed":
@@ -175,7 +198,57 @@ func UpdatePost(re *core.RequestEvent) error {
 			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to update community post", "details": err.Error()})
 		}
 	}
-	return re.JSON(http.StatusOK, buildPostResponse(re.App, updated, OriginalLocale))
+	return servePost(re, updated, OriginalLocale, http.StatusOK)
+}
+
+// DeletePost hides the post from all public reads and drops its public files.
+// The tombstone is retained so retries by its author are idempotent.
+func DeletePost(re *core.RequestEvent) error {
+	id := strings.TrimSpace(re.Request.URL.Query().Get("id"))
+	if id == "" {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "id is required"})
+	}
+	err := re.App.RunInTransaction(func(tx core.App) error {
+		record, err := tx.FindRecordById(CollectionPost, id)
+		if err != nil {
+			return fmt.Errorf("not_found")
+		}
+		if record.GetString("author") != re.Auth.Id {
+			return fmt.Errorf("forbidden")
+		}
+		if record.GetString("status") == "deleted" {
+			return nil
+		}
+		record.Set("status", "deleted")
+		record.Set("photos", []string{})
+		record.Set("translations", map[string]any{})
+		record.Set("translation_started_at", "")
+		record.Set("translation_error", "")
+		if err := tx.Save(record); err != nil {
+			return err
+		}
+		comments, err := tx.FindAllRecords(CollectionComment, dbx.HashExp{"post": id})
+		if err != nil {
+			return err
+		}
+		for _, comment := range comments {
+			if err = eraseComment(tx, comment); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		switch err.Error() {
+		case "not_found":
+			return re.JSON(http.StatusNotFound, map[string]any{"error": "community post not found"})
+		case "forbidden":
+			return re.JSON(http.StatusForbidden, map[string]any{"error": "only the author can delete this post"})
+		default:
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to delete community post"})
+		}
+	}
+	return re.NoContent(http.StatusNoContent)
 }
 
 func GetPost(re *core.RequestEvent) error {
@@ -191,7 +264,7 @@ func GetPost(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
 	}
-	return re.JSON(http.StatusOK, buildPostResponse(re.App, record, locale))
+	return servePost(re, record, locale, http.StatusOK)
 }
 
 func ListPosts(re *core.RequestEvent) error {
@@ -265,10 +338,11 @@ func ListPosts(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to list community posts", "details": err.Error()})
 	}
-	items := make([]map[string]any, 0, len(records))
-	for _, record := range records {
-		items = append(items, buildPostResponse(re.App, record, locale))
+	items, err := postResponses(re.App, records, locale, viewerID(re))
+	if err != nil {
+		return err
 	}
+	privateSocialResponse(re)
 	lastPage := 0
 	if total > 0 {
 		lastPage = int((total + int64(perPage) - 1) / int64(perPage))
@@ -307,22 +381,8 @@ func decodePostInput(re *core.RequestEvent) (postInput, error) {
 }
 
 func validatePostInput(app core.App, input postInput) error {
-	if len(input.Photos) > MaxPostPhotos {
-		return fmt.Errorf("photos must have at most 8 items")
-	}
-	for _, file := range input.Photos {
-		if file.Size > MaxPostPhotoBytes {
-			return fmt.Errorf("each photo must be at most 10 MB")
-		}
-		reader, err := file.Reader.Open()
-		if err != nil {
-			return fmt.Errorf("failed to read photo")
-		}
-		mime, err := mimetype.DetectReader(reader)
-		reader.Close()
-		if err != nil || (mime.String() != "image/jpeg" && mime.String() != "image/png" && mime.String() != "image/webp" && mime.String() != "image/gif") {
-			return fmt.Errorf("photos must be JPEG, PNG, WebP or GIF images")
-		}
+	if err := validatePhotos(input.Photos, MaxPostPhotos); err != nil {
+		return err
 	}
 	if input.Body == "" {
 		return fmt.Errorf("body is required")
@@ -346,13 +406,6 @@ func validatePostInput(app core.App, input postInput) error {
 
 func buildPostResponse(app core.App, record *core.Record, requested string) map[string]any {
 	authorName := record.GetString("author")
-	if author, err := app.FindRecordById("user", authorName); err == nil {
-		if nickname := author.GetString("nickname"); nickname != "" {
-			authorName = nickname
-		} else if username := author.GetString("username"); username != "" {
-			authorName = username
-		}
-	}
 	title := record.GetString("title")
 	body := record.GetString("body")
 	servedLocale := OriginalLocale

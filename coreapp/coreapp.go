@@ -13,6 +13,7 @@ import (
 	"github.com/ericbaek/musecat-backend-core/docs"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	"github.com/ericbaek/musecat-backend-core/handlers"
+	announcementhandler "github.com/ericbaek/musecat-backend-core/handlers/announcement"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
@@ -31,6 +32,7 @@ import (
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
 	communityhandler "github.com/ericbaek/musecat-backend-core/handlers/community"
 	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
+	messaginghandler "github.com/ericbaek/musecat-backend-core/handlers/messaging"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
@@ -103,6 +105,8 @@ func configureDefaultRateLimits(app core.App) {
 // It is exported so test applications and integration suites can wire the exact
 // same routing table without duplicating it.
 func RegisterAPIRoutes(se *core.ServeEvent) {
+	announcementhandler.RegisterRoutes(se)
+	messaginghandler.RegisterRoutes(se)
 	se.Router.GET("/hello", handlers.HelloHandler)
 	se.Router.GET("/geo", handlers.GeoLookupHandler)
 	se.Router.GET("/geocode", handlers.GeocodeHandler)

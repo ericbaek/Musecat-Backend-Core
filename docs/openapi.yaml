@@ -31,11 +31,13 @@ tags:
     description: Authenticated arcade editing endpoints.
 components:
   securitySchemes:
+ {type: http, scheme: bearer, description: Musecat-issued server key; distinct from OAuth tokens and secrets.}
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
   parameters:
+ {name: X-Request-Id, in: header, required: true, schema: {type: string, format: uuid}, description: Replays return the original result for ten minutes; changed requests with the same ID conflict.}
     LimitQuery:
       name: limit
       in: query
@@ -62,6 +64,83 @@ components:
       schema:
         type: string
   schemas:
+    Announcement:
+      type: object
+      required: [id, status, createdAt, updatedAt, publishedAt, viewed, localizations, locales]
+      properties:
+        id: {type: string}
+        status: {type: string, enum: [draft, published, archived]}
+        locales:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          items: {type: string, enum: [ko, en, ja]}
+          description: Immutable selected release locales; empty for drafts.
+        createdAt: {type: string}
+        updatedAt: {type: string}
+        publishedAt: {type: string, description: Empty until first publication.}
+        viewed: {type: boolean, description: Account-wide across locales and devices; false for guests.}
+        localizations:
+          type: object
+          additionalProperties: false
+          properties:
+            ko: {$ref: '#/components/schemas/AnnouncementLocalization'}
+            en: {$ref: '#/components/schemas/AnnouncementLocalization'}
+            ja: {$ref: '#/components/schemas/AnnouncementLocalization'}
+    AnnouncementLocalization:
+      type: object
+      required: [title, summary, slides]
+      properties:
+        title: {type: string, maxLength: 160}
+        summary: {type: string, maxLength: 500}
+        slides:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            required: [id, fileName, imageUrl, alt]
+            properties:
+              id: {type: string}
+              fileName: {type: string}
+              imageUrl: {type: string, description: Relative custom API image URL; draft and archived images require staff.}
+              alt: {type: string, maxLength: 3000}
+    AnnouncementPage:
+      type: object
+      required: [items, next]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Announcement'}}
+        next: {type: string, description: Last item id or empty at end.}
+    AnnouncementInput:
+      type: object
+      required: [localizations]
+      properties:
+        localizations:
+          type: object
+          description: Complete replacement map; only ko, en and ja keys. Drafts may omit locales. Existing file names retain images; upload:N references index N in images_LOCALE.
+          additionalProperties:
+            type: object
+            required: [title, summary, slides]
+            properties:
+              title: {type: string, maxLength: 160}
+              summary: {type: string, maxLength: 500}
+              slides:
+                type: array
+                maxItems: 12
+                items:
+                  type: object
+                  required: [image, alt]
+                  properties:
+                    image: {type: string}
+                    alt: {type: string, maxLength: 3000}
+    MessagingReport: {"type": "object", "properties": {"id": {"type": "string"}, "reporterId": {"type": "string"}, "messageId": {"type": "string"}, "reason": {"type": "string"}, "createdAt": {"type": "string"}, "message": {"$ref": "#/components/schemas/MessagingMessage"}}, "required": ["id", "reporterId", "messageId", "reason", "createdAt", "message"]}
+    MessagingParty: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}, "name": {"type": "string"}, "avatarUrl": {"type": "string", "nullable": true}, "roleTags": {"type": "array", "items": {"type": "string"}}}, "required": ["type", "id", "name", "avatarUrl", "roleTags"]}
+    MessagingIdentity: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}}, "required": ["type", "id"]}
+    MessagingMessage: {"type": "object", "properties": {"id": {"type": "string"}, "conversationId": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "senderUserId": {"type": "string"}, "sender": {"$ref": "#/components/schemas/MessagingParty"}, "actingAs": {"$ref": "#/components/schemas/MessagingParty"}, "clientMessageId": {"type": "string"}, "text": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string"}}, "required": ["name", "url"]}}, "createdAt": {"type": "string"}, "mentions": {"type": "array", "maxItems": 1, "items": {"type": "string", "enum": ["musecat"]}, "description": "Explicit MUSECAT notification mention. Only arcade inquiries support nonempty mentions; duplicates normalize to one. Omitted input becomes an empty array."}}, "required": ["id", "conversationId", "sequence", "senderUserId", "sender", "actingAs", "clientMessageId", "text", "photos", "createdAt", "mentions"]}
+    ConversationSummary: {"type": "object", "properties": {"id": {"type": "string"}, "kind": {"type": "string", "enum": ["dm", "inquiry"]}, "counterpart": {"$ref": "#/components/schemas/MessagingParty"}, "inbox": {"allOf": [{"$ref": "#/components/schemas/MessagingParty"}], "nullable": true}, "requester": {"allOf": [{"$ref": "#/components/schemas/MessagingParty"}], "nullable": true}, "status": {"type": "string", "nullable": true, "enum": ["waiting", "recognised", "solved", null]}, "legacyFeedbackId": {"type": "string", "nullable": true}, "latestSequence": {"type": "integer", "minimum": 0}, "lastMessage": {"allOf": [{"$ref": "#/components/schemas/MessagingMessage"}], "nullable": true}, "lastMessageAt": {"type": "string", "nullable": true}, "unreadCount": {"type": "integer", "minimum": 0}, "lastReadSequence": {"type": "integer", "minimum": 0}, "canSend": {"type": "boolean"}, "canManageStatus": {"type": "boolean", "description": "Compatibility capability, true when allowedStatusTransitions is nonempty."}, "createdAt": {"type": "string"}, "allowedSenderIdentities": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingIdentity"}, "description": "Current permitted acting identities. Dual-role inquiry users explicitly choose one."}, "allowedStatusTransitions": {"type": "array", "items": {"type": "string", "enum": ["waiting", "recognised", "solved"]}, "description": "Current permitted status values: requester waiting/solved; responders all three; DM empty."}}, "required": ["allowedSenderIdentities", "allowedStatusTransitions"]}
+    MessagingSend: {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string", "minLength": 1, "maxLength": 100}, "actingAs": {"$ref": "#/components/schemas/MessagingIdentity"}, "mentions": {"type": "array", "maxItems": 16, "items": {"type": "string", "enum": ["musecat"]}, "description": "Explicit MUSECAT notification mention. Only arcade inquiries support nonempty mentions; duplicates normalize to one. Omitted input becomes an empty array."}}, "required": ["clientMessageId"]}
+    MessagingCreate: {"type": "object", "properties": {"kind": {"type": "string", "enum": ["dm", "inquiry"]}, "peerUserId": {"type": "string"}, "inbox": {"$ref": "#/components/schemas/MessagingIdentity"}, "initialMessage": {"$ref": "#/components/schemas/MessagingSend"}}, "required": ["kind"]}
+    ConversationList: {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ConversationSummary"}}, "nextCursor": {"type": "string", "nullable": true}}, "required": ["items", "nextCursor"]}
+    MessagePage: {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingMessage"}}, "latestSequence": {"type": "integer", "minimum": 0}, "nextBeforeSequence": {"type": "integer", "nullable": true}, "nextAfterSequence": {"type": "integer", "nullable": true}}, "required": ["items", "latestSequence", "nextBeforeSequence", "nextAfterSequence"]}
     InquirySettings:
       type: object
       required: [mode, contactType, contactValue, guide, loginRequired, configured]
@@ -139,7 +218,7 @@ components:
           type: array
           maxItems: 8
           items: {type: string, format: binary}
-          description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes.
+          description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes. Achievement posts require at least one photo; updates count retained photos.
         game_series:
           type: string
           description: Optional canonical game_series id.
@@ -150,6 +229,10 @@ components:
         id: {type: string}
         author: {type: string}
         author_name: {type: string, description: Public nickname or username.}
+        author_avatar_url: {type: string}
+        like_count: {type: integer, minimum: 0}
+        liked: {type: boolean}
+        comment_count: {type: integer, minimum: 0, description: Active comments and replies.}
         game_series: {type: string}
         photos: {type: array, items: {type: string}, maxItems: 8, description: Ordered stored filenames.}
         title: {type: string}
@@ -169,6 +252,51 @@ components:
             - {type: string, maxLength: 0}
         created: {type: string, format: date-time}
         updated: {type: string, format: date-time}
+    CommunityLike:
+      type: object
+      required: [like_count, liked]
+      properties:
+        like_count: {type: integer, minimum: 0}
+        liked: {type: boolean}
+    CommunityCommentInput:
+      type: object
+      required: [body]
+      properties:
+        post: {type: string, description: Required on creation.}
+        parent: {type: string, description: Top-level comment id for a reply.}
+        reply_to: {type: string, description: Active comment or reply in the same post.}
+        body: {type: string, maxLength: 2000, description: Text or at least one new/retained photo is required.}
+        photos: {type: array, maxItems: 3, items: {type: string, format: binary}, description: Multipart JPEG/PNG/WebP/GIF; at most 10 MiB each.}
+        keep_photos: {type: array, maxItems: 3, items: {type: string}, description: Update-only retained filenames; omitted preserves existing photos.}
+    CommunityComment:
+      allOf:
+        - {$ref: '#/components/schemas/CommunityLike'}
+        - type: object
+          properties:
+            id: {type: string}
+            post: {type: string}
+            parent: {type: string}
+            reply_to: {type: string}
+            reply_to_name: {type: string}
+            author: {type: string}
+            author_name: {type: string}
+            author_avatar_url: {type: string}
+            body: {type: string}
+            photos: {type: array, maxItems: 3, items: {type: string}}
+            deleted: {type: boolean}
+            created: {type: string, format: date-time}
+            editable_until: {type: string, format: date-time}
+            edited_at: {type: string, description: Empty until the body is edited.}
+            locale: {type: string, enum: [ko-KR, en-US, ja-JP]}
+            translated: {type: boolean}
+            translation_status: {type: string, enum: [pending, processing, ready, failed]}
+            reply_count: {type: integer, minimum: 0}
+    CommunityCommentsPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/CommunityComment'}}
+        next_cursor: {type: string, description: Opaque older-page cursor; empty when exhausted.}
     CommunityPostList:
       type: object
       required: [page, per_page, last_page, total, items]
@@ -1853,7 +1981,7 @@ components:
           type: integer
           minimum: 0
           maximum: 4
-          description: Heatmap intensity uses fixed logarithmic daily-count buckets: 0 for no activity, 1 for one activity, 2 for 2–3, 3 for 4–7, and 4 for 8 or more. It is independent of the maximum count in the requested range.
+          description: "Heatmap intensity uses fixed logarithmic daily-count buckets: 0 for no activity, 1 for one activity, 2 for 2–3, 3 for 4–7, and 4 for 8 or more. It is independent of the maximum count in the requested range."
         changelog_count:
           type: integer
         flag_count:
@@ -3185,6 +3313,159 @@ components:
         created: {type: string}
         updated: {type: string}
 paths:
+  /community/comments:
+    get:
+      tags: [Community]
+      summary: List root comments or replies with optional viewer personalization
+      description: Twenty items per page, newest first with an opaque older cursor. Deleted roots remain only while active replies exist. Deleted posts are inaccessible. Responses are private and no-store.
+      parameters:
+        - {name: post, in: query, required: true, schema: {type: string}}
+        - {name: parent, in: query, schema: {type: string}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: locale, in: query, schema: {type: string, enum: [ko-KR, en-US, ja-JP]}}
+      responses:
+        '200':
+          description: Comment page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityCommentsPage'}
+        '400': {description: Invalid parent, cursor or locale}
+        '404': {description: Post not found}
+  /community/comment:
+    get:
+      tags: [Community]
+      summary: Read an active comment or its original
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+        - {name: locale, in: query, schema: {type: string, enum: [ko-KR, en-US, ja-JP]}}
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityComment'}
+        '400': {description: Invalid input}
+        '404': {description: Comment or post not found}
+    post:
+      tags: [Community]
+      summary: Create a comment or one-level reply
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommunityCommentInput'}
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/CommunityCommentInput'}
+      responses:
+        '201':
+          description: Successful operation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityComment'}
+        '400': {description: Invalid input}
+        '404': {description: Comment or post not found}
+        '401': {description: Sign-in required}
+        '403': {description: Author-only operation or inactive account}
+    put:
+      tags: [Community]
+      summary: Edit own comment within five minutes
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommunityCommentInput'}
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/CommunityCommentInput'}
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityComment'}
+        '400': {description: Invalid input}
+        '404': {description: Comment or post not found}
+        '401': {description: Sign-in required}
+        '403': {description: Author-only operation or inactive account}
+        '409': {description: Five-minute edit window closed}
+    delete:
+      tags: [Community]
+      summary: Delete own comment at any time
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '204':
+          description: Successful operation
+        '400': {description: Invalid input}
+        '404': {description: Comment or post not found}
+        '401': {description: Sign-in required}
+        '403': {description: Author-only operation or inactive account}
+  /community/post/like:
+    put:
+      tags: [Community]
+      summary: Set a post like idempotently
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Authoritative current count and viewer state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityLike'}
+        '401': {description: Sign-in required}
+        '403': {description: Inactive account}
+        '404': {description: Target or parent post not active}
+    delete:
+      tags: [Community]
+      summary: Remove a post like idempotently
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Authoritative current count and viewer state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityLike'}
+        '401': {description: Sign-in required}
+        '403': {description: Inactive account}
+        '404': {description: Target or parent post not active}
+  /community/comment/like:
+    put:
+      tags: [Community]
+      summary: Set a comment like idempotently
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Authoritative current count and viewer state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityLike'}
+        '401': {description: Sign-in required}
+        '403': {description: Inactive account}
+        '404': {description: Target or parent post not active}
+    delete:
+      tags: [Community]
+      summary: Remove a comment like idempotently
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Authoritative current count and viewer state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityLike'}
+        '401': {description: Sign-in required}
+        '403': {description: Inactive account}
+        '404': {description: Target or parent post not active}
   /search:
     get:
       tags: [Search]
@@ -4167,6 +4448,30 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+    delete:
+      tags: [Community]
+      summary: Delete the author's post at any time
+      description: Retains a private tombstone, removes attached public files and cached translations, and excludes the post from detail, feeds, galleries, counts and translation jobs. Repeated deletion by the author returns 204.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '204':
+          description: Deleted, or already deleted by this author.
+        '400':
+          description: Missing id.
+        '401':
+          description: Authentication required.
+        '403':
+          description: Not the author, withdrawn, or banned.
+        '404':
+          description: Post not found.
+        '502':
+          description: Failed to delete post.
   /user:
     get:
       tags: [Users]
@@ -6993,7 +7298,7 @@ paths:
           description: Oldest reply id from the preceding page; replies are returned chronologically, 50 per page.
       responses:
         '200':
-          description: Original inquiry, attachment filenames, chronological items and older-page cursor. Private no-store.
+          description: Original inquiry, attachment filenames, chronological items and older-page cursor. The nullable conversationId identifies its canonical messaging inquiry after migration. Private no-store.
         '401': {description: Authentication required}
         '404': {description: Missing or inaccessible inquiry}
     post:
@@ -7056,6 +7361,7 @@ paths:
       description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. The durable arcade_setup notice remains visible to current active exact arcade_owner accounts regardless of saved inquiry/report modes; reading it never changes settings. Does not expose endpoints or subscription credentials.
       security: [{bearerAuth: []}]
       parameters:
+        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}, description: Announcement title/summary language and audience filter; other notification kinds are unaffected.}
         - {name: before, in: query, schema: {type: string}, description: Last notification id from the previous page.}
       responses:
         '200':
@@ -7073,14 +7379,15 @@ paths:
                       required: [id, kind, read, created, arcadeName, gameName, message, reaction, url]
                       properties:
                         id: {type: string}
-                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup]}
+                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement]}
                         read: {type: boolean}
                         created: {type: string}
                         arcadeName: {type: string}
                         gameName: {type: string}
+                        title: {type: string, description: Localized announcement title; omitted for other kinds.}
                         message: {type: string}
                         reaction: {type: string}
-                        url: {type: string, description: Server-generated relative deep link. arcade_setup opens /account/arcade-dashboard/setup.}
+                        url: {type: string, description: "Server-generated relative deep link. Announcements open /community/updates?announcement=id, feedback opens /updates/feedback?thread=id, and arcade_setup resolves current ownership to /arcade/id?setup=dashboard (legacy redirect fallback)."}
                   unread: {type: integer, minimum: 0}
                   next: {type: string, description: Empty at the end of the inbox.}
         '401': {description: Authentication required.}
@@ -8027,7 +8334,7 @@ paths:
     get:
       tags: [Arcades]
       summary: List active update campaigns
-      description: Returns at most 20 campaigns that are active at request time, newest start first. Target counts include pending and already-updated public/open targets.
+      description: Returns at most 20 campaigns that are active at request time, newest start first. Target counts include pending and already-updated public/open targets. A fresh database or no active campaigns returns an empty items array.
       responses:
         '200':
           description: Active campaign summaries.
@@ -8585,6 +8892,7 @@ paths:
         '403': {description: Inactive account.}
         '404': {description: Private, missing or withdrawn target profile.}
         '502': {description: Failed to load passport.}
+
   /user/arcade-inquiry-onboarding:
     get:
       tags: [Users, Arcade]
@@ -8653,3 +8961,326 @@ paths:
         '401': {description: Authentication required.}
         '403': {description: Not an assigned official owner or strict staff.}
         '404': {description: Arcade not found.}
+
+  /user/conversations:
+    get:
+      tags: ["Messaging"]
+      summary: "List bounded authorized conversation summaries"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}]
+    post:
+      tags: ["Messaging"]
+      summary: "Create or find an unordered user pair, or create an independent inquiry"
+      description: "DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries notify official responders; explicit musecat mentions additionally notify active platform staff. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
+      security: [{"bearerAuth": []}]
+      responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Existing or new DM, or idempotent inquiry replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingCreate"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "kind": {"type": "string", "enum": ["inquiry"]}, "inboxType": {"type": "string"}, "inboxId": {"type": "string"}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
+
+  /user/conversations/{id}:
+    get:
+      tags: ["Messaging"]
+      summary: "Get a conversation summary"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+
+  /user/conversations/{id}/messages:
+    get:
+      tags: ["Messaging"]
+      summary: "Read chronological history or sequence delta"
+      description: "Exactly one cursor direction. Without a cursor returns latest messages. before pages allow up to 100; after pages up to 200. Explicit afterSequence=0 starts from sequence one. Follow non-null nextBeforeSequence/nextAfterSequence until null. No durable SSE replay is implied."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagePage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "beforeSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "afterSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}]
+    post:
+      tags: ["Messaging"]
+      summary: "Append an idempotent message"
+      description: "Same clientMessageId and normalized text, ordered photo byte hashes, canonical mentions and acting identity returns original message with 200; changed content returns 409. Inquiry requester who also manages the inbox must explicitly choose actingAs. DM staff has no bypass. Multipart has text,clientMessageId,actingAs(JSON string),mentions(JSON array string),photos. Nonempty mentions are only supported for arcade inquiries. Ordinary arcade notifications target current official responders; musecat additionally targets platform staff. Inbox replies notify the requester as usual. Team notifications are unchanged. 3 photos at 15,000,000 bytes each. Sender limit 60 messages/minute, 30/conversation/minute, 12 photos/minute; replay does not consume a limit."
+      security: [{"bearerAuth": []}]
+      responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Idempotent replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingSend"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "actingAs": {"type": "string", "description": "JSON encoded MessagingIdentity."}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
+
+  /user/conversations/{id}/read:
+    put:
+      tags: ["Messaging"]
+      summary: "Advance this user's read cursor"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"conversationId": {"type": "string"}, "lastReadSequence": {"type": "integer", "minimum": 0}, "unreadCount": {"type": "integer", "minimum": 0}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"throughSequence": {"type": "integer", "minimum": 0}}, "required": ["throughSequence"]}}}}
+
+  /user/conversations/{id}/inquiry:
+    patch:
+      tags: ["Messaging"]
+      summary: "Change inquiry workflow status"
+      description: "Requester may set waiting/solved; current inbox responders may also set recognised. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"status": {"type": "string", "enum": ["waiting", "recognised", "solved"]}}, "required": ["status"]}}}}
+
+  /user/conversations/{id}/attachments/{messageId}/{file}:
+    get:
+      tags: ["Messaging"]
+      summary: "Read a protected conversation photo"
+      description: "Current conversation ACL and exact file/message ownership required. Existing legacy files are served from their unchanged storage reference only after verifying legacy inquiry mapping. No public file token or redirect."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Protected image; Cache-Control private, no-store.", "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "messageId", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "file", "in": "path", "required": true, "schema": {"type": "string"}}]
+
+  /user/messaging/preferences:
+    get:
+      tags: ["Messaging"]
+      summary: "Read DM receive preference"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"receive": {"type": "string", "enum": ["everyone", "nobody"]}}, "required": ["receive"]}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+    put:
+      tags: ["Messaging"]
+      summary: "Set DM receive preference"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"receive": {"type": "string", "enum": ["everyone", "nobody"]}}, "required": ["receive"]}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"receive": {"type": "string", "enum": ["everyone", "nobody"]}}, "required": ["receive"]}}}}
+
+  /user/messaging/blocks:
+    get:
+      tags: ["Messaging"]
+      summary: "List this user's blocked users"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/MessagingParty"}}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+
+  /user/messaging/blocks/{userId}:
+    put:
+      tags: ["Messaging"]
+      summary: "Block or unblock personal DM"
+      description: "Either side's block prevents new DM messages in both directions. Existing history stays accessible. Does not affect arcade/team inquiries; limit 100 directed blocks."
+      security: [{"bearerAuth": []}]
+      responses: {"204": {"description": "Success"}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "userId", "in": "path", "required": true, "schema": {"type": "string"}}]
+    delete:
+      tags: ["Messaging"]
+      summary: "Block or unblock personal DM"
+      description: "Either side's block prevents new DM messages in both directions. Existing history stays accessible. Does not affect arcade/team inquiries; limit 100 directed blocks."
+      security: [{"bearerAuth": []}]
+      responses: {"204": {"description": "Success"}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "userId", "in": "path", "required": true, "schema": {"type": "string"}}]
+
+  /user/messaging/recipients:
+    get:
+      tags: ["Messaging"]
+      summary: "Search public users for a personal DM"
+      description: "Authenticated bounded public profile projection, excludes self and withdrawn users. Does not disclose receive preference or block state."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingParty"}}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "q", "in": "query", "schema": {"type": "string", "minLength": 2, "maxLength": 100}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10}}]
+
+  /user/messages/{messageId}/report:
+    post:
+      tags: ["Messaging"]
+      summary: "Report an accessible message and preserve evidence"
+      description: "Only a user who can currently read the conversation may report. A repeated report returns its existing id with 200. Evidence is private and immutable; reporting grants no broader conversation access."
+      security: [{"bearerAuth": []}]
+      responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string"}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "messageId", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": 2000}}, "required": ["reason"]}}}}
+
+  /user/events:
+    get:
+      tags: ["Messaging"]
+      summary: "Subscribe to one authenticated shared event stream"
+      description: "SSE ready, conversation.changed {id,latestSequence,reason}, conversation.read {id,lastReadSequence}, notifications.changed, resync, session.expired. No private message payload. Auth/account and conversation ACL rechecked before delivery. 15s heartbeat, 25-minute connection lifetime, 4 streams/user and 1024/process, queue32. Slow consumers receive resync then close. Reconnect must fetch database snapshots/deltas; Last-Event-ID has no durable replay contract."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "private,no-store SSE with proxy buffering disabled.", "content": {"text/event-stream": {"schema": {"type": "string"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+
+  /moderation/messages/reports:
+    get:
+      tags: ["Messaging"]
+      summary: "List reported message snapshots"
+      description: "Current active developer/moderator only. Access is limited to reported evidence; it grants no private DM history access. Photos are private and no-store."
+      security: [{"bearerAuth": []}]
+      parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 50}}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingReport"}}, "nextCursor": {"type": "string", "nullable": true}}}}}}, "400": {"description": "Invalid cursor or limit."}, "401": {"description": "Authentication required."}, "403": {"description": "Current active staff access required."}, "404": {"description": "Report or reported photo not found."}}
+
+  /moderation/messages/reports/{id}:
+    get:
+      tags: ["Messaging"]
+      summary: "Read one reported message snapshot"
+      description: "Current active developer/moderator only. Access is limited to reported evidence; it grants no private DM history access. Photos are private and no-store."
+      security: [{"bearerAuth": []}]
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingReport"}}}}, "400": {"description": "Invalid cursor or limit."}, "401": {"description": "Authentication required."}, "403": {"description": "Current active staff access required."}, "404": {"description": "Report or reported photo not found."}}
+
+  /moderation/messages/reports/{id}/attachments/{file}:
+    get:
+      tags: ["Messaging"]
+      summary: "Read one photo included in a reported message snapshot"
+      description: "Current active developer/moderator only. Access is limited to reported evidence; it grants no private DM history access. Photos are private and no-store."
+      security: [{"bearerAuth": []}]
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "file", "in": "path", "required": true, "schema": {"type": "string"}}]
+      responses: {"200": {"description": "Success", "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}, "400": {"description": "Invalid cursor or limit."}, "401": {"description": "Authentication required."}, "403": {"description": "Current active staff access required."}, "404": {"description": "Report or reported photo not found."}}
+
+  /announcements:
+    get:
+      summary: List published announcement stories
+      description: Newest publication first, 20 items, private no-store. A cursor from a now-archived publication remains valid. Only releases targeting the requested locale are returned. Public metadata omits unselected draft variants; image bytes are fetched separately. Guests may read published content.
+      parameters:
+        - {name: before, in: query, schema: {type: string}}
+        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}}
+      responses:
+        '200': {description: Published stories., content: {application/json: {schema: {$ref: '#/components/schemas/AnnouncementPage'}}}}
+        '400': {description: Invalid cursor.}
+  /announcements/unseen:
+    get:
+      summary: Get the latest story targeting the current locale only if this account has not viewed it
+      description: Does not queue older unviewed stories after the latest matching release has been viewed. Viewing a story is independent of inbox read state and shared across selected languages.
+      parameters:
+        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}}
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Latest unseen story or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [announcement]
+                properties:
+                  announcement:
+                    oneOf: [{$ref: '#/components/schemas/Announcement'}, {type: 'null'}]
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+  /announcements/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      summary: Read an announcement story
+      parameters:
+        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}}
+      description: Published content is public only when its selected audience includes the requested locale; mismatches return 404 with no fallback. Draft and archived content is visible only to developer or moderator accounts. Private no-store.
+      responses:
+        '200': {description: Story metadata., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '404': {description: Missing or inaccessible story.}
+  /announcements/{id}/images/{filename}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+      - {name: filename, in: path, required: true, schema: {type: string}}
+    get:
+      summary: Read a story image through current publication visibility
+      description: Raw file REST access is protected. This route verifies current story visibility and image membership, including after archive or draft removal. Unselected locale images remain private to active staff even when other languages are published. Private no-store.
+      responses:
+        '200': {description: PNG, JPEG or WebP bytes.}
+        '404': {description: Missing or inaccessible image.}
+  /announcements/{id}/view:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Idempotently mark one published story viewed by the current account
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: View persisted; inbox read state unchanged.}
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+        '404': {description: Missing or unpublished story.}
+  /moderation/announcements:
+    get:
+      summary: List all announcement drafts, publications and archives
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: before, in: query, schema: {type: string}}
+      responses:
+        '200': {description: 'Newest-created first, 20 items.', content: {application/json: {schema: {$ref: '#/components/schemas/AnnouncementPage'}}}}
+        '400': {description: Invalid cursor.}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+    post:
+      summary: Create an announcement draft
+      description: No notification is created before publication. Maximum 12 actual PNG/JPEG/WebP images per locale, 5 MiB and 40 megapixels per image; total body 181 MiB. Images containing text are supplied separately for ko, en and ja; no translation is inferred.
+      security: [{bearerAuth: []}]
+      requestBody: &announcementMutationBody
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AnnouncementInput'}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [localizations]
+              properties:
+                localizations: {type: string, description: JSON encoding of AnnouncementInput.localizations. Complete replacement map; ordered slides specify retained fileName or upload:N and alt text.}
+                images_ko: {type: array, maxItems: 12, items: {type: string, format: binary}}
+                images_en: {type: array, maxItems: 12, items: {type: string, format: binary}}
+                images_ja: {type: array, maxItems: 12, items: {type: string, format: binary}}
+      responses:
+        '201': {description: Draft saved., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '400': {description: Invalid metadata, foreign file reference, or invalid image.}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+        '413': {description: Image or total request exceeds byte limit.}
+  /moderation/announcements/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    put:
+      summary: Replace draft localized content and ordered image references
+      description: Omitting references removes images. Retained files need no re-upload. Published and archived content is immutable.
+      security: [{bearerAuth: []}]
+      requestBody: *announcementMutationBody
+      responses:
+        '200': {description: Draft saved., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '400': {description: Invalid input.}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+        '404': {description: Missing story.}
+        '409': {description: Story is no longer a draft.}
+        '413': {description: Image or total request exceeds byte limit.}
+  /moderation/announcements/{id}/publish:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Publish selected language variants once
+      description: Requires a nonempty unique supported locale selection. Only selected variants need titles and 1..12 images each. Image alt text may be empty. Content and selected locales become immutable. A durable bounded worker creates one logical inbox event per existing non-withdrawn account; inbox reads filter by locale. Only already registered devices with selected saved locales get deliveries, and delivery rechecks current device locale. Repeating the same selected locale set is idempotent, including after read/view. Device pushes remain at-least-once with a stable notification tag.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [locales]
+              properties:
+                locales:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  uniqueItems: true
+                  items: {type: string, enum: [ko, en, ja]}
+      responses:
+        '200': {description: Published story., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '400': {description: Invalid selection or one or more selected variants are incomplete.}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+        '404': {description: Missing story.}
+        '409': {description: Archived story cannot be republished or selected locales differ from the original publication.}
+  /moderation/announcements/{id}/archive:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Archive a draft or publication without deleting event/view identities
+      description: Idempotent terminal state. Stops unfinished fan-out and prevents delivery of remaining queued push receipts; hides public metadata, images and inbox entries. Previously displayed OS notifications cannot be recalled.
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Archived story., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+        '404': {description: Missing story.}
+
+x-musecat-joint-connection:
+  status: implemented
+  public-endpoints-enabled: true
+  description: Active only for operator-approved registrations with both OAuth credentials and both server keys. See /developer/integration-spec.md.

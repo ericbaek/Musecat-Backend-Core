@@ -406,6 +406,21 @@ status correction does not award publication/edit XP or create a content revisio
 or arcade changelog row; public-conversion requirements apply to the creator's
 publication workflow, not this administrative correction.
 
+## Delegated developer requests
+
+The `/developer/v1/arcade/flag`, `/developer/v1/arcade/flag/reaction` and
+`/developer/v1/campaign/check` endpoints apply an OAuth scope boundary and then call the existing
+domain handlers with the verified Musecat user. They preserve the same transaction, XP and history
+behavior. Delegation itself creates no arcade changelog row. Campaign responses retain the existing
+game-change rows and GPS/eligibility rules; report/reaction activity remains outside the changelog
+category set. The OAuth client is never substituted for `by` or supplied as a caller-selected user ID.
+
+The `account:access` transport at `/developer/v1/account` reuses the original general-user mutation
+handlers, including information edits, photo upload/application and rollback. The same atomic aggregate,
+immutable changelog, XP and cache-invalidation rules apply; no separate partner history or XP path exists.
+Management operations remain excluded even for connected staff accounts. Request-attempt logs include
+the verified user and app-specific delegation subject, but do not replace committed changelog history.
+
 ## Custom game prices
 
 `custom_v1` uses the existing named numeric `PriceItem[]` contract, including
