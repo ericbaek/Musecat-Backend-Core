@@ -39,11 +39,6 @@ func ValidatePublished(record *core.Record, locales []string) error {
 		if !exists || strings.TrimSpace(content.Title) == "" || len(content.Slides) == 0 || len(content.Slides) > MaxSlides {
 			return fmt.Errorf("%s requires a title and 1..%d slides", locale, MaxSlides)
 		}
-		for _, slide := range content.Slides {
-			if strings.TrimSpace(slide.Alt) == "" {
-				return fmt.Errorf("%s slide requires alt text", locale)
-			}
-		}
 	}
 	return nil
 }

@@ -1444,7 +1444,7 @@ multi-replica broker is deliberately outside the current single-container deploy
 Korean, English and Japanese image stories. Staff (`developer|moderator`) use only
 custom `/moderation/announcements` APIs. Drafts may be incomplete; publication
 accepts an explicit nonempty subset of `ko|en|ja` and requires a title, 1–12 valid
-PNG/JPEG/WebP images and alt text only in those selected locales. The selected
+PNG/JPEG/WebP images only in those selected locales. Image alt text is optional. The selected
 locale set becomes immutable alongside the published content. Unselected variants
 remain private to staff and never appear in public metadata or image reads.
 Image text is never assumed to translate automatically. JSON metadata preserves

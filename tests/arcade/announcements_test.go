@@ -236,6 +236,23 @@ func TestAnnouncementFanoutBoundedResumableAndAudienceCutoff(t *testing.T) {
 	}
 }
 
+func TestAnnouncementPublicationWithoutImageDescriptions(t *testing.T) {
+	app := newArcadeTestApp(t)
+	staffToken, _ := createAuthUserWithTags(t, app, []string{"moderator"})
+	item := uploadAnnouncement(t, app, staffToken, []string{"ko"})
+	id := item["id"].(string)
+	slides := item["localizations"].(map[string]any)["ko"].(map[string]any)["slides"].([]any)
+	input := map[string]any{"localizations": map[string]any{"ko": map[string]any{
+		"title": "제목", "summary": "", "slides": []map[string]string{
+			{"image": slides[0].(map[string]any)["fileName"].(string), "alt": ""},
+			{"image": slides[1].(map[string]any)["fileName"].(string), "alt": "   "},
+		},
+	}}}
+	announcementCall(t, app, "PUT", "/moderation/announcements/"+id, staffToken, input, 200)
+	announcementCall(t, app, "POST", "/moderation/announcements/"+id+"/publish", staffToken, map[string]any{"locales": []string{"ko"}}, 200)
+	announcementCall(t, app, "GET", "/announcements/"+id+"?locale=ko", "", nil, 200)
+}
+
 func TestAnnouncementSelectedLocalesConstrainPublicContentInboxAndDevices(t *testing.T) {
 	app := newArcadeTestApp(t)
 	staffToken, _ := createAuthUserWithTags(t, app, []string{"moderator"})

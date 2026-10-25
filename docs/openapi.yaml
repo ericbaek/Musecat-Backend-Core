@@ -16616,7 +16616,7 @@ paths:
       - {name: id, in: path, required: true, schema: {type: string}}
     post:
       summary: Publish selected language variants once
-      description: Requires a nonempty unique supported locale selection. Only selected variants need titles, 1..12 images each, and nonempty image alt text. Content and selected locales become immutable. A durable bounded worker creates one logical inbox event per existing non-withdrawn account; inbox reads filter by locale. Only already registered devices with selected saved locales get deliveries, and delivery rechecks current device locale. Repeating the same selected locale set is idempotent, including after read/view. Device pushes remain at-least-once with a stable notification tag.
+      description: Requires a nonempty unique supported locale selection. Only selected variants need titles and 1..12 images each. Image alt text may be empty. Content and selected locales become immutable. A durable bounded worker creates one logical inbox event per existing non-withdrawn account; inbox reads filter by locale. Only already registered devices with selected saved locales get deliveries, and delivery rechecks current device locale. Repeating the same selected locale set is idempotent, including after read/view. Device pushes remain at-least-once with a stable notification tag.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
