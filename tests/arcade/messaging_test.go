@@ -29,7 +29,17 @@ func TestMessagingDMPrivacyIdempotencyAndRead(t *testing.T) {
 		}
 		return out
 	}
-	call("POST", "/user/conversations", fmt.Sprintf(`{"kind":"dm","peerUserId":%q}`, b.Id), aToken, 403)
+	if got := call("GET", "/user/messaging/preferences", "", bToken, 200); got["receive"] != "everyone" {
+		t.Fatal("missing preference must accept messages", got)
+	}
+	initial := call("POST", "/user/conversations", fmt.Sprintf(`{"kind":"dm","peerUserId":%q}`, b.Id), aToken, 200)
+	if initial["canSend"] != true {
+		t.Fatal("default recipient cannot receive", initial)
+	}
+	defaultList := call("GET", "/user/conversations", "", aToken, 200)
+	if defaultList["items"].([]any)[0].(map[string]any)["canSend"] != true {
+		t.Fatal("list policy disagrees with default receipt", defaultList)
+	}
 	call("PUT", "/user/messaging/preferences", `{"receive":"everyone"}`, bToken, 200)
 	call("PUT", "/user/messaging/preferences", `{"receive":"everyone"}`, aToken, 200)
 	c := call("POST", "/user/conversations", fmt.Sprintf(`{"kind":"dm","peerUserId":%q}`, b.Id), aToken, 200)

@@ -313,7 +313,7 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 		ID    string `db:"id"`
 		Email string `db:"email"`
 	}
-	err = app.DB().NewQuery(`SELECT u.id,u.email FROM user u JOIN messaging_preference p ON p.user=u.id AND p.receive='everyone' WHERE u.id IN (SELECT value FROM json_each({:peers})) AND u.withdrawn=false AND NOT EXISTS(SELECT 1 FROM messaging_block b WHERE (b.user={:u} AND b.blocked_user=u.id) OR (b.user=u.id AND b.blocked_user={:u})) AND NOT EXISTS(SELECT 1 FROM user_ban b WHERE b.id=u.id AND (b.until='' OR b.until>strftime('%Y-%m-%d %H:%M:%fZ','now')))`).Bind(dbx.Params{"peers": string(peerRaw), "u": u.Id}).All(&eligible)
+	err = app.DB().NewQuery(`SELECT u.id,u.email FROM user u LEFT JOIN messaging_preference p ON p.user=u.id WHERE (p.id IS NULL OR p.receive='everyone') AND u.id IN (SELECT value FROM json_each({:peers})) AND u.withdrawn=false AND NOT EXISTS(SELECT 1 FROM messaging_block b WHERE (b.user={:u} AND b.blocked_user=u.id) OR (b.user=u.id AND b.blocked_user={:u})) AND NOT EXISTS(SELECT 1 FROM user_ban b WHERE b.id=u.id AND (b.until='' OR b.until>strftime('%Y-%m-%d %H:%M:%fZ','now')))`).Bind(dbx.Params{"peers": string(peerRaw), "u": u.Id}).All(&eligible)
 	if err != nil {
 		return nil, err
 	}

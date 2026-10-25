@@ -2,7 +2,9 @@ package messaging
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
+	"errors"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
@@ -72,7 +74,7 @@ func Access(app core.App, userID, id string) (*core.Record, *core.Record, error)
 }
 func Receive(app core.App, userID string) string {
 	row, err := app.FindFirstRecordByFilter(Preferences, "user={:u}", dbx.Params{"u": userID})
-	if err == nil && row.GetString("receive") == "everyone" {
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && row.GetString("receive") == "everyone") {
 		return "everyone"
 	}
 	return "nobody"

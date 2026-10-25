@@ -1373,7 +1373,7 @@ responders can choose waiting/recognised/solved. `canManageStatus` remains a
 compatibility field derived from the nonempty transition list. DM sender identities
 are empty when current receive/block/account policy prevents sending.
 
-Missing DM receive preference means nobody. Each new DM/send checks receiver opt-in,
+Missing DM receive preference means everyone. Explicit opt-out remains nobody. Each new DM/send checks receiver preference,
 both directed blocks, active account and current roles/ownership. Block/opt-out do
 not delete old history. Conversation creation is limited to 10/minute for its
 recorded `created_by` initiator; incoming conversations never consume that quota.
