@@ -365,7 +365,9 @@ including the authenticated user's own entry.
 users for one public arcade. `total` (also the default) ranks by visit XP plus
 edit XP, `edit` by edit XP only, and `passport` by completed visit-verification
 XP only. Edit XP comes from positive `xp:arcade-edit:<part>:<arcadeId>` grants for all supported
-parts (`basic`, `game`, `hour`, `sns`, `gtk`, `photo`, and `memo`). Public closed
+parts (`basic`, `game`, `hour`, `sns`, `gtk`, `photo`, and `memo`), plus positive
+`xp:arcade-photo:<arcadeId>:<atomId>` grants. Existing per-photo grants count
+without rewriting the ledger. Public closed
 arcades remain eligible. Private arcades return `404`; visit XP from users with
 `visit_visibility=private` is omitted, while their eligible arcade edit XP is
 still ranked. Only positive edit grants count; corrections do not reduce a

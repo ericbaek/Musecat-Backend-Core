@@ -66,13 +66,16 @@ func loadArcadeContributionRankings(app core.App, ctx context.Context, arcadeID,
 		"arcade": arcadeID,
 		"metric": metric,
 		"limit":  arcadeContributionRankingLimit,
+		"photo":  "xp:arcade-photo:" + arcadeID + ":%",
 	}
-	editPredicates := make([]string, 0, len(arcadeEditRankingParts))
+	editPredicates := make([]string, 0, len(arcadeEditRankingParts)+1)
 	for index, part := range arcadeEditRankingParts {
 		key := fmt.Sprintf("edit%d", index)
 		params[key] = "xp:arcade-edit:" + part + ":" + arcadeID + "%"
 		editPredicates = append(editPredicates, "l.kind LIKE {:"+key+"}")
 	}
+
+	editPredicates = append(editPredicates, "l.kind LIKE {:photo}")
 
 	userTags := "'[]'"
 	if collection, err := app.FindCollectionByNameOrId("user"); err == nil && collection.Fields.GetByName("tags") != nil {

@@ -174,3 +174,51 @@ func TestArcadeContributionRanking_HidesPrivateArcades(t *testing.T) {
 		t.Fatalf("expected private arcade to return 404, got %d", res.StatusCode)
 	}
 }
+
+func TestArcadeContributionRanking_IncludesPhotoXP(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	arcadeID, _ := seedPublicArcade(t, app, user.Id, arcadeSeed{
+		Name: "Photo Ranking Arcade", Address: "3 Ranking St",
+		Location: location{Lat: 37.5665, Lon: 126.978},
+	})
+	now := time.Now().UTC()
+	seedArcadeVisit(t, app, user.Id, arcadeID, now)
+	setArcadeVisitGainedExp(t, app, user.Id, arcadeID, now, 5)
+	seedSupporterLedgerEntry(t, app, user.Id, userhandler.ArcadeEditKind(arcadeID, "photo"), 0, 2, now)
+	seedSupporterLedgerEntry(t, app, user.Id, "xp:arcade-photo:"+arcadeID+":photo1", 2, 4, now)
+	seedSupporterLedgerEntry(t, app, user.Id, "xp:arcade-photo:"+arcadeID+":photo2", 4, 8, now)
+	seedSupporterLedgerEntry(t, app, user.Id, "xp:arcade-photo:"+arcadeID+":correction", 8, 6, now)
+	seedSupporterLedgerEntry(t, app, user.Id, "xp:arcade-photo:"+arcadeID+"other:photo3", 6, 26, now)
+
+	for _, tc := range []struct {
+		metric string
+		score  int64
+	}{
+		{"total", 13},
+		{"edit", 8},
+		{"passport", 5},
+	} {
+		t.Run(tc.metric, func(t *testing.T) {
+			res := executeJSONRequest(t, app, http.MethodGet, "/arcade/ranking?arcade="+arcadeID+"&metric="+tc.metric, "", nil)
+			defer res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200, got %d", res.StatusCode)
+			}
+			var payload struct {
+				Entries []struct {
+					Score   int64 `json:"score"`
+					Profile struct {
+						ID string `json:"id"`
+					} `json:"profile"`
+				} `json:"entries"`
+			}
+			if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if len(payload.Entries) != 1 || payload.Entries[0].Profile.ID != user.Id || payload.Entries[0].Score != tc.score {
+				t.Fatalf("expected user %s with score %d, got %#v", user.Id, tc.score, payload.Entries)
+			}
+		})
+	}
+}
