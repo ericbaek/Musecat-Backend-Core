@@ -78,6 +78,11 @@ func parseSend(re *core.RequestEvent) (messaging.SendInput, error) {
 			return in, err
 		}
 	}
+	if v := re.Request.FormValue("mentions"); v != "" {
+		if err := json.Unmarshal([]byte(v), &in.Mentions); err != nil {
+			return in, err
+		}
+	}
 	files, err := re.FindUploadedFiles("photos")
 	if errors.Is(err, http.ErrMissingFile) {
 		err = nil

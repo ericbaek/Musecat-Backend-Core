@@ -110,22 +110,38 @@ func actor(app core.App, u, c *core.Record, requested *Identity) (Identity, erro
 	if err != nil {
 		return own, err
 	}
-	inbox := Identity{q.GetString("inbox_type"), q.GetString("inbox_id")}
-	requester := q.GetString("requester") == u.Id
-	responder := Responder(app, u, q)
+	permissions := inquiryPolicy(u, q, Responder(app, u, q))
 	if requested == nil {
-		if requester && responder {
+		if len(permissions.identities) > 1 {
 			return own, apis.NewBadRequestError("Choose the sender identity.", nil)
 		}
-		if requester {
-			return own, nil
-		}
-		if responder {
-			return inbox, nil
+		if len(permissions.identities) == 1 {
+			return permissions.identities[0], nil
 		}
 	}
-	if requested != nil && ((requester && *requested == own) || (responder && *requested == inbox)) {
-		return *requested, nil
+	for _, identity := range permissions.identities {
+		if requested != nil && *requested == identity {
+			return identity, nil
+		}
 	}
 	return own, apis.NewForbiddenError("Invalid sender identity.", nil)
+}
+
+// Shared by summaries and mutation validation; callers resolve current access first.
+type inquiryPermissions struct {
+	identities []Identity
+	statuses   []string
+}
+
+func inquiryPolicy(u, q *core.Record, responder bool) inquiryPermissions {
+	p := inquiryPermissions{identities: []Identity{}, statuses: []string{}}
+	if q.GetString("requester") == u.Id {
+		p.identities = append(p.identities, Identity{"user", u.Id})
+		p.statuses = []string{"waiting", "solved"}
+	}
+	if responder {
+		p.identities = append(p.identities, Identity{q.GetString("inbox_type"), q.GetString("inbox_id")})
+		p.statuses = []string{"waiting", "recognised", "solved"}
+	}
+	return p
 }

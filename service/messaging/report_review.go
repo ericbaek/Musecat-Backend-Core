@@ -46,6 +46,7 @@ func reviewDTO(r *core.Record) (MessageReport, error) {
 	if err != nil {
 		return MessageReport{}, err
 	}
+	evidence.Message.Mentions = append([]string{}, evidence.Message.Mentions...)
 	for i := range evidence.Message.Photos {
 		evidence.Message.Photos[i].URL = "/moderation/messages/reports/" + r.Id + "/attachments/" + url.PathEscape(evidence.Message.Photos[i].Name)
 	}

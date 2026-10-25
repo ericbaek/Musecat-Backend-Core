@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/arcadereport"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
@@ -103,7 +104,7 @@ func messageDTO(app core.App, r *core.Record, parties map[string]Party) Message 
 	for _, f := range names {
 		photos = append(photos, Attachment{Name: f, URL: "/user/conversations/" + r.GetString("conversation") + "/attachments/" + r.Id + "/" + url.PathEscape(f)})
 	}
-	return Message{ID: r.Id, ConversationID: r.GetString("conversation"), Sequence: r.GetInt("sequence"), SenderUserID: sender.ID, Sender: sender, ActingAs: acting, ClientMessageID: r.GetString("client_message_id"), Text: r.GetString("text"), Photos: photos, CreatedAt: r.GetString("created")}
+	return Message{ID: r.Id, ConversationID: r.GetString("conversation"), Sequence: r.GetInt("sequence"), SenderUserID: sender.ID, Sender: sender, ActingAs: acting, ClientMessageID: r.GetString("client_message_id"), Text: r.GetString("text"), Mentions: append([]string{}, r.GetStringSlice("mentions")...), Photos: photos, CreatedAt: r.GetString("created")}
 }
 func LegacyConversation(app core.App, legacy string) (string, error) {
 	q, err := app.FindFirstRecordByFilter(Inquiries, "legacy_feedback_id={:id}", dbx.Params{"id": legacy})
@@ -294,7 +295,7 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 		ID    string `db:"id"`
 		Count int    `db:"count"`
 	}
-	err = app.DB().NewQuery(`SELECT m.conversation id,count(*) count FROM messaging_message m JOIN messaging_conversation c ON c.id=m.conversation LEFT JOIN messaging_inquiry i ON i.conversation=c.id LEFT JOIN messaging_read r ON r.conversation=c.id AND r.user={:u} WHERE c.id IN (SELECT value FROM json_each({:ids})) AND m.sequence>COALESCE(r.last_read_sequence,0) AND ((c.kind='dm' AND m.sender_user!={:u}) OR (c.kind='inquiry' AND ((i.requester={:u} AND m.acting_type!='user') OR (i.requester!={:u} AND m.acting_type='user')))) GROUP BY m.conversation`).Bind(params).All(&counts)
+	err = app.DB().NewQuery(`SELECT m.conversation id,count(*) count FROM messaging_message m JOIN messaging_conversation c ON c.id=m.conversation LEFT JOIN messaging_inquiry i ON i.conversation=c.id LEFT JOIN messaging_read r ON r.conversation=c.id AND r.user={:u} WHERE c.id IN (SELECT value FROM json_each({:ids})) AND m.sequence>COALESCE(r.last_read_sequence,0) AND m.sender_user!={:u} AND ((c.kind='dm' AND m.sender_user!={:u}) OR (c.kind='inquiry' AND ((i.requester={:u} AND m.acting_type!='user') OR (i.requester!={:u} AND m.acting_type='user')))) GROUP BY m.conversation`).Bind(params).All(&counts)
 	if err != nil {
 		return nil, err
 	}
@@ -341,9 +342,26 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 		can[p.ID] = !blockedHashes[userHash[p.ID]]
 	}
 
+	// Resolve arcade existence once for official-owner policy, including dual-role requesters.
+	arcadeIDs := []string{}
+	for _, q := range qs {
+		if q.GetString("inbox_type") == "arcade" {
+			arcadeIDs = append(arcadeIDs, q.GetString("inbox_id"))
+		}
+	}
+	arcades := map[string]*core.Record{}
+	if len(arcadeIDs) > 0 {
+		current, e := app.FindRecordsByIds("arcade", arcadeIDs)
+		if e != nil {
+			return nil, e
+		}
+		for _, a := range current {
+			arcades[a.Id] = a
+		}
+	}
 	out := []Summary{}
 	for _, c := range rows {
-		s := Summary{ID: c.Id, Kind: c.GetString("kind"), LatestSequence: c.GetInt("last_sequence"), CreatedAt: c.GetString("created"), UnreadCount: unread[c.Id], LastReadSequence: reads[c.Id]}
+		s := Summary{ID: c.Id, Kind: c.GetString("kind"), LatestSequence: c.GetInt("last_sequence"), CreatedAt: c.GetString("created"), UnreadCount: unread[c.Id], LastReadSequence: reads[c.Id], AllowedSenderIdentities: []Identity{}, AllowedStatusTransitions: []string{}}
 		if at := c.GetString("last_message_at"); at != "" {
 			s.LastMessageAt = ptr(at)
 		}
@@ -355,6 +373,9 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 			peer := peerBy[c.Id]
 			s.Counterpart = parties["user:"+peer]
 			s.CanSend = can[peer]
+			if s.CanSend {
+				s.AllowedSenderIdentities = []Identity{{"user", u.Id}}
+			}
 		} else {
 			q := cases[c.Id]
 			if q == nil {
@@ -370,8 +391,11 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 			if id := q.GetString("legacy_feedback_id"); id != "" {
 				s.LegacyFeedbackID = ptr(id)
 			}
-			s.CanSend = true
-			s.CanManageStatus = supportfeedback.IsStaff(u) || (q.GetString("inbox_type") == "arcade" && (slices.Contains(u.GetStringSlice("tags"), "arcade_owner") || slices.Contains(u.GetStringSlice("tag"), "arcade_owner")) && slices.Contains(u.GetStringSlice("owns"), q.GetString("inbox_id")))
+			permissions := inquiryPolicy(u, q, supportfeedback.IsStaff(u) || (q.GetString("inbox_type") == "arcade" && arcadereport.CanManage(u, arcades[q.GetString("inbox_id")])))
+			s.AllowedSenderIdentities = permissions.identities
+			s.AllowedStatusTransitions = permissions.statuses
+			s.CanSend = len(permissions.identities) > 0
+			s.CanManageStatus = len(permissions.statuses) > 0
 		}
 		out = append(out, s)
 	}

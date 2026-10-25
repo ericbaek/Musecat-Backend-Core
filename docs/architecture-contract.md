@@ -1243,7 +1243,7 @@ Push is an explicit per-device browser opt-in; the in-app inbox is always enable
 
 `support_feedback` preserves the original inquiry and photos. `support_feedback_message` stores immutable, chronological replies. `/user/feedback/thread` GET/POST/PATCH is restricted to the authenticated active inquiry author, current official account of the scoped arcade, or strict support staff (developer/moderator). Inaccessible ids return 404. The staff label and author are always server-derived. Replies contain up to 4000 characters and/or up to three images (15,000,000 bytes each; content-sniffed image validation matching initial inquiry uploads), and paged reads return the newest 50 in chronological order, with a private cursor for older messages.
 
-Reply, inquiry status and `feedback_reply` notification/queue writes share one transaction. Staff replies notify the inquiry author; user replies notify current strict staff, excluding the sender and withdrawn accounts. User follow-up returns status to waiting; staff reply changes it to recognised. Original guest submissions remain supported, but guests have no authenticated conversation or inbox. Existing status review remains available. Feedback notifications recheck ownership/strict staff permissions when listed or delivered; revoking staff access hides them. Arcade/flag notification relations are optional so private inquiries do not fabricate arcade references. Push uses generic copy without private inquiry text. Raw reply collection API rules remain locked.
+Reply, inquiry status and `feedback_reply` notification/queue writes share one transaction. Staff replies notify the inquiry author; ordinary MUSECAT inquiry replies notify current strict staff. Arcade inquiry requester messages notify current official responders, with canonical explicit mentions additionally notifying staff; legacy/guest messages have no mention metadata. Senders and restricted accounts do not receive notifications. User follow-up returns status to waiting; staff reply changes it to recognised. Original guest submissions remain supported, but guests have no authenticated conversation or inbox. Existing status review remains available. Feedback notifications recheck ownership/strict staff permissions when listed or delivered; revoking staff access hides them. Arcade/flag notification relations are optional so private inquiries do not fabricate arcade references. Push uses generic copy without private inquiry text. Raw reply collection API rules remain locked.
 
 ### Arcade-scoped inquiries and push locale
 
@@ -1365,6 +1365,11 @@ requester plus arcade or `team:musecat` inbox. Strict developer/moderator staff 
 current official owners may access shared inquiries. Historical responders are not
 permanent participants. Actual sender user and acting party are separately stored;
 when a requester is also a responder they explicitly choose their sending identity.
+Summaries expose `allowedSenderIdentities` and `allowedStatusTransitions` from the
+same inquiry policy used by writes. Requesters can choose waiting/solved; current
+responders can choose waiting/recognised/solved. `canManageStatus` remains a
+compatibility field derived from the nonempty transition list. DM sender identities
+are empty when current receive/block/account policy prevents sending.
 
 Missing DM receive preference means nobody. Each new DM/send checks receiver opt-in,
 both directed blocks, active account and current roles/ownership. Block/opt-out do
@@ -1380,14 +1385,19 @@ idempotent response remains allowed after opt-out; it creates no new message.
 Short transactions allocate a per-conversation sequence and persist the message,
 latest pointer, inquiry status and recipient notification outbox together. Read cursors
 are individual, monotonic and bounded by the latest committed sequence. Unread counts
-exclude the reader's party, including other staff acting for the same inbox. Status
+exclude the reader's actual sender user and their party, including other staff acting for the same inbox. Status
 changes do not reorder conversations. Latest summaries batch load parties/profiles,
 messages, preferences, blocks and reads; no conversation-by-conversation HTTP or SQL
 fanout is needed. Message text is stored once, on messaging_message.
 
 Idempotency is unique per conversation/sender/clientMessageId. Payload comparison
-uses normalized text, ordered photo byte digests and the resolved acting identity;
-a different payload returns 409. Accepted photo formats are JPEG/PNG/WebP/GIF with
+uses normalized text, ordered photo byte digests, canonical mentions and the resolved acting identity;
+a different payload returns 409. Messages without mentions retain the original payload
+hash encoding, including imported/replayed messages. `mentions` is a bounded JSON
+field (128 bytes); API inputs accept at most 16 entries, only `musecat`, canonicalized
+to `[]` or `["musecat"]`. Nonempty mentions are rejected for DMs and team inquiries.
+JSON and multipart initial/reply messages share validation; multipart `mentions` is a
+JSON array string. Plain text never creates mention metadata. Accepted photo formats are JPEG/PNG/WebP/GIF with
 three files of at most 15,000,000 bytes each. Photos are protected, and custom reads
 revalidate conversation ownership and exact message/file membership. Existing legacy
 storage remains in place and is read only through the authorized mapping adapter.
@@ -1402,6 +1412,20 @@ synthetic users, never manufactures notifications, and initializes requester rea
 the imported last sequence while preserving existing notification unread flags.
 Legacy staff/official role snapshots come only from original flags; display names
 copied during migration are current snapshots, not claimed historical identities.
+
+Arcade requester messages notify current official responders by default. Platform
+staff receive arcade notifications only with an explicit `musecat` mention; a staff
+account that also qualifies as the current official owner retains ordinary owner
+notifications. Inbox replies still notify the requester; an explicit mention also
+adds active staff, excluding the sender. Team inquiries retain their existing staff
+notification policy. Recipient accounts and bans are batch loaded, and at most 20
+devices per recipient are selected in one bounded query. Notification/delivery rows
+remain atomic with the message and use the existing durable delivery worker.
+Queued messages recheck the same policy through `NotificationDeliverable`; existing
+inbox rows retain access-only visibility. Legacy arcade/guest feedback has no mention
+metadata and likewise notifies official responders, with
+`FeedbackNotificationDeliverable` suppressing old queued staff-only pushes.
+Notification policy does not narrow conversation access or SSE audiences.
 
 The single-process SSE hub publishes invalidations after commit only. Conversation
 audiences are resolved once per change and only their connected users are enqueued;

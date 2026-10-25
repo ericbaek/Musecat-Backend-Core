@@ -35,6 +35,19 @@ func existingRetry(app core.App, c, user, key string) (*core.Record, error) {
 }
 func inputHash(in *SendInput) (string, error) {
 	in.Text = strings.TrimSpace(in.Text)
+	if len(in.Mentions) > 16 {
+		return "", apis.NewBadRequestError("Too many mentions.", nil)
+	}
+	for _, mention := range in.Mentions {
+		if mention != "musecat" {
+			return "", apis.NewBadRequestError("Invalid mention.", nil)
+		}
+	}
+	if len(in.Mentions) > 0 {
+		in.Mentions = []string{"musecat"}
+	} else {
+		in.Mentions = []string{}
+	}
 	maxText := 4000
 	if in.LegacyOriginal {
 		maxText = 13000
@@ -80,6 +93,14 @@ func inputHash(in *SendInput) (string, error) {
 		Text   string
 		Photos []string
 	}{in.Text, hashes})
+	// Keep the original payload encoding for retries of messages without mentions.
+	if len(in.Mentions) > 0 {
+		raw, _ = json.Marshal(struct {
+			Text     string
+			Photos   []string
+			Mentions []string
+		}{in.Text, hashes, in.Mentions})
+	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
 }
@@ -116,6 +137,9 @@ func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool,
 	var cid string
 	if in.Kind != "dm" && in.Kind != "inquiry" {
 		return Summary{}, false, apis.NewBadRequestError("Invalid conversation kind.", nil)
+	}
+	if err := validateMentions(in.Kind, in.Inbox.Type, in.InitialMessage.Mentions); err != nil {
+		return Summary{}, false, err
 	}
 	hash := ""
 	var err error
@@ -227,6 +251,17 @@ func Send(app core.App, user, cid string, in SendInput) (Message, bool, error) {
 		if err != nil {
 			return err
 		}
+		inboxType := ""
+		if c.GetString("kind") == "inquiry" {
+			q, e := inquiry(tx, cid)
+			if e != nil {
+				return e
+			}
+			inboxType = q.GetString("inbox_type")
+		}
+		if err := validateMentions(c.GetString("kind"), inboxType, in.Mentions); err != nil {
+			return err
+		}
 		// A committed retry is readable even after receive/block policy changes.
 		if prior, e := existingRetry(tx, cid, user, in.ClientMessageID); e == nil {
 			if prior.GetString("payload_hash") != hash || (in.ActingAs != nil && (prior.GetString("acting_type") != in.ActingAs.Type || prior.GetString("acting_id") != in.ActingAs.ID)) {
@@ -277,7 +312,7 @@ func saveMessage(tx core.App, u, c *core.Record, in SendInput, acting Identity, 
 		}
 	}
 	seq := c.GetInt("last_sequence") + 1
-	m, err := record(tx, Messages, map[string]any{"conversation": c.Id, "sequence": seq, "sender_user": u.Id, "acting_type": acting.Type, "acting_id": acting.ID, "sender_name": sender.Name, "sender_avatar": sender.AvatarURL, "sender_roles": roles, "client_message_id": in.ClientMessageID, "payload_hash": hash, "text": in.Text, "photos": in.Photos})
+	m, err := record(tx, Messages, map[string]any{"conversation": c.Id, "sequence": seq, "sender_user": u.Id, "acting_type": acting.Type, "acting_id": acting.ID, "sender_name": sender.Name, "sender_avatar": sender.AvatarURL, "sender_roles": roles, "client_message_id": in.ClientMessageID, "payload_hash": hash, "text": in.Text, "mentions": in.Mentions, "photos": in.Photos})
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +389,7 @@ func SetStatus(app core.App, user, id, status string) (Summary, error) {
 		if err != nil {
 			return err
 		}
-		if !slices.Contains([]string{"waiting", "recognised", "solved"}, status) || (status == "recognised" && !Responder(tx, u, q)) {
+		if !slices.Contains(inquiryPolicy(u, q, Responder(tx, u, q)).statuses, status) {
 			return apis.NewBadRequestError("Invalid inquiry status.", nil)
 		}
 		q.Set("status", status)
@@ -463,4 +498,11 @@ func Report(app core.App, user, id, reason string) (string, bool, error) {
 		return e
 	})
 	return out, exists, err
+}
+
+func validateMentions(kind, inboxType string, mentions []string) error {
+	if len(mentions) > 0 && (kind != "inquiry" || inboxType != "arcade") {
+		return apis.NewBadRequestError("Mentions are only supported for arcade inquiries.", nil)
+	}
+	return nil
 }
