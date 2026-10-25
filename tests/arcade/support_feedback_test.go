@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 
@@ -151,14 +152,14 @@ func TestCreateSupportFeedback_MultipartWithPhotos(t *testing.T) {
 			tb.Fatalf("expected two uploaded photos, got %T %#v", payload["photos"], payload["photos"])
 		}
 
-		rec, err := app.FindRecordById("support_feedback", feedbackID)
+		rec, err := app.FindFirstRecordByFilter(messaging.Messages, "conversation={:c} && sequence=1", map[string]any{"c": feedbackID})
 		if err != nil {
 			tb.Fatalf("failed to load support_feedback record: %v", err)
 		}
-		if got := rec.GetString("message"); got != "photo upload broke" {
+		if got := rec.GetString("text"); got != "photo upload broke" {
 			tb.Fatalf("expected message to persist, got %q", got)
 		}
-		if got := rec.GetString("createdBy"); got != userID {
+		if got := rec.GetString("sender_user"); got != userID {
 			tb.Fatalf("expected createdBy %q, got %q", userID, got)
 		}
 		if got := rec.GetStringSlice("photos"); len(got) != 2 {

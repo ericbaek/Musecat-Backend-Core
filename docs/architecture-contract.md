@@ -1345,3 +1345,67 @@ backfill migration. No inquiry/report settings are rewritten.
 not the base price. Base `value` may remain null for a PASELI-only price. Existing
 prices and immutable history are not migrated. Representative guest rows retain
 the PASELI amount alongside the base amount.
+
+## Private messaging and shared inquiries
+
+`service/messaging` owns conversation/party/message/read storage and the authenticated
+`/user/conversations`, `/user/messaging/*`, `/user/messages/*/report`, and `/user/events`
+contracts. These routes are deliberately excluded from delegated account APIs.
+Raw collection rules remain locked. Core creates fresh schema only; Full invokes
+`messaging.EnsureSchema` from its independently guarded migration and imports legacy
+inquiry data there. Schema helpers reject incompatible existing definitions.
+
+DM is one unique unordered user pair. Only those two active users can read its
+messages/files/events; staff has no DM override. Inquiries are separate cases with
+requester plus arcade or `team:musecat` inbox. Strict developer/moderator staff and
+current official owners may access shared inquiries. Historical responders are not
+permanent participants. Actual sender user and acting party are separately stored;
+when a requester is also a responder they explicitly choose their sending identity.
+
+Missing DM receive preference means nobody. Each new DM/send checks receiver opt-in,
+both directed blocks, active account and current roles/ownership. Block/opt-out do
+not delete old history. Conversation creation is limited to 10/minute for its
+recorded `created_by` initiator; incoming conversations never consume that quota.
+Reports require current message access and preserve a private
+evidence snapshot without granting staff blanket DM access. Strict current staff can
+review a bounded report list and each reported snapshot/its own photos through
+`/moderation/messages/reports`; these routes never expose other thread messages.
+Report submissions are limited to 20/minute; repeated reports return the same record. Receipt of an existing
+idempotent response remains allowed after opt-out; it creates no new message.
+
+Short transactions allocate a per-conversation sequence and persist the message,
+latest pointer, inquiry status and recipient notification outbox together. Read cursors
+are individual, monotonic and bounded by the latest committed sequence. Unread counts
+exclude the reader's party, including other staff acting for the same inbox. Status
+changes do not reorder conversations. Latest summaries batch load parties/profiles,
+messages, preferences, blocks and reads; no conversation-by-conversation HTTP or SQL
+fanout is needed. Message text is stored once, on messaging_message.
+
+Idempotency is unique per conversation/sender/clientMessageId. Payload comparison
+uses normalized text, ordered photo byte digests and the resolved acting identity;
+a different payload returns 409. Accepted photo formats are JPEG/PNG/WebP/GIF with
+three files of at most 15,000,000 bytes each. Photos are protected, and custom reads
+revalidate conversation ownership and exact message/file membership. Existing legacy
+storage remains in place and is read only through the authorized mapping adapter.
+
+Existing authenticated support create/reply/status routes delegate to canonical
+messaging and project their previous response shape. New authenticated inquiries do
+not create another independent support_feedback message store. Guest receipt intake
+and its staff queue stay on the legacy store. Full maps each historical authenticated
+feedback independently, preserves the first message and replies in created/id order,
+and records source collection/record/file references. It never converts guests into
+synthetic users, never manufactures notifications, and initializes requester read to
+the imported last sequence while preserving existing notification unread flags.
+Legacy staff/official role snapshots come only from original flags; display names
+copied during migration are current snapshots, not claimed historical identities.
+
+The single-process SSE hub publishes invalidations after commit only. Conversation
+audiences are resolved once per change and only their connected users are enqueued;
+each recipient still receives a final current-ACL check before delivery. Each stream
+has a 32-event queue; enqueue never waits on socket I/O. Overflow requests resync and
+closes. At most four streams/user and 1024/process are accepted. Authorization and
+current account state are rechecked before event delivery and every 15-second
+heartbeat; streams expire after 25 minutes. No transaction/SQL rows are retained by
+a stream. Reconnection catches up from persisted sequences, not Last-Event-ID. All
+user_notification changes also invalidate the shared notification inbox. An external
+multi-replica broker is deliberately outside the current single-container deployment.

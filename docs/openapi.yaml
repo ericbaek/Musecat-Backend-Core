@@ -89,6 +89,15 @@ components:
       schema:
         type: string
   schemas:
+    MessagingReport: {"type": "object", "properties": {"id": {"type": "string"}, "reporterId": {"type": "string"}, "messageId": {"type": "string"}, "reason": {"type": "string"}, "createdAt": {"type": "string"}, "message": {"$ref": "#/components/schemas/MessagingMessage"}}, "required": ["id", "reporterId", "messageId", "reason", "createdAt", "message"]}
+    MessagingParty: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}, "name": {"type": "string"}, "avatarUrl": {"type": "string", "nullable": true}, "roleTags": {"type": "array", "items": {"type": "string"}}}, "required": ["type", "id", "name", "avatarUrl", "roleTags"]}
+    MessagingIdentity: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}}, "required": ["type", "id"]}
+    MessagingMessage: {"type": "object", "properties": {"id": {"type": "string"}, "conversationId": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "senderUserId": {"type": "string"}, "sender": {"$ref": "#/components/schemas/MessagingParty"}, "actingAs": {"$ref": "#/components/schemas/MessagingParty"}, "clientMessageId": {"type": "string"}, "text": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string"}}, "required": ["name", "url"]}}, "createdAt": {"type": "string"}}, "required": ["id", "conversationId", "sequence", "senderUserId", "sender", "actingAs", "clientMessageId", "text", "photos", "createdAt"]}
+    ConversationSummary: {"type": "object", "properties": {"id": {"type": "string"}, "kind": {"type": "string", "enum": ["dm", "inquiry"]}, "counterpart": {"$ref": "#/components/schemas/MessagingParty"}, "inbox": {"allOf": [{"$ref": "#/components/schemas/MessagingParty"}], "nullable": true}, "requester": {"allOf": [{"$ref": "#/components/schemas/MessagingParty"}], "nullable": true}, "status": {"type": "string", "nullable": true, "enum": ["waiting", "recognised", "solved", null]}, "legacyFeedbackId": {"type": "string", "nullable": true}, "latestSequence": {"type": "integer", "minimum": 0}, "lastMessage": {"allOf": [{"$ref": "#/components/schemas/MessagingMessage"}], "nullable": true}, "lastMessageAt": {"type": "string", "nullable": true}, "unreadCount": {"type": "integer", "minimum": 0}, "lastReadSequence": {"type": "integer", "minimum": 0}, "canSend": {"type": "boolean"}, "canManageStatus": {"type": "boolean"}, "createdAt": {"type": "string"}}}
+    MessagingSend: {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string", "minLength": 1, "maxLength": 100}, "actingAs": {"$ref": "#/components/schemas/MessagingIdentity"}}, "required": ["clientMessageId"]}
+    MessagingCreate: {"type": "object", "properties": {"kind": {"type": "string", "enum": ["dm", "inquiry"]}, "peerUserId": {"type": "string"}, "inbox": {"$ref": "#/components/schemas/MessagingIdentity"}, "initialMessage": {"$ref": "#/components/schemas/MessagingSend"}}, "required": ["kind"]}
+    ConversationList: {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/ConversationSummary"}}, "nextCursor": {"type": "string", "nullable": true}}, "required": ["items", "nextCursor"]}
+    MessagePage: {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingMessage"}}, "latestSequence": {"type": "integer", "minimum": 0}, "nextBeforeSequence": {"type": "integer", "nullable": true}, "nextAfterSequence": {"type": "integer", "nullable": true}}, "required": ["items", "latestSequence", "nextBeforeSequence", "nextAfterSequence"]}
     InquirySettings:
       type: object
       required: [mode, contactType, contactValue, guide, loginRequired, configured]
@@ -7683,7 +7692,7 @@ paths:
           description: Oldest reply id from the preceding page; replies are returned chronologically, 50 per page.
       responses:
         '200':
-          description: Original inquiry, attachment filenames, chronological items and older-page cursor. Private no-store.
+          description: Original inquiry, attachment filenames, chronological items and older-page cursor. The nullable conversationId identifies its canonical messaging inquiry after migration. Private no-store.
         '401': {description: Authentication required}
         '404': {description: Missing or inaccessible inquiry}
     post:
@@ -16254,6 +16263,170 @@ paths:
         '401': {description: Authentication required.}
         '403': {description: Not an assigned official owner or strict staff.}
         '404': {description: Arcade not found.}
+
+  /user/conversations:
+    get:
+      tags: ["Messaging"]
+      summary: "List bounded authorized conversation summaries"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}]
+    post:
+      tags: ["Messaging"]
+      summary: "Create or find an unordered user pair, or create an independent inquiry"
+      description: "DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is nobody. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
+      security: [{"bearerAuth": []}]
+      responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Existing or new DM, or idempotent inquiry replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingCreate"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "kind": {"type": "string", "enum": ["inquiry"]}, "inboxType": {"type": "string"}, "inboxId": {"type": "string"}}, "required": ["clientMessageId"]}}}}
+
+  /user/conversations/{id}:
+    get:
+      tags: ["Messaging"]
+      summary: "Get a conversation summary"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+
+  /user/conversations/{id}/messages:
+    get:
+      tags: ["Messaging"]
+      summary: "Read chronological history or sequence delta"
+      description: "Exactly one cursor direction. Without a cursor returns latest messages. before pages allow up to 100; after pages up to 200. Explicit afterSequence=0 starts from sequence one. Follow non-null nextBeforeSequence/nextAfterSequence until null. No durable SSE replay is implied."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagePage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "beforeSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "afterSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}]
+    post:
+      tags: ["Messaging"]
+      summary: "Append an idempotent message"
+      description: "Same clientMessageId and normalized text, ordered photo byte hashes and acting identity returns original message with 200; changed content returns 409. Inquiry requester who also manages the inbox must explicitly choose actingAs. DM staff has no bypass. Multipart has text,clientMessageId,actingAs(JSON string),photos. 3 photos at 15,000,000 bytes each. Sender limit 60 messages/minute, 30/conversation/minute, 12 photos/minute; replay does not consume a limit."
+      security: [{"bearerAuth": []}]
+      responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Idempotent replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingSend"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "actingAs": {"type": "string", "description": "JSON encoded MessagingIdentity."}}, "required": ["clientMessageId"]}}}}
+
+  /user/conversations/{id}/read:
+    put:
+      tags: ["Messaging"]
+      summary: "Advance this user's read cursor"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"conversationId": {"type": "string"}, "lastReadSequence": {"type": "integer", "minimum": 0}, "unreadCount": {"type": "integer", "minimum": 0}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"throughSequence": {"type": "integer", "minimum": 0}}, "required": ["throughSequence"]}}}}
+
+  /user/conversations/{id}/inquiry:
+    patch:
+      tags: ["Messaging"]
+      summary: "Change inquiry workflow status"
+      description: "Requester may set waiting/solved; current inbox responders may also set recognised. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"status": {"type": "string", "enum": ["waiting", "recognised", "solved"]}}, "required": ["status"]}}}}
+
+  /user/conversations/{id}/attachments/{messageId}/{file}:
+    get:
+      tags: ["Messaging"]
+      summary: "Read a protected conversation photo"
+      description: "Current conversation ACL and exact file/message ownership required. Existing legacy files are served from their unchanged storage reference only after verifying legacy inquiry mapping. No public file token or redirect."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Protected image; Cache-Control private, no-store.", "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "messageId", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "file", "in": "path", "required": true, "schema": {"type": "string"}}]
+
+  /user/messaging/preferences:
+    get:
+      tags: ["Messaging"]
+      summary: "Read DM receive preference"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"receive": {"type": "string", "enum": ["everyone", "nobody"]}}, "required": ["receive"]}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+    put:
+      tags: ["Messaging"]
+      summary: "Set DM receive preference"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"receive": {"type": "string", "enum": ["everyone", "nobody"]}}, "required": ["receive"]}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"receive": {"type": "string", "enum": ["everyone", "nobody"]}}, "required": ["receive"]}}}}
+
+  /user/messaging/blocks:
+    get:
+      tags: ["Messaging"]
+      summary: "List this user's blocked users"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/MessagingParty"}}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+
+  /user/messaging/blocks/{userId}:
+    put:
+      tags: ["Messaging"]
+      summary: "Block or unblock personal DM"
+      description: "Either side's block prevents new DM messages in both directions. Existing history stays accessible. Does not affect arcade/team inquiries; limit 100 directed blocks."
+      security: [{"bearerAuth": []}]
+      responses: {"204": {"description": "Success"}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "userId", "in": "path", "required": true, "schema": {"type": "string"}}]
+    delete:
+      tags: ["Messaging"]
+      summary: "Block or unblock personal DM"
+      description: "Either side's block prevents new DM messages in both directions. Existing history stays accessible. Does not affect arcade/team inquiries; limit 100 directed blocks."
+      security: [{"bearerAuth": []}]
+      responses: {"204": {"description": "Success"}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "userId", "in": "path", "required": true, "schema": {"type": "string"}}]
+
+  /user/messaging/recipients:
+    get:
+      tags: ["Messaging"]
+      summary: "Search public users for a personal DM"
+      description: "Authenticated bounded public profile projection, excludes self and withdrawn users. Does not disclose receive preference or block state."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingParty"}}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "q", "in": "query", "schema": {"type": "string", "minLength": 2, "maxLength": 100}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10}}]
+
+  /user/messages/{messageId}/report:
+    post:
+      tags: ["Messaging"]
+      summary: "Report an accessible message and preserve evidence"
+      description: "Only a user who can currently read the conversation may report. A repeated report returns its existing id with 200. Evidence is private and immutable; reporting grants no broader conversation access."
+      security: [{"bearerAuth": []}]
+      responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string"}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "messageId", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": 2000}}, "required": ["reason"]}}}}
+
+  /user/events:
+    get:
+      tags: ["Messaging"]
+      summary: "Subscribe to one authenticated shared event stream"
+      description: "SSE ready, conversation.changed {id,latestSequence,reason}, conversation.read {id,lastReadSequence}, notifications.changed, resync, session.expired. No private message payload. Auth/account and conversation ACL rechecked before delivery. 15s heartbeat, 25-minute connection lifetime, 4 streams/user and 1024/process, queue32. Slow consumers receive resync then close. Reconnect must fetch database snapshots/deltas; Last-Event-ID has no durable replay contract."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "private,no-store SSE with proxy buffering disabled.", "content": {"text/event-stream": {"schema": {"type": "string"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+
+  /moderation/messages/reports:
+    get:
+      tags: ["Messaging"]
+      summary: "List reported message snapshots"
+      description: "Current active developer/moderator only. Access is limited to reported evidence; it grants no private DM history access. Photos are private and no-store."
+      security: [{"bearerAuth": []}]
+      parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 20, "minimum": 1, "maximum": 50}}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingReport"}}, "nextCursor": {"type": "string", "nullable": true}}}}}}, "400": {"description": "Invalid cursor or limit."}, "401": {"description": "Authentication required."}, "403": {"description": "Current active staff access required."}, "404": {"description": "Report or reported photo not found."}}
+
+  /moderation/messages/reports/{id}:
+    get:
+      tags: ["Messaging"]
+      summary: "Read one reported message snapshot"
+      description: "Current active developer/moderator only. Access is limited to reported evidence; it grants no private DM history access. Photos are private and no-store."
+      security: [{"bearerAuth": []}]
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingReport"}}}}, "400": {"description": "Invalid cursor or limit."}, "401": {"description": "Authentication required."}, "403": {"description": "Current active staff access required."}, "404": {"description": "Report or reported photo not found."}}
+
+  /moderation/messages/reports/{id}/attachments/{file}:
+    get:
+      tags: ["Messaging"]
+      summary: "Read one photo included in a reported message snapshot"
+      description: "Current active developer/moderator only. Access is limited to reported evidence; it grants no private DM history access. Photos are private and no-store."
+      security: [{"bearerAuth": []}]
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "file", "in": "path", "required": true, "schema": {"type": "string"}}]
+      responses: {"200": {"description": "Success", "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}, "400": {"description": "Invalid cursor or limit."}, "401": {"description": "Authentication required."}, "403": {"description": "Current active staff access required."}, "404": {"description": "Report or reported photo not found."}}
 
 x-musecat-joint-connection:
   status: implemented

@@ -30,7 +30,9 @@ func listInbox(app core.App, user *core.Record, before string) ([]*core.Record, 
 	visibility := map[string]bool{}
 	visible := func(row *core.Record) bool {
 		kind, source := row.GetString("kind"), row.GetString("arcade")
-		if kind == "feedback_reply" || kind == "feedback_created" {
+		if kind == "message" {
+			source = row.GetString("conversation")
+		} else if kind == "feedback_reply" || kind == "feedback_created" {
 			kind, source = "feedback", row.GetString("feedback")
 		} else if kind != "report_created" && kind != usernotification.ArcadeSetupKind {
 			kind = "report_reaction"

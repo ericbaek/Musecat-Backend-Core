@@ -37,6 +37,7 @@ import (
 	delegationhandler "github.com/ericbaek/musecat-backend-core/handlers/delegation"
 	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
 	jointhandler "github.com/ericbaek/musecat-backend-core/handlers/joint"
+	messaginghandler "github.com/ericbaek/musecat-backend-core/handlers/messaging"
 	partnerapphandler "github.com/ericbaek/musecat-backend-core/handlers/partnerapp"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
@@ -164,6 +165,7 @@ func RegisterAPIRoutes(se *core.ServeEvent, managers ...*connections.Manager) {
 		manager = managers[0]
 	}
 	connectionhandler.RegisterRoutes(se, manager)
+	messaginghandler.RegisterRoutes(se)
 	registerSessionRoutes(se.Router.RouterGroup)
 	registerAccountRoutes(se.Router.RouterGroup)
 }
