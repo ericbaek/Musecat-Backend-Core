@@ -16,6 +16,7 @@ import (
 	"github.com/ericbaek/musecat-backend-core/docs"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	"github.com/ericbaek/musecat-backend-core/handlers"
+	announcementhandler "github.com/ericbaek/musecat-backend-core/handlers/announcement"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
@@ -165,6 +166,7 @@ func RegisterAPIRoutes(se *core.ServeEvent, managers ...*connections.Manager) {
 		manager = managers[0]
 	}
 	connectionhandler.RegisterRoutes(se, manager)
+	announcementhandler.RegisterRoutes(se)
 	messaginghandler.RegisterRoutes(se)
 	registerSessionRoutes(se.Router.RouterGroup)
 	registerAccountRoutes(se.Router.RouterGroup)

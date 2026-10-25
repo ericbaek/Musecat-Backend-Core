@@ -1409,3 +1409,47 @@ heartbeat; streams expire after 25 minutes. No transaction/SQL rows are retained
 a stream. Reconnection catches up from persisted sequences, not Last-Event-ID. All
 user_notification changes also invalidate the shared notification inbox. An external
 multi-replica broker is deliberately outside the current single-container deployment.
+
+## Announcement stories
+
+`announcement` stores one locale-independent publication with separately authored
+Korean, English and Japanese image stories. Staff (`developer|moderator`) use only
+custom `/moderation/announcements` APIs. Drafts may be incomplete; publication
+accepts an explicit nonempty subset of `ko|en|ja` and requires a title, 1–12 valid
+PNG/JPEG/WebP images and alt text only in those selected locales. The selected
+locale set becomes immutable alongside the published content. Unselected variants
+remain private to staff and never appear in public metadata or image reads.
+Image text is never assumed to translate automatically. JSON metadata preserves
+ordered image references; multipart replacements can combine retained file names
+and per-locale `upload:N` indices. Omitted references remove old files. Files are
+protected at the raw PocketBase boundary; custom image reads recheck publication
+visibility. Published content is immutable. Archive is terminal and hides public
+content and its inbox entries, without erasing deduplication or view identities.
+
+Publication captures a timestamp. Full registers the bounded fan-out worker even
+when VAPID is disabled. Each transaction processes at most 100 non-withdrawn users
+created no later than publication; the durable user-id cursor, one inbox identity
+`announcement:<id>` per user, and matching-device outbox receipts commit together.
+Restart, repeated publish or replayed batches cannot reset read/view state or
+requeue existing events. Accounts created later see the public story but do not
+receive historical broadcasts. Device delivery uses the existing bounded retry
+worker and stable tag; OS delivery is at-least-once, not exactly-once. Each inbox
+event snapshots only selected title/summary pairs. Inbox `locale=ko|en|ja` filters
+announcement entries and unread counts without affecting other notification kinds.
+Push queues only devices whose saved locale is selected, and rechecks that locale
+before delivery; no foreign-language fallback is used. Deep links use the matching
+route prefix.
+No permission prompt or new device registration is triggered by publication.
+
+`announcement_view` has a unique account/publication key, independent of locale,
+device and inbox read status. `/announcements/unseen` considers only the latest
+published story targeting the requested locale, rather than opening a backlog.
+`/view` is idempotent. Public list/detail accept `locale=ko|en|ja` (default `ko`) and allow replay only of matching
+publications; a mismatched detail request returns 404. The canonical deep link is
+`/community/updates?announcement=<id>` and opens the same story dialog.
+
+Retained legacy feedback notification links now directly target `/updates/feedback?thread=<id>`.
+Setup links resolve the recipient's current owned arcade using the onboarding
+endpoint's ownership rules and target `/arcade/<id>?setup=dashboard`; the legacy
+redirect remains a fallback when no current owned arcade exists. Retained legacy
+links remain valid frontend inputs. Neither kind needs an intermediate launcher.

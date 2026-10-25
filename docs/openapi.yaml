@@ -89,6 +89,74 @@ components:
       schema:
         type: string
   schemas:
+    Announcement:
+      type: object
+      required: [id, status, createdAt, updatedAt, publishedAt, viewed, localizations, locales]
+      properties:
+        id: {type: string}
+        status: {type: string, enum: [draft, published, archived]}
+        locales:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          items: {type: string, enum: [ko, en, ja]}
+          description: Immutable selected release locales; empty for drafts.
+        createdAt: {type: string}
+        updatedAt: {type: string}
+        publishedAt: {type: string, description: Empty until first publication.}
+        viewed: {type: boolean, description: Account-wide across locales and devices; false for guests.}
+        localizations:
+          type: object
+          additionalProperties: false
+          properties:
+            ko: {$ref: '#/components/schemas/AnnouncementLocalization'}
+            en: {$ref: '#/components/schemas/AnnouncementLocalization'}
+            ja: {$ref: '#/components/schemas/AnnouncementLocalization'}
+    AnnouncementLocalization:
+      type: object
+      required: [title, summary, slides]
+      properties:
+        title: {type: string, maxLength: 160}
+        summary: {type: string, maxLength: 500}
+        slides:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            required: [id, fileName, imageUrl, alt]
+            properties:
+              id: {type: string}
+              fileName: {type: string}
+              imageUrl: {type: string, description: Relative custom API image URL; draft and archived images require staff.}
+              alt: {type: string, maxLength: 3000}
+    AnnouncementPage:
+      type: object
+      required: [items, next]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Announcement'}}
+        next: {type: string, description: Last item id or empty at end.}
+    AnnouncementInput:
+      type: object
+      required: [localizations]
+      properties:
+        localizations:
+          type: object
+          description: Complete replacement map; only ko, en and ja keys. Drafts may omit locales. Existing file names retain images; upload:N references index N in images_LOCALE.
+          additionalProperties:
+            type: object
+            required: [title, summary, slides]
+            properties:
+              title: {type: string, maxLength: 160}
+              summary: {type: string, maxLength: 500}
+              slides:
+                type: array
+                maxItems: 12
+                items:
+                  type: object
+                  required: [image, alt]
+                  properties:
+                    image: {type: string}
+                    alt: {type: string, maxLength: 3000}
     MessagingReport: {"type": "object", "properties": {"id": {"type": "string"}, "reporterId": {"type": "string"}, "messageId": {"type": "string"}, "reason": {"type": "string"}, "createdAt": {"type": "string"}, "message": {"$ref": "#/components/schemas/MessagingMessage"}}, "required": ["id", "reporterId", "messageId", "reason", "createdAt", "message"]}
     MessagingParty: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}, "name": {"type": "string"}, "avatarUrl": {"type": "string", "nullable": true}, "roleTags": {"type": "array", "items": {"type": "string"}}}, "required": ["type", "id", "name", "avatarUrl", "roleTags"]}
     MessagingIdentity: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}}, "required": ["type", "id"]}
@@ -7755,6 +7823,7 @@ paths:
       description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. The durable arcade_setup notice remains visible to current active exact arcade_owner accounts regardless of saved inquiry/report modes; reading it never changes settings. Does not expose endpoints or subscription credentials.
       security: [{bearerAuth: []}]
       parameters:
+        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}, description: Announcement title/summary language and audience filter; other notification kinds are unaffected.}
         - {name: before, in: query, schema: {type: string}, description: Last notification id from the previous page.}
       responses:
         '200':
@@ -7772,14 +7841,15 @@ paths:
                       required: [id, kind, read, created, arcadeName, gameName, message, reaction, url]
                       properties:
                         id: {type: string}
-                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup]}
+                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement]}
                         read: {type: boolean}
                         created: {type: string}
                         arcadeName: {type: string}
                         gameName: {type: string}
+                        title: {type: string, description: Localized announcement title; omitted for other kinds.}
                         message: {type: string}
                         reaction: {type: string}
-                        url: {type: string, description: Server-generated relative deep link. arcade_setup opens /account/arcade-dashboard/setup.}
+                        url: {type: string, description: "Server-generated relative deep link. Announcements open /community/updates?announcement=id, feedback opens /updates/feedback?thread=id, and arcade_setup resolves current ownership to /arcade/id?setup=dashboard (legacy redirect fallback)."}
                   unread: {type: integer, minimum: 0}
                   next: {type: string, description: Empty at the end of the inbox.}
         '401': {description: Authentication required.}
@@ -16427,6 +16497,160 @@ paths:
       security: [{"bearerAuth": []}]
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "file", "in": "path", "required": true, "schema": {"type": "string"}}]
       responses: {"200": {"description": "Success", "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}, "400": {"description": "Invalid cursor or limit."}, "401": {"description": "Authentication required."}, "403": {"description": "Current active staff access required."}, "404": {"description": "Report or reported photo not found."}}
+
+  /announcements:
+    get:
+      summary: List published announcement stories
+      description: Newest publication first, 20 items, private no-store. A cursor from a now-archived publication remains valid. Only releases targeting the requested locale are returned. Public metadata omits unselected draft variants; image bytes are fetched separately. Guests may read published content.
+      parameters:
+        - {name: before, in: query, schema: {type: string}}
+        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}}
+      responses:
+        '200': {description: Published stories., content: {application/json: {schema: {$ref: '#/components/schemas/AnnouncementPage'}}}}
+        '400': {description: Invalid cursor.}
+  /announcements/unseen:
+    get:
+      summary: Get the latest story targeting the current locale only if this account has not viewed it
+      description: Does not queue older unviewed stories after the latest matching release has been viewed. Viewing a story is independent of inbox read state and shared across selected languages.
+      parameters:
+        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}}
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Latest unseen story or null.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [announcement]
+                properties:
+                  announcement:
+                    oneOf: [{$ref: '#/components/schemas/Announcement'}, {type: 'null'}]
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+  /announcements/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      summary: Read an announcement story
+      parameters:
+        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}}
+      description: Published content is public only when its selected audience includes the requested locale; mismatches return 404 with no fallback. Draft and archived content is visible only to developer or moderator accounts. Private no-store.
+      responses:
+        '200': {description: Story metadata., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '404': {description: Missing or inaccessible story.}
+  /announcements/{id}/images/{filename}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+      - {name: filename, in: path, required: true, schema: {type: string}}
+    get:
+      summary: Read a story image through current publication visibility
+      description: Raw file REST access is protected. This route verifies current story visibility and image membership, including after archive or draft removal. Unselected locale images remain private to active staff even when other languages are published. Private no-store.
+      responses:
+        '200': {description: PNG, JPEG or WebP bytes.}
+        '404': {description: Missing or inaccessible image.}
+  /announcements/{id}/view:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Idempotently mark one published story viewed by the current account
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: View persisted; inbox read state unchanged.}
+        '401': {description: Authentication required.}
+        '403': {description: Active account required.}
+        '404': {description: Missing or unpublished story.}
+  /moderation/announcements:
+    get:
+      summary: List all announcement drafts, publications and archives
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: before, in: query, schema: {type: string}}
+      responses:
+        '200': {description: 'Newest-created first, 20 items.', content: {application/json: {schema: {$ref: '#/components/schemas/AnnouncementPage'}}}}
+        '400': {description: Invalid cursor.}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+    post:
+      summary: Create an announcement draft
+      description: No notification is created before publication. Maximum 12 actual PNG/JPEG/WebP images per locale, 5 MiB and 40 megapixels per image; total body 181 MiB. Images containing text are supplied separately for ko, en and ja; no translation is inferred.
+      security: [{bearerAuth: []}]
+      requestBody: &announcementMutationBody
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AnnouncementInput'}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [localizations]
+              properties:
+                localizations: {type: string, description: JSON encoding of AnnouncementInput.localizations. Complete replacement map; ordered slides specify retained fileName or upload:N and alt text.}
+                images_ko: {type: array, maxItems: 12, items: {type: string, format: binary}}
+                images_en: {type: array, maxItems: 12, items: {type: string, format: binary}}
+                images_ja: {type: array, maxItems: 12, items: {type: string, format: binary}}
+      responses:
+        '201': {description: Draft saved., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '400': {description: Invalid metadata, foreign file reference, or invalid image.}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+        '413': {description: Image or total request exceeds byte limit.}
+  /moderation/announcements/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    put:
+      summary: Replace draft localized content and ordered image references
+      description: Omitting references removes images. Retained files need no re-upload. Published and archived content is immutable.
+      security: [{bearerAuth: []}]
+      requestBody: *announcementMutationBody
+      responses:
+        '200': {description: Draft saved., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '400': {description: Invalid input.}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+        '404': {description: Missing story.}
+        '409': {description: Story is no longer a draft.}
+        '413': {description: Image or total request exceeds byte limit.}
+  /moderation/announcements/{id}/publish:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Publish selected language variants once
+      description: Requires a nonempty unique supported locale selection. Only selected variants need titles, 1..12 images each, and nonempty image alt text. Content and selected locales become immutable. A durable bounded worker creates one logical inbox event per existing non-withdrawn account; inbox reads filter by locale. Only already registered devices with selected saved locales get deliveries, and delivery rechecks current device locale. Repeating the same selected locale set is idempotent, including after read/view. Device pushes remain at-least-once with a stable notification tag.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [locales]
+              properties:
+                locales:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  uniqueItems: true
+                  items: {type: string, enum: [ko, en, ja]}
+      responses:
+        '200': {description: Published story., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '400': {description: Invalid selection or one or more selected variants are incomplete.}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+        '404': {description: Missing story.}
+        '409': {description: Archived story cannot be republished or selected locales differ from the original publication.}
+  /moderation/announcements/{id}/archive:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Archive a draft or publication without deleting event/view identities
+      description: Idempotent terminal state. Stops unfinished fan-out and prevents delivery of remaining queued push receipts; hides public metadata, images and inbox entries. Previously displayed OS notifications cannot be recalled.
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Archived story., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
+        '401': {description: Authentication required.}
+        '403': {description: Active developer or moderator required.}
+        '404': {description: Missing story.}
 
 x-musecat-joint-connection:
   status: implemented

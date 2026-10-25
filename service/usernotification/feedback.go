@@ -107,7 +107,7 @@ func feedbackItem(app core.App, row *core.Record) map[string]any {
 			}
 		}
 	}
-	return map[string]any{"id": row.Id, "kind": row.GetString("kind"), "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": arcadeName, "gameName": "", "reaction": "", "message": message, "url": "/support/feedback/" + row.GetString("feedback")}
+	return map[string]any{"id": row.Id, "kind": row.GetString("kind"), "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": arcadeName, "gameName": "", "reaction": "", "message": message, "url": "/updates/feedback?thread=" + row.GetString("feedback")}
 }
 
 func FeedbackCreatedTx(app core.App, feedback *core.Record) error {
