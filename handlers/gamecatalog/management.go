@@ -484,7 +484,10 @@ func revert(re *core.RequestEvent, body mutationBody, payloadHash string) error 
 			return &apiError{status: http.StatusConflict, message: "catalog revision conflict", details: map[string]any{"current_revision": revision(record)}}
 		}
 		before := snapshot(entity, record)
-		target, _ := change.Get("before").(map[string]any)
+		var target map[string]any
+		if err := change.UnmarshalJSONField("before", &target); err != nil {
+			return fmt.Errorf("decode catalog change before snapshot: %w", err)
+		}
 		if target == nil || len(target) == 0 {
 			blockers, blockerErr := blockingReferences(tx, entity, record.Id)
 			if blockerErr != nil {

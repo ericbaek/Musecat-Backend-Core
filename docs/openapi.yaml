@@ -5529,6 +5529,7 @@ paths:
     post:
       tags: [Moderator]
       summary: Revert a catalog change as a new audited operation
+      description: Restores the persisted before snapshot, including archive state. A creation with no before snapshot is archived after reference checks.
       security:
         - bearerAuth: []
       requestBody:
@@ -13442,6 +13443,7 @@ paths:
     post:
       tags: [Moderator]
       summary: Revert a catalog change as a new audited operation
+      description: Restores the persisted before snapshot, including archive state. A creation with no before snapshot is archived after reference checks.
       security:
         - nativeBearer: []
       requestBody:

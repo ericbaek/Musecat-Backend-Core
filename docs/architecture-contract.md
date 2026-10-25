@@ -425,7 +425,9 @@ operation writes one immutable `game_catalog_changelog` record containing the
 authenticated actor and tags, reason, before/after snapshots, and revisions.
 `GET /moderation/game/catalog/changes` lists that evidence and a guarded
 `POST /moderation/game/catalog/changes/revert` records a new revert operation;
-it does not erase history. Full owns notifications for those log records.
+it restores the persisted before snapshot, including names and archive state.
+Reverting a creation with no before snapshot archives the item after checking
+references. Revert does not erase history. Full owns notifications for those log records.
 
 The `POST /arcade/game/bulk_version` operation is an administrative version
 swap for developer/moderator accounts. It applies the
