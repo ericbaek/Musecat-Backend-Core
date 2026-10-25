@@ -8796,7 +8796,7 @@ paths:
     get:
       tags: [Arcades]
       summary: List active update campaigns
-      description: Returns at most 20 campaigns that are active at request time, newest start first. Target counts include pending and already-updated public/open targets.
+      description: Returns at most 20 campaigns that are active at request time, newest start first. Target counts include pending and already-updated public/open targets. A fresh database or no active campaigns returns an empty items array.
       responses:
         '200':
           description: Active campaign summaries.

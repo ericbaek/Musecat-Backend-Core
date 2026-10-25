@@ -239,6 +239,10 @@ these limits using the saved coordinates and its own country lookup; denied
 moves return `403` with `location_move_distance_exceeded`,
 `location_move_country_changed`, or `location_move_origin_missing`.
 
+Fresh Core bootstrap includes the private `arcade_campaign` and
+`arcade_campaign_check` collections. With no active campaigns, `GET /campaigns`
+returns `200` with `{"items":[]}`. Full owns migrations for existing installations.
+
 Update campaign checks use `POST /campaign/check`. An active authenticated user
 may confirm whether a public/open campaign target is still old or updated. A
 location-verified `still_old` result awards the configured campaign XP once per
