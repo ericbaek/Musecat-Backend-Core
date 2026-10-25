@@ -422,7 +422,7 @@ components:
         score:
           type: integer
           format: int64
-          description: XP earned for the selected metric. Total combines completed visit verifications and positive arcade edit grants; edit and passport each count their respective source only.
+          description: XP earned for the selected metric. Total combines completed visit verifications and positive arcade edit grants, including per-photo XP grants; edit and passport each count their respective source only.
         profile: {$ref: '#/components/schemas/RankingProfile'}
     ArcadeVisitRankingResponse:
       type: object
@@ -7752,7 +7752,7 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcade/ranking
-      description: Returns up to five users ranked by XP earned from this public arcade. The total metric combines completed visit verifications and positive arcade edit grants; edit and passport rank those sources separately. Public closed arcades remain eligible. Private arcades return 404, and visit XP with private visit visibility is omitted.
+      description: Returns up to five users ranked by XP earned from this public arcade. The total metric combines completed visit verifications and positive arcade edit grants, including per-photo XP grants; edit and passport rank those sources separately. Public closed arcades remain eligible. Private arcades return 404, and visit XP with private visit visibility is omitted.
       parameters:
         - name: arcade
           in: query
