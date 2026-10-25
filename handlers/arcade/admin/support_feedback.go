@@ -8,10 +8,14 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/ericbaek/musecat-backend-core/service/arcadereport"
+	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
+	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
+	"github.com/pocketbase/pocketbase/tools/router"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 )
@@ -25,6 +29,7 @@ const maxSupportFeedbackMessageLength = 13_000
 const MaxSupportFeedbackBodyBytes = maxSupportFeedbackPhotosPerRequest*maxSupportFeedbackPhotoBytes + (1 << 20)
 
 type CreateSupportFeedbackBody struct {
+	Arcade  string             `json:"arcade"`
 	Message string             `json:"message"`
 	Photos  []*filesystem.File `json:"-"`
 }
@@ -38,6 +43,7 @@ func parseCreateSupportFeedbackBody(re *core.RequestEvent) (CreateSupportFeedbac
 
 		body := CreateSupportFeedbackBody{
 			Message: re.Request.FormValue("message"),
+			Arcade:  re.Request.FormValue("arcade"),
 		}
 
 		files, err := re.FindUploadedFiles("photos")
@@ -72,6 +78,9 @@ func validateCreateSupportFeedbackBody(body *CreateSupportFeedbackBody) error {
 
 func CreateSupportFeedback(re *core.RequestEvent) error {
 	body, err := parseCreateSupportFeedbackBody(re)
+	if re.Request.MultipartForm != nil {
+		defer re.Request.MultipartForm.RemoveAll()
+	}
 	if err != nil {
 		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
 			return apis.ErrRequestEntityTooLarge
@@ -91,6 +100,16 @@ func CreateSupportFeedback(re *core.RequestEvent) error {
 		})
 	}
 
+	body.Arcade = strings.TrimSpace(body.Arcade)
+	if body.Arcade != "" {
+		if re.Auth != nil && re.Auth.GetBool("withdrawn") {
+			return re.UnauthorizedError("account is inactive", nil)
+		}
+		arcade, err := re.App.FindRecordById("arcade", body.Arcade)
+		if err != nil || (!arcade.GetBool("public") && (re.Auth == nil || (arcade.GetString("createdBy") != re.Auth.Id && !arcadereport.CanManage(re.Auth, arcade)))) {
+			return re.NotFoundError("arcade not found", nil)
+		}
+	}
 	coll, err := re.App.FindCollectionByNameOrId(arcadeinternal.CollectionSupportFeedback)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
@@ -102,6 +121,9 @@ func CreateSupportFeedback(re *core.RequestEvent) error {
 	rec := core.NewRecord(coll)
 	rec.Set("message", body.Message)
 	rec.Set("status", supportFeedbackWaitingStatus)
+	if body.Arcade != "" {
+		rec.Set("arcade", body.Arcade)
+	}
 	if len(body.Photos) > 0 {
 		rec.Set("photos", body.Photos)
 	}
@@ -113,7 +135,45 @@ func CreateSupportFeedback(re *core.RequestEvent) error {
 		}
 	}
 
-	if err := re.App.Save(rec); err != nil {
+	if err := re.App.RunInTransaction(func(tx core.App) error {
+		if body.Arcade != "" {
+			var user *core.Record
+			if re.Auth != nil {
+				var err error
+				user, err = tx.FindRecordById("user", re.Auth.Id)
+				if err != nil || user.GetBool("withdrawn") {
+					return re.UnauthorizedError("account is inactive", nil)
+				}
+			}
+			arcade, err := tx.FindRecordById("arcade", body.Arcade)
+			if err != nil {
+				return re.NotFoundError("arcade not found", nil)
+			}
+			if !arcade.GetBool("public") && (user == nil || (arcade.GetString("createdBy") != user.Id && !arcadereport.CanManage(user, arcade))) {
+				return re.NotFoundError("arcade not found", nil)
+			}
+			settings := supportfeedback.InquirySettings(arcade)
+			if supportfeedback.HasOfficialAccount(tx, arcade.Id) {
+				if settings.Mode == "disabled" {
+					return router.NewApiError(http.StatusConflict, "INQUIRY_DISABLED", nil)
+				}
+				if settings.Mode == "external" {
+					return router.NewApiError(http.StatusConflict, "INQUIRY_EXTERNAL", nil)
+				}
+				if settings.LoginRequired && user == nil {
+					return router.NewApiError(http.StatusUnauthorized, "LOGIN_REQUIRED", nil)
+				}
+			}
+		}
+		if err := tx.Save(rec); err != nil {
+			return err
+		}
+		return usernotification.FeedbackCreatedTx(tx, rec)
+	}); err != nil {
+		var apiErr *router.ApiError
+		if errors.As(err, &apiErr) {
+			return err
+		}
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to create support_feedback",
 			"details": fmt.Sprintf("failed to save support_feedback record: %v", err),
@@ -125,6 +185,7 @@ func CreateSupportFeedback(re *core.RequestEvent) error {
 		"message":   rec.GetString("message"),
 		"status":    rec.GetString("status"),
 		"createdBy": rec.GetString("createdBy"),
+		"arcade":    rec.GetString("arcade"),
 		"photos":    append([]string{}, rec.GetStringSlice("photos")...),
 		"created":   rec.GetString("created"),
 		"updated":   rec.GetString("updated"),
@@ -138,28 +199,43 @@ func ListSupportFeedback(re *core.RequestEvent) error {
 
 // ListMySupportFeedback ignores client-supplied owner filters.
 func ListMySupportFeedback(re *core.RequestEvent) error {
+	if supportfeedback.IsStaff(re.Auth) && re.Request.URL.Query().Get("arcade") != "" {
+		return listSupportFeedback(re, "")
+	}
 	return listSupportFeedback(re, re.Auth.Id)
 }
 
 func listSupportFeedback(re *core.RequestEvent, createdByID string) error {
 	status := strings.TrimSpace(re.Request.URL.Query().Get("status"))
 
-	filters := make([]string, 0, 2)
+	filters := make([]string, 0, 3)
 	params := dbx.Params{}
 	if createdByID != "" {
-		filters = append(filters, "createdBy = {:createdBy}")
+		ownerFilter := "createdBy = {:createdBy}"
+		if re.Auth != nil && createdByID == re.Auth.Id {
+			for i, id := range re.Auth.GetStringSlice("owns") {
+				key := fmt.Sprintf("owned%d", i)
+				ownerFilter += " || arcade={:" + key + "}"
+				params[key] = id
+			}
+		}
+		filters = append(filters, "("+ownerFilter+")")
 		params["createdBy"] = createdByID
 	}
 	if status != "" {
 		filters = append(filters, "status = {:status}")
 		params["status"] = status
 	}
+	if arcade := strings.TrimSpace(re.Request.URL.Query().Get("arcade")); arcade != "" {
+		filters = append(filters, "arcade={:arcade}")
+		params["arcade"] = arcade
+	}
 	filter := strings.Join(filters, " && ")
 
 	recs, err := re.App.FindRecordsByFilter(
 		arcadeinternal.CollectionSupportFeedback,
 		filter,
-		"-created",
+		"-updated,-created,-id",
 		0,
 		0,
 		params,
@@ -173,11 +249,15 @@ func listSupportFeedback(re *core.RequestEvent, createdByID string) error {
 
 	items := make([]map[string]any, 0, len(recs))
 	for _, rec := range recs {
+		if !supportfeedback.CanAccess(re.App, re.Auth, rec) {
+			continue
+		}
 		items = append(items, map[string]any{
 			"id":        rec.Id,
 			"message":   rec.GetString("message"),
 			"status":    rec.GetString("status"),
 			"createdBy": rec.GetString("createdBy"),
+			"arcade":    rec.GetString("arcade"),
 			"photos":    append([]string{}, rec.GetStringSlice("photos")...),
 			"created":   rec.GetString("created"),
 			"updated":   rec.GetString("updated"),

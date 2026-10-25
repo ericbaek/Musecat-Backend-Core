@@ -122,3 +122,13 @@ func TestGuestCustomTextPreservesFirstLine(t *testing.T) {
 		t.Fatalf("incorrect guest custom: %#v", result)
 	}
 }
+
+func TestGuestPaseliPrice(t *testing.T) {
+	for _, represent := range []bool{true, false} {
+		result := arcadeinternal.RedactGuestPrice(map[string]any{"currency": "JPY", "type": "gamemode", "list": []any{map[string]any{"value": 100, "paseli_value": 95, "represent": represent}}}).(map[string]any)
+		rows := result["list"].([]map[string]any)
+		if len(rows) != 1 || rows[0]["paseli_value"] != float64(95) {
+			t.Fatalf("lost PASELI price: %#v", result)
+		}
+	}
+}

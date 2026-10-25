@@ -46,7 +46,7 @@ Each row uses these common columns:
 | `PUT /arcade/gtk` | `gtk` | one row per request | `gtk_diff` | Replaces the current `arcade_gtk` relation. |
 | `PUT /arcade/game` | `game` | one row per request | `game_diff` | Accepts required `add`/`modify`/`remove` arrays, materializes the current immutable state, validates `base_state_id`, creates a new immutable history batch, then moves `arcade.game_v2` to it. Item IDs are persistent `arcade_game_id` IDs. |
 | `POST /arcade/game/bulk_version` | `game` | one row per affected arcade | `game_diff` | Administrative version swap for developer/moderator accounts. It uses the normal immutable game-state batch flow. |
-| `POST /campaign/check` | `game` when an old target is updated or reverted | one row | `game_diff` | Campaign checks append a report event with location-verification status. `result=updated` uses the normal immutable game-state batch flow; level-10+ location bypass awards 1 XP. A `still_old` report awards 1 XP and can revert the latest campaign update for seven days. |
+| `POST /campaign/check` | `game` when an old target is updated or reverted | one row | `game_diff` | Campaign checks append a report event with location-verification status. `result=updated` uses the normal immutable game-state batch flow; location bypass is available at any level and awards 1 XP for `updated`. A location-verified `still_old` report awards the configured campaign XP once per user and target (unverified reports award no XP) and can revert the latest campaign update for seven days. |
 | `PUT /arcade/photo` | `photo` | one row per request | `photo_diff` | Replaces the current `arcade_photo` relation. |
 | `PUT /arcade/memo` | `memo` | one row per changed request | `memo_diff` | Creates an immutable Tiptap JSON revision and moves `arcade.memo` for an authenticated user with arcade write access. |
 | `POST /arcade/rollback` | the requested part | one row per request | `<part>_diff` | Generic rollback for `basic`, `hour`, `sns`, `gtk`, `game`, `photo`, or `memo`; private draft rollback requires the creator or a developer/moderator. |
@@ -278,8 +278,9 @@ accounts; it does not award XP.
 
 The mutation promotes pending atoms and awards XP only for atoms whose
 `public` flag was false before the transaction. Each newly published atom is
-worth 2 XP, capped over a rolling seven-day window at 20 XP for an automatic
-photo-campaign target and 10 XP for another public arcade. Uploading a pending
+worth 4 XP for an automatic photo-campaign target (double the normal 2 XP),
+capped over a rolling seven-day window at 20 XP for a campaign target and 10 XP
+for another public arcade. Uploading a pending
 atom, changing order, removing a gallery member, or re-adding an already
 published atom does not award XP. Aggregate pointer, atom promotion, changelog,
 and XP ledger updates commit atomically.
@@ -433,3 +434,38 @@ Untouched revisions and rollback retain their original raw price JSON. New
 edits may have a legacy price in `before` and a versioned price in `after`.
 Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
 retains the existing representative-item policy.
+
+
+Photo `captured_at` metadata and Full's fill-only EXIF backfill do not create or
+rewrite changelog rows. `created` remains upload time; gallery date labels and
+photo campaign freshness prefer capture time. Photo membership/order and XP event
+timestamps retain their existing contracts.
+
+### Report destination settings
+
+`PUT /arcade/report-settings` is operational configuration, like moderation status. It changes no immutable content revision, awards no XP and writes no arcade_changelog. External mode hides existing reports without deleting them. Subscription registration/deletion and push delivery receipts likewise do not produce content changelog rows.
+
+Support inquiry replies update support status only; they never write arcade changelog or arcade XP. Reply and recipient notifications are atomic in their private support transaction.
+
+- A `fixed` flag reaction from a current developer/moderator or the official owner assigned to that arcade resolves immediately regardless of level. The reaction attribution and notification/XP transaction are preserved; other users retain the existing resolution-voting delay.
+
+Explicit inquiry resolve/reopen changes only private support status; no arcade changelog or XP is created. The author, current scoped official, or strict staff may act through the authenticated thread API.
+
+`PUT /arcade/inquiry-settings` is operational configuration independent of fault-report routing.
+It awards no XP and creates no arcade changelog/content revision. External mode only redirects
+new inquiries; disabled mode blocks new official inquiries. Missing configuration defaults to OFF,
+and explicit internal/external/disabled choices are retained. The read-only owner onboarding
+endpoint and settings changes create no history or XP; existing private conversations remain intact.
+
+
+The one-time `arcade_setup` account notification and notification-initiated dashboard setup funnel
+create no arcade history or XP. Existing OFF/internal/external settings are preserved, and current
+owners may review all their arcades through the scoped setup endpoint.
+
+## Optional PASELI numeric prices
+
+`price.accept` accepts `PASELI`. A numeric row (`gamemode`, `credit`, `song`, `time`, `custom_v1`, or legacy object-form `custom`) may include optional
+`paseli_value` (> 0), in JPY and with PASELI acceptance. Omission means unknown,
+not the base price. Base `value` may remain null for a PASELI-only price. Existing
+prices and immutable history are not migrated. Representative guest rows retain
+the PASELI amount alongside the base amount.

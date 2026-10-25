@@ -1,10 +1,12 @@
 package query
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -13,6 +15,7 @@ import (
 var arcadeUpdatePartOrder = []string{"basic", "hour", "sns", "gtk", "game", "photo", "flag", "flag_reaction", "visit"}
 
 type arcadeUpdateBlockRow struct {
+	BlockID        string
 	ArcadeID       string
 	Changed        string
 	ChangedBy      string
@@ -37,6 +40,8 @@ func ListArcadeUpdateHistory(re *core.RequestEvent) error {
 }
 
 func listArcadeUpdates(re *core.RequestEvent, history bool) error {
+	ctx, cancel := context.WithTimeout(re.Request.Context(), 12*time.Second)
+	defer cancel()
 	q := re.Request.URL.Query()
 
 	limit := 6
@@ -84,7 +89,8 @@ func listArcadeUpdates(re *core.RequestEvent, history bool) error {
 		visitFilter += " AND 0 = 1"
 	}
 	selection := `selected_blocks AS (
-	SELECT block_id, arcade, block_started_at, block_ended_at
+	SELECT block_id, arcade, block_started_at, block_ended_at,
+		COUNT(*) OVER () AS total_blocks
 	FROM latest_block_per_arcade
 	ORDER BY block_started_at DESC, block_id ASC
 	LIMIT {:limit} OFFSET {:offset}
@@ -97,7 +103,7 @@ func listArcadeUpdates(re *core.RequestEvent, history bool) error {
 	WHERE arcade_rank = 1
 ),
 selected_blocks AS (
-	SELECT block_id, arcade, block_started_at, block_ended_at
+	SELECT block_id, arcade, block_started_at, block_ended_at, 0 AS total_blocks
 	FROM summary_candidates
 	WHERE summary_rank <= 6 OR (
 		country <> 'KR' AND summary_rank = (
@@ -211,20 +217,15 @@ SELECT
 	b.bulk_id,
 	s.block_started_at,
 	s.block_ended_at,
- s.block_id
+ s.block_id,
+ s.total_blocks
 FROM blocks b
 INNER JOIN selected_blocks s ON s.block_id = b.block_id
 ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 	`, strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), visitFilter, selection)
 
 	var total int64
-	if page > 0 {
-		countSQL := sql[:strings.Index(sql, ",\nselected_blocks AS (")] + " SELECT COUNT(*) FROM block_ranges"
-		if err := re.App.DB().NewQuery(countSQL).Bind(params).Row(&total); err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count arcade updates"})
-		}
-	}
-	rows, err := re.App.DB().NewQuery(sql).Bind(params).Rows()
+	rows, err := re.App.DB().NewQuery(sql).Bind(params).WithContext(ctx).Rows()
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to load arcade updates",
@@ -233,14 +234,7 @@ ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 	}
 	defer rows.Close()
 
-	type entryState struct {
-		payload map[string]any
-		partSet map[string]struct{}
-	}
-
-	entries := make([]*entryState, 0, limit)
-	entryByArcade := map[string]*entryState{}
-
+	var blockRows []arcadeUpdateBlockRow
 	for rows.Next() {
 		raw := dbx.NullStringMap{}
 		if err := rows.ScanMap(raw); err != nil {
@@ -249,8 +243,15 @@ ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 				"details": err.Error(),
 			})
 		}
+		if page > 0 {
+			total, err = strconv.ParseInt(nullStringMapValue(raw, "total_blocks"), 10, 64)
+			if err != nil {
+				return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count arcade updates"})
+			}
+		}
 
-		row := arcadeUpdateBlockRow{
+		blockRows = append(blockRows, arcadeUpdateBlockRow{
+			BlockID:        nullStringMapValue(raw, "block_id"),
 			ArcadeID:       nullStringMapValue(raw, "arcade"),
 			Changed:        nullStringMapValue(raw, "changed"),
 			ChangedBy:      nullStringMapValue(raw, "changed_by"),
@@ -258,12 +259,36 @@ ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
 			BulkID:         nullStringMapValue(raw, "bulk_id"),
 			BlockStartedAt: nullStringMapValue(raw, "block_started_at"),
 			BlockEndedAt:   nullStringMapValue(raw, "block_ended_at"),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load arcade updates"})
+	}
+	// Release the aggregate connection before enrichment borrows DB connections.
+	rows.Close()
+	// An out-of-range page has no row from which to read the window count.
+	if page > 0 && total == 0 {
+		countSQL := sql[:strings.Index(sql, ",\nselected_blocks AS (")] + " SELECT COUNT(*) FROM block_ranges"
+		if err := re.App.DB().NewQuery(countSQL).Bind(params).WithContext(ctx).Row(&total); err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count arcade updates"})
+		}
+	}
+
+	type entryState struct {
+		payload map[string]any
+		partSet map[string]struct{}
+	}
+	entries := make([]*entryState, 0, limit)
+	entryByArcade := map[string]*entryState{}
+	for _, row := range blockRows {
+		if ctx.Err() != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load arcade updates"})
 		}
 		if row.ArcadeID == "" {
 			continue
 		}
 
-		entryKey := row.ArcadeID + ":" + nullStringMapValue(raw, "block_id")
+		entryKey := row.ArcadeID + ":" + row.BlockID
 		entry, ok := entryByArcade[entryKey]
 		if !ok {
 			arcadeRec, err := re.App.FindRecordById("arcade", row.ArcadeID)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ericbaek/musecat-backend-core/handlers/arcade/campaign"
 	"github.com/ericbaek/musecat-backend-core/service/xp"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
@@ -115,21 +116,66 @@ func setPhotoAtomCreated(tb testing.TB, app *tests.TestApp, atomID string, at ti
 	}
 }
 
+func TestPhotoCampaignUsesCaptureDateWithoutChangingUploadDate(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Old photo uploaded today", Address: "A"})
+	setArcadeVisibility(t, app, arcadeID, true, false)
+	atomID := seedPhotoAtom(t, app, arcadeID, user.Id, true)
+	seedPhotoMolecule(t, app, arcadeID, user.Id, []string{atomID})
+	atom, err := app.FindRecordById("arcade_photo_atoms", atomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := atom.GetString("created")
+	at := time.Now().UTC().AddDate(-1, 0, 0)
+	atom.Set("captured_at", at)
+	if err := app.Save(atom); err != nil {
+		t.Fatal(err)
+	}
+	status, err := campaign.GetPhotoCampaignStatus(app, arcadeID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Status != "stale" {
+		t.Fatalf("expected stale photo, got %#v", status)
+	}
+	atom, _ = app.FindRecordById("arcade_photo_atoms", atomID)
+	if atom.GetString("created") != created {
+		t.Fatal("capture metadata changed upload time")
+	}
+	atom.Set("captured_at", "")
+	if err := app.Save(atom); err != nil {
+		t.Fatal(err)
+	}
+	status, err = campaign.GetPhotoCampaignStatus(app, arcadeID, time.Now())
+	if err != nil || status.Status != "current" {
+		t.Fatalf("expected upload-date fallback: %#v %v", status, err)
+	}
+}
+
 func TestPhotoPublicationWeeklyCaps(t *testing.T) {
 	for _, target := range []bool{false, true} {
 		t.Run(fmt.Sprintf("campaign=%t", target), func(t *testing.T) {
 			app := newArcadeTestApp(t)
 			_, user := createAuthUser(t, app)
-			capExp := 10
+			capExp, perPhoto := 10, 2
 			if target {
-				capExp = 20
+				capExp, perPhoto = 20, 4
 			}
 			atoms := make([]string, 12)
 			for i := range atoms {
 				atoms[i] = fmt.Sprintf("photo%d", i)
 			}
 			err := app.RunInTransaction(func(tx core.App) error {
-				exp, granted, err := xp.AwardArcadePhotoExpTx(tx, user.Id, "arcade", atoms, target, 0, time.Now().UTC())
+				exp, granted, err := xp.AwardArcadePhotoExpTx(tx, user.Id, "arcade", atoms[:1], target, 0, time.Now().UTC())
+				if err != nil {
+					return err
+				}
+				if !granted || exp != perPhoto {
+					t.Fatalf("expected %d XP per photo, got %d (granted=%t)", perPhoto, exp, granted)
+				}
+				exp, granted, err = xp.AwardArcadePhotoExpTx(tx, user.Id, "arcade", atoms, target, exp, time.Now().UTC())
 				if err != nil {
 					return err
 				}

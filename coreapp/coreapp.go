@@ -2,6 +2,7 @@ package coreapp
 
 import (
 	"crypto/subtle"
+	usernotifications "github.com/ericbaek/musecat-backend-core/handlers/user/notifications"
 	"net/http"
 	"os"
 
@@ -28,6 +29,7 @@ import (
 	arcadephoto "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo"
 	arcadepublic "github.com/ericbaek/musecat-backend-core/handlers/arcade/public"
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
+	arcadereporting "github.com/ericbaek/musecat-backend-core/handlers/arcade/reporting"
 	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
 	communityhandler "github.com/ericbaek/musecat-backend-core/handlers/community"
@@ -136,6 +138,7 @@ func configureDefaultRateLimits(app core.App) {
 		{Label: "POST /user/joint/lookup", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/joint/begin", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "/partner/v1/", MaxRequests: 120, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /user/feedback/thread", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 	}
 	for _, rule := range defaults {
 		found := false
@@ -281,6 +284,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
 	// Public user profile read endpoint
 	api.GET("/user", userhandler.GetUserByID)
+	api.GET("/user/arcade-inquiry-onboarding", arcadereporting.InquiryOnboarding).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
 	api.GET("/user/activity", userhandler.GetUserActivity)
 	// Public user-scoped changelog read endpoint; private arcade rows are
 	// returned only to their owner or strict reviewers.
@@ -289,6 +293,10 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
+	api.GET("/user/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	api.GET("/user/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	api.POST("/user/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
+	api.PATCH("/user/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(4096))
 	api.GET("/support_feedback", arcadeadmin.ListSupportFeedback).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
@@ -329,6 +337,12 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
 	// Allow up to 10 * 20MB photo files (+multipart overhead) in a single request.
 	authArcade.POST("/photo/upload", arcadephoto.UploadArcadePhotos).Bind(apis.BodyLimit(220 << 20))
+	authArcade.GET("/report-settings", arcadereporting.GetSettings)
+	authArcade.PUT("/report-settings", arcadereporting.UpdateSettings).Bind(apis.BodyLimit(64 << 10))
+	authArcade.PUT("/inquiry-settings", arcadereporting.UpdateInquirySettings).Bind(apis.BodyLimit(64 << 10))
+	authArcade.POST("/report-subscription/status", arcadereporting.SubscriptionStatus).Bind(apis.BodyLimit(4 << 10))
+	authArcade.PUT("/report-subscription", arcadereporting.SaveSubscription).Bind(apis.BodyLimit(16 << 10))
+	authArcade.DELETE("/report-subscription", arcadereporting.DeleteSubscription).Bind(apis.BodyLimit(4 << 10))
 	authArcade.POST("/flag", arcadeflag.CreateArcadeFlag).Bind(apis.BodyLimit(arcadeflag.MaxFlagBodyBytes))
 	authArcade.POST("/flag/delete", arcadeflag.DeleteArcadeFlag)
 	authArcade.POST("/flag/reaction", arcadeflag.UpdateArcadeFlagReaction)
@@ -345,6 +359,14 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	)
 
 	authUser := api.Group("/user").Bind(apis.RequireAuth("user"))
+
+	authNotifications := api.Group("/user/notifications").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	authNotifications.GET("", usernotifications.List)
+	authNotifications.POST("/read", usernotifications.Read).Bind(apis.BodyLimit(4096))
+	authNotifications.POST("/device", usernotifications.DeviceStatus).Bind(apis.BodyLimit(4096))
+	authNotifications.PATCH("/device", usernotifications.SyncDeviceLocale).Bind(apis.BodyLimit(4096))
+	authNotifications.PUT("/device", usernotifications.SaveDevice).Bind(apis.BodyLimit(16384))
+	authNotifications.DELETE("/device", usernotifications.DeleteDevice).Bind(apis.BodyLimit(4096))
 	authUser.GET("/me", userhandler.GetMe)
 	authUser.PUT("/profile", userhandler.UpdateProfile).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(35<<20))
 	authUser.PUT("/game-preferences", userhandler.UpdateGamePreferences).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(128<<10))

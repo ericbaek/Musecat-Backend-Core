@@ -263,11 +263,5 @@ func photoAtomTimestamp(atom *core.Record) time.Time {
 	if atom == nil {
 		return time.Time{}
 	}
-	// Core's fresh bootstrap currently stores atom creation time only. Prefer
-	// an updated value when a deployment supplies it; published atoms are
-	// immutable, so this fallback remains stable and migration-free.
-	if updated := atom.GetDateTime("updated").Time().UTC(); !updated.IsZero() {
-		return updated
-	}
-	return atom.GetDateTime("created").Time().UTC()
+	return arcadeinternal.PhotoTimestamp(atom)
 }

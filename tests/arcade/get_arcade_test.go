@@ -415,8 +415,12 @@ func TestGetArcadeValues_Default(t *testing.T) {
 		if _, ok := admin["updated"]; !ok {
 			tb.Fatalf("expected admin.updated to exist")
 		}
-		if len(admin) != 9 {
-			tb.Fatalf("expected admin to have only 9 keys, got %d (%v)", len(admin), admin)
+		settings, ok := admin["inquirySettings"].(map[string]any)
+		if !ok || settings["mode"] != "disabled" || settings["configured"] != false {
+			tb.Fatalf("expected default unconfigured disabled inquiry settings, got %v", admin["inquirySettings"])
+		}
+		if len(admin) != 12 {
+			tb.Fatalf("expected admin to have only 12 keys, got %d (%v)", len(admin), admin)
 		}
 	}
 

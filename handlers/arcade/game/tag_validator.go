@@ -33,12 +33,14 @@ const (
 	PriceAcceptCreditCard PriceAccept = "Credit Card"
 	PriceAcceptPrepaid    PriceAccept = "Prepaid Card"
 	PriceAcceptCash       PriceAccept = "Cash"
+	PriceAcceptPaseli     PriceAccept = "PASELI"
 )
 
 var priceAcceptEnum = map[PriceAccept]struct{}{
 	PriceAcceptCreditCard: {},
 	PriceAcceptPrepaid:    {},
 	PriceAcceptCash:       {},
+	PriceAcceptPaseli:     {},
 }
 
 type PriceCurrency string

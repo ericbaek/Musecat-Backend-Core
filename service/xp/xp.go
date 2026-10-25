@@ -544,9 +544,9 @@ func AwardArcadePhotoExpTx(txApp core.App, userID, arcadeID string, atomIDs []st
 		return 0, false, err
 	}
 
-	capExp := 10
+	capExp, photoExp := 10, 2
 	if campaignTarget {
-		capExp = 20
+		capExp, photoExp = 20, 4
 	}
 	cutoff := now.Add(-7 * 24 * time.Hour)
 	prefix := "xp:arcade-photo:" + arcadeID + ":%"
@@ -586,7 +586,7 @@ ORDER BY created ASC, id ASC
 		if remaining <= 0 {
 			break
 		}
-		grant := 2
+		grant := photoExp
 		if grant > remaining {
 			grant = remaining
 		}

@@ -379,13 +379,18 @@ func TestUploadArcadePhotos_Unauthorized(t *testing.T) {
 	scenario.Test(t)
 }
 
-func buildPhotoUploadMultipart(tb testing.TB, arcadeID string, files []uploadTestFile) ([]byte, string) {
+func buildPhotoUploadMultipart(tb testing.TB, arcadeID string, files []uploadTestFile, capturedAt ...string) ([]byte, string) {
 	tb.Helper()
 
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	if err := writer.WriteField("arcade", arcadeID); err != nil {
 		tb.Fatalf("failed to write arcade field: %v", err)
+	}
+	if len(capturedAt) > 0 {
+		if err := writer.WriteField("captured_at", capturedAt[0]); err != nil {
+			tb.Fatal(err)
+		}
 	}
 	for _, f := range files {
 		part, err := writer.CreateFormFile("photos", f.Filename)
@@ -432,5 +437,48 @@ func gifFixtureBytes() []byte {
 	return []byte{
 		0x47, 0x49, 0x46, 0x38, 0x39, 0x61,
 		0x01, 0x00, 0x01, 0x00, 0x80, 0x00, 0x00,
+	}
+}
+
+func TestUploadArcadePhotos_CaptureMetadata(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	arcadeID, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Capture Date", Address: "A"})
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arcade.Set("timezone", "Asia/Seoul")
+	if err := app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+	body, contentType := buildPhotoUploadMultipart(t, arcadeID, []uploadTestFile{
+		{Filename: "dated.png", Content: pngFixtureBytes()},
+		{Filename: "unknown.png", Content: pngFixtureBytes()},
+	}, `["2025-02-03T17:47:27", "invalid"]`)
+	res := executeRequest(t, app, http.MethodPost, "/arcade/photo/upload", bytes.NewReader(body), map[string]string{
+		"Content-Type": contentType, "Authorization": "Bearer " + token,
+	})
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("got %d", res.StatusCode)
+	}
+	var payload photoUploadResponse
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Uploaded) != 2 {
+		t.Fatalf("unexpected response: %#v", payload)
+	}
+	dated, _ := app.FindRecordById("arcade_photo_atoms", payload.Uploaded[0].AtomID)
+	if got := dated.GetDateTime("captured_at").Time().UTC().Format("2006-01-02T15:04:05Z"); got != "2025-02-03T08:47:27Z" {
+		t.Fatalf("wrong venue-local capture time: %s", got)
+	}
+	if dated.GetDateTime("created").Time().Year() < 2026 {
+		t.Fatal("upload date was rewritten")
+	}
+	unknown, _ := app.FindRecordById("arcade_photo_atoms", payload.Uploaded[1].AtomID)
+	if !unknown.GetDateTime("captured_at").IsZero() {
+		t.Fatal("invalid metadata should remain empty")
 	}
 }

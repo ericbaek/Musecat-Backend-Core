@@ -159,13 +159,14 @@ func DownloadArcadePhotoAtom(re *core.RequestEvent) error {
 
 func photoAtomPayload(atom *core.Record) map[string]any {
 	return map[string]any{
-		"id":        atom.Id,
-		"arcade":    atom.GetString("arcade"),
-		"photo":     atom.GetString("photo"),
-		"file_url":  photoread.FileURL(atom.Id),
-		"public":    atom.GetBool("public"),
-		"createdBy": atom.GetString("createdBy"),
-		"created":   atom.Get("created"),
-		"updated":   atom.Get("updated"),
+		"id":          atom.Id,
+		"arcade":      atom.GetString("arcade"),
+		"photo":       atom.GetString("photo"),
+		"file_url":    photoread.FileURL(atom.Id),
+		"public":      atom.GetBool("public"),
+		"createdBy":   atom.GetString("createdBy"),
+		"created":     atom.Get("created"),
+		"captured_at": atom.Get("captured_at"),
+		"updated":     atom.Get("updated"),
 	}
 }

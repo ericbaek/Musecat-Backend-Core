@@ -241,15 +241,18 @@ moves return `403` with `location_move_distance_exceeded`,
 
 Update campaign checks use `POST /campaign/check`. An active authenticated user
 may confirm whether a public/open campaign target is still old or updated. A
-`still_old` result awards 1 XP once per user and campaign target; an updated
+location-verified `still_old` result awards the configured campaign XP once per
+user and campaign target; an unverified `still_old` result awards no XP. An updated
 result awards the campaign XP atomically with the game-state mutation. The
 default path requires a same-day verified arcade visit. The
-optional `bypass_location=true` path is restricted to users at level 10 or
-above; it skips only the visit-location check and does not relax campaign,
+optional `bypass_location=true` path is available at any level; it skips only the
+visit-location check and does not relax campaign,
 arcade, or target validation. An updated result through the bypass path awards
 1 XP instead of the campaign's configured reward. Clients must show a two-step
 warning confirmation before sending the bypass flag. Campaign checks are
-append-only reports with a per-report location-verification flag. A
+append-only reports with a per-report location-verification flag. A user may
+follow an unverified `still_old` report with a verified report to receive the
+campaign reward; repeated verified reports do not award XP again. A
 `still_old` report can revert the latest update for seven days after the
 update, subject to the same campaign and visit/bypass validation. `GET
 /campaign?id=...` returns the remaining old-version targets, current
@@ -261,20 +264,24 @@ are included. The report view includes only currently public/open arcades.
 
 Arcade detail prompts (`GET /arcade/campaigns`) and anonymous presence
 (`GET /arcade/campaigns/presence`) use a narrower target set: current
-`from_version` machines plus current `to_version` machines with an `updated`
-report for that campaign and arcade/game created less than seven days ago.
-Machines already on `to_version` without a campaign update report never show
-a prompt. Once the update report's seven-day review window expires, the
-machine is accepted as updated and its prompt/presence disappears on the next
-read. Expiry does not mutate the game, delete reports, or remove updated
-machines from campaign overview statistics/history.
+`from_version` machines plus current `to_version` machines within their report
+review window. After the most recent `still_old` (Wrong) report, one
+location-verified `updated` report or two unverified `updated` reports hide the
+prompt immediately. A single unverified update starts a seven-day window.
+A Wrong report resets the report counts and expiry anchor; old-version targets
+remain visible until updated again. Updated targets expose `review_expires_at` (UTC RFC 3339) for
+the detail countdown. Machines already on `to_version` without a campaign
+update report never show a prompt. At expiry the prompt/presence disappears
+on the next read, while the client countdown also hides the prompt at zero.
+Expiry does not mutate the game, delete reports, or remove updated machines
+from campaign overview statistics/history.
 
 `GET /campaign/photo` is the automatic photo-update campaign discovery route.
 It returns only public/open arcades whose current `arcade.photo` molecule has
 no public atom (`photo_status=missing`) or whose newest public atom is at least
 one year old (`photo_status=stale`). The newest timestamp is read from an
-atom's `updated` value when available and otherwise its immutable `created`
-value. Photo atoms removed from the current gallery do not keep an arcade
+atom's EXIF `captured_at` when available and otherwise its immutable `created`
+upload timestamp. Photo atoms removed from the current gallery do not keep an arcade
 fresh. The response uses the standard `page`, `per_page`, `last_page`, `total`,
 and `items` envelope; missing targets sort before stale targets, and stale
 targets sort oldest first.
@@ -571,8 +578,9 @@ location. All external fallback calls happen before the mutation transaction.
 - Public conversion remains creator-only and uses the creator's level snapshot at request time: levels 0-4 require game information, contact-or-hours, and facility-photo-or-location-verification; levels 5-9 require game information and facility-photo-or-location-verification; levels 10+ require game information only. Supporter and staff tags never bypass these requirements. The one-time publication location verification keeps its stricter 100-meter distance / 100-meter GPS-accuracy rule, is tied to the current `arcade.basic` revision, and is invalidated automatically when basic information changes. It does not create a Passport visit or award XP.
 - XP ledger changes and aggregate mutations belong to the same transaction. No XP grant may survive a failed aggregate mutation.
 - XP is available only after the authenticated user has a non-empty `username`. Before one-time username setup, XP-producing actions retain their normal mutation semantics where applicable but award `0`; they must not create `user_level` or `user_level_log` state, and public-conversion XP previews must report no eligible XP.
-- Normal edit XP remains scoped by user, arcade, and part. Basic/hour/sns/gtk edits grant 2 XP with their existing seven-day cooldown. Photo atoms grant 2 XP each only when first published, with a rolling seven-day cap of 20 XP for a photo-campaign target and 10 XP for another public arcade; upload-only, reorder, removal, and reuse of a published atom grant 0. Game edits use a rolling seven-day window of distinct durable `arcade_game_id` values: the target is `min(10, 2*n)` and each request receives only the increase over XP already granted in that window. Revisiting an entry already counted in the window grants 0; entries become eligible again after they leave the window. Administrative bulk game-version updates and public-conversion backfill do not use this scale.
+- Normal edit XP remains scoped by user, arcade, and part. Basic/hour/sns/gtk edits grant 2 XP with their existing seven-day cooldown. Photo atoms grant 4 XP each for a photo-campaign target (double the normal 2 XP) only when first published, with a rolling seven-day cap of 20 XP for a campaign target and 10 XP for another public arcade; upload-only, reorder, removal, and reuse of a published atom grant 0. Game edits use a rolling seven-day window of distinct durable `arcade_game_id` values: the target is `min(10, 2*n)` and each request receives only the increase over XP already granted in that window. Revisiting an entry already counted in the window grants 0; entries become eligible again after they leave the window. Administrative bulk game-version updates and public-conversion backfill do not use this scale.
 - Passport visits grant 5 XP for a lifetime first visit to an arcade and 2 XP for a revisit. Attendance check-in grants 1 XP. Flag creation grants 5 XP; `issue_persist` reactions grant 2 XP, `fixed` reactions grant 3 XP, and `wrong` votes grant 0 XP. Deleting a rewarded reaction reverses the exact original ledger amount.
+- Publishing an arcade does not send Telegram or Discord notifications.
 - Notification delivery is after persistence and best-effort. A Telegram/Discord failure MUST NOT roll back a completed user request.
 - Review processing has no automated ban and no automated rollback.
 - Public `GET /arcade` detail loads record one `page_view` event best-effort. The direction-click event route is anonymous and accepts only `direction_click`. Its JSON body is capped at 2 KiB and at most ten distinct series IDs. After validating the arcade, it applies the rate limit before game-series database validation, so rejected series IDs consume quota rather than creating a lookup-amplification path. It retains no client identity: a process-local limiter keyed by the Core app instance and PocketBase `RealIP()` accepts at most 20 events per client in a rolling ten minutes and one event per client/arcade every 30 seconds. Expired per-arcade cooldown entries are removed on the next client request, and the limiter evicts the least recently active client when its 4,096-client memory cap is reached. `RealIP()` uses proxy headers only when PocketBase trusted-proxy settings permit them; otherwise it uses the direct remote IP. Limit rejection returns `429` with `Retry-After`. This is intentionally best-effort across process restarts and separate instances, preserving the no-IP-storage analytics contract; edge-level rate limiting remains required when deployment-wide enforcement is needed.
@@ -712,6 +720,21 @@ not change arcade visibility, author/reviewer permissions, XP or history semanti
 ### Profile background framing
 
 `background_position` stores x/y cover anchors (0–100), optional zoom (1–4, default 1), and clockwise rotation (0/90/180/270, default 0). Anchors apply after rotation. Preserve the full image; these are rendering transforms. Legacy x/y-only JSON remains valid within the existing 128-byte field, so no schema migration or data backfill is required. Publish this Core contract before updating Full’s pinned Core dependency and deploying frontend transform writes.
+
+## Public aggregate execution
+
+`GET /stats` caches successful public aggregate snapshots for 30 minutes per
+application process. Concurrent cache misses share one refresh; errors are not
+cached. A refresh has a 12-second database deadline and survives an individual
+viewer's disconnect, while that viewer stops waiting immediately. Counts may
+therefore lag underlying mutations by up to 30 minutes.
+
+Both arcade-update aggregates remain uncached, propagate request cancellation
+to SQLite, and cap database work at 12 seconds, below the web transport's
+15-second timeout. Failed result iteration must not return a partial success.
+History pages obtain their total from the same query as the selected blocks;
+only an empty page needs a separate count. The aggregate connection is released
+before detail enrichment borrows another connection.
 
 ## Public arcade summary timestamps
 
@@ -1174,3 +1197,151 @@ Untouched revisions and rollback retain their original raw price JSON. New
 edits may have a legacy price in `before` and a versioned price in `after`.
 Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
 retains the existing representative-item policy.
+
+
+## Photo capture dates
+
+Photo atoms keep `created` as their actual upload timestamp and store optional
+`captured_at` separately. The web client extracts EXIF DateTimeOriginal and
+OffsetTimeOriginal before normalization and sends an index-aligned JSON array to
+the photo upload endpoint. Offsetless camera times use the venue timezone, or UTC
+if absent. Invalid and future capture dates are ignored. No file modification date
+is used as evidence of capture. This metadata is user supplied, not verified proof.
+Photo labels and automatic campaign freshness use captured_at then created;
+updated is never evidence of a new photo. Gallery membership/order, pending-photo
+list order, audit history, and XP event timestamps do not change. Full owns the
+existing-data field migration and explicit offline, fill-only EXIF backfill. It
+must not rewrite immutable changelogs or fabricate dates for stripped images.
+
+## Arcade report destination and device alerts
+
+`GET|PUT /arcade/report-settings` require an active `developer|moderator`, or `arcade_owner` with the target id in `owns`. Staff may manage private/closed arcades. Default mode is `internal`; `external` requires an HTTP(S) contact without URL credentials or a phone number. Settings are stored on the arcade aggregate in a short transaction. This operational configuration awards no XP and does not create a content revision/changelog.
+
+Detail admin metadata exposes `reportSettings` and `canManageReports`. Game expansions suppress all flags/history while external reporting is enabled, including orphan flags. Existing flags, reactions and resolution timers are preserved. POST flag and reaction reject external mode with 409/REPORT_EXTERNAL, rechecked inside the transaction. Returning to internal mode shows only reports eligible under their current resolution state; it never resurrects solved reports. Hidden reports keep normal stale-resolution schedules (currently 120 days to start stale resolution).
+
+`PUT|DELETE /arcade/report-subscription` store/remove a device per arcade and authenticated user. Repeated registration is idempotent; explicit registration transfers the browser endpoint away from other accounts on a shared device. DELETE may remove only the caller's subscription even after loss of ownership. Raw collection APIs remain locked. Browser subscription endpoints are restricted to HTTPS browser push providers, including Google FCM and the exact Chromium staging host `jmt17.google.com`; keys are validated before persistence. Endpoints and secrets are never public data.
+
+`POST /arcade/report-subscription/status` reads only the authenticated manager's subscription for one arcade and device. It returns a private, no-store enabled boolean, never endpoint credentials. Full registers `POST /arcade/report-subscription/test` to send directly to that same registered device using its VAPID sender, with current ownership and internal-mode checks. Provider acceptance is distinct from notification display; expired registrations are removed. Neither operation writes a report, changelog or XP.
+
+Report creation atomically inserts the account inbox event and one durable `user_notification_delivery` per eligible device with the flag and XP. `arcade_report_delivery` is a locked migration archive; no new writes or dispatch target it. External network delivery belongs to Full, outside transactions. Full rechecks current arcade ownership, withdrawn state, report mode and solved state, sends game/severity/message previews, records receipts, retries up to five times with exponential delays, and removes 404/410 endpoints. Delivery is at least once; notification tags collapse duplicate browser notifications. Revoked ownership and external mode cancel pending delivery. Configuration and VAPID keys are selected only by the executable.
+
+## Unified user notifications
+
+`user_notification` is a private, account-scoped inbox. `user_notification_device` stores one authenticated account per browser endpoint; `user_notification_delivery` is its durable per-device outbox. Raw collection access is locked. Core defines fresh-bootstrap schema; Full alone applies the guarded forward migration. Existing arcade report subscriptions are promoted idempotently without requesting browser permission again.
+
+New arcade reports create inbox events for current official owners and explicitly subscribed managers. Reactions create an event for the report author, excluding the reacting author themselves. Event insertion and delivery enqueue happen in the originating content transaction. A unique `(user,event_key)` prevents duplicate event creation. Deleting a source report/reaction cascades to its inbox event and queued deliveries. No extra XP or arcade changelog is awarded.
+
+The custom `/user/notifications` APIs require an active authenticated account. List/read/device operations never accept another user id. Lists are newest-first, use a before-id cursor (20 visible entries per response), expose an unread count, and recheck source visibility and management access. External-reporting arcades are suppressed. Read state is persistent; marking a foreign notification read is a no-op. Device endpoints stay in bounded request bodies, not URL queries or responses. Public VAPID configuration is supplied by the frontend server, never the private key.
+
+Push is an explicit per-device browser opt-in; the in-app inbox is always enabled. Enabling through either the arcade compatibility API or the unified device API stores credentials only in `user_notification_device` and transfers a shared endpoint away from any previous account. `arcade_report_subscription` is a device relation with an enabled flag, not a second credential store. Disabling removes only that account/device, including its legacy arcade subscriptions and queued deliveries. Full validates current account/ownership/source visibility before dispatch, uses the existing VAPID sender outside transactions, retries up to five times (including failed expired-endpoint cleanup), removes expired endpoints, and dispatches only the unified outbox. Full consolidation maps every legacy receipt into that outbox before removing duplicate subscription credentials. Existing retries and completed/read state are preserved; source receipts remain archived. Pending reports from before inbox migration remain deliverable. Full's `/user/notifications/test` sends only to the caller's registered device and confirms provider acceptance, not OS display. The frontend polls unread state and refreshes on opening; it never prompts for browser permissions during a read.
+
+## Private inquiry conversations
+
+`support_feedback` preserves the original inquiry and photos. `support_feedback_message` stores immutable, chronological replies. `/user/feedback/thread` GET/POST/PATCH is restricted to the authenticated active inquiry author, current official account of the scoped arcade, or strict support staff (developer/moderator). Inaccessible ids return 404. The staff label and author are always server-derived. Replies contain up to 4000 characters and/or up to three images (15,000,000 bytes each; content-sniffed image validation matching initial inquiry uploads), and paged reads return the newest 50 in chronological order, with a private cursor for older messages.
+
+Reply, inquiry status and `feedback_reply` notification/queue writes share one transaction. Staff replies notify the inquiry author; user replies notify current strict staff, excluding the sender and withdrawn accounts. User follow-up returns status to waiting; staff reply changes it to recognised. Original guest submissions remain supported, but guests have no authenticated conversation or inbox. Existing status review remains available. Feedback notifications recheck ownership/strict staff permissions when listed or delivered; revoking staff access hides them. Arcade/flag notification relations are optional so private inquiries do not fabricate arcade references. Push uses generic copy without private inquiry text. Raw reply collection API rules remain locked.
+
+### Arcade-scoped inquiries and push locale
+
+`/support_feedback` submissions may set `arcade`; public arcade inquiries accept guests unless the current official account has enabled `loginRequired`. The arcade must be public or accessible to the submitting user. A nullable, non-cascading parent relation preserves inquiry history when the arcade is removed. Current official owners may access only inquiries for arcades they manage; ordinary MUSECAT inquiries remain author/staff only. Exact current `owns` plus official management policy is rechecked for every thread read, append, inbox list and push delivery. Current strict staff retain access. `/user/feedback?arcade=<id>` lists the user's authored and officially assigned inquiries; staff may read the arcade-scoped queue. Other owners see none. Original moderator/edit-report and closure history is retained in its existing queue; new contact submissions use conversations without exposing historical moderator submissions to newly added recipients.
+
+New arcade inquiries create `feedback_created` notifications for current official accounts and strict staff. Replies by the requester notify current responders; official/staff replies notify the requester. The snapshot distinguishes staff and official replies; current authorization governs visibility independently of historical role labels. Each message can generate independent per-device deliveries. Devices sync locale through authenticated PATCH `/user/notifications/device`, which may update only an already registered endpoint for that account. It never opts a user in, transfers ownership or prompts for permission. Real and test pushes use the stored device locale.
+
+- A `fixed` flag reaction from a current developer/moderator or the official owner assigned to that arcade resolves immediately regardless of level. The reaction attribution and notification/XP transaction are preserved; other users retain the existing resolution-voting delay.
+
+Inquiry participants can PATCH `/user/feedback/thread` with `status: solved` to resolve or `waiting` to reopen without posting a reply. Current access is rechecked inside the status transaction; foreign and revoked participants receive 404. This operational status change does not award XP or alter message history. Replies retain the existing waiting/recognised transitions.
+
+### Arcade inquiry destination
+
+`arcade.inquiry_settings` is independent from `report_settings`. `PUT /arcade/inquiry-settings`
+accepts internal, external, or disabled mode and the validated HTTP(S)-URL/phone contact shape (guide up to
+2000 characters). Only current assigned official owners and strict developer/moderator users
+can configure it. Arcade detail returns `admin.inquirySettings` alongside current exact official
+account IDs. Missing, empty, or invalid persisted inquiry mode defaults to disabled with
+`configured: false`; saved internal/external/disabled modes return `configured: true`. This flag is
+derived from persisted mode and is never stored or trusted from clients. Explicit OFF requires no
+external contact. New arcade-scoped support submissions return 409 `INQUIRY_DISABLED` for disabled
+mode or `INQUIRY_EXTERNAL` for external mode while an official account exists, checked in the creation transaction.
+Existing conversations, replies, attachments, notifications and their access policy are retained.
+Without a current official account, new inquiries target MUSECAT moderators and ignore a retained
+external or disabled setting. Explicit moderator contact from the external destination opens a general private
+MUSECAT inquiry, which is not shared with arcade owners. No historical private inquiries migrate.
+Core defines fresh bootstrap only; Full owns the guarded forward schema migration.
+
+Both destination settings accept a guide of up to 2000 Unicode code points and a contact
+value of up to 2048. Their JSON fields allow 32768 bytes, including UTF-8 and JSON
+escaping overhead. Full widens only the known 8192-byte predecessor or accepts the
+already upgraded 32768-byte schema; unexpected field types or capacities fail closed.
+Existing settings values are preserved. Both Core settings endpoints and their web BFF
+routes accept at most 65536 request-body bytes, covering the settings plus JSON envelope.
+
+### Private inquiry reply attachments
+
+Reply POST retains JSON text compatibility and accepts bounded multipart `feedbackId`,
+`message` and repeated `photos` fields. Empty text is allowed only with an image; blank
+replies are rejected. Uploaded files use the existing image validation plus a private,
+protected `support_feedback_message.photos` field. GET/POST reply DTOs include filename
+arrays. `GET /user/feedback/thread/photo?id=<replyId>&file=<filename>` and
+`GET /user/feedback/thread/photo?feedbackId=<inquiryId>&file=<filename>` recheck current
+parent inquiry access and exact file membership before serving private, no-store bytes.
+Exactly one record selector is required; ambiguous selectors return 400.
+Raw PocketBase file delivery is denied; leaked filenames never grant access. Original
+inquiry photos are protected by the same policy; filenames and stored files are unchanged.
+Guest submission receipts grant no attachment read capability. Message persistence, status transitions and inbox/push
+queue insertion remain one transaction, including image-only replies. Core defines fresh
+bootstrap; Full's guarded forward migration preserves existing messages and locked rules.
+
+Arcade inquiry settings include `loginRequired` (boolean, default false) in the existing
+JSON configuration and public detail `admin.inquirySettings` capability. Only current
+assigned official owners and strict staff may save it. New anonymous internal inquiries
+return 401 `LOGIN_REQUIRED` when enabled, rechecked in the creation transaction. External
+mode still returns 409 first; without a current official account, retained owner routing
+and login preferences do not block moderator contact. Guests cannot create inquiries for
+private arcades. Guest inquiries keep an empty `createdBy`, appear in the official/staff
+queues, and notify current responders through the existing atomic inbox/push flow. Guest
+receipt does not issue a conversation token, expose private reads, or introduce guest chat
+or reply delivery. Existing historical access/status behavior is unchanged. No schema or
+production data migration is needed for this optional JSON key.
+
+
+Notification storage consolidation uses a guarded Full-only data migration. Core
+bootstrap defines only the empty canonical schema. Endpoint owner conflicts, orphan
+references, incompatible fields and unaccounted source deliveries abort the entire
+transaction. Existing canonical credentials win over older same-owner key rotations;
+conflicting legacy-only credentials fail closed. Historical events synthesized during
+cutover start read, while existing inbox read state is unchanged. Explicit per-arcade
+opt-outs affect report pushes only, leaving personal notifications and other arcades
+on the same device enabled. Completed transport receipts are retained 90 days;
+cleanup records archive completion proofs before deletion, and inbox event identity
+continues to prevent duplicate enqueue. Unread inbox events and pending/exhausted
+receipts are never retention-deleted. Inbox reads use indexed keyset batches plus
+unread-only visibility scans, not a full read-history load.
+
+
+`GET /user/arcade-inquiry-onboarding` requires an active authenticated user and reloads their current
+role and ownership. Only exact `arcade_owner` accounts receive their currently owned
+arcades, including already configured arcades as `{items: [{arcadeId, arcadeName, settings, reportSettings}]}`. Staff-only accounts receive an empty list.
+Private names are available only within this ownership scope; missing arcades are skipped and missing
+basic relations produce an empty name. The response is private/no-store. Existing explicitly configured internal/external/disabled choices are preserved without data rewrites.
+The independent `reportSettings` is the current report routing settings read from each owned arcade.
+This setup endpoint supports the notification-initiated dashboard funnel; login does not open a dialog.
+
+
+The account-scoped `arcade_setup` notification invites every active exact `arcade_owner` account to
+set up the new admin dashboard, independently of saved reporting/inquiry modes. Its generic message
+is `새 관리자 대시보드를 설정해주세요` and destination is `/account/arcade-dashboard/setup`.
+`usernotification.EnsureArcadeSetupNoticeTx` rechecks the current user, withdrawal, exact role, and
+active bans, then inserts at most one `arcade_dashboard_setup:v1` event per user with no actor or
+arcade relation. Existing notices and their read state are untouched on reruns. Canonical registered
+devices receive deliveries in the same transaction. Notification visibility rechecks the current
+active owner role and is independent of OFF settings. Future official account provisioning inserts
+this notice atomically. Core only defines fresh bootstrap schema; Full owns the existing-account
+backfill migration. No inquiry/report settings are rewritten.
+
+## Optional PASELI numeric prices
+
+`price.accept` accepts `PASELI`. A numeric row (`gamemode`, `credit`, `song`, `time`, `custom_v1`, or legacy object-form `custom`) may include optional
+`paseli_value` (> 0), in JPY and with PASELI acceptance. Omission means unknown,
+not the base price. Base `value` may remain null for a PASELI-only price. Existing
+prices and immutable history are not migrated. Representative guest rows retain
+the PASELI amount alongside the base amount.

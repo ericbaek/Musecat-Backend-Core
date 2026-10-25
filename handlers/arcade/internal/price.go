@@ -57,6 +57,9 @@ func RedactGuestPrice(raw any) any {
 				if value, exists := itemMap["value"]; exists {
 					repItem["value"] = value
 				}
+				if paseli, exists := itemMap["paseli_value"]; exists {
+					repItem["paseli_value"] = paseli
+				}
 				if modeKey, exists := itemMap["mode_key"]; exists {
 					repItem["mode_key"] = modeKey
 				}
@@ -77,6 +80,9 @@ func RedactGuestPrice(raw any) any {
 			}
 			if value, exists := firstMap["value"]; exists {
 				repItem["value"] = value
+			}
+			if paseli, exists := firstMap["paseli_value"]; exists {
+				repItem["paseli_value"] = paseli
 			}
 			if modeKey, exists := firstMap["mode_key"]; exists {
 				repItem["mode_key"] = modeKey
