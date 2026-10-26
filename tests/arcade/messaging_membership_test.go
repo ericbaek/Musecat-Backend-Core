@@ -62,6 +62,10 @@ func TestArcadeInquiryPersonalChatVisibilityRequiresExplicitMention(t *testing.T
 				if err != nil || len(dashboard.Items) != 2 {
 					t.Fatal("staff dashboard lost inquiries", dashboard, err)
 				}
+				contact, err := messaging.ListConversations(app, id, url.Values{"inbox": {"arcade:" + arcadeID}, "requesterOnly": {"true"}})
+				if err != nil || len(contact.Items) != 0 {
+					t.Fatal("contact entry exposed dashboard inquiries", contact, err)
+				}
 				if _, _, err := messaging.AttachmentPath(app, id, c.ID, c.LastMessage.ID, c.LastMessage.Photos[0].Name); err != nil {
 					t.Fatal("dashboard staff cannot read attachment", err)
 				}

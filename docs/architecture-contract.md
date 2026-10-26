@@ -1396,6 +1396,7 @@ requester plus arcade or `team:musecat` inbox. Current official owners and stric
 developer/moderator staff retain inquiry management access in the arcade admin
 dashboard. Unmentioned incoming arcade inquiries are excluded from all responders'
 personal chat lists; the matching arcade inbox scope lists them in its dashboard.
+Public contact windows pass `requesterOnly=true` and list only the caller's own inquiries, even for staff or owners; management inboxes omit it.
 A persisted `musecat` mention makes only that conversation appear in the team's and
 official responders' personal chat lists, including subsequent follow-ups. Requesters
 retain their own conversations. Team inquiries remain accessible to strict current

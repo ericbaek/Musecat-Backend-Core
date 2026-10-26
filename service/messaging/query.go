@@ -194,6 +194,14 @@ func ListFor(app core.App, viewer Principal, q url.Values) (List, error) {
 	if q.Get("inbox") == "" {
 		where += " AND (NOT EXISTS(SELECT 1 FROM messaging_inquiry i WHERE i.conversation=c.id AND i.inbox_type='arcade' AND i.requester!={:user}) OR " + musecatMentionSQL + ")"
 	}
+	if only := q.Get("requesterOnly"); only != "" {
+		if only != "true" && only != "false" {
+			return out, apis.NewBadRequestError("Invalid requester scope.", nil)
+		}
+		if only == "true" {
+			where += " AND EXISTS(SELECT 1 FROM messaging_inquiry i WHERE i.conversation=c.id AND i.requester={:user})"
+		}
+	}
 	if search := strings.TrimSpace(q.Get("q")); search != "" {
 		if len([]rune(search)) > 100 {
 			return out, apis.NewBadRequestError("Search is too long.", nil)
