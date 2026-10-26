@@ -159,7 +159,7 @@ func Item(app core.App, row *core.Record) map[string]any {
 		return announcementItem(row, "ko")
 	}
 	if row.GetString("kind") == "message" {
-		return messaging.NotificationItem(row)
+		return messaging.NotificationItem(app, row)
 	}
 	if row.GetString("kind") == ArcadeSetupKind {
 		return arcadeSetupItem(app, row)

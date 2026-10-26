@@ -3,6 +3,7 @@ package usernotification
 import (
 	"context"
 	"encoding/json"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 
 	"github.com/ericbaek/musecat-backend-core/service/announcement"
 	"github.com/pocketbase/dbx"
@@ -94,6 +95,9 @@ func announcementItem(row *core.Record, locale string) map[string]any {
 func ItemLocalized(app core.App, row *core.Record, locale string) map[string]any {
 	if row.GetString("kind") == AnnouncementKind {
 		return announcementItem(row, locale)
+	}
+	if row.GetString("kind") == "message" {
+		return messaging.NotificationItemLocalized(app, row, locale)
 	}
 	return Item(app, row)
 }

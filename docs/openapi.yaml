@@ -7361,11 +7361,11 @@ paths:
       description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. The durable arcade_setup notice remains visible to current active exact arcade_owner accounts regardless of saved inquiry/report modes; reading it never changes settings. Does not expose endpoints or subscription credentials.
       security: [{bearerAuth: []}]
       parameters:
-        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}, description: Announcement title/summary language and audience filter; other notification kinds are unaffected.}
+        - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}, description: Announcement title/summary language and audience filter; message team names and photo-only previews also use this locale.}
         - {name: before, in: query, schema: {type: string}, description: Last notification id from the previous page.}
       responses:
         '200':
-          description: Inbox page and unread count.
+          description: "Inbox page and unread count. Message events are grouped by conversation before pagination; the latest received message represents each conversation and contributes at most one unread notification. Title identifies the sending user or acting arcade/team; message contains a plain-text preview up to 160 Unicode characters plus an ellipsis, or a localized photo label."
           content:
             application/json:
               schema:
@@ -7384,7 +7384,7 @@ paths:
                         created: {type: string}
                         arcadeName: {type: string}
                         gameName: {type: string}
-                        title: {type: string, description: Localized announcement title; omitted for other kinds.}
+                        title: {type: string, description: Localized announcement title or message sender identity.}
                         message: {type: string}
                         reaction: {type: string}
                         url: {type: string, description: "Server-generated relative deep link. Announcements open /community/updates?announcement=id, feedback opens /updates/feedback?thread=id, and arcade_setup resolves current ownership to /arcade/id?setup=dashboard (legacy redirect fallback)."}
@@ -7406,7 +7406,7 @@ paths:
                 id: {type: string}
                 all: {type: boolean}
       responses:
-        '200': {description: Own notifications marked read. A foreign id cannot modify another account.}
+        '200': {description: 'Own notifications marked read. A message notification acknowledges earlier events in that conversation through its message sequence only; newer arrivals remain unread. A foreign id cannot modify another account.'}
         '400': {description: Notification id or all=true required.}
         '401': {description: Authentication required.}
         '403': {description: Active account required.}

@@ -126,7 +126,7 @@ func TestFeedbackReplyPhotoAttachments(t *testing.T) {
 		t.Fatal("original/status changed")
 	}
 	notifications := call("GET", "/user/notifications", "", authorToken, 200)
-	if notifications["unread"] != float64(2) {
+	if notifications["unread"] != float64(1) {
 		t.Fatal("image-only responder replies missing alerts", notifications)
 	}
 	notification, err := app.FindFirstRecordByFilter(usernotification.Inbox, "user={:user} && message={:message}", map[string]any{"user": author.Id, "message": last["id"]})

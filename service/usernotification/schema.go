@@ -94,7 +94,7 @@ func EnsureSchema(app core.App) error {
 		} else if !col.IsBase() || col.System {
 			return fmt.Errorf("incompatible %s", Deliveries)
 		}
-		fields := []core.Field{relation("notification", inbox.Id, true, true), relation("device", device.Id, true, true), &core.NumberField{Name: "attempts", OnlyInt: true}, &core.DateField{Name: "next_attempt"}, &core.BoolField{Name: "done"}, &core.AutodateField{Name: "created", OnCreate: true}}
+		fields := []core.Field{relation("notification", inbox.Id, true, true), relation("device", device.Id, true, true), &core.NumberField{Name: "attempts", OnlyInt: true}, &core.DateField{Name: "next_attempt"}, &core.DateField{Name: "sent_at"}, &core.BoolField{Name: "done"}, &core.AutodateField{Name: "created", OnCreate: true}}
 		for _, f := range fields {
 			if old := col.Fields.GetByName(f.GetName()); old == nil {
 				col.Fields.Add(f)

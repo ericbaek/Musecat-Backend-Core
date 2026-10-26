@@ -1193,3 +1193,20 @@ Setup links resolve the recipient's current owned arcade using the onboarding
 endpoint's ownership rules and target `/arcade/<id>?setup=dashboard`; the legacy
 redirect remains a fallback when no current owned arcade exists. Retained legacy
 links remain valid frontend inputs. Neither kind needs an intermediate launcher.
+
+Message notification inboxes project the latest received event per user/conversation,
+including existing history, before keyset pagination and unread counting. Source
+message/event/delivery identities remain immutable. The title is the sending user
+snapshot or acting arcade/team; previews normalize whitespace and truncate at 160
+Unicode characters, with localized photo-only fallback. Access checks still precede
+projection. Acknowledging one message notification clears events only through that
+message sequence. Conversation read cursors also acknowledge corresponding inbox
+events, without advancing beyond the displayed sequence.
+
+Full message pushes wait at least five seconds from event creation, collapse older
+queued events, and use a user/conversation tag. A successful delivery persists
+`sent_at`; subsequent pushes to the same conversation/device wait at least two
+minutes, retaining the newest pending message. Deferral does not consume retries.
+Skipped receipts never start the cooldown. Delivery rechecks read cursors and
+notification acknowledgement in addition to the existing recipient/access policy.
+Push title/body use the same sender and preview as the authenticated inbox.
