@@ -209,6 +209,8 @@ func userChangelogVisibility(re *core.RequestEvent, userID, changed string) (str
 	}
 
 	switch {
+	case publicProfileAudience(re):
+		parts = append(parts, "a.public = 1")
 	case hasStrictReviewerAccess(re.Auth):
 		// Reviewers can audit private arcade history as well as public history.
 	case re.Auth != nil:

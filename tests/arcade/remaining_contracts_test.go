@@ -108,7 +108,7 @@ func TestFlagAndNoticeUploadLimits(t *testing.T) {
 					arcadeID, _ := seedArcade(tb, app, user.Id, arcadeSeed{Name: "Upload limits", Address: "Test", Location: location{Lat: 37, Lon: 127}})
 					var body bytes.Buffer
 					form := multipart.NewWriter(&body)
-					fields := map[string]string{"arcade": arcadeID, "message": "broken", "disruption": "major", "type": "alert", "document": `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"notice"}]}]}`}
+					fields := map[string]string{"arcade": arcadeID, "title": "Notice", "message": "broken", "disruption": "major", "type": "alert", "document": `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"notice"}]}]}`}
 					if route.path == "/arcade/flag" {
 						fields["game_id"] = seedGameAtomForFlag(tb, app, arcadeID)
 					}

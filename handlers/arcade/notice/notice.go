@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
@@ -36,14 +37,16 @@ var noticeAccessTags = map[string]struct{}{
 }
 
 type NoticeBody struct {
-	ID       string             `json:"id,omitempty"`
-	Arcade   string             `json:"arcade,omitempty"`
-	Type     *string            `json:"type,omitempty"`
-	Document json.RawMessage    `json:"document,omitempty"`
-	Link     *string            `json:"link,omitempty"`
-	Until    *time.Time         `json:"until,omitempty"`
-	Priority *float64           `json:"priority,omitempty"`
-	Photos   []*filesystem.File `json:"-"`
+	Title       *string            `json:"title,omitempty"`
+	DisplayMode *string            `json:"display_mode,omitempty"`
+	ID          string             `json:"id,omitempty"`
+	Arcade      string             `json:"arcade,omitempty"`
+	Type        *string            `json:"type,omitempty"`
+	Document    json.RawMessage    `json:"document,omitempty"`
+	Link        *string            `json:"link,omitempty"`
+	Until       *time.Time         `json:"until,omitempty"`
+	Priority    *float64           `json:"priority,omitempty"`
+	Photos      []*filesystem.File `json:"-"`
 }
 
 func parseNoticeBody(re *core.RequestEvent) (NoticeBody, error) {
@@ -56,6 +59,12 @@ func parseNoticeBody(re *core.RequestEvent) (NoticeBody, error) {
 		body := NoticeBody{
 			ID:     strings.TrimSpace(re.Request.FormValue("id")),
 			Arcade: strings.TrimSpace(re.Request.FormValue("arcade")),
+		}
+		if values, ok := re.Request.MultipartForm.Value["title"]; ok && len(values) > 0 {
+			body.Title = &values[0]
+		}
+		if values, ok := re.Request.MultipartForm.Value["display_mode"]; ok && len(values) > 0 {
+			body.DisplayMode = &values[0]
 		}
 		if v := strings.TrimSpace(re.Request.FormValue("type")); v != "" {
 			body.Type = &v
@@ -204,96 +213,179 @@ func ownsArcade(auth *core.Record, arcadeID string) bool {
 }
 
 func hasOtherOfficialArcadeManager(app core.App, auth *core.Record, arcadeID string) bool {
-	users, err := app.FindAllRecords("user")
+	collection, err := app.FindCollectionByNameOrId("user")
 	if err != nil {
-		// A failed management lookup must not let a supporter post to a
-		// potentially official-managed arcade.
 		return true
 	}
-	for _, user := range users {
-		if auth != nil && user.Id == auth.Id {
-			continue
-		}
-		if hasNoticeTag(user, "arcade_owner") && ownsArcade(user, arcadeID) {
-			return true
+	roles := make([]string, 0, 2)
+	for _, field := range []string{"tag", "tags"} {
+		if collection.Fields.GetByName(field) != nil {
+			roles = append(roles, "EXISTS (SELECT 1 FROM json_each(u."+field+") WHERE lower(trim(value)) = 'arcade_owner')")
 		}
 	}
-	return false
+	if len(roles) == 0 {
+		return true
+	}
+	userID := ""
+	if auth != nil {
+		userID = auth.Id
+	}
+	var result struct {
+		Managed bool `db:"managed"`
+	}
+	err = app.DB().NewQuery("SELECT EXISTS (SELECT 1 FROM user u WHERE (" + strings.Join(roles, " OR ") + ") AND EXISTS (SELECT 1 FROM json_each(u.owns) WHERE value = {:arcade}) AND u.id != {:user}) AS managed").
+		Bind(dbx.Params{"arcade": arcadeID, "user": userID}).One(&result)
+	// Failed lookups fail closed without loading the entire user collection.
+	return err != nil || result.Managed
 }
 
-func rejectNoticeCreateAccess(re *core.RequestEvent, arcadeID string) (bool, error) {
-	if re.Auth == nil {
-		return true, re.UnauthorizedError("The request requires valid record authorization token.", nil)
-	}
-
-	if !hasAnyNoticeAccessTag(re.Auth) {
-		return true, re.JSON(http.StatusForbidden, map[string]any{
-			"error": "notice access required",
-		})
-	}
-
-	if hasElevatedNoticeAccess(re.Auth) {
-		return false, nil
-	}
-	if hasNoticeTag(re.Auth, "arcade_owner") && ownsArcade(re.Auth, arcadeID) {
-		return false, nil
-	}
-	if isSupporter(re.Auth) {
-		if !hasSupporterNoticeAccess(re.App, re.Auth) {
-			return true, re.JSON(http.StatusForbidden, map[string]any{
-				"error": "supporter level 30 or staff access required",
-			})
-		}
-		if !hasOtherOfficialArcadeManager(re.App, re.Auth, arcadeID) {
-			return false, nil
-		}
-	}
-	return true, re.JSON(http.StatusForbidden, map[string]any{"error": "notice creation is not allowed for this arcade"})
+type noticeRequestError struct {
+	status  int
+	message string
+	mode    string
+	limit   int
 }
 
-func rejectNoticeMutationAccess(re *core.RequestEvent, rec *core.Record) (bool, error) {
-	if re.Auth == nil {
-		return true, re.UnauthorizedError("The request requires valid record authorization token.", nil)
+func (err *noticeRequestError) Error() string { return err.message }
+
+func noticeError(status int, message string) error {
+	return &noticeRequestError{status: status, message: message}
+}
+
+func writeNoticeError(re *core.RequestEvent, err error) error {
+	var requestError *noticeRequestError
+	if errors.As(err, &requestError) {
+		payload := map[string]any{"error": requestError.message}
+		if requestError.limit > 0 {
+			payload["code"] = "notice_display_limit_exceeded"
+			payload["display_mode"] = requestError.mode
+			payload["limit"] = requestError.limit
+		}
+		return re.JSON(requestError.status, payload)
 	}
-	arcade, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, rec.GetString("arcade"))
+	return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to save arcade_notice", "details": err.Error()})
+}
+
+func noticeCreateAccess(app core.App, auth *core.Record, arcadeID string) error {
+	if auth == nil {
+		return noticeError(http.StatusUnauthorized, "authentication required")
+	}
+	if !hasAnyNoticeAccessTag(auth) {
+		return noticeError(http.StatusForbidden, "notice access required")
+	}
+	if hasElevatedNoticeAccess(auth) {
+		return nil
+	}
+	if hasNoticeTag(auth, "arcade_owner") && ownsArcade(auth, arcadeID) {
+		return nil
+	}
+	if isSupporter(auth) {
+		if !hasSupporterNoticeAccess(app, auth) {
+			return noticeError(http.StatusForbidden, "supporter level 30 or staff access required")
+		}
+		if !hasOtherOfficialArcadeManager(app, auth, arcadeID) {
+			return nil
+		}
+	}
+	return noticeError(http.StatusForbidden, "notice creation is not allowed for this arcade")
+}
+
+func noticeMutationAccess(app core.App, auth *core.Record, rec *core.Record) error {
+	if auth == nil {
+		return noticeError(http.StatusUnauthorized, "authentication required")
+	}
+	arcade, err := app.FindRecordById(arcadeinternal.CollectionArcade, rec.GetString("arcade"))
 	if err != nil {
-		return true, re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
+		return noticeError(http.StatusNotFound, "arcade not found")
 	}
-	if !arcadeinternal.CanWriteArcade(re.Auth, arcade) {
-		return true, re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
+	if !arcadeinternal.CanWriteArcade(auth, arcade) {
+		return noticeError(http.StatusForbidden, arcadeinternal.ErrArcadeWriteForbidden.Error())
 	}
-	if hasElevatedNoticeAccess(re.Auth) {
-		return false, nil
+	if hasElevatedNoticeAccess(auth) {
+		return nil
 	}
-	if rec.GetString("createdBy") != re.Auth.Id {
-		return true, re.JSON(http.StatusForbidden, map[string]any{"error": "only the notice author can modify this notice"})
+	author := rec.GetString("createdBy")
+	if author == "" && hasNoticeTag(auth, "arcade_owner") && ownsArcade(auth, arcade.Id) {
+		return nil
 	}
-	if hasNoticeTag(re.Auth, "arcade_owner") && ownsArcade(re.Auth, rec.GetString("arcade")) {
-		return false, nil
+	if author != auth.Id {
+		return noticeError(http.StatusForbidden, "only the notice author can modify this notice")
 	}
-	if isSupporter(re.Auth) && !hasSupporterNoticeAccess(re.App, re.Auth) {
-		return true, re.JSON(http.StatusForbidden, map[string]any{
-			"error": "supporter level 30 or staff access required",
-		})
+	if hasNoticeTag(auth, "arcade_owner") && ownsArcade(auth, arcade.Id) {
+		return nil
 	}
+	if isSupporter(auth) && !hasSupporterNoticeAccess(app, auth) {
+		return noticeError(http.StatusForbidden, "supporter level 30 or staff access required")
+	}
+	return nil
+}
 
-	return false, nil
+func noticeDisplayMode(rec *core.Record) string {
+	mode := rec.GetString("display_mode")
+	if mode == "" {
+		return "normal"
+	}
+	return mode
+}
+
+func noticeDisplayRank(rec *core.Record) int {
+	switch noticeDisplayMode(rec) {
+	case "required":
+		return 0
+	case "pinned":
+		return 1
+	default:
+		return 2
+	}
+}
+
+// Called inside the same write transaction as Save. PocketBase serializes write
+// transactions, so simultaneous promotions cannot reserve the same last slot.
+func checkNoticeDisplayLimit(app core.App, rec *core.Record) error {
+	mode := noticeDisplayMode(rec)
+	limit := 0
+	switch mode {
+	case "required":
+		limit = 1
+	case "pinned":
+		limit = 3
+	}
+	now := time.Now().UTC()
+	if limit == 0 || rec.GetBool("delete") {
+		return nil
+	}
+	if until := noticeUntil(rec); !until.IsZero() && !until.After(now) {
+		return nil
+	}
+	records, err := app.FindRecordsByFilter(arcadeinternal.CollectionArcadeNotice,
+		"arcade = {:arcade} && display_mode = {:mode} && delete = false && id != {:id} && (until = '' || until > {:now})", "", limit, 0,
+		dbx.Params{"arcade": rec.GetString("arcade"), "mode": mode, "id": rec.Id, "now": now.Format(types.DefaultDateLayout)})
+	if err != nil {
+		return err
+	}
+	count := len(records)
+	if count >= limit {
+		return &noticeRequestError{status: http.StatusConflict, message: "notice display limit exceeded", mode: mode, limit: limit}
+	}
+	return nil
 }
 
 func noticePayload(rec *core.Record) map[string]any {
 	return map[string]any{
-		"id":        rec.Id,
-		"arcade":    strings.TrimSpace(rec.GetString("arcade")),
-		"createdBy": rec.GetString("createdBy"),
-		"type":      strings.TrimSpace(rec.GetString("type")),
-		"document":  rec.Get("document"),
-		"link":      strings.TrimSpace(rec.GetString("link")),
-		"until":     rec.Get("until"),
-		"priority":  rec.Get("priority"),
-		"delete":    rec.GetBool("delete"),
-		"photos":    append([]string{}, rec.GetStringSlice("photos")...),
-		"created":   rec.Get("created"),
-		"updated":   rec.Get("updated"),
+		"id":           rec.Id,
+		"title":        rec.GetString("title"),
+		"display_mode": noticeDisplayMode(rec),
+		"arcade":       strings.TrimSpace(rec.GetString("arcade")),
+		"createdBy":    rec.GetString("createdBy"),
+		"type":         strings.TrimSpace(rec.GetString("type")),
+		"document":     rec.Get("document"),
+		"link":         strings.TrimSpace(rec.GetString("link")),
+		"until":        rec.Get("until"),
+		"priority":     rec.Get("priority"),
+		"delete":       rec.GetBool("delete"),
+		"photos":       append([]string{}, rec.GetStringSlice("photos")...),
+		"created":      rec.Get("created"),
+		"updated":      rec.Get("updated"),
 	}
 }
 
@@ -433,19 +525,21 @@ func ListArcadeNotice(re *core.RequestEvent) error {
 	}
 
 	sort.SliceStable(filtered, func(i, j int) bool {
-		pi := noticePriorityValue(filtered[i])
-		pj := noticePriorityValue(filtered[j])
-		if pi <= 0 && pj > 0 {
-			return false
+		ri, rj := noticeDisplayRank(filtered[i]), noticeDisplayRank(filtered[j])
+		if ri != rj {
+			return ri < rj
 		}
-		if pj <= 0 && pi > 0 {
-			return true
+		if ri == 1 {
+			pi, pj := noticePriorityValue(filtered[i]), noticePriorityValue(filtered[j])
+			if pi != pj {
+				return pi < pj
+			}
 		}
-		if pi != pj {
-			return pi < pj
+		ti, tj := noticeCreatedAt(filtered[i]), noticeCreatedAt(filtered[j])
+		if !ti.Equal(tj) {
+			return ti.After(tj)
 		}
-
-		return noticeCreatedAt(filtered[i]).After(noticeCreatedAt(filtered[j]))
+		return filtered[i].Id < filtered[j].Id
 	})
 
 	items := make([]map[string]any, 0, len(filtered))
@@ -460,8 +554,33 @@ func ListArcadeNotice(re *core.RequestEvent) error {
 }
 
 func applyNoticeFields(rec *core.Record, body NoticeBody) error {
+	if body.Title != nil {
+		title := strings.TrimSpace(*body.Title)
+		if title == "" {
+			return fmt.Errorf("title is required")
+		}
+		if utf8.RuneCountInString(title) > 5000 {
+			return fmt.Errorf("title exceeds storage limit of 5000 characters")
+		}
+		rec.Set("title", title)
+	}
+	if body.DisplayMode != nil {
+		mode := strings.TrimSpace(*body.DisplayMode)
+		if mode != "normal" && mode != "pinned" && mode != "required" {
+			return fmt.Errorf("invalid display_mode")
+		}
+		rec.Set("display_mode", mode)
+	}
 	if body.Type != nil {
-		rec.Set("type", strings.TrimSpace(*body.Type))
+		topic := strings.TrimSpace(*body.Type)
+		switch topic {
+		case "alert", "close", "issue", "event":
+		default:
+			if topic == "" || topic != rec.GetString("type") {
+				return fmt.Errorf("invalid notice type")
+			}
+		}
+		rec.Set("type", topic)
 	}
 	if len(body.Document) > 0 {
 		document, err := normalizeNoticeDocument(body.Document)
@@ -491,59 +610,49 @@ func CreateArcadeNotice(re *core.RequestEvent) error {
 		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
 			return apis.ErrRequestEntityTooLarge
 		}
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error":   "invalid JSON body",
-			"details": err.Error(),
-		})
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
 	}
 	if len(body.Document) == 0 {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "document is required"})
 	}
-
+	if body.Title == nil {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "title is required"})
+	}
 	if body.Arcade == "" {
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error": "arcade is required",
-		})
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "arcade is required"})
 	}
-
-	if denied, err := rejectNoticeCreateAccess(re, body.Arcade); denied {
-		return err
-	}
-
-	arcadeRec, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
+	var rec *core.Record
+	err = re.App.RunInTransaction(func(tx core.App) error {
+		if err := noticeCreateAccess(tx, re.Auth, body.Arcade); err != nil {
+			return err
+		}
+		arcade, err := tx.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
+		if err != nil {
+			return noticeError(http.StatusNotFound, "arcade not found")
+		}
+		if !arcadeinternal.CanWriteArcade(re.Auth, arcade) {
+			return noticeError(http.StatusForbidden, arcadeinternal.ErrArcadeWriteForbidden.Error())
+		}
+		coll, err := tx.FindCollectionByNameOrId(arcadeinternal.CollectionArcadeNotice)
+		if err != nil {
+			return err
+		}
+		rec = core.NewRecord(coll)
+		rec.Set("arcade", arcade.Id)
+		rec.Set("createdBy", re.Auth.Id)
+		rec.Set("display_mode", "normal")
+		rec.Set("delete", false)
+		if err := applyNoticeFields(rec, body); err != nil {
+			return noticeError(http.StatusBadRequest, err.Error())
+		}
+		if err := checkNoticeDisplayLimit(tx, rec); err != nil {
+			return err
+		}
+		return tx.Save(rec)
+	})
 	if err != nil {
-		return re.JSON(http.StatusNotFound, map[string]any{
-			"error":   "arcade not found",
-			"details": err.Error(),
-		})
+		return writeNoticeError(re, err)
 	}
-	if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
-		return re.JSON(http.StatusForbidden, map[string]any{"error": arcadeinternal.ErrArcadeWriteForbidden.Error()})
-	}
-
-	coll, err := re.App.FindCollectionByNameOrId(arcadeinternal.CollectionArcadeNotice)
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to create arcade_notice",
-			"details": fmt.Sprintf("failed to find arcade_notice collection: %v", err),
-		})
-	}
-
-	rec := core.NewRecord(coll)
-	rec.Set("arcade", arcadeRec.Id)
-	rec.Set("createdBy", re.Auth.Id)
-	rec.Set("delete", false)
-	if err := applyNoticeFields(rec, body); err != nil {
-		return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
-	}
-
-	if err := re.App.Save(rec); err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to create arcade_notice",
-			"details": fmt.Sprintf("failed to save arcade_notice record: %v", err),
-		})
-	}
-
 	return re.JSON(http.StatusOK, noticePayload(rec))
 }
 
@@ -553,41 +662,32 @@ func UpdateArcadeNotice(re *core.RequestEvent) error {
 		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
 			return apis.ErrRequestEntityTooLarge
 		}
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error":   "invalid JSON body",
-			"details": err.Error(),
-		})
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
 	}
-
 	if body.ID == "" {
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error": "id is required",
-		})
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "id is required"})
 	}
-
-	rec, err := re.App.FindRecordById(arcadeinternal.CollectionArcadeNotice, body.ID)
+	var rec *core.Record
+	err = re.App.RunInTransaction(func(tx core.App) error {
+		var err error
+		rec, err = tx.FindRecordById(arcadeinternal.CollectionArcadeNotice, body.ID)
+		if err != nil {
+			return noticeError(http.StatusNotFound, "notice not found")
+		}
+		if err := noticeMutationAccess(tx, re.Auth, rec); err != nil {
+			return err
+		}
+		if err := applyNoticeFields(rec, body); err != nil {
+			return noticeError(http.StatusBadRequest, err.Error())
+		}
+		if err := checkNoticeDisplayLimit(tx, rec); err != nil {
+			return err
+		}
+		return tx.Save(rec)
+	})
 	if err != nil {
-		return re.JSON(http.StatusNotFound, map[string]any{
-			"error":   "notice not found",
-			"details": err.Error(),
-		})
+		return writeNoticeError(re, err)
 	}
-
-	if denied, err := rejectNoticeMutationAccess(re, rec); denied {
-		return err
-	}
-
-	if err := applyNoticeFields(rec, body); err != nil {
-		return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
-	}
-
-	if err := re.App.Save(rec); err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to update arcade_notice",
-			"details": fmt.Sprintf("failed to save arcade_notice record: %v", err),
-		})
-	}
-
 	return re.JSON(http.StatusOK, noticePayload(rec))
 }
 
@@ -597,41 +697,24 @@ func DeleteArcadeNotice(re *core.RequestEvent) error {
 		if errors.Is(err, apis.ErrRequestEntityTooLarge) {
 			return apis.ErrRequestEntityTooLarge
 		}
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error":   "invalid JSON body",
-			"details": err.Error(),
-		})
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
 	}
-
 	if body.ID == "" {
-		return re.JSON(http.StatusBadRequest, map[string]any{
-			"error": "id is required",
-		})
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "id is required"})
 	}
-
-	rec, err := re.App.FindRecordById(arcadeinternal.CollectionArcadeNotice, body.ID)
-	if err != nil {
-		return re.JSON(http.StatusNotFound, map[string]any{
-			"error":   "notice not found",
-			"details": err.Error(),
-		})
-	}
-
-	if denied, err := rejectNoticeMutationAccess(re, rec); denied {
-		return err
-	}
-
-	rec.Set("delete", true)
-
-	if err := re.App.Save(rec); err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to delete arcade_notice",
-			"details": fmt.Sprintf("failed to update arcade_notice record: %v", err),
-		})
-	}
-
-	return re.JSON(http.StatusOK, map[string]any{
-		"id":     body.ID,
-		"delete": true,
+	err = re.App.RunInTransaction(func(tx core.App) error {
+		rec, err := tx.FindRecordById(arcadeinternal.CollectionArcadeNotice, body.ID)
+		if err != nil {
+			return noticeError(http.StatusNotFound, "notice not found")
+		}
+		if err := noticeMutationAccess(tx, re.Auth, rec); err != nil {
+			return err
+		}
+		rec.Set("delete", true)
+		return tx.Save(rec)
 	})
+	if err != nil {
+		return writeNoticeError(re, err)
+	}
+	return re.JSON(http.StatusOK, map[string]any{"id": body.ID, "delete": true})
 }

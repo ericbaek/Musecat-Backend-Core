@@ -16,6 +16,8 @@ When adding or changing an endpoint:
 4. Load `/docs/` and confirm the endpoint renders correctly.
 5. Keep request and response examples aligned with actual behavior.
 
+- External account linking: [`external-connections.md`](external-connections.md).
+
 ## Local Usage
 - OpenAPI spec: `/openapi.yaml`
 - Stoplight docs page: `/docs/`
@@ -25,3 +27,20 @@ When adding or changing an endpoint:
 - Arcade game Delta API handoff: `/arcade-game-delta-api.md`
 - Supporter API notes: `/supporter-api.md`
 - Community translation prototype: `/community-translation-prototype.md`
+
+## Public integration documentation
+
+- Developer portal: `/developer` (public; contains only the delegated integration surface).
+- Developer OpenAPI: `/developer/openapi.yaml`, embedded from `developer-openapi.yaml`.
+- Integration guide: `/developer/guide.md`, embedded from [`developer-api.md`](developer-api.md).
+- OAuth metadata: `/.well-known/oauth-authorization-server` when configured.
+- Internal/operational API docs retain their existing optional authentication policy.
+
+- New integrations use `account:access` for the explicit general-user API allowlist; management is excluded.
+- CHUNITHM Info agent handoff: [`partners/chuniinfo/agent.md`](partners/chuniinfo/agent.md);
+  partner decision/implementation checklist: [`partners/chuniinfo/checklist.md`](partners/chuniinfo/checklist.md).
+  Share with the guide and developer OpenAPI. Development URL and credentials are supplied separately.
+
+- Partner integration contract (all third-party platforms): [`partner-integration-spec.md`](partner-integration-spec.md).
+- Self-service registration and one-click activation design: [`developer-center.md`](developer-center.md).
+- Reciprocal one-step rationale and internal coordinator: [`joint-connections.md`](joint-connections.md).
