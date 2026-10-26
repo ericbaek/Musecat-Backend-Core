@@ -19,7 +19,7 @@ import (
 
 func feedbackThreadAccess(re *core.RequestEvent, id string) (*core.Record, error) {
 	record, err := re.App.FindRecordById("support_feedback", id)
-	if err != nil || !supportfeedback.CanAccess(re.App, re.Auth, record) {
+	if err != nil || !canAccessFeedback(re, re.App, re.Auth, record) {
 		return nil, re.NotFoundError("feedback not found", nil)
 	}
 	return record, nil
@@ -74,7 +74,7 @@ func GetSupportFeedbackThread(re *core.RequestEvent) error {
 		}
 	}
 	re.Response.Header().Set("Cache-Control", "private, no-store")
-	return re.JSON(200, map[string]any{"conversationId": nil, "feedback": map[string]any{"id": record.Id, "message": record.GetString("message"), "status": record.GetString("status"), "arcadeId": arcadeID, "arcadeName": arcadeName, "arcadeHasOfficial": supportfeedback.HasOfficialAccount(re.App, arcadeID), "createdBy": record.GetString("createdBy"), "photos": record.GetStringSlice("photos"), "created": record.GetString("created")}, "items": items, "next": next})
+	return re.JSON(200, map[string]any{"conversationId": nil, "feedback": map[string]any{"id": record.Id, "message": record.GetString("message"), "status": record.GetString("status"), "arcadeId": arcadeID, "arcadeName": arcadeName, "arcadeHasOfficial": supportfeedback.HasOfficialAccount(re.App, arcadeID), "createdBy": record.GetString("createdBy"), "guestChat": record.GetString("guest_key_hash") != "", "photos": record.GetStringSlice("photos"), "created": record.GetString("created")}, "items": items, "next": next})
 }
 
 type replySupportFeedbackBody struct {
@@ -140,8 +140,14 @@ func ReplySupportFeedback(re *core.RequestEvent) error {
 			return re.NotFoundError("feedback not found", nil)
 		}
 		// Recheck policy under the same transaction as the message and its alerts.
-		user, err := tx.FindRecordById("user", re.Auth.Id)
-		if err != nil || !supportfeedback.CanAccess(tx, user, feedback) {
+		var user *core.Record
+		if re.Auth != nil {
+			user, err = tx.FindRecordById("user", re.Auth.Id)
+			if err != nil {
+				return err
+			}
+		}
+		if !canAccessFeedback(re, tx, user, feedback) {
 			return re.NotFoundError("feedback not found", nil)
 		}
 		col, err := tx.FindCollectionByNameOrId(supportfeedback.Messages)
@@ -150,7 +156,9 @@ func ReplySupportFeedback(re *core.RequestEvent) error {
 		}
 		message := core.NewRecord(col)
 		message.Set("feedback", body.ID)
-		message.Set("author", user.Id)
+		if user != nil {
+			message.Set("author", user.Id)
+		}
 		message.Set("staff", supportfeedback.IsStaff(user))
 		message.Set("official", !supportfeedback.IsStaff(user) && supportfeedback.IsOfficial(tx, user, feedback))
 		message.Set("message", body.Message)
@@ -162,7 +170,7 @@ func ReplySupportFeedback(re *core.RequestEvent) error {
 		}
 		// A new user message returns the inquiry to the waiting queue.
 		status := "waiting"
-		if (message.GetBool("staff") || message.GetBool("official")) && user.Id != feedback.GetString("createdBy") {
+		if (message.GetBool("staff") || message.GetBool("official")) && message.GetString("author") != feedback.GetString("createdBy") {
 			status = "recognised"
 		}
 		feedback.Set("status", status)
@@ -206,8 +214,14 @@ func UpdateSupportFeedbackThreadStatus(re *core.RequestEvent) error {
 		if err != nil {
 			return re.NotFoundError("feedback not found", nil)
 		}
-		user, err := tx.FindRecordById("user", re.Auth.Id)
-		if err != nil || !supportfeedback.CanAccess(tx, user, feedback) {
+		var user *core.Record
+		if re.Auth != nil {
+			user, err = tx.FindRecordById("user", re.Auth.Id)
+			if err != nil {
+				return err
+			}
+		}
+		if !canAccessFeedback(re, tx, user, feedback) {
 			return re.NotFoundError("feedback not found", nil)
 		}
 		feedback.Set("status", body.Status)
