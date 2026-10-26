@@ -173,8 +173,8 @@ func save(re *core.RequestEvent, update bool) error {
 			if err != nil {
 				return re.NotFoundError("announcement not found", nil)
 			}
-			if row.GetString("status") != "draft" {
-				return re.Error(http.StatusConflict, "only draft announcements can be edited", nil)
+			if row.GetString("status") == "archived" {
+				return re.Error(http.StatusConflict, "archived announcements cannot be edited", nil)
 			}
 		} else {
 			col, err := tx.FindCollectionByNameOrId(announcement.Collection)
@@ -187,6 +187,11 @@ func save(re *core.RequestEvent, update bool) error {
 		}
 		if err := applyInput(row, input); err != nil {
 			return re.BadRequestError(err.Error(), nil)
+		}
+		if row.GetString("status") == "published" {
+			if err := announcement.ValidatePublished(row, row.GetStringSlice("locales")); err != nil {
+				return re.BadRequestError(err.Error(), nil)
+			}
 		}
 		if err := tx.Save(row); err != nil {
 			return err
@@ -208,13 +213,16 @@ func Publish(re *core.RequestEvent) error { return changeStatus(re, "published")
 func Archive(re *core.RequestEvent) error { return changeStatus(re, "archived") }
 func changeStatus(re *core.RequestEvent, status string) error {
 	var locales []string
+	var sendPush *bool
 	if status == "published" {
 		var body struct {
-			Locales []string `json:"locales"`
+			Locales  []string `json:"locales"`
+			SendPush *bool    `json:"sendPush"`
 		}
 		if err := re.BindBody(&body); err != nil {
 			return re.BadRequestError("publication locales are required", err)
 		}
+		sendPush = body.SendPush
 		if len(body.Locales) == 0 || len(body.Locales) > len(announcement.Locales) {
 			return re.BadRequestError("select at least one supported locale", nil)
 		}
@@ -251,6 +259,7 @@ func changeStatus(re *core.RequestEvent, status string) error {
 			if err := announcement.ValidatePublished(row, locales); err != nil {
 				return re.BadRequestError(err.Error(), nil)
 			}
+			row.Set("suppress_device_push", sendPush != nil && !*sendPush)
 			row.Set("published_at", time.Now().UTC())
 			row.Set("locales", locales)
 		}

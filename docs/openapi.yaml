@@ -9227,8 +9227,8 @@ paths:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string}}
     put:
-      summary: Replace draft localized content and ordered image references
-      description: Omitting references removes images. Retained files need no re-upload. Published and archived content is immutable.
+      summary: Replace draft or published localized content and ordered image references
+      description: Omitting references removes images. Retained files need no re-upload. Published content must remain complete for its selected locales. Edits preserve publication time, audience, inbox snapshots and read/view state without resending notifications. Archived content is immutable.
       security: [{bearerAuth: []}]
       requestBody: *announcementMutationBody
       responses:
@@ -9237,14 +9237,14 @@ paths:
         '401': {description: Authentication required.}
         '403': {description: Active developer or moderator required.}
         '404': {description: Missing story.}
-        '409': {description: Story is no longer a draft.}
+        '409': {description: Archived story cannot be edited.}
         '413': {description: Image or total request exceeds byte limit.}
   /moderation/announcements/{id}/publish:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string}}
     post:
       summary: Publish selected language variants once
-      description: Requires a nonempty unique supported locale selection. Only selected variants need titles and 1..12 images each. Image alt text may be empty. Content and selected locales become immutable. A durable bounded worker creates one logical inbox event per existing non-withdrawn account; inbox reads filter by locale. Only already registered devices with selected saved locales get deliveries, and delivery rechecks current device locale. Repeating the same selected locale set is idempotent, including after read/view. Device pushes remain at-least-once with a stable notification tag.
+      description: Requires a nonempty unique supported locale selection. Only selected variants need titles and 1..12 images each. Image alt text may be empty. Selected locales become immutable. Published content remains editable by staff. A durable bounded worker creates one logical inbox event per existing non-withdrawn account; inbox reads filter by locale. When sendPush is true (the default), only already registered devices with selected saved locales get deliveries, and delivery rechecks current device locale. sendPush=false creates inbox events without device deliveries. Repeating the same selected locale set is idempotent, including after read/view, and does not change the original push policy. Device pushes remain at-least-once with a stable notification tag.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -9254,6 +9254,7 @@ paths:
               type: object
               required: [locales]
               properties:
+                sendPush: {type: boolean, default: true, description: Create device deliveries in addition to the durable inbox event. Ignored on idempotent publication retries.}
                 locales:
                   type: array
                   minItems: 1

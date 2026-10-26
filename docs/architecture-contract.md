@@ -1150,15 +1150,22 @@ Korean, English and Japanese image stories. Staff (`developer|moderator`) use on
 custom `/moderation/announcements` APIs. Drafts may be incomplete; publication
 accepts an explicit nonempty subset of `ko|en|ja` and requires a title, 1–12 valid
 PNG/JPEG/WebP images only in those selected locales. Image alt text is optional. The selected
-locale set becomes immutable alongside the published content. Unselected variants
+locale set becomes immutable after publication. Unselected variants
 remain private to staff and never appear in public metadata or image reads.
 Image text is never assumed to translate automatically. JSON metadata preserves
 ordered image references; multipart replacements can combine retained file names
 and per-locale `upload:N` indices. Omitted references remove old files. Files are
 protected at the raw PocketBase boundary; custom image reads recheck publication
-visibility. Published content is immutable. Archive is terminal and hides public
+visibility. Staff may edit published content while preserving the selected locales,
+publication timestamp, fan-out cursor, inbox snapshots and read/view identities.
+Edits must retain complete content for every published locale and do not resend
+notifications. Archived content cannot be edited. Archive is terminal and hides public
 content and its inbox entries, without erasing deduplication or view identities.
 
+Publication accepts optional `sendPush` (boolean, default true), persisted as
+`suppress_device_push` for the fan-out worker. With `sendPush=false`, inbox
+events are still created but no device deliveries are enqueued. Retrying publication
+does not change its original push policy.
 Publication captures a timestamp. Full registers the bounded fan-out worker even
 when VAPID is disabled. Each transaction processes at most 100 non-withdrawn users
 created no later than publication; the durable user-id cursor, one inbox identity

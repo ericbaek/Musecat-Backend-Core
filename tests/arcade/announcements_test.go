@@ -112,7 +112,7 @@ func TestAnnouncementsPublicationLocalizationViewsAndArchive(t *testing.T) {
 
 	call("POST", "/moderation/announcements/"+id+"/publish", staffToken, map[string]any{"locales": announcement.Locales}, 200)
 	call("POST", "/moderation/announcements/"+id+"/publish", staffToken, map[string]any{"locales": announcement.Locales}, 200)
-	call("PUT", "/moderation/announcements/"+id, staffToken, map[string]any{"localizations": input}, 409)
+	call("PUT", "/moderation/announcements/"+id, staffToken, map[string]any{"localizations": input}, 200)
 	list := call("GET", "/announcements", "", nil, 200)
 	if len(list["items"].([]any)) != 1 {
 		t.Fatal("draft leaked to public list", list)
@@ -336,5 +336,78 @@ func TestAnnouncementSelectedLocalesConstrainPublicContentInboxAndDevices(t *tes
 	row, err := app.FindFirstRecordByFilter(usernotification.Inbox, "user={:user} && announcement={:id}", dbx.Params{"user": user.Id, "id": id})
 	if err != nil || usernotification.AnnouncementLocaleAllowed(row, "ko") || !usernotification.AnnouncementLocaleAllowed(row, "ja") {
 		t.Fatal("unselected notification copy persisted", err)
+	}
+}
+
+func TestAnnouncementPushChoiceAndPublishedEdits(t *testing.T) {
+	for _, sendPush := range []bool{false, true} {
+		t.Run(fmt.Sprintf("sendPush=%v", sendPush), func(t *testing.T) {
+			app := newArcadeTestApp(t)
+			staffToken, _ := createAuthUserWithTags(t, app, []string{"moderator"})
+			userToken, user := createAuthUser(t, app)
+			if err := app.RunInTransaction(func(tx core.App) error {
+				_, err := usernotification.UpsertDeviceTx(tx, user.Id, "https://fcm.googleapis.com/fcm/send/push-choice", map[string]string{"endpoint": "unused"}, "ko")
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			item := uploadAnnouncement(t, app, staffToken, []string{"ko"})
+			id := item["id"].(string)
+			path := "/moderation/announcements/" + id
+			published := announcementCall(t, app, "POST", path+"/publish", staffToken, map[string]any{"locales": []string{"ko"}, "sendPush": sendPush}, 200)
+			// A retry must not change the persisted delivery choice.
+			announcementCall(t, app, "POST", path+"/publish", staffToken, map[string]any{"locales": []string{"ko"}, "sendPush": !sendPush}, 200)
+			for range 2 {
+				if err := usernotification.FanoutAnnouncementsBatch(context.Background(), app); err != nil {
+					t.Fatal(err)
+				}
+			}
+			inbox, err := app.FindRecordsByFilter(usernotification.Inbox, "announcement={:id}", "id", 0, 0, dbx.Params{"id": id})
+			if err != nil || len(inbox) != 2 {
+				t.Fatalf("inbox: %d %v", len(inbox), err)
+			}
+			deliveries, err := app.FindRecordsByFilter(usernotification.Deliveries, "notification.announcement={:id}", "id", 0, 0, dbx.Params{"id": id})
+			want := 0
+			if sendPush {
+				want = 1
+			}
+			if err != nil || len(deliveries) != want {
+				t.Fatalf("deliveries=%d want=%d err=%v", len(deliveries), want, err)
+			}
+			announcementCall(t, app, "POST", "/announcements/"+id+"/view", userToken, nil, 200)
+			inbox[0].Set("read", true)
+			if err := app.Save(inbox[0]); err != nil {
+				t.Fatal(err)
+			}
+			row, _ := app.FindRecordById(announcement.Collection, id)
+			localized := announcement.Read(row)
+			ko := localized["ko"]
+			ko.Title = "Corrected title"
+			ko.Slides = ko.Slides[1:]
+			input := map[string]any{"ko": map[string]any{"title": ko.Title, "summary": ko.Summary, "slides": []map[string]string{{"image": ko.Slides[0].FileName, "alt": ko.Slides[0].Alt}}}}
+			body := map[string]any{"localizations": input}
+			announcementCall(t, app, "PUT", path, userToken, body, 403)
+			updated := announcementCall(t, app, "PUT", path, staffToken, body, 200)
+			if updated["status"] != "published" || updated["publishedAt"] != published["publishedAt"] {
+				t.Fatal("edit changed publication identity", updated)
+			}
+			public := announcementCall(t, app, "GET", "/announcements/"+id, userToken, nil, 200)
+			if public["localizations"].(map[string]any)["ko"].(map[string]any)["title"] != "Corrected title" || public["viewed"] != true {
+				t.Fatal("edit not visible or view state reset", public)
+			}
+			announcementCall(t, app, "PUT", path, staffToken, map[string]any{"localizations": map[string]any{}}, 400)
+			input["ko"].(map[string]any)["title"] = ""
+			announcementCall(t, app, "PUT", path, staffToken, body, 400)
+			if err := usernotification.FanoutAnnouncementsBatch(context.Background(), app); err != nil {
+				t.Fatal(err)
+			}
+			after, _ := app.FindRecordsByFilter(usernotification.Inbox, "announcement={:id}", "id", 0, 0, dbx.Params{"id": id})
+			afterDeliveries, _ := app.FindRecordsByFilter(usernotification.Deliveries, "notification.announcement={:id}", "id", 0, 0, dbx.Params{"id": id})
+			if len(after) != len(inbox) || !after[0].GetBool("read") || len(afterDeliveries) != want {
+				t.Fatal("edit duplicated notifications or reset read state")
+			}
+			announcementCall(t, app, "POST", path+"/archive", staffToken, nil, 200)
+			announcementCall(t, app, "PUT", path, staffToken, body, 409)
+		})
 	}
 }

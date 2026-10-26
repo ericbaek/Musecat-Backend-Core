@@ -63,6 +63,9 @@ func createAnnouncementTx(app core.App, user, publication *core.Record) error {
 	if err := app.Save(row); err != nil {
 		return err
 	}
+	if publication.GetBool("suppress_device_push") {
+		return nil
+	}
 	return enqueueDevicesTx(app, row, user.Id)
 }
 
