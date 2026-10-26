@@ -1392,8 +1392,14 @@ inquiry data there. Schema helpers reject incompatible existing definitions.
 
 DM is one unique unordered user pair. Only those two active users can read its
 messages/files/events; staff has no DM override. Inquiries are separate cases with
-requester plus arcade or `team:musecat` inbox. Strict developer/moderator staff and
-current official owners may access shared inquiries. Historical responders are not
+requester plus arcade or `team:musecat` inbox. Current official owners and strict
+developer/moderator staff retain inquiry management access in the arcade admin
+dashboard. Unmentioned incoming arcade inquiries are excluded from all responders'
+personal chat lists; the matching arcade inbox scope lists them in its dashboard.
+A persisted `musecat` mention makes only that conversation appear in the team's and
+official responders' personal chat lists, including subsequent follow-ups. Requesters
+retain their own conversations. Team inquiries remain accessible to strict current
+staff. Historical responders are not
 permanent participants. Actual sender user and acting party are separately stored;
 when a requester is also a responder they explicitly choose their sending identity.
 Summaries expose `allowedSenderIdentities` and `allowedStatusTransitions` from the
@@ -1452,8 +1458,10 @@ notification policy. Recipient accounts and bans are batch loaded, and at most 2
 devices per recipient are selected in one bounded query. Notification/delivery rows
 remain atomic with the message and use the existing durable delivery worker.
 Queued messages recheck the same policy through `NotificationDeliverable`; existing
-inbox rows retain access-only visibility. Imported arcade/guest messages have no synthesized mention metadata. Their preserved notification records use canonical conversation/message references, and the canonical delivery policy suppresses staff-only pushes without removing inbox history.
-Notification policy does not narrow conversation access or SSE audiences.
+inbox rows recheck conversation access. Imported arcade/guest messages have no synthesized mention metadata; old staff notification/read/reply records never surface unmentioned cases in personal inboxes. Their preserved notification records use canonical conversation/message references and remain available to authorized management in the arcade dashboard.
+Personal chat lists and staff SSE/notification inboxes enforce the mention boundary.
+Dashboard lists, direct reads, files and mutations retain current official/staff management permissions. Notifications for unmentioned incoming arcade inquiries link to their arcade page rather than personal chat.
+Push delivery still requires a mention on the individual message for staff-only alerts.
 
 The single-process SSE hub publishes invalidations after commit only. Conversation
 audiences are resolved once per change and only their connected users are enqueued;

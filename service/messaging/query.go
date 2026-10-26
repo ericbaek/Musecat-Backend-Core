@@ -189,6 +189,11 @@ func ListFor(app core.App, viewer Principal, q url.Values) (List, error) {
 		params["it"] = parts[0]
 		params["ii"] = parts[1]
 	}
+	// Ordinary arcade inbox traffic belongs in that arcade's dashboard, not
+	// responders' personal chat lists. Requesters retain their own conversations.
+	if q.Get("inbox") == "" {
+		where += " AND (NOT EXISTS(SELECT 1 FROM messaging_inquiry i WHERE i.conversation=c.id AND i.inbox_type='arcade' AND i.requester!={:user}) OR " + musecatMentionSQL + ")"
+	}
 	if search := strings.TrimSpace(q.Get("q")); search != "" {
 		if len([]rune(search)) > 100 {
 			return out, apis.NewBadRequestError("Search is too long.", nil)

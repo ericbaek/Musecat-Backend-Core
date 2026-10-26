@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/pocketbase/dbx"
@@ -39,6 +40,24 @@ func ActiveUser(app core.App, id string) (*core.Record, error) {
 func inquiry(app core.App, id string) (*core.Record, error) {
 	return app.FindFirstRecordByFilter(Inquiries, "conversation={:id}", dbx.Params{"id": id})
 }
+
+// Persisted mention metadata surfaces arcade inquiries in personal chat lists
+// and staff realtime feeds. Dashboard management permissions remain separate.
+const musecatMentionSQL = `EXISTS(SELECT 1 FROM messaging_message m, json_each(m.mentions) mention WHERE m.conversation=c.id AND mention.value='musecat')`
+
+func mentionedConversations(app core.App, ids []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	raw, _ := json.Marshal(ids)
+	var rows []struct {
+		ID string `db:"id"`
+	}
+	err := app.DB().NewQuery("SELECT c.id FROM messaging_conversation c WHERE c.id IN (SELECT value FROM json_each({:ids})) AND " + musecatMentionSQL).Bind(dbx.Params{"ids": string(raw)}).All(&rows)
+	for _, row := range rows {
+		out[row.ID] = true
+	}
+	return out, err
+}
+
 func Responder(app core.App, u, c *core.Record) bool {
 	if supportfeedback.IsStaff(u) {
 		return true

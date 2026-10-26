@@ -12,7 +12,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-func TestLegacyArcadeNotificationsMutePlatformStaffAndQueuedPushes(t *testing.T) {
+func TestLegacyArcadeNotificationsExcludeUninvitedStaffAndQueuedPushes(t *testing.T) {
 	app := newArcadeTestApp(t)
 	_, requester := createAuthUserWithTags(t, app, []string{})
 	_, owner := createAuthUserWithTags(t, app, []string{"arcade_owner"})
@@ -64,12 +64,12 @@ func TestLegacyArcadeNotificationsMutePlatformStaffAndQueuedPushes(t *testing.T)
 	if messaging.NotificationDeliverable(app, staff, queued) {
 		t.Fatal("old staff-only guest alert delivers")
 	}
-	// The suppressed queued row is still visible in the existing notification inbox.
+	// Old queued rows cannot expose an uninvited inquiry in the notification inbox.
 	inbox := executeJSONRequest(t, app, "GET", "/user/notifications", "", map[string]string{"Authorization": "Bearer " + staffToken})
 	var listed map[string]any
 	_ = json.NewDecoder(inbox.Body).Decode(&listed)
 	inbox.Body.Close()
-	if inbox.StatusCode != 200 || len(listed["items"].([]any)) != 1 {
+	if inbox.StatusCode != 200 || len(listed["items"].([]any)) != 0 || listed["unread"] != float64(0) {
 		t.Fatal(listed)
 	}
 	summary, err := messaging.Create(app, requester.Id, messaging.CreateInput{Kind: "inquiry", Inbox: messaging.Identity{Type: "arcade", ID: arcadeID}, InitialMessage: messaging.SendInput{Text: "Authenticated inquiry", ClientMessageID: "initial"}})

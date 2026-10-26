@@ -10,6 +10,7 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -35,7 +36,15 @@ func conversationAudience(app core.App, c *core.Record) ([]string, error) {
 	if requesterType(q) == "user" {
 		ids = append(ids, q.GetString("requester"))
 	}
-	rows, err := app.FindRecordsByFilter("user", "withdrawn=false && (tags ~ 'developer' || tags ~ 'moderator' || owns ~ {:arcade})", "id", 201, 0, dbx.Params{"arcade": q.GetString("inbox_id")})
+	staffAccess := q.GetString("inbox_type") == "team"
+	if !staffAccess {
+		invited, err := mentionedConversations(app, []string{c.Id})
+		if err != nil {
+			return nil, err
+		}
+		staffAccess = invited[c.Id]
+	}
+	rows, err := app.FindRecordsByFilter("user", "withdrawn=false && (({:staff}=true && (tags ~ 'developer' || tags ~ 'moderator')) || owns ~ {:arcade})", "id", 201, 0, dbx.Params{"arcade": q.GetString("inbox_id"), "staff": staffAccess})
 	if err != nil {
 		return nil, err
 	}
@@ -47,15 +56,15 @@ func conversationAudience(app core.App, c *core.Record) ([]string, error) {
 		arcade, _ = app.FindRecordById("arcade", q.GetString("inbox_id"))
 	}
 	for _, u := range rows {
-		if u.Id != q.GetString("requester") && (supportfeedback.IsStaff(u) || officialResponder(u, arcade)) {
+		if u.Id != q.GetString("requester") && ((staffAccess && supportfeedback.IsStaff(u)) || officialResponder(u, arcade)) {
 			ids = append(ids, u.Id)
 		}
 	}
 	return ids, nil
 }
 
-// Access and SSE always use conversationAudience. Notification preferences never
-// narrow the set of users who can see a shared inquiry or receive its invalidation.
+// Personal SSE and notification inboxes include requesters and official responders.
+// Platform staff join after an explicit mention; dashboard management is separate.
 func notifyMessageTx(app core.App, c, m *core.Record, audience []string) error {
 	users, err := activeRecipients(app, audience)
 	if err != nil {
@@ -213,14 +222,39 @@ func NotificationVisible(app core.App, user, row *core.Record) bool {
 	if user == nil || row.GetString("user") != user.Id {
 		return false
 	}
-	_, _, err := Access(app, user.Id, row.GetString("conversation"))
-	return err == nil
+	c, _, err := Access(app, user.Id, row.GetString("conversation"))
+	if err != nil {
+		return false
+	}
+	if c.GetString("kind") != "inquiry" {
+		return true
+	}
+	q, err := inquiry(app, c.Id)
+	if err != nil {
+		return false
+	}
+	if q.GetString("inbox_type") != "arcade" || q.GetString("requester") == user.Id {
+		return true
+	}
+	arcade, _ := app.FindRecordById("arcade", q.GetString("inbox_id"))
+	if officialResponder(user, arcade) {
+		return true
+	}
+	invited, err := mentionedConversations(app, []string{c.Id})
+	return err == nil && invited[c.Id]
 }
 func NotificationItem(app core.App, row *core.Record) map[string]any {
 	return NotificationItemLocalized(app, row, "ko")
 }
 
 func NotificationItemLocalized(app core.App, row *core.Record, locale string) map[string]any {
+	target := "/messages?conversation=" + row.GetString("conversation")
+	if q, err := inquiry(app, row.GetString("conversation")); err == nil && q.GetString("inbox_type") == "arcade" && q.GetString("requester") != row.GetString("user") {
+		invited, err := mentionedConversations(app, []string{q.GetString("conversation")})
+		if err != nil || !invited[q.GetString("conversation")] {
+			target = "/arcade/" + url.PathEscape(q.GetString("inbox_id"))
+		}
+	}
 	name, preview := "", ""
 	if m, err := app.FindRecordById(Messages, row.GetString("message")); err == nil && m.GetString("conversation") == row.GetString("conversation") {
 		name = m.GetString("sender_name")
@@ -249,5 +283,5 @@ func NotificationItemLocalized(app core.App, row *core.Record, locale string) ma
 			}
 		}
 	}
-	return map[string]any{"id": row.Id, "kind": "message", "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": name, "title": name, "gameName": "", "reaction": "", "message": preview, "conversationId": row.GetString("conversation"), "url": "/messages?conversation=" + row.GetString("conversation")}
+	return map[string]any{"id": row.Id, "kind": "message", "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": name, "title": name, "gameName": "", "reaction": "", "message": preview, "conversationId": row.GetString("conversation"), "url": target}
 }
