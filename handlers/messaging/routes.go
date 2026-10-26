@@ -6,6 +6,7 @@ import (
 	"fmt"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/ericbaek/musecat-backend-core/service/messaging"
+	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/router"
@@ -22,6 +23,25 @@ func RegisterRoutes(se *core.ServeEvent) {
 	review.GET("", ReviewReports)
 	review.GET("/{id}", ReviewReport)
 	review.GET("/{id}/attachments/{file}", ReviewPhoto)
+	guest := se.Router.Group("/guest").BindFunc(func(re *core.RequestEvent) error {
+		if supportfeedback.GuestKeyHash(re.Request.Header.Get(supportfeedback.GuestHeader)) == "" {
+			return re.UnauthorizedError("Inquiry credentials required.", nil)
+		}
+		re.Auth = nil
+		return re.Next()
+	})
+	guest.GET("/messaging/session", func(re *core.RequestEvent) error {
+		out, err := messaging.ViewerIdentity(re.App, requestPrincipal(re))
+		return reply(re, 200, out, err)
+	})
+	guest.GET("/conversations", List)
+	guest.POST("/conversations", Create).Bind(apis.BodyLimit(MaxBodyBytes))
+	guest.GET("/conversations/{id}", Get)
+	guest.GET("/conversations/{id}/messages", History)
+	guest.POST("/conversations/{id}/messages", Send).Bind(apis.BodyLimit(MaxBodyBytes))
+	guest.PUT("/conversations/{id}/read", Read).Bind(apis.BodyLimit(4096))
+	guest.PATCH("/conversations/{id}/inquiry", Status).Bind(apis.BodyLimit(4096))
+	guest.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo)
 	api := se.Router.Group("/user").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
 	api.GET("/conversations", List)
 	api.POST("/conversations", Create).Bind(apis.BodyLimit(MaxBodyBytes))
@@ -55,12 +75,18 @@ func reply(re *core.RequestEvent, status int, v any, err error) error {
 	}
 	return re.JSON(status, v)
 }
+func requestPrincipal(re *core.RequestEvent) messaging.Principal {
+	if re.Auth != nil {
+		return messaging.Principal{UserID: re.Auth.Id}
+	}
+	return messaging.Principal{GuestKey: re.Request.Header.Get(supportfeedback.GuestHeader)}
+}
 func List(re *core.RequestEvent) error {
-	out, err := messaging.ListConversations(re.App, re.Auth.Id, re.Request.URL.Query())
+	out, err := messaging.ListFor(re.App, requestPrincipal(re), re.Request.URL.Query())
 	return reply(re, 200, out, err)
 }
 func Get(re *core.RequestEvent) error {
-	out, err := messaging.Get(re.App, re.Auth.Id, re.Request.PathValue("id"))
+	out, err := messaging.GetFor(re.App, requestPrincipal(re), re.Request.PathValue("id"))
 	return reply(re, 200, out, err)
 }
 func parseSend(re *core.RequestEvent) (messaging.SendInput, error) {
@@ -110,7 +136,7 @@ func Create(re *core.RequestEvent) error {
 	if err != nil {
 		return re.BadRequestError("Invalid conversation.", err)
 	}
-	out, replay, err := messaging.CreateWithReplay(re.App, re.Auth.Id, in)
+	out, replay, err := messaging.CreateFor(re.App, requestPrincipal(re), in)
 	status := 201
 	if in.Kind == "dm" || replay {
 		status = 200
@@ -123,7 +149,7 @@ func Send(re *core.RequestEvent) error {
 	if err != nil {
 		return re.BadRequestError("Invalid message.", err)
 	}
-	out, replay, err := messaging.Send(re.App, re.Auth.Id, re.Request.PathValue("id"), in)
+	out, replay, err := messaging.SendFor(re.App, requestPrincipal(re), re.Request.PathValue("id"), in)
 	status := 201
 	if replay {
 		status = 200
@@ -145,7 +171,7 @@ func History(re *core.RequestEvent) error {
 			}
 		}
 	}
-	out, err := messaging.History(re.App, re.Auth.Id, re.Request.PathValue("id"), before, after, limit)
+	out, err := messaging.HistoryFor(re.App, requestPrincipal(re), re.Request.PathValue("id"), before, after, limit)
 	return reply(re, 200, out, err)
 }
 func Read(re *core.RequestEvent) error {
@@ -155,7 +181,7 @@ func Read(re *core.RequestEvent) error {
 	if err := re.BindBody(&in); err != nil || in.ThroughSequence == nil {
 		return re.BadRequestError("Invalid read cursor.", nil)
 	}
-	out, err := messaging.SetRead(re.App, re.Auth.Id, re.Request.PathValue("id"), *in.ThroughSequence)
+	out, err := messaging.SetReadFor(re.App, requestPrincipal(re), re.Request.PathValue("id"), *in.ThroughSequence)
 	return reply(re, 200, out, err)
 }
 func Status(re *core.RequestEvent) error {
@@ -165,7 +191,7 @@ func Status(re *core.RequestEvent) error {
 	if err := re.BindBody(&in); err != nil {
 		return re.BadRequestError("Invalid status.", nil)
 	}
-	out, err := messaging.SetStatus(re.App, re.Auth.Id, re.Request.PathValue("id"), in.Status)
+	out, err := messaging.SetStatusFor(re.App, requestPrincipal(re), re.Request.PathValue("id"), in.Status)
 	return reply(re, 200, out, err)
 }
 func Preferences(re *core.RequestEvent) error {
@@ -224,7 +250,7 @@ func Report(re *core.RequestEvent) error {
 	return reply(re, status, map[string]any{"id": id}, err)
 }
 func Photo(re *core.RequestEvent) error {
-	storage, filename, err := messaging.AttachmentPath(re.App, re.Auth.Id, re.Request.PathValue("id"), re.Request.PathValue("messageId"), re.Request.PathValue("file"))
+	storage, filename, err := messaging.AttachmentPathFor(re.App, requestPrincipal(re), re.Request.PathValue("id"), re.Request.PathValue("messageId"), re.Request.PathValue("file"))
 	if err != nil {
 		return err
 	}

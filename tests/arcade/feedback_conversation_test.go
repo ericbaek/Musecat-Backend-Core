@@ -105,7 +105,7 @@ func TestFeedbackConversationAccessRepliesAndNotifications(t *testing.T) {
 		t.Fatal("revoked staff saw inquiry", got)
 	}
 	// Migration is repeatable and keeps existing messages/read state.
-	if err := usernotification.EnsureFeedbackSchema(app); err != nil {
+	if err := messaging.EnsureSchema(app); err != nil {
 		t.Fatal(err)
 	}
 	if thread = call("GET", "/user/feedback/thread?id="+id, "", authorToken, 200); len(thread["items"].([]any)) != 3 {

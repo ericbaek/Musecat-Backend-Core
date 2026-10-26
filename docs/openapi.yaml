@@ -138,9 +138,9 @@ components:
                     image: {type: string}
                     alt: {type: string, maxLength: 3000}
     MessagingReport: {"type": "object", "properties": {"id": {"type": "string"}, "reporterId": {"type": "string"}, "messageId": {"type": "string"}, "reason": {"type": "string"}, "createdAt": {"type": "string"}, "message": {"$ref": "#/components/schemas/MessagingMessage"}}, "required": ["id", "reporterId", "messageId", "reason", "createdAt", "message"]}
-    MessagingParty: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}, "name": {"type": "string"}, "avatarUrl": {"type": "string", "nullable": true}, "roleTags": {"type": "array", "items": {"type": "string"}}}, "required": ["type", "id", "name", "avatarUrl", "roleTags"]}
-    MessagingIdentity: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}}, "required": ["type", "id"]}
-    MessagingMessage: {"type": "object", "properties": {"id": {"type": "string"}, "conversationId": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "senderUserId": {"type": "string"}, "sender": {"$ref": "#/components/schemas/MessagingParty"}, "actingAs": {"$ref": "#/components/schemas/MessagingParty"}, "clientMessageId": {"type": "string"}, "text": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string"}}, "required": ["name", "url"]}}, "createdAt": {"type": "string"}, "mentions": {"type": "array", "maxItems": 1, "items": {"type": "string", "enum": ["musecat"]}, "description": "Explicit MUSECAT notification mention. Only arcade inquiries support nonempty mentions; duplicates normalize to one. Omitted input becomes an empty array."}}, "required": ["id", "conversationId", "sequence", "senderUserId", "sender", "actingAs", "clientMessageId", "text", "photos", "createdAt", "mentions"]}
+    MessagingParty: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "guest", "arcade", "team"]}, "id": {"type": "string"}, "name": {"type": "string"}, "avatarUrl": {"type": "string", "nullable": true}, "roleTags": {"type": "array", "items": {"type": "string"}}}, "required": ["type", "id", "name", "avatarUrl", "roleTags"]}
+    MessagingIdentity: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "guest", "arcade", "team"]}, "id": {"type": "string"}}, "required": ["type", "id"]}
+    MessagingMessage: {"type": "object", "properties": {"id": {"type": "string"}, "conversationId": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "senderUserId": {"type": "string", "description": "Actual authenticated author account; empty for guests. sender identifies the real public account or opaque guest, independently of actingAs."}, "sender": {"$ref": "#/components/schemas/MessagingParty"}, "actingAs": {"$ref": "#/components/schemas/MessagingParty"}, "clientMessageId": {"type": "string"}, "text": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string"}}, "required": ["name", "url"]}}, "createdAt": {"type": "string"}, "mentions": {"type": "array", "maxItems": 1, "items": {"type": "string", "enum": ["musecat"]}, "description": "Explicit MUSECAT notification mention. Only arcade inquiries support nonempty mentions; duplicates normalize to one. Omitted input becomes an empty array."}}, "required": ["id", "conversationId", "sequence", "senderUserId", "sender", "actingAs", "clientMessageId", "text", "photos", "createdAt", "mentions"]}
     ConversationSummary: {"type": "object", "properties": {"id": {"type": "string"}, "kind": {"type": "string", "enum": ["dm", "inquiry"]}, "counterpart": {"$ref": "#/components/schemas/MessagingParty"}, "inbox": {"allOf": [{"$ref": "#/components/schemas/MessagingParty"}], "nullable": true}, "requester": {"allOf": [{"$ref": "#/components/schemas/MessagingParty"}], "nullable": true}, "status": {"type": "string", "nullable": true, "enum": ["waiting", "recognised", "solved", null]}, "legacyFeedbackId": {"type": "string", "nullable": true}, "latestSequence": {"type": "integer", "minimum": 0}, "lastMessage": {"allOf": [{"$ref": "#/components/schemas/MessagingMessage"}], "nullable": true}, "lastMessageAt": {"type": "string", "nullable": true}, "unreadCount": {"type": "integer", "minimum": 0}, "lastReadSequence": {"type": "integer", "minimum": 0}, "canSend": {"type": "boolean"}, "canManageStatus": {"type": "boolean", "description": "Compatibility capability, true when allowedStatusTransitions is nonempty."}, "createdAt": {"type": "string"}, "allowedSenderIdentities": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingIdentity"}, "description": "Current permitted acting identities. Dual-role inquiry users explicitly choose one."}, "allowedStatusTransitions": {"type": "array", "items": {"type": "string", "enum": ["waiting", "recognised", "solved"]}, "description": "Current permitted status values: requester waiting/solved; responders all three; DM empty."}}, "required": ["allowedSenderIdentities", "allowedStatusTransitions"]}
     MessagingSend: {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string", "minLength": 1, "maxLength": 100}, "actingAs": {"$ref": "#/components/schemas/MessagingIdentity"}, "mentions": {"type": "array", "maxItems": 16, "items": {"type": "string", "enum": ["musecat"]}, "description": "Explicit MUSECAT notification mention. Only arcade inquiries support nonempty mentions; duplicates normalize to one. Omitted input becomes an empty array."}}, "required": ["clientMessageId"]}
     MessagingCreate: {"type": "object", "properties": {"kind": {"type": "string", "enum": ["dm", "inquiry"]}, "peerUserId": {"type": "string"}, "inbox": {"$ref": "#/components/schemas/MessagingIdentity"}, "initialMessage": {"$ref": "#/components/schemas/MessagingSend"}}, "required": ["kind"]}
@@ -7282,7 +7282,7 @@ paths:
     post:
       tags: [Support]
       summary: Reply as a guest without an account or role
-      description: Same JSON or multipart body and photo limits as POST /user/feedback/thread. Author and roles are server-derived. Guest follow-up returns status to waiting and notifies current responders.
+      description: Same JSON or multipart body and photo limits as POST /user/feedback/thread. Author and roles are server-derived. This compatibility route delegates to the same messaging service as /guest/conversations. Guest follow-up returns status to waiting and notifies current responders.
       security: [{guestFeedbackKey: []}]
       requestBody:
         $ref: '#/paths/~1user~1feedback~1thread/post/requestBody'
@@ -7364,7 +7364,7 @@ paths:
           description: Oldest reply id from the preceding page; replies are returned chronologically, 50 per page.
       responses:
         '200':
-          description: Original inquiry, attachment filenames, chronological items and older-page cursor. The nullable conversationId identifies its canonical messaging inquiry after migration. Private no-store.
+          description: Original inquiry, attachment filenames, chronological items and older-page cursor. conversationId identifies the canonical messaging inquiry for both account and guest authors. Private no-store.
         '401': {description: Authentication required}
         '404': {description: Missing or inaccessible inquiry}
     post:
@@ -9351,3 +9351,100 @@ x-musecat-joint-connection:
   status: implemented
   public-endpoints-enabled: true
   description: Active only for operator-approved registrations with both OAuth credentials and both server keys. See /developer/integration-spec.md.
+
+  /guest/conversations:
+    get:
+      tags: ["Messaging"]
+      summary: "List bounded authorized conversation summaries"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"guestFeedbackKey": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}]
+    post:
+      description: Creates inquiries only. Guest credentials cannot create DMs or borrow account permissions.
+      tags: ["Messaging"]
+      summary: "Create or find an unordered user pair, or create an independent inquiry"
+      description: "DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries notify official responders; explicit musecat mentions additionally notify active platform staff. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
+      security: [{"guestFeedbackKey": []}]
+      responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Existing or new DM, or idempotent inquiry replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}}
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingCreate"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "kind": {"type": "string", "enum": ["inquiry"]}, "inboxType": {"type": "string"}, "inboxId": {"type": "string"}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
+
+
+  /guest/conversations/{id}:
+    get:
+      tags: ["Messaging"]
+      summary: "Get a conversation summary"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"guestFeedbackKey": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+
+
+  /guest/conversations/{id}/messages:
+    get:
+      tags: ["Messaging"]
+      summary: "Read chronological history or sequence delta"
+      description: "Exactly one cursor direction. Without a cursor returns latest messages. before pages allow up to 100; after pages up to 200. Explicit afterSequence=0 starts from sequence one. Follow non-null nextBeforeSequence/nextAfterSequence until null. No durable SSE replay is implied."
+      security: [{"guestFeedbackKey": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagePage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "beforeSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "afterSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}]
+    post:
+      tags: ["Messaging"]
+      summary: "Append an idempotent message"
+      description: "Same clientMessageId and normalized text, ordered photo byte hashes, canonical mentions and acting identity returns original message with 200; changed content returns 409. Inquiry requester who also manages the inbox must explicitly choose actingAs. DM staff has no bypass. Multipart has text,clientMessageId,actingAs(JSON string),mentions(JSON array string),photos. Nonempty mentions are only supported for arcade inquiries. Ordinary arcade notifications target current official responders; musecat additionally targets platform staff. Inbox replies notify the requester as usual. Team notifications are unchanged. 3 photos at 15,000,000 bytes each. Sender limit 60 messages/minute, 30/conversation/minute, 12 photos/minute; replay does not consume a limit."
+      security: [{"guestFeedbackKey": []}]
+      responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Idempotent replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingSend"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "actingAs": {"type": "string", "description": "JSON encoded MessagingIdentity."}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
+
+
+  /guest/conversations/{id}/read:
+    put:
+      tags: ["Messaging"]
+      summary: "Advance this user's read cursor"
+      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      security: [{"guestFeedbackKey": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"conversationId": {"type": "string"}, "lastReadSequence": {"type": "integer", "minimum": 0}, "unreadCount": {"type": "integer", "minimum": 0}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"throughSequence": {"type": "integer", "minimum": 0}}, "required": ["throughSequence"]}}}}
+
+
+  /guest/conversations/{id}/inquiry:
+    patch:
+      tags: ["Messaging"]
+      summary: "Change inquiry workflow status"
+      description: "Requester may set waiting/solved; current inbox responders may also set recognised. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
+      security: [{"guestFeedbackKey": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"status": {"type": "string", "enum": ["waiting", "recognised", "solved"]}}, "required": ["status"]}}}}
+
+
+  /guest/conversations/{id}/attachments/{messageId}/{file}:
+    get:
+      tags: ["Messaging"]
+      summary: "Read a protected conversation photo"
+      description: "Current conversation ACL and exact file/message ownership required. Existing legacy files are served from their unchanged storage reference only after verifying legacy inquiry mapping. No public file token or redirect."
+      security: [{"guestFeedbackKey": []}]
+      responses: {"200": {"description": "Protected image; Cache-Control private, no-store.", "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "messageId", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "file", "in": "path", "required": true, "schema": {"type": "string"}}]
+
+
+  /guest/messaging/session:
+    get:
+      tags: [Messaging]
+      summary: Resolve the browser guest display identity
+      description: Returns an opaque identity only. Neither the credential nor its stored hash is returned. The identity cannot authorize requests.
+      security: [{guestFeedbackKey: []}]
+      responses:
+        '200':
+          description: Current guest identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [type, id]
+                properties:
+                  type: {type: string, enum: [guest]}
+                  id: {type: string}
+        '401': {description: Missing or malformed browser credential.}

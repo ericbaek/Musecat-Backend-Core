@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/ericbaek/musecat-backend-core/service/messaging"
-	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 )
 
 func TestFeedbackReplyPhotoAttachments(t *testing.T) {
@@ -113,7 +112,7 @@ func TestFeedbackReplyPhotoAttachments(t *testing.T) {
 	call("GET", raw, "", "", 404)
 	call("GET", raw, "", authorToken, 404)
 	for i := 0; i < 2; i++ {
-		if err := supportfeedback.EnsureReplyPhotosSchema(app); err != nil {
+		if err := messaging.EnsureSchema(app); err != nil {
 			t.Fatal(err)
 		}
 	}

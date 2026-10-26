@@ -37,6 +37,7 @@ type Summary struct {
 	Inbox                    *Party     `json:"inbox"`
 	Requester                *Party     `json:"requester"`
 	Status                   *string    `json:"status"`
+	GuestChat                bool       `json:"guestChat"`
 	LegacyFeedbackID         *string    `json:"legacyFeedbackId"`
 	LatestSequence           int        `json:"latestSequence"`
 	LastMessage              *Message   `json:"lastMessage"`

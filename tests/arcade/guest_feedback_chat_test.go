@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 )
 
@@ -50,8 +51,11 @@ func TestGuestFeedbackChat(t *testing.T) {
 	call("PUT", "/arcade/inquiry-settings", fmt.Sprintf(`{"arcade":%q,"mode":"internal"}`, arcadeID), "", ownerToken, 200)
 	inquiry := call("POST", "/support_feedback", fmt.Sprintf(`{"arcade":%q,"message":"Guest question"}`, arcadeID), key, "", 200)
 	id := inquiry["id"].(string)
-	record, _ := app.FindRecordById("support_feedback", id)
-	if record.GetString("guest_key_hash") != supportfeedback.GuestKeyHash(key) || record.GetString("createdBy") != "" {
+	record, err := app.FindFirstRecordByFilter(messaging.Inquiries, "legacy_feedback_id={:id}", map[string]any{"id": id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.GetString("guest_key_hash") != supportfeedback.GuestKeyHash(key) || record.GetString("requester_type") != "guest" {
 		t.Fatal("guest credential not stored independently")
 	}
 	path := "/guest/feedback/thread?id=" + id

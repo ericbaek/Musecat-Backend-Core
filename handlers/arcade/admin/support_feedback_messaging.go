@@ -1,18 +1,29 @@
 package admin
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"github.com/ericbaek/musecat-backend-core/service/messaging"
+	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/security"
 )
 
 func createMessagingFeedback(re *core.RequestEvent, body CreateSupportFeedbackBody) error {
+	if re.Auth == nil && re.Request.Header.Get(supportfeedback.GuestHeader) == "" {
+		key := make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return err
+		}
+		re.Request.Header.Set(supportfeedback.GuestHeader, hex.EncodeToString(key))
+	}
+
 	inbox := messaging.Identity{Type: "team", ID: "musecat"}
 	if body.Arcade != "" {
 		inbox = messaging.Identity{Type: "arcade", ID: body.Arcade}
 	}
-	s, err := messaging.Create(re.App, re.Auth.Id, messaging.CreateInput{Kind: "inquiry", Inbox: inbox, InitialMessage: messaging.SendInput{Text: body.Message, ClientMessageID: "legacy:" + security.RandomString(24), Photos: body.Photos, LegacyOriginal: true}})
+	s, _, err := messaging.CreateFor(re.App, feedbackPrincipal(re), messaging.CreateInput{Kind: "inquiry", Inbox: inbox, InitialMessage: messaging.SendInput{Text: body.Message, ClientMessageID: "legacy:" + security.RandomString(24), Photos: body.Photos, LegacyOriginal: true}})
 	if err != nil {
 		return err
 	}
@@ -22,17 +33,19 @@ func createMessagingFeedback(re *core.RequestEvent, body CreateSupportFeedbackBo
 	}
 	return re.JSON(200, item)
 }
-func mappedFeedback(re *core.RequestEvent, id string) string {
-	if re.Auth == nil {
-		return ""
+func feedbackPrincipal(re *core.RequestEvent) messaging.Principal {
+	if re.Auth != nil {
+		return messaging.Principal{UserID: re.Auth.Id}
 	}
-	cid, _ := messaging.LegacyConversation(re.App, id)
-	return cid
+	return messaging.Principal{GuestKey: re.Request.Header.Get(supportfeedback.GuestHeader)}
+}
+func mappedFeedback(re *core.RequestEvent, id string) string {
+	if cid, err := messaging.LegacyConversation(re.App, id); err == nil {
+		return cid
+	}
+	return id
 }
 func messagingFeedbackPhoto(re *core.RequestEvent) (bool, error) {
-	if re.Auth == nil {
-		return false, nil
-	}
 	q := re.Request.URL.Query()
 	cid, mid := "", ""
 	if id := q.Get("feedbackId"); id != "" {
@@ -53,7 +66,7 @@ func messagingFeedbackPhoto(re *core.RequestEvent) (bool, error) {
 	if cid == "" {
 		return false, nil
 	}
-	storage, file, err := messaging.AttachmentPath(re.App, re.Auth.Id, cid, mid, q.Get("file"))
+	storage, file, err := messaging.AttachmentPathFor(re.App, feedbackPrincipal(re), cid, mid, q.Get("file"))
 	if err != nil {
 		return true, err
 	}

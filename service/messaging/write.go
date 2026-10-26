@@ -31,7 +31,7 @@ func record(app core.App, col string, values map[string]any) (*core.Record, erro
 	return r, app.Save(r)
 }
 func existingRetry(app core.App, c, user, key string) (*core.Record, error) {
-	return app.FindFirstRecordByFilter(Messages, "conversation={:c} && sender_user={:u} && client_message_id={:k}", dbx.Params{"c": c, "u": user, "k": key})
+	return app.FindFirstRecordByFilter(Messages, "conversation={:c} && (sender_user={:u} || sender_guest={:u}) && client_message_id={:k}", dbx.Params{"c": c, "u": user, "k": key})
 }
 func inputHash(in *SendInput) (string, error) {
 	in.Text = strings.TrimSpace(in.Text)
@@ -106,7 +106,7 @@ func inputHash(in *SendInput) (string, error) {
 }
 func rateLimit(app core.App, user, c string, create bool) error {
 	since := time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05.000Z")
-	filter := "sender_user={:u} AND created>={:since}"
+	filter := "(sender_user={:u} OR sender_guest={:u}) AND created>={:since}"
 	params := dbx.Params{"u": user, "since": since}
 	collection := Messages
 	limit := 60
@@ -133,6 +133,9 @@ func Create(app core.App, user string, in CreateInput) (Summary, error) {
 	return summary, err
 }
 func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool, error) {
+	return CreateFor(app, Principal{UserID: user}, in)
+}
+func CreateFor(app core.App, viewer Principal, in CreateInput) (Summary, bool, error) {
 	replayed := false
 	var cid string
 	if in.Kind != "dm" && in.Kind != "inquiry" {
@@ -150,11 +153,15 @@ func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool,
 		}
 	}
 	err = app.RunInTransaction(func(tx core.App) error {
-		u, err := ActiveUser(tx, user)
+		u, err := viewer.resolve(tx)
 		if err != nil {
 			return err
 		}
+		user := u.ID
 		if in.Kind == "dm" {
+			if u.Kind != "user" {
+				return apis.NewForbiddenError("Guests may only create inquiries.", nil)
+			}
 			if user == in.PeerUserID {
 				return apis.NewBadRequestError("Cannot message yourself.", nil)
 			}
@@ -190,10 +197,10 @@ func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool,
 			return apis.NewBadRequestError("Invalid inbox.", nil)
 		}
 		// Initial client keys are scoped to requester across inquiry creation retries.
-		prior, e := tx.FindFirstRecordByFilter(Messages, "conversation.kind='inquiry' && sender_user={:u} && client_message_id={:k} && sequence=1", dbx.Params{"u": user, "k": in.InitialMessage.ClientMessageID})
+		prior, e := tx.FindFirstRecordByFilter(Messages, "conversation.kind='inquiry' && (sender_user={:u} || sender_guest={:u}) && client_message_id={:k} && sequence=1", dbx.Params{"u": user, "k": in.InitialMessage.ClientMessageID})
 		if e == nil {
 			q, e := inquiry(tx, prior.GetString("conversation"))
-			if e != nil || q.GetString("requester") != user || q.GetString("inbox_type") != in.Inbox.Type || q.GetString("inbox_id") != in.Inbox.ID || prior.GetString("payload_hash") != hash {
+			if e != nil || !u.requests(q) || q.GetString("inbox_type") != in.Inbox.Type || q.GetString("inbox_id") != in.Inbox.ID || prior.GetString("payload_hash") != hash {
 				return router.NewApiError(409, "clientMessageId was already used for different content.", nil)
 			}
 			cid = prior.GetString("conversation")
@@ -202,15 +209,19 @@ func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool,
 		}
 		if in.Inbox.Type == "arcade" {
 			arcade, e := tx.FindRecordById("arcade", in.Inbox.ID)
-			if e != nil || (!arcade.GetBool("public") && arcade.GetString("createdBy") != u.Id && !arcadereport.CanManage(u, arcade)) {
+			if e != nil || (!arcade.GetBool("public") && (u.User == nil || arcade.GetString("createdBy") != u.ID) && !arcadereport.CanManage(u.User, arcade)) {
 				return apis.NewNotFoundError("Arcade not found.", nil)
 			}
+
 			if supportfeedback.HasOfficialAccount(tx, arcade.Id) && supportfeedback.InquirySettings(arcade).Mode != "internal" {
 				code := "INQUIRY_DISABLED"
 				if supportfeedback.InquirySettings(arcade).Mode == "external" {
 					code = "INQUIRY_EXTERNAL"
 				}
 				return router.NewApiError(409, code, nil)
+			}
+			if u.Kind == "guest" && supportfeedback.HasOfficialAccount(tx, arcade.Id) && supportfeedback.InquirySettings(arcade).LoginRequired {
+				return router.NewApiError(401, "LOGIN_REQUIRED", nil)
 			}
 		}
 		if err = rateLimit(tx, user, "", true); err != nil {
@@ -221,25 +232,28 @@ func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool,
 			return err
 		}
 		cid = c.Id
-		_, err = record(tx, Inquiries, map[string]any{"conversation": cid, "requester": user, "inbox_type": in.Inbox.Type, "inbox_id": in.Inbox.ID, "status": "waiting", "legacy_feedback_id": cid})
+		_, err = record(tx, Inquiries, map[string]any{"conversation": cid, "requester": user, "requester_type": u.Kind, "guest_key_hash": u.guestHash, "inbox_type": in.Inbox.Type, "inbox_id": in.Inbox.ID, "status": "waiting", "legacy_feedback_id": cid})
 		if err != nil {
 			return err
 		}
-		for _, p := range []Identity{{"user", user}, in.Inbox} {
+		for _, p := range []Identity{{u.Kind, user}, in.Inbox} {
 			if _, err = record(tx, Parties, map[string]any{"conversation": cid, "party_type": p.Type, "party_id": p.ID}); err != nil {
 				return err
 			}
 		}
-		_, err = saveMessage(tx, u, c, in.InitialMessage, Identity{"user", user}, hash)
+		_, err = saveMessage(tx, u, c, in.InitialMessage, Identity{u.Kind, user}, hash)
 		return err
 	})
 	if err != nil {
 		return Summary{}, false, err
 	}
-	summary, err := Get(app, user, cid)
+	summary, err := GetFor(app, viewer, cid)
 	return summary, replayed, err
 }
 func Send(app core.App, user, cid string, in SendInput) (Message, bool, error) {
+	return SendFor(app, Principal{UserID: user}, cid, in)
+}
+func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message, bool, error) {
 	hash, err := inputHash(&in)
 	if err != nil {
 		return Message{}, false, err
@@ -247,10 +261,11 @@ func Send(app core.App, user, cid string, in SendInput) (Message, bool, error) {
 	var saved *core.Record
 	replayed := false
 	err = app.RunInTransaction(func(tx core.App) error {
-		c, u, err := Access(tx, user, cid)
+		c, u, err := access(tx, viewer, cid)
 		if err != nil {
 			return err
 		}
+		user := u.ID
 		inboxType := ""
 		if c.GetString("kind") == "inquiry" {
 			q, e := inquiry(tx, cid)
@@ -289,10 +304,10 @@ func Send(app core.App, user, cid string, in SendInput) (Message, bool, error) {
 	}
 	return messageDTO(app, saved, nil), replayed, nil
 }
-func saveMessage(tx core.App, u, c *core.Record, in SendInput, acting Identity, hash string) (*core.Record, error) {
+func saveMessage(tx core.App, u *participant, c *core.Record, in SendInput, acting Identity, hash string) (*core.Record, error) {
 	if len(in.Photos) > 0 {
 		var used int
-		err := tx.DB().NewQuery("SELECT COALESCE(sum(json_array_length(photos)),0) FROM messaging_message WHERE sender_user={:u} AND created>={:since}").Bind(dbx.Params{"u": u.Id, "since": time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05.000Z")}).Row(&used)
+		err := tx.DB().NewQuery("SELECT COALESCE(sum(json_array_length(photos)),0) FROM messaging_message WHERE (sender_user={:u} OR sender_guest={:u}) AND created>={:since}").Bind(dbx.Params{"u": u.ID, "since": time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05.000Z")}).Row(&used)
 		if err != nil {
 			return nil, err
 		}
@@ -300,19 +315,25 @@ func saveMessage(tx core.App, u, c *core.Record, in SendInput, acting Identity, 
 			return nil, router.NewApiError(429, "Please wait before uploading more photos.", nil)
 		}
 	}
-	parties, err := loadParties(tx, []Identity{{"user", u.Id}})
-	if err != nil {
-		return nil, err
-	}
-	sender := parties["user:"+u.Id]
-	roles := append([]string{}, u.GetStringSlice("tags")...)
-	for _, tag := range u.GetStringSlice("tag") {
-		if !slices.Contains(roles, tag) {
-			roles = append(roles, tag)
+	sender := Party{Type: u.Kind, ID: u.ID, Name: "비회원", RoleTags: []string{}}
+	roles := []string{}
+	senderUser, senderGuest := "", u.ID
+	if u.Kind == "user" {
+		parties, err := loadParties(tx, []Identity{{"user", u.ID}})
+		if err != nil {
+			return nil, err
+		}
+		sender = parties["user:"+u.ID]
+		senderUser, senderGuest = u.ID, ""
+		roles = append(roles, u.User.GetStringSlice("tags")...)
+		for _, tag := range u.User.GetStringSlice("tag") {
+			if !slices.Contains(roles, tag) {
+				roles = append(roles, tag)
+			}
 		}
 	}
 	seq := c.GetInt("last_sequence") + 1
-	m, err := record(tx, Messages, map[string]any{"conversation": c.Id, "sequence": seq, "sender_user": u.Id, "acting_type": acting.Type, "acting_id": acting.ID, "sender_name": sender.Name, "sender_avatar": sender.AvatarURL, "sender_roles": roles, "client_message_id": in.ClientMessageID, "payload_hash": hash, "text": in.Text, "mentions": in.Mentions, "photos": in.Photos})
+	m, err := record(tx, Messages, map[string]any{"conversation": c.Id, "sequence": seq, "sender_user": senderUser, "sender_guest": senderGuest, "acting_type": acting.Type, "acting_id": acting.ID, "sender_name": sender.Name, "sender_avatar": sender.AvatarURL, "sender_roles": roles, "client_message_id": in.ClientMessageID, "payload_hash": hash, "text": in.Text, "mentions": in.Mentions, "photos": in.Photos})
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +349,7 @@ func saveMessage(tx core.App, u, c *core.Record, in SendInput, acting Identity, 
 			return nil, e
 		}
 		status := "recognised"
-		if acting.Type == "user" {
+		if acting.Type == "user" || acting.Type == "guest" {
 			status = "waiting"
 		}
 		q.Set("status", status)
@@ -347,12 +368,16 @@ func saveMessage(tx core.App, u, c *core.Record, in SendInput, acting Identity, 
 	return m, nil
 }
 func SetRead(app core.App, user, id string, through int) (map[string]any, error) {
+	return SetReadFor(app, Principal{UserID: user}, id, through)
+}
+func SetReadFor(app core.App, viewer Principal, id string, through int) (map[string]any, error) {
 	last := 0
 	err := app.RunInTransaction(func(tx core.App) error {
-		c, _, err := Access(tx, user, id)
+		c, u, err := access(tx, viewer, id)
 		if err != nil {
 			return err
 		}
+		user := u.ID
 		if through < 0 || through > c.GetInt("last_sequence") {
 			return apis.NewBadRequestError("Invalid read sequence.", nil)
 		}
@@ -384,12 +409,15 @@ func SetRead(app core.App, user, id string, through int) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
-	s, err := Get(app, user, id)
+	s, err := GetFor(app, viewer, id)
 	return map[string]any{"conversationId": id, "lastReadSequence": last, "unreadCount": s.UnreadCount}, err
 }
 func SetStatus(app core.App, user, id, status string) (Summary, error) {
+	return SetStatusFor(app, Principal{UserID: user}, id, status)
+}
+func SetStatusFor(app core.App, viewer Principal, id, status string) (Summary, error) {
 	err := app.RunInTransaction(func(tx core.App) error {
-		c, u, err := Access(tx, user, id)
+		c, u, err := access(tx, viewer, id)
 		if err != nil {
 			return err
 		}
@@ -400,7 +428,7 @@ func SetStatus(app core.App, user, id, status string) (Summary, error) {
 		if err != nil {
 			return err
 		}
-		if !slices.Contains(inquiryPolicy(u, q, Responder(tx, u, q)).statuses, status) {
+		if !slices.Contains(inquiryPolicy(u, q, Responder(tx, u.User, q)).statuses, status) {
 			return apis.NewBadRequestError("Invalid inquiry status.", nil)
 		}
 		q.Set("status", status)
@@ -417,7 +445,7 @@ func SetStatus(app core.App, user, id, status string) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
-	return Get(app, user, id)
+	return GetFor(app, viewer, id)
 }
 func Preference(app core.App, user, receive string) error {
 	if receive != "nobody" && receive != "everyone" {

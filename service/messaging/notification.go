@@ -31,7 +31,10 @@ func conversationAudience(app core.App, c *core.Record) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ids := []string{q.GetString("requester")}
+	ids := []string{}
+	if requesterType(q) == "user" {
+		ids = append(ids, q.GetString("requester"))
+	}
 	rows, err := app.FindRecordsByFilter("user", "withdrawn=false && (tags ~ 'developer' || tags ~ 'moderator' || owns ~ {:arcade})", "id", 201, 0, dbx.Params{"arcade": q.GetString("inbox_id")})
 	if err != nil {
 		return nil, err
@@ -149,7 +152,7 @@ func notificationRecipient(u, q, arcade, m *core.Record) bool {
 		return true
 	}
 	notify := false
-	if m.GetString("acting_type") != "user" {
+	if m.GetString("acting_type") != "user" && m.GetString("acting_type") != "guest" {
 		notify = u.Id == q.GetString("requester")
 	} else if u.Id != q.GetString("requester") {
 		notify = q.GetString("inbox_type") == "team" || officialResponder(u, arcade)
@@ -221,7 +224,7 @@ func NotificationItemLocalized(app core.App, row *core.Record, locale string) ma
 	name, preview := "", ""
 	if m, err := app.FindRecordById(Messages, row.GetString("message")); err == nil && m.GetString("conversation") == row.GetString("conversation") {
 		name = m.GetString("sender_name")
-		if m.GetString("acting_type") != "user" {
+		if m.GetString("acting_type") != "user" && m.GetString("acting_type") != "guest" {
 			parties, _ := loadParties(app, []Identity{{m.GetString("acting_type"), m.GetString("acting_id")}})
 			name = parties[m.GetString("acting_type")+":"+m.GetString("acting_id")].Name
 		}

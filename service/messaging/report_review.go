@@ -130,15 +130,5 @@ func ReportAttachmentPath(app core.App, user, id, file string) (string, string, 
 	if slices.Contains(m.GetStringSlice("photos"), file) {
 		return m.BaseFilesPath() + "/" + file, file, nil
 	}
-	if !slices.Contains(evidence.LegacyPhotos, file) || (evidence.LegacyCollection != "support_feedback" && evidence.LegacyCollection != "support_feedback_message") {
-		return deny()
-	}
-	if m.GetString("legacy_collection") != evidence.LegacyCollection || m.GetString("legacy_record") != evidence.LegacyRecord {
-		return deny()
-	}
-	source, err := app.FindRecordById(evidence.LegacyCollection, evidence.LegacyRecord)
-	if err != nil || !slices.Contains(source.GetStringSlice("photos"), file) {
-		return deny()
-	}
-	return source.BaseFilesPath() + "/" + file, file, nil
+	return deny()
 }

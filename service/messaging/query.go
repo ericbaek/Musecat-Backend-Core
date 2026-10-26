@@ -22,8 +22,10 @@ func loadParties(app core.App, ids []Identity) (map[string]Party, error) {
 	users, arcades := []string{}, []string{}
 	for _, p := range ids {
 		out[p.Type+":"+p.ID] = Party{Type: p.Type, ID: p.ID, Name: "", RoleTags: []string{}}
-		if p.Type == "user" {
+		if p.Type == "user" && p.ID != "" {
 			users = append(users, p.ID)
+		} else if p.Type == "guest" {
+			out[p.Type+":"+p.ID] = Party{Type: "guest", ID: p.ID, Name: "비회원", RoleTags: []string{}}
 		} else if p.Type == "arcade" {
 			arcades = append(arcades, p.ID)
 		} else if p.Type == "team" {
@@ -42,6 +44,11 @@ func loadParties(app core.App, ids []Identity) (map[string]Party, error) {
 				p.Name = "탈퇴한 사용자"
 			} else {
 				p.RoleTags = append([]string{}, r.GetStringSlice("tags")...)
+				for _, tag := range r.GetStringSlice("tag") {
+					if !slices.Contains(p.RoleTags, tag) {
+						p.RoleTags = append(p.RoleTags, tag)
+					}
+				}
 			}
 			out["user:"+r.Id] = p
 		}
@@ -91,6 +98,15 @@ func messageDTO(app core.App, r *core.Record, parties map[string]Party) Message 
 	if avatar := r.GetString("sender_avatar"); avatar != "" {
 		sender.AvatarURL = ptr(avatar)
 	}
+	if guest := r.GetString("sender_guest"); guest != "" {
+		sender = Party{Type: "guest", ID: guest, Name: "비회원", RoleTags: []string{}}
+	}
+	if parties == nil {
+		parties, _ = loadParties(app, []Identity{{sender.Type, sender.ID}, {r.GetString("acting_type"), r.GetString("acting_id")}})
+	}
+	if current, ok := parties[sender.Type+":"+sender.ID]; ok && current.Name != "" {
+		sender = current
+	}
 	acting := sender
 	if r.GetString("acting_type") != "user" {
 		key := r.GetString("acting_type") + ":" + r.GetString("acting_id")
@@ -104,7 +120,7 @@ func messageDTO(app core.App, r *core.Record, parties map[string]Party) Message 
 	for _, f := range names {
 		photos = append(photos, Attachment{Name: f, URL: "/user/conversations/" + r.GetString("conversation") + "/attachments/" + r.Id + "/" + url.PathEscape(f)})
 	}
-	return Message{ID: r.Id, ConversationID: r.GetString("conversation"), Sequence: r.GetInt("sequence"), SenderUserID: sender.ID, Sender: sender, ActingAs: acting, ClientMessageID: r.GetString("client_message_id"), Text: r.GetString("text"), Mentions: append([]string{}, r.GetStringSlice("mentions")...), Photos: photos, CreatedAt: r.GetString("created")}
+	return Message{ID: r.Id, ConversationID: r.GetString("conversation"), Sequence: r.GetInt("sequence"), SenderUserID: r.GetString("sender_user"), Sender: sender, ActingAs: acting, ClientMessageID: r.GetString("client_message_id"), Text: r.GetString("text"), Mentions: append([]string{}, r.GetStringSlice("mentions")...), Photos: photos, CreatedAt: r.GetString("created")}
 }
 func LegacyConversation(app core.App, legacy string) (string, error) {
 	q, err := app.FindFirstRecordByFilter(Inquiries, "legacy_feedback_id={:id}", dbx.Params{"id": legacy})
@@ -114,7 +130,10 @@ func LegacyConversation(app core.App, legacy string) (string, error) {
 	return q.GetString("conversation"), nil
 }
 func Get(app core.App, user, id string) (Summary, error) {
-	c, u, err := Access(app, user, id)
+	return GetFor(app, Principal{UserID: user}, id)
+}
+func GetFor(app core.App, viewer Principal, id string) (Summary, error) {
+	c, u, err := access(app, viewer, id)
 	if err != nil {
 		return Summary{}, err
 	}
@@ -124,7 +143,11 @@ func Get(app core.App, user, id string) (Summary, error) {
 	}
 	return items[0], nil
 }
-func allowedSQL(u *core.Record) (string, dbx.Params) {
+func allowedSQL(p *participant) (string, dbx.Params) {
+	if p.Kind == "guest" {
+		return "c.kind='inquiry' AND EXISTS(SELECT 1 FROM messaging_inquiry i WHERE i.conversation=c.id AND i.requester_type='guest' AND i.requester={:user} AND i.guest_key_hash={:guest})", dbx.Params{"user": p.ID, "guest": p.guestHash}
+	}
+	u := p.User
 	owns := []string{}
 	if slices.Contains(u.GetStringSlice("tags"), "arcade_owner") || slices.Contains(u.GetStringSlice("tag"), "arcade_owner") {
 		owns = u.GetStringSlice("owns")
@@ -133,8 +156,11 @@ func allowedSQL(u *core.Record) (string, dbx.Params) {
 	return `(c.kind='dm' AND EXISTS(SELECT 1 FROM messaging_party p WHERE p.conversation=c.id AND p.party_type='user' AND p.party_id={:user})) OR (c.kind='inquiry' AND EXISTS(SELECT 1 FROM messaging_inquiry i WHERE i.conversation=c.id AND (i.requester={:user} OR {:staff}=1 OR (i.inbox_type='arcade' AND i.inbox_id IN (SELECT value FROM json_each({:owns})) AND EXISTS(SELECT 1 FROM arcade a WHERE a.id=i.inbox_id)))))`, dbx.Params{"user": u.Id, "staff": supportfeedback.IsStaff(u), "owns": string(raw)}
 }
 func ListConversations(app core.App, user string, q url.Values) (List, error) {
+	return ListFor(app, Principal{UserID: user}, q)
+}
+func ListFor(app core.App, viewer Principal, q url.Values) (List, error) {
 	out := List{Items: []Summary{}}
-	u, err := ActiveUser(app, user)
+	u, err := viewer.resolve(app)
 	if err != nil {
 		return out, err
 	}
@@ -224,7 +250,7 @@ func ListConversations(app core.App, user string, q url.Values) (List, error) {
 	}
 	return out, nil
 }
-func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, error) {
+func summaries(app core.App, u *participant, rows []*core.Record) ([]Summary, error) {
 	ids, latestIDs := []string{}, []string{}
 	for _, r := range rows {
 		ids = append(ids, r.Id)
@@ -233,7 +259,7 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 		}
 	}
 	raw, _ := json.Marshal(ids)
-	params := dbx.Params{"ids": string(raw), "u": u.Id}
+	params := dbx.Params{"ids": string(raw), "u": u.ID}
 	queryRecords := func(col string) ([]*core.Record, error) {
 		collection, e := app.FindCollectionByNameOrId(col)
 		if e != nil {
@@ -242,7 +268,7 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 		result := []*core.Record{}
 		query := app.RecordQuery(collection).AndWhere(dbx.NewExp("conversation IN (SELECT value FROM json_each({:ids}))", params))
 		if col == Reads {
-			query.AndWhere(dbx.HashExp{"user": u.Id})
+			query.AndWhere(dbx.HashExp{"user": u.ID})
 		}
 		e = query.All(&result)
 		return result, e
@@ -263,13 +289,9 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 	peerBy := map[string]string{}
 	for _, p := range ps {
 		identities = append(identities, Identity{p.GetString("party_type"), p.GetString("party_id")})
-		if p.GetString("party_type") == "user" && p.GetString("party_id") != u.Id {
+		if p.GetString("party_type") == "user" && p.GetString("party_id") != u.ID {
 			peerBy[p.GetString("conversation")] = p.GetString("party_id")
 		}
-	}
-	parties, err := loadParties(app, identities)
-	if err != nil {
-		return nil, err
 	}
 	latest := map[string]*core.Record{}
 	if len(latestIDs) > 0 {
@@ -281,13 +303,20 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 			latest[m.Id] = m
 		}
 	}
+	for _, m := range latest {
+		identities = append(identities, Identity{"user", m.GetString("sender_user")}, Identity{m.GetString("acting_type"), m.GetString("acting_id")})
+	}
+	parties, err := loadParties(app, identities)
+	if err != nil {
+		return nil, err
+	}
 	cases := map[string]*core.Record{}
 	for _, q := range qs {
 		cases[q.GetString("conversation")] = q
 	}
 	reads := map[string]int{}
 	for _, r := range rs {
-		if r.GetString("user") == u.Id {
+		if r.GetString("user") == u.ID {
 			reads[r.GetString("conversation")] = r.GetInt("last_read_sequence")
 		}
 	}
@@ -295,7 +324,7 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 		ID    string `db:"id"`
 		Count int    `db:"count"`
 	}
-	err = app.DB().NewQuery(`SELECT m.conversation id,count(*) count FROM messaging_message m JOIN messaging_conversation c ON c.id=m.conversation LEFT JOIN messaging_inquiry i ON i.conversation=c.id LEFT JOIN messaging_read r ON r.conversation=c.id AND r.user={:u} WHERE c.id IN (SELECT value FROM json_each({:ids})) AND m.sequence>COALESCE(r.last_read_sequence,0) AND m.sender_user!={:u} AND ((c.kind='dm' AND m.sender_user!={:u}) OR (c.kind='inquiry' AND ((i.requester={:u} AND m.acting_type!='user') OR (i.requester!={:u} AND m.acting_type='user')))) GROUP BY m.conversation`).Bind(params).All(&counts)
+	err = app.DB().NewQuery(`SELECT m.conversation id,count(*) count FROM messaging_message m JOIN messaging_conversation c ON c.id=m.conversation LEFT JOIN messaging_inquiry i ON i.conversation=c.id LEFT JOIN messaging_read r ON r.conversation=c.id AND r.user={:u} WHERE c.id IN (SELECT value FROM json_each({:ids})) AND m.sequence>COALESCE(r.last_read_sequence,0) AND m.sender_user!={:u} AND ((c.kind='dm' AND m.sender_user!={:u}) OR (c.kind='inquiry' AND ((i.requester={:u} AND m.acting_type NOT IN ('user','guest')) OR (i.requester!={:u} AND m.acting_type IN ('user','guest'))))) GROUP BY m.conversation`).Bind(params).All(&counts)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +342,7 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 		ID    string `db:"id"`
 		Email string `db:"email"`
 	}
-	err = app.DB().NewQuery(`SELECT u.id,u.email FROM user u LEFT JOIN messaging_preference p ON p.user=u.id WHERE (p.id IS NULL OR p.receive='everyone') AND u.id IN (SELECT value FROM json_each({:peers})) AND u.withdrawn=false AND NOT EXISTS(SELECT 1 FROM messaging_block b WHERE (b.user={:u} AND b.blocked_user=u.id) OR (b.user=u.id AND b.blocked_user={:u})) AND NOT EXISTS(SELECT 1 FROM user_ban b WHERE b.id=u.id AND (b.until='' OR b.until>strftime('%Y-%m-%d %H:%M:%fZ','now')))`).Bind(dbx.Params{"peers": string(peerRaw), "u": u.Id}).All(&eligible)
+	err = app.DB().NewQuery(`SELECT u.id,u.email FROM user u LEFT JOIN messaging_preference p ON p.user=u.id WHERE (p.id IS NULL OR p.receive='everyone') AND u.id IN (SELECT value FROM json_each({:peers})) AND u.withdrawn=false AND NOT EXISTS(SELECT 1 FROM messaging_block b WHERE (b.user={:u} AND b.blocked_user=u.id) OR (b.user=u.id AND b.blocked_user={:u})) AND NOT EXISTS(SELECT 1 FROM user_ban b WHERE b.id=u.id AND (b.until='' OR b.until>strftime('%Y-%m-%d %H:%M:%fZ','now')))`).Bind(dbx.Params{"peers": string(peerRaw), "u": u.ID}).All(&eligible)
 	if err != nil {
 		return nil, err
 	}
@@ -374,24 +403,25 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 			s.Counterpart = parties["user:"+peer]
 			s.CanSend = can[peer]
 			if s.CanSend {
-				s.AllowedSenderIdentities = []Identity{{"user", u.Id}}
+				s.AllowedSenderIdentities = []Identity{{"user", u.ID}}
 			}
 		} else {
 			q := cases[c.Id]
 			if q == nil {
 				return nil, fmt.Errorf("inquiry missing for %s", c.Id)
 			}
-			s.Requester = ptr(parties["user:"+q.GetString("requester")])
+			s.Requester = ptr(parties[requesterType(q)+":"+q.GetString("requester")])
 			s.Inbox = ptr(parties[q.GetString("inbox_type")+":"+q.GetString("inbox_id")])
 			s.Counterpart = *s.Inbox
-			if q.GetString("requester") != u.Id {
+			if q.GetString("requester") != u.ID {
 				s.Counterpart = *s.Requester
 			}
+			s.GuestChat = requesterType(q) == "guest" && q.GetString("guest_key_hash") != ""
 			s.Status = ptr(q.GetString("status"))
 			if id := q.GetString("legacy_feedback_id"); id != "" {
 				s.LegacyFeedbackID = ptr(id)
 			}
-			permissions := inquiryPolicy(u, q, supportfeedback.IsStaff(u) || (q.GetString("inbox_type") == "arcade" && arcadereport.CanManage(u, arcades[q.GetString("inbox_id")])))
+			permissions := inquiryPolicy(u, q, supportfeedback.IsStaff(u.User) || (q.GetString("inbox_type") == "arcade" && arcadereport.CanManage(u.User, arcades[q.GetString("inbox_id")])))
 			s.AllowedSenderIdentities = permissions.identities
 			s.AllowedStatusTransitions = permissions.statuses
 			s.CanSend = len(permissions.identities) > 0
@@ -402,8 +432,11 @@ func summaries(app core.App, u *core.Record, rows []*core.Record) ([]Summary, er
 	return out, nil
 }
 func History(app core.App, user, id string, before, after, limit int) (MessagePage, error) {
+	return HistoryFor(app, Principal{UserID: user}, id, before, after, limit)
+}
+func HistoryFor(app core.App, viewer Principal, id string, before, after, limit int) (MessagePage, error) {
 	out := MessagePage{Items: []Message{}}
-	c, _, err := Access(app, user, id)
+	c, _, err := access(app, viewer, id)
 	if err != nil {
 		return out, err
 	}
@@ -435,7 +468,7 @@ func History(app core.App, user, id string, before, after, limit int) (MessagePa
 	}
 	identities := []Identity{}
 	for _, m := range rows {
-		identities = append(identities, Identity{m.GetString("acting_type"), m.GetString("acting_id")})
+		identities = append(identities, Identity{m.GetString("acting_type"), m.GetString("acting_id")}, Identity{"user", m.GetString("sender_user")})
 	}
 	parties, err := loadParties(app, identities)
 	if err != nil {

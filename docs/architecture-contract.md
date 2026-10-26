@@ -946,9 +946,9 @@ Push is an explicit per-device browser opt-in; the in-app inbox is always enable
 
 ## Private inquiry conversations
 
-`support_feedback` preserves the original inquiry and photos. `support_feedback_message` stores immutable, chronological replies. `/user/feedback/thread` GET/POST/PATCH is restricted to the authenticated active inquiry author, current official account of the scoped arcade, or strict support staff (developer/moderator). Inaccessible ids return 404. The staff label and author are always server-derived. Replies contain up to 4000 characters and/or up to three images (15,000,000 bytes each; content-sniffed image validation matching initial inquiry uploads), and paged reads return the newest 50 in chronological order, with a private cursor for older messages.
+`messaging_conversation`, `messaging_party`, `messaging_inquiry`, `messaging_message` and `messaging_read` are the only active inquiry storage. The first submission and every reply are messages in one conversation, including guest inquiries. `/support_feedback`, `/user/feedback/*` and `/guest/feedback/*` are compatibility projections of that service and never read or write a second message store. Core fresh bootstrap removes the empty legacy collections; Full alone migrates populated history and retires them after file/data postflight. Exact current author, staff and arcade-owner access remains server-authorized. Guest credentials authorize only their own inquiries and never DMs.
 
-Reply, inquiry status and `feedback_reply` notification/queue writes share one transaction. Staff replies notify the inquiry author; ordinary MUSECAT inquiry replies notify current strict staff. Arcade inquiry requester messages notify current official responders, with canonical explicit mentions additionally notifying staff; legacy/guest messages have no mention metadata. Senders and restricted accounts do not receive notifications. User follow-up returns status to waiting; staff reply changes it to recognised. Guest submissions with a valid `X-Feedback-Guest-Key` retain a private browser-scoped chat on the legacy store. The 32-byte random credential is represented only by its SHA-256 digest in the hidden `guest_key_hash` field; unkeyed historical submissions cannot be claimed. `/guest/feedback` lists only matching guest records. `/guest/feedback/thread` GET/POST/PATCH and `/guest/feedback/thread/photo` require that credential and recheck exact parent access, including inside write transactions. Missing or malformed keys return 401; foreign ids return 404. Guest replies have no synthetic account or role and notify current responders. Intake policy changes do not revoke existing guest chats. The web adapter keeps the key in a year-long HttpOnly, SameSite=Lax cookie (Secure in production); clearing the cookie loses access. Guest chats use the existing five-second polling interval while open. Existing status review remains available. Feedback notifications recheck ownership/strict staff permissions when listed or delivered; revoking staff access hides them. Arcade/flag notification relations are optional so private inquiries do not fabricate arcade references. Push uses generic copy without private inquiry text. Raw reply collection API rules remain locked.
+Reply, inquiry status and `feedback_reply` notification/queue writes share one transaction. Staff replies notify the inquiry author; ordinary MUSECAT inquiry replies notify current strict staff. Arcade inquiry requester messages notify current official responders, with canonical explicit mentions additionally notifying staff; legacy/guest messages have no mention metadata. Senders and restricted accounts do not receive notifications. User follow-up returns status to waiting; staff reply changes it to recognised. Guest submissions with a valid `X-Feedback-Guest-Key` use canonical messaging. Only its SHA-256 digest is stored in the hidden inquiry `guest_key_hash`; `requester_type=guest` and an opaque, domain-separated requester ID identify the browser without a synthetic user account. The stored digest and raw credential never appear in DTOs or audit reports. `sender_user` stays empty for guest messages and `sender_guest` identifies their real guest participant. `/guest/conversations` supports the same inquiry list/create/history/send/read/status/attachment contracts as account conversations, with the same validation, sequencing, retry and notification policy. Guests cannot create DMs or impersonate another acting identity. Existing cookies survive migration; clearing them loses access. Historical unkeyed receipts remain staff-readable but cannot be claimed. Intake settings affect new inquiries, not existing access. The legacy guest endpoints are adapters to that same service. Existing status review remains available. Feedback notifications recheck ownership/strict staff permissions when listed or delivered; revoking staff access hides them. Arcade/flag notification relations are optional so private inquiries do not fabricate arcade references. Push uses generic copy without private inquiry text. Raw reply collection API rules remain locked.
 
 ### Arcade-scoped inquiries and push locale
 
@@ -1008,7 +1008,7 @@ mode still returns 409 first; without a current official account, retained owner
 and login preferences do not block moderator contact. Guests cannot create inquiries for
 private arcades. Guest inquiries keep an empty `createdBy`, appear in the official/staff
 queues, and notify current responders through the existing atomic inbox/push flow. Guest
-receipt does not issue a conversation token, expose private reads, or introduce guest chat
+receipt without a browser credential does not grant private reads; keyed guest submissions use the shared inquiry conversation
 or reply delivery. Existing historical access/status behavior is unchanged. No schema or
 production data migration is needed for this optional JSON key.
 
@@ -1093,7 +1093,7 @@ are individual, monotonic and bounded by the latest committed sequence. Unread c
 exclude the reader's actual sender user and their party, including other staff acting for the same inbox. Status
 changes do not reorder conversations. Latest summaries batch load parties/profiles,
 messages, preferences, blocks and reads; no conversation-by-conversation HTTP or SQL
-fanout is needed. Message text is stored once, on messaging_message.
+fanout is needed. Message text is stored once, on messaging_message. Inquiry rooms always expose each incoming actual sender in the timeline, even before a second responder speaks. Public message DTOs batch resolve the actual account’s current public nickname/avatar/roles; stored sender snapshots and report evidence remain historical. `actingAs` expresses the represented inbox independently of that public sender. Guest read cursors use the opaque guest identity and never generate account notifications.
 
 Idempotency is unique per conversation/sender/clientMessageId. Payload comparison
 uses normalized text, ordered photo byte digests, canonical mentions and the resolved acting identity;
@@ -1109,8 +1109,7 @@ storage remains in place and is read only through the authorized mapping adapter
 
 Existing authenticated support create/reply/status routes delegate to canonical
 messaging and project their previous response shape. New authenticated inquiries do
-not create another independent support_feedback message store. Guest receipt intake
-and its staff queue stay on the legacy store. Full maps each historical authenticated
+not create another independent support_feedback message store. Guest intake and staff review use that same canonical store. Full maps each historical authenticated
 feedback independently, preserves the first message and replies in created/id order,
 and records source collection/record/file references. It never converts guests into
 synthetic users, never manufactures notifications, and initializes requester read to
@@ -1127,9 +1126,7 @@ notification policy. Recipient accounts and bans are batch loaded, and at most 2
 devices per recipient are selected in one bounded query. Notification/delivery rows
 remain atomic with the message and use the existing durable delivery worker.
 Queued messages recheck the same policy through `NotificationDeliverable`; existing
-inbox rows retain access-only visibility. Legacy arcade/guest feedback has no mention
-metadata and likewise notifies official responders, with
-`FeedbackNotificationDeliverable` suppressing old queued staff-only pushes.
+inbox rows retain access-only visibility. Imported arcade/guest messages have no synthesized mention metadata. Their preserved notification records use canonical conversation/message references, and the canonical delivery policy suppresses staff-only pushes without removing inbox history.
 Notification policy does not narrow conversation access or SSE audiences.
 
 The single-process SSE hub publishes invalidations after commit only. Conversation
