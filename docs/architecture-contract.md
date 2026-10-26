@@ -1535,3 +1535,22 @@ minutes, retaining the newest pending message. Deferral does not consume retries
 Skipped receipts never start the cooldown. Delivery rechecks read cursors and
 notification acknowledgement in addition to the existing recipient/access policy.
 Push title/body use the same sender and preview as the authenticated inbox.
+
+## Arcade check request notes
+
+`/arcade/check-notes` is the only read/write contract for the locked
+`arcade_check_note` collection. Reads and creation have no distance restriction;
+public venues are anonymously readable and private venues retain creator/reviewer
+visibility. Active authenticated users with existing arcade write access may attach
+1–1000 character plain-text requests. Identical open requests from the same author
+are idempotent. Each arcade has at most 50 open notes; list returns at most 100,
+open first then newest. Authors or strict reviewers may remove notes remotely.
+
+Completing a note atomically records nonblank findings, answering user and timestamp.
+The server requires a current GPS fix within 300 meters of the arcade's current
+basic coordinates, accuracy at most 150 meters, and capture age at most 60 seconds
+(5 seconds future skew tolerated). Existing visits and campaign bypasses do not
+authorize remote completion. An already completed note returns 409, preserving its
+answer. Creation, completion and deletion grant no XP or arcade changelog rows.
+Requests and responses are private/no-store; raw collection rules stay locked.
+Full owns the guarded forward migration; Core migration is fresh-bootstrap only.

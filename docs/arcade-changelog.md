@@ -478,3 +478,5 @@ Creation/update enforce the active required/pinned caps in their write transacti
 and rejected capacity or permission checks leave the record unchanged. Official
 accounts may manage authorless legacy notices only in their owned arcade; no author
 is fabricated. Full's migration preserves original notice content and timestamps.
+
+Shared check request creation, completion and removal are activity records in `arcade_check_note`; they do not change arcade information and create no `arcade_changelog` or XP entries. Information edits continue through the existing mutation endpoints.

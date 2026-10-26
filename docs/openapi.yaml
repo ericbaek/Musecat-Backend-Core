@@ -3784,6 +3784,72 @@ components:
         updated_at: {type: string, format: date-time}
         payload: {$ref: '#/components/schemas/ExternalRecordEnvelope'}
 paths:
+  /arcade/check-notes:
+    get:
+      tags: [Arcades]
+      summary: Read shared check request notes without a distance restriction
+      description: Public arcade notes are readable anonymously. Private drafts use existing creator/reviewer visibility. Returns up to 100 notes, open first then newest. No XP or arcade changelog is created. Raw collection REST remains locked.
+      parameters:
+        - {name: arcade, in: query, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Private no-store check notes with author identity and completed findings.
+          content:
+            application/json:
+              schema: {type: object, required: [items], properties: {items: {type: array, maxItems: 100, items: {type: object, required: [id, arcade, message, author, answer, answeredBy, completed, created, answeredAt], properties: {id: {type: string}, arcade: {type: string}, message: {type: string}, author: {type: object, properties: {id: {type: string}, name: {type: string}}}, answer: {type: string}, answeredBy: {type: object, properties: {id: {type: string}, name: {type: string}}}, completed: {type: boolean}, created: {type: string}, answeredAt: {type: string}}}}}}
+        '404': {description: Arcade missing or not visible.}
+    post:
+      tags: [Arcade Mutations]
+      summary: Attach a short check request from any distance
+      security: [{bearerAuth: []}]
+      description: Requires an active user with arcade write access. Identical open notes by the same author return the existing record. At most 50 open notes per arcade. Does not require GPS. Body limit 16384 bytes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [arcade, message], properties: {arcade: {type: string}, message: {type: string, minLength: 1, maxLength: 1000}}}
+      responses:
+        '200': {description: Saved note including id, message, author and completed=false.}
+        '400': {description: Invalid or blank message.}
+        '401': {description: Authentication required.}
+        '403': {description: Inactive user or write denied.}
+        '404': {description: Arcade missing or not visible.}
+        '413': {description: Body limit exceeded.}
+        '429': {description: Too many open notes.}
+    put:
+      tags: [Arcade Mutations]
+      summary: Complete a note with findings and a fresh GPS fix within 300 meters
+      security: [{bearerAuth: []}]
+      description: Requires active arcade write access. GPS is checked by the server against the current basic revision. Accuracy must be 0 to 150 meters, captured_at must be within 60 seconds with at most 5 seconds future skew, and distance must be at most 300 meters. No remote bypass or historical Passport substitute. Completion is transactional and cannot overwrite prior findings. Body limit 16384 bytes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [arcade, id, answer, lat, lon, accuracy, captured_at], properties: {arcade: {type: string}, id: {type: string}, answer: {type: string, minLength: 1, maxLength: 1000}, lat: {type: number}, lon: {type: number}, accuracy: {type: number, minimum: 0, maximum: 150}, captured_at: {type: integer, description: GPS capture Unix time in milliseconds}}}
+      responses:
+        '200': {description: Completed note with findings, answering user and answeredAt.}
+        '400': {description: Invalid answer or missing, stale or inaccurate GPS.}
+        '401': {description: Authentication required.}
+        '403': {description: Inactive user, write denied or outside 300 meters.}
+        '404': {description: Note or arcade missing or not visible; cross-arcade note IDs are rejected.}
+        '409': {description: Already completed or arcade coordinates unavailable.}
+        '413': {description: Body limit exceeded.}
+    delete:
+      tags: [Arcade Mutations]
+      summary: Remove a note as its author or strict reviewer, from any distance
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [arcade, id], properties: {arcade: {type: string}, id: {type: string}}}
+      responses:
+        '204': {description: Removed.}
+        '400': {description: Invalid JSON.}
+        '401': {description: Authentication required.}
+        '403': {description: Inactive user or another author's note.}
+        '404': {description: Note or arcade missing or not visible.}
+        '413': {description: Body limit exceeded.}
   /community/comments:
     get:
       tags: [Community]
