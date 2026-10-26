@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/ericbaek/musecat-backend-core/service/usernotification"
@@ -12,7 +13,8 @@ import (
 
 type inboxQueryApp struct {
 	core.App
-	queries, returned, sourceReads int
+	queries, sourceReads int
+	inboxQueries         []*dbx.SelectQuery
 }
 
 func (app *inboxQueryApp) FindRecordsByFilter(collection any, filter, sort string, limit, offset int, params ...dbx.Params) ([]*core.Record, error) {
@@ -23,10 +25,15 @@ func (app *inboxQueryApp) FindRecordsByFilter(collection any, filter, sort strin
 		app.queries++
 	}
 	rows, err := app.App.FindRecordsByFilter(collection, filter, sort, limit, offset, params...)
-	if collection == usernotification.Inbox {
-		app.returned += len(rows)
-	}
 	return rows, err
+}
+func (app *inboxQueryApp) RecordQuery(collection any) *dbx.SelectQuery {
+	query := app.App.RecordQuery(collection)
+	if collection == usernotification.Inbox {
+		app.queries++
+		app.inboxQueries = append(app.inboxQueries, query)
+	}
+	return query
 }
 func (app *inboxQueryApp) FindRecordById(collection any, id string, expand ...func(*dbx.SelectQuery) error) (*core.Record, error) {
 	app.sourceReads++
@@ -108,13 +115,20 @@ func TestInboxBoundedPagingAndCurrentVisibility(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		insert(i, "visiblearcade01", "report_reaction", true)
 	}
-	app.queries, app.returned, app.sourceReads = 0, 0, 0
+	app.queries, app.sourceReads = 0, 0
+	app.inboxQueries = nil
 	rows, unread, next, err = listInbox(app, user, "")
 	if err != nil || len(rows) != 20 || unread != 0 || next == "" {
 		t.Fatalf("dense history len=%d unread=%d next=%q err=%v", len(rows), unread, next, err)
 	}
-	if app.queries != 2 || app.returned != inboxBatchSize || app.sourceReads != 1 {
-		t.Fatalf("history amplified polling: queries=%d returned=%d sources=%d", app.queries, app.returned, app.sourceReads)
+	if app.queries != 2 || app.sourceReads != 1 {
+		t.Fatalf("history amplified polling: queries=%d sources=%d", app.queries, app.sourceReads)
+	}
+	for _, query := range app.inboxQueries {
+		sql := query.Build().SQL()
+		if !strings.Contains(sql, "LIMIT 100") || strings.Contains(sql, "OFFSET") {
+			t.Fatalf("unbounded inbox query: %s", sql)
+		}
 	}
 	// Feedback shares the current access check across reply/created event kinds,
 	// but never carries staff authorization into the next polling request.

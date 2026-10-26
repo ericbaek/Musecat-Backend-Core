@@ -29,6 +29,7 @@ func EnsureSchema(app core.App) error {
 			&core.DateField{Name: "published_at"},
 			&core.TextField{Name: "broadcast_cursor", Max: 15},
 			&core.BoolField{Name: "broadcast_done"},
+			&core.BoolField{Name: "suppress_device_push"},
 			&core.RelationField{Name: "created_by", CollectionId: user.Id, MaxSelect: 1},
 			&core.AutodateField{Name: "created", OnCreate: true},
 			&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},

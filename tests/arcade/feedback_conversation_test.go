@@ -58,11 +58,11 @@ func TestFeedbackConversationAccessRepliesAndNotifications(t *testing.T) {
 	}
 	reply(authorToken, "It still fails", 201)
 	moderatorInbox := call("GET", "/user/notifications", "", staffToken, 200)
-	if moderatorInbox["unread"] != float64(2) {
+	if moderatorInbox["unread"] != float64(1) {
 		t.Fatal("staff not notified", moderatorInbox)
 	}
 	reply(staffToken, "Now fixed", 201)
-	if got := call("GET", "/user/notifications", "", authorToken, 200); got["unread"] != float64(2) {
+	if got := call("GET", "/user/notifications", "", authorToken, 200); got["unread"] != float64(1) {
 		t.Fatal(got)
 	}
 	if got := call("GET", "/user/notifications", "", otherToken, 200); got["unread"] != float64(0) {
@@ -173,7 +173,7 @@ func TestArcadeInquiryOfficialAccountIsolationAndAlerts(t *testing.T) {
 		t.Fatal("author not notified", got)
 	}
 	call("POST", "/user/feedback/thread", fmt.Sprintf(`{"feedbackId":%q,"message":"Follow up"}`, id), authorToken, 201)
-	if got := call("GET", "/user/notifications", "", ownerToken, 200); got["unread"] != float64(2) {
+	if got := call("GET", "/user/notifications", "", ownerToken, 200); got["unread"] != float64(1) {
 		t.Fatal("official followup alert missing", got)
 	}
 	statusBody := fmt.Sprintf(`{"feedbackId":%q,"status":"solved"}`, id)
@@ -194,7 +194,7 @@ func TestArcadeInquiryOfficialAccountIsolationAndAlerts(t *testing.T) {
 		t.Fatal("requester follow-up did not reopen resolved inquiry")
 	}
 	inbox := call("GET", "/user/notifications", "", ownerToken, 200)
-	if inbox["unread"] != float64(3) {
+	if inbox["unread"] != float64(1) {
 		t.Fatal("resolved follow-up did not alert official", inbox)
 	}
 	notification, err := app.FindFirstRecordByFilter(usernotification.Inbox, "user={:user} && message={:message}", map[string]any{"user": owner.Id, "message": followup["id"]})

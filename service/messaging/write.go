@@ -367,6 +367,17 @@ func SetRead(app core.App, user, id string, through int) (map[string]any, error)
 			return err
 		}
 		last = row.GetInt("last_read_sequence")
+		// Only acknowledge notifications through the sequence actually displayed.
+		notices, err := tx.FindRecordsByFilter("user_notification", "user={:u} && kind='message' && conversation={:c} && read=false && message.sequence<={:s}", "", 0, 0, dbx.Params{"u": user, "c": id, "s": last})
+		if err != nil {
+			return err
+		}
+		for _, notice := range notices {
+			notice.Set("read", true)
+			if err := tx.Save(notice); err != nil {
+				return err
+			}
+		}
 		afterCommit(tx, Event{Name: "conversation.read", ID: id, UserID: user, LastReadSequence: last})
 		return nil
 	})

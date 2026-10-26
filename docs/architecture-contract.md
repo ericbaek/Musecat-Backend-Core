@@ -1447,15 +1447,22 @@ Korean, English and Japanese image stories. Staff (`developer|moderator`) use on
 custom `/moderation/announcements` APIs. Drafts may be incomplete; publication
 accepts an explicit nonempty subset of `ko|en|ja` and requires a title, 1–12 valid
 PNG/JPEG/WebP images only in those selected locales. Image alt text is optional. The selected
-locale set becomes immutable alongside the published content. Unselected variants
+locale set becomes immutable after publication. Unselected variants
 remain private to staff and never appear in public metadata or image reads.
 Image text is never assumed to translate automatically. JSON metadata preserves
 ordered image references; multipart replacements can combine retained file names
 and per-locale `upload:N` indices. Omitted references remove old files. Files are
 protected at the raw PocketBase boundary; custom image reads recheck publication
-visibility. Published content is immutable. Archive is terminal and hides public
+visibility. Staff may edit published content while preserving the selected locales,
+publication timestamp, fan-out cursor, inbox snapshots and read/view identities.
+Edits must retain complete content for every published locale and do not resend
+notifications. Archived content cannot be edited. Archive is terminal and hides public
 content and its inbox entries, without erasing deduplication or view identities.
 
+Publication accepts optional `sendPush` (boolean, default true), persisted as
+`suppress_device_push` for the fan-out worker. With `sendPush=false`, inbox
+events are still created but no device deliveries are enqueued. Retrying publication
+does not change its original push policy.
 Publication captures a timestamp. Full registers the bounded fan-out worker even
 when VAPID is disabled. Each transaction processes at most 100 non-withdrawn users
 created no later than publication; the durable user-id cursor, one inbox identity
@@ -1483,3 +1490,20 @@ Setup links resolve the recipient's current owned arcade using the onboarding
 endpoint's ownership rules and target `/arcade/<id>?setup=dashboard`; the legacy
 redirect remains a fallback when no current owned arcade exists. Retained legacy
 links remain valid frontend inputs. Neither kind needs an intermediate launcher.
+
+Message notification inboxes project the latest received event per user/conversation,
+including existing history, before keyset pagination and unread counting. Source
+message/event/delivery identities remain immutable. The title is the sending user
+snapshot or acting arcade/team; previews normalize whitespace and truncate at 160
+Unicode characters, with localized photo-only fallback. Access checks still precede
+projection. Acknowledging one message notification clears events only through that
+message sequence. Conversation read cursors also acknowledge corresponding inbox
+events, without advancing beyond the displayed sequence.
+
+Full message pushes wait at least five seconds from event creation, collapse older
+queued events, and use a user/conversation tag. A successful delivery persists
+`sent_at`; subsequent pushes to the same conversation/device wait at least two
+minutes, retaining the newest pending message. Deferral does not consume retries.
+Skipped receipts never start the cooldown. Delivery rechecks read cursors and
+notification acknowledgement in addition to the existing recipient/access policy.
+Push title/body use the same sender and preview as the authenticated inbox.

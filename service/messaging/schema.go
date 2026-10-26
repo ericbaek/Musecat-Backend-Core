@@ -115,6 +115,9 @@ func EnsureSchema(app core.App) error {
 				return fmt.Errorf("incompatible notification %s", pair[0])
 			}
 		}
+		before := append([]string{}, inbox.Indexes...)
+		inbox.AddIndex("idx_notification_conversation", false, "user,conversation,created,id", "kind='message'")
+		changed = changed || !slices.Equal(before, inbox.Indexes)
 		if changed {
 			return tx.Save(inbox)
 		}

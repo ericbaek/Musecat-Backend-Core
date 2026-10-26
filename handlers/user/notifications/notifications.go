@@ -58,7 +58,7 @@ func listInbox(app core.App, user *core.Record, before string, locales ...string
 	}
 
 	unread := 0
-	if err := scanInbox(app, user.Id, " && read=false", nil, func(row *core.Record) bool {
+	if err := scanInbox(app, user.Id, true, nil, func(row *core.Record) bool {
 		if visible(row) {
 			unread++
 		}
@@ -81,7 +81,7 @@ func listInbox(app core.App, user *core.Record, before string, locales ...string
 	}
 	items := make([]*core.Record, 0, 20)
 	next := ""
-	err := scanInbox(app, user.Id, "", cursor, func(row *core.Record) bool {
+	err := scanInbox(app, user.Id, false, cursor, func(row *core.Record) bool {
 		if !visible(row) {
 			return true
 		}
@@ -97,15 +97,21 @@ func listInbox(app core.App, user *core.Record, before string, locales ...string
 
 // scanInbox never retains the full history. The created/id keyset preserves
 // newest-first ordering even when several events share the same timestamp.
-func scanInbox(app core.App, userID, extraFilter string, cursor *core.Record, visit func(*core.Record) bool) error {
+func scanInbox(app core.App, userID string, unreadOnly bool, cursor *core.Record, visit func(*core.Record) bool) error {
 	for {
-		filter := "user={:user}" + extraFilter
+		filter := "user_notification.user={:user}"
+		if unreadOnly {
+			filter += " AND user_notification.read=false"
+		}
 		params := dbx.Params{"user": userID}
 		if cursor != nil {
-			filter += " && (created<{:created} || (created={:created} && id<{:id}))"
+			filter += " AND (user_notification.created<{:created} OR (user_notification.created={:created} AND user_notification.id<{:id}))"
 			params["created"], params["id"] = cursor.GetString("created"), cursor.Id
 		}
-		rows, err := app.FindRecordsByFilter(usernotification.Inbox, filter, "-created,-id", inboxBatchSize, 0, params)
+		// Apply grouping before the cursor so older events never reappear on later pages.
+		filter += ` AND (user_notification.kind!='message' OR NOT EXISTS (SELECT 1 FROM user_notification newer WHERE newer.user=user_notification.user AND newer.kind='message' AND newer.conversation=user_notification.conversation AND ((SELECT sequence FROM messaging_message WHERE id=newer.message)>(SELECT sequence FROM messaging_message WHERE id=user_notification.message) OR (newer.message=user_notification.message AND newer.id>user_notification.id))))`
+		rows := []*core.Record{}
+		err := app.RecordQuery(usernotification.Inbox).AndWhere(dbx.NewExp(filter, params)).OrderBy("user_notification.created DESC", "user_notification.id DESC").Limit(inboxBatchSize).All(&rows)
 		if err != nil {
 			return err
 		}
@@ -132,7 +138,24 @@ func Read(re *core.RequestEvent) error {
 		filter := "user={:user} && read=false"
 		params := dbx.Params{"user": re.Auth.Id}
 		if !body.All {
-			filter += " && id={:id}"
+			selected, err := tx.FindRecordsByFilter(usernotification.Inbox, "user={:user} && id={:id}", "", 1, 0, dbx.Params{"user": re.Auth.Id, "id": body.ID})
+			if err != nil {
+				return err
+			}
+			if len(selected) == 0 {
+				return nil
+			}
+			row := selected[0]
+			if row.GetString("kind") == "message" {
+				message, err := tx.FindRecordById("messaging_message", row.GetString("message"))
+				if err != nil {
+					return err
+				}
+				filter += " && kind='message' && conversation={:c} && message.sequence<={:s}"
+				params["c"], params["s"] = row.GetString("conversation"), message.GetInt("sequence")
+			} else {
+				filter += " && id={:id}"
+			}
 			params["id"] = body.ID
 		}
 		rows, err := tx.FindRecordsByFilter(usernotification.Inbox, filter, "", 0, 0, params)

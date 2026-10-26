@@ -135,7 +135,11 @@ func NotificationDeliverable(app core.App, user, row *core.Record) bool {
 			arcade, _ = app.FindRecordById("arcade", q.GetString("inbox_id"))
 		}
 	}
-	return notificationRecipient(current, q, arcade, m)
+	if row.GetBool("read") {
+		return false
+	}
+	read, err := app.FindRecordsByFilter(Reads, "conversation={:c} && user={:u} && last_read_sequence>={:s}", "", 1, 0, dbx.Params{"c": c.Id, "u": user.Id, "s": m.GetInt("sequence")})
+	return err == nil && len(read) == 0 && notificationRecipient(current, q, arcade, m)
 }
 func notificationRecipient(u, q, arcade, m *core.Record) bool {
 	if u == nil || u.Id == m.GetString("sender_user") {
@@ -209,6 +213,38 @@ func NotificationVisible(app core.App, user, row *core.Record) bool {
 	_, _, err := Access(app, user.Id, row.GetString("conversation"))
 	return err == nil
 }
-func NotificationItem(row *core.Record) map[string]any {
-	return map[string]any{"id": row.Id, "kind": "message", "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": "뮤즈캣", "gameName": "", "reaction": "", "message": "", "conversationId": row.GetString("conversation"), "url": "/messages?conversation=" + row.GetString("conversation")}
+func NotificationItem(app core.App, row *core.Record) map[string]any {
+	return NotificationItemLocalized(app, row, "ko")
+}
+
+func NotificationItemLocalized(app core.App, row *core.Record, locale string) map[string]any {
+	name, preview := "", ""
+	if m, err := app.FindRecordById(Messages, row.GetString("message")); err == nil && m.GetString("conversation") == row.GetString("conversation") {
+		name = m.GetString("sender_name")
+		if m.GetString("acting_type") != "user" {
+			parties, _ := loadParties(app, []Identity{{m.GetString("acting_type"), m.GetString("acting_id")}})
+			name = parties[m.GetString("acting_type")+":"+m.GetString("acting_id")].Name
+		}
+		if m.GetString("acting_type") == "team" {
+			if locale == "en" {
+				name = "Musecat Team"
+			} else if locale == "ja" {
+				name = "Musecatチーム"
+			}
+		}
+		runes := []rune(strings.Join(strings.Fields(m.GetString("text")), " "))
+		if len(runes) > 160 {
+			runes = append(runes[:160], '…')
+		}
+		preview = string(runes)
+		if preview == "" && (len(m.GetStringSlice("photos")) > 0 || len(m.GetStringSlice("legacy_photos")) > 0) {
+			preview = "사진을 보냈습니다"
+			if locale == "en" {
+				preview = "Sent a photo"
+			} else if locale == "ja" {
+				preview = "写真を送信しました"
+			}
+		}
+	}
+	return map[string]any{"id": row.Id, "kind": "message", "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": name, "title": name, "gameName": "", "reaction": "", "message": preview, "conversationId": row.GetString("conversation"), "url": "/messages?conversation=" + row.GetString("conversation")}
 }

@@ -3,6 +3,7 @@ package usernotification
 import (
 	"context"
 	"encoding/json"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 
 	"github.com/ericbaek/musecat-backend-core/service/announcement"
 	"github.com/pocketbase/dbx"
@@ -63,6 +64,9 @@ func createAnnouncementTx(app core.App, user, publication *core.Record) error {
 	if err := app.Save(row); err != nil {
 		return err
 	}
+	if publication.GetBool("suppress_device_push") {
+		return nil
+	}
 	return enqueueDevicesTx(app, row, user.Id)
 }
 
@@ -91,6 +95,9 @@ func announcementItem(row *core.Record, locale string) map[string]any {
 func ItemLocalized(app core.App, row *core.Record, locale string) map[string]any {
 	if row.GetString("kind") == AnnouncementKind {
 		return announcementItem(row, locale)
+	}
+	if row.GetString("kind") == "message" {
+		return messaging.NotificationItemLocalized(app, row, locale)
 	}
 	return Item(app, row)
 }
