@@ -125,6 +125,7 @@ func CreateSupportFeedback(re *core.RequestEvent) error {
 	rec := core.NewRecord(coll)
 	rec.Set("message", body.Message)
 	rec.Set("status", supportFeedbackWaitingStatus)
+	rec.Set("guest_key_hash", supportfeedback.GuestKeyHash(re.Request.Header.Get(supportfeedback.GuestHeader)))
 	if body.Arcade != "" {
 		rec.Set("arcade", body.Arcade)
 	}

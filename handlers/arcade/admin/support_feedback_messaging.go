@@ -23,10 +23,16 @@ func createMessagingFeedback(re *core.RequestEvent, body CreateSupportFeedbackBo
 	return re.JSON(200, item)
 }
 func mappedFeedback(re *core.RequestEvent, id string) string {
+	if re.Auth == nil {
+		return ""
+	}
 	cid, _ := messaging.LegacyConversation(re.App, id)
 	return cid
 }
 func messagingFeedbackPhoto(re *core.RequestEvent) (bool, error) {
+	if re.Auth == nil {
+		return false, nil
+	}
 	q := re.Request.URL.Query()
 	cid, mid := "", ""
 	if id := q.Get("feedbackId"); id != "" {

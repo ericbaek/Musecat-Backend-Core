@@ -31,6 +31,11 @@ tags:
     description: Authenticated arcade editing endpoints.
 components:
   securitySchemes:
+    guestFeedbackKey:
+      type: apiKey
+      in: header
+      name: X-Feedback-Guest-Key
+      description: A 64-character lowercase hexadecimal browser credential. Optional on guest POST /support_feedback to create a recoverable chat; required for all /guest/feedback routes. Only its SHA-256 digest is stored. Existing unkeyed submissions cannot be claimed.
  {type: http, scheme: bearer, description: Musecat-issued server key; distinct from OAuth tokens and secrets.}
     bearerAuth:
       type: http
@@ -5839,7 +5844,7 @@ paths:
     post:
       tags: [Support]
       summary: /support_feedback
-      description: Default per-client-IP limit is 10 requests per 600 seconds, shared by anonymous and authenticated users. With no official account, arcade-scoped inquiries accept guests through moderator fallback. With a current official account, missing configuration defaults to OFF and disabled mode rejects creation with 409 INQUIRY_DISABLED; loginRequired rejects anonymous submissions with 401 LOGIN_REQUIRED; external mode rejects creation with 409 INQUIRY_EXTERNAL. Private arcades remain inaccessible to guests. Guest submissions preserve existing initial-receipt semantics and do not grant authenticated conversation access. Operator-configured limits and PocketBase exemptions may override the defaults. Accepts at most 3 images of 15000000 bytes each; the total encoded body is limited to 46048576 bytes (45 MB of photos plus 1 MiB of form overhead).
+      description: Default per-client-IP limit is 10 requests per 600 seconds, shared by anonymous and authenticated users. With no official account, arcade-scoped inquiries accept guests through moderator fallback. With a current official account, missing configuration defaults to OFF and disabled mode rejects creation with 409 INQUIRY_DISABLED; loginRequired rejects anonymous submissions with 401 LOGIN_REQUIRED; external mode rejects creation with 409 INQUIRY_EXTERNAL. Private arcades remain inaccessible to guests. Guest submissions with an optional X-Feedback-Guest-Key header (64 lowercase hexadecimal characters) create a browser-owned chat accessible through /guest/feedback endpoints. Only the credential digest is stored. Unkeyed submissions retain initial-receipt semantics and cannot be claimed later. Operator-configured limits and PocketBase exemptions may override the defaults. Accepts at most 3 images of 15000000 bytes each; the total encoded body is limited to 46048576 bytes (45 MB of photos plus 1 MiB of form overhead).
       requestBody:
         required: true
         content:
@@ -7252,6 +7257,67 @@ paths:
         '403': {description: Active account or arcade management access required.}
         '404': {description: Arcade not found.}
         '413': {description: Encoded request exceeds its limit.}
+  /guest/feedback:
+    get:
+      tags: [Support]
+      summary: List guest inquiries owned by the browser credential
+      security: [{guestFeedbackKey: []}]
+      parameters:
+        - {in: query, name: arcade, schema: {type: string}}
+      responses:
+        '200': {description: Matching guest inquiries only; private no-store. Credential hashes are never returned.}
+        '401': {description: Missing or malformed guest key}
+  /guest/feedback/thread:
+    get:
+      tags: [Support]
+      summary: Read a guest inquiry and its chronological replies
+      security: [{guestFeedbackKey: []}]
+      parameters:
+        - {in: query, name: id, required: true, schema: {type: string}}
+        - {in: query, name: before, schema: {type: string}}
+      responses:
+        '200': {description: Same thread envelope as /user/feedback/thread with guestChat true; newest 50 replies and private cursor.}
+        '401': {description: Missing or malformed guest key}
+        '404': {description: Missing or foreign inquiry}
+    post:
+      tags: [Support]
+      summary: Reply as a guest without an account or role
+      description: Same JSON or multipart body and photo limits as POST /user/feedback/thread. Author and roles are server-derived. Guest follow-up returns status to waiting and notifies current responders.
+      security: [{guestFeedbackKey: []}]
+      requestBody:
+        $ref: '#/paths/~1user~1feedback~1thread/post/requestBody'
+      responses:
+        '201': {description: Persisted reply}
+        '400': {description: Invalid reply}
+        '401': {description: Missing or malformed guest key}
+        '404': {description: Missing or foreign inquiry}
+        '413': {description: Upload exceeds limits}
+    patch:
+      tags: [Support]
+      summary: Resolve or reopen a guest inquiry
+      security: [{guestFeedbackKey: []}]
+      requestBody:
+        $ref: '#/paths/~1user~1feedback~1thread/patch/requestBody'
+      responses:
+        '200': {description: Persisted id and status}
+        '400': {description: Invalid status}
+        '401': {description: Missing or malformed guest key}
+        '404': {description: Missing or foreign inquiry}
+  /guest/feedback/thread/photo:
+    get:
+      tags: [Support]
+      summary: Download a private guest inquiry attachment
+      description: Uses the same exact id or feedbackId and file selectors as /user/feedback/thread/photo, rechecking guest ownership of the parent inquiry.
+      security: [{guestFeedbackKey: []}]
+      parameters:
+        - {in: query, name: id, schema: {type: string}}
+        - {in: query, name: feedbackId, schema: {type: string}}
+        - {in: query, name: file, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Attachment bytes; private no-store}
+        '400': {description: Missing or ambiguous selector}
+        '401': {description: Missing or malformed guest key}
+        '404': {description: Missing file or foreign inquiry}
   /user/feedback/thread/photo:
     get:
       tags: [User]

@@ -66,7 +66,7 @@ func EnsureSchema(app core.App) error {
 			}
 			if want, ok := field.(*core.RelationField); ok {
 				got := old.(*core.RelationField)
-				if got.CollectionId != want.CollectionId || got.Required != want.Required || got.CascadeDelete != want.CascadeDelete || got.MaxSelect != 1 {
+				if got.CollectionId != want.CollectionId || (got.Required != want.Required && !(field.GetName() == "author" && !got.Required)) || got.CascadeDelete != want.CascadeDelete || got.MaxSelect != 1 {
 					return fmt.Errorf("incompatible message relation")
 				}
 			}
