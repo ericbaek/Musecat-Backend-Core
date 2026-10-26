@@ -469,3 +469,12 @@ owners may review all their arcades through the scoped setup endpoint.
 not the base price. Base `value` may remain null for a PASELI-only price. Existing
 prices and immutable history are not migrated. Representative guest rows retain
 the PASELI amount alongside the base amount.
+
+### Notice presentation policy
+
+Notice title and display-mode mutations retain the existing standalone notice
+history semantics; they do not rewrite arcade changelog history or award XP.
+Creation/update enforce the active required/pinned caps in their write transaction,
+and rejected capacity or permission checks leave the record unchanged. Official
+accounts may manage authorless legacy notices only in their owned arcade; no author
+is fabricated. Full's migration preserves original notice content and timestamps.

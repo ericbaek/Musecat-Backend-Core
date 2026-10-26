@@ -2580,11 +2580,20 @@ components:
             type: string
     CreateArcadeNoticeRequest:
       type: object
-      required: [arcade]
+      required: [arcade, title, document]
       description: JSON body for notice metadata. To attach photos, use the multipart/form-data variant with `photos` files.
       properties:
         arcade:
           type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: Trimmed notice title. Required on creation; omitted updates preserve the stored title.
+        display_mode:
+          type: string
+          enum: [normal, pinned, required]
+          description: Presentation mode. Creation defaults to normal; omitted updates preserve the stored mode. Each arcade allows at most one active required notice and three active pinned notices.
         type:
           type: string
           enum: [alert, close, issue, event]
@@ -2600,11 +2609,20 @@ components:
           type: number
     CreateArcadeNoticeMultipartRequest:
       type: object
-      required: [arcade]
+      required: [arcade, title, document]
       description: Multipart body for notice metadata plus optional `photos` file uploads.
       properties:
         arcade:
           type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: Trimmed notice title. Required on creation; omitted updates preserve the stored title.
+        display_mode:
+          type: string
+          enum: [normal, pinned, required]
+          description: Presentation mode. Creation defaults to normal; omitted updates preserve the stored mode. Each arcade allows at most one active required notice and three active pinned notices.
         type:
           type: string
           enum: [alert, close, issue, event]
@@ -2632,6 +2650,15 @@ components:
       properties:
         id:
           type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: Trimmed notice title. Required on creation; omitted updates preserve the stored title.
+        display_mode:
+          type: string
+          enum: [normal, pinned, required]
+          description: Presentation mode. Creation defaults to normal; omitted updates preserve the stored mode. Each arcade allows at most one active required notice and three active pinned notices.
         type:
           type: string
           enum: [alert, close, issue, event]
@@ -2652,6 +2679,15 @@ components:
       properties:
         id:
           type: string
+        title:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          description: Trimmed notice title. Required on creation; omitted updates preserve the stored title.
+        display_mode:
+          type: string
+          enum: [normal, pinned, required]
+          description: Presentation mode. Creation defaults to normal; omitted updates preserve the stored mode. Each arcade allows at most one active required notice and three active pinned notices.
         type:
           type: string
           enum: [alert, close, issue, event]
@@ -2680,7 +2716,7 @@ components:
           type: string
     ArcadeNotice:
       type: object
-      required: [id, arcade, createdBy, type, document, priority, created, updated]
+      required: [id, arcade, createdBy, title, display_mode, type, document, priority, created, updated]
       properties:
         id:
           type: string
@@ -2689,9 +2725,17 @@ components:
         createdBy:
           type: string
           description: Author user id. Existing notices without an author return an empty string.
+        title:
+          type: string
+          maxLength: 5000
+          description: Stored title. Legacy records may have an empty title before migration.
+        display_mode:
+          type: string
+          enum: [normal, pinned, required]
+          description: Presentation mode. Creation defaults to normal; omitted updates preserve the stored mode. Each arcade allows at most one active required notice and three active pinned notices.
         type:
           type: string
-          enum: [alert, close, issue, event]
+          description: Topic category; legacy category values are preserved.
         document:
           $ref: '#/components/schemas/ArcadeMemoDocument'
           description: Canonical Tiptap JSON document.
@@ -6984,7 +7028,7 @@ paths:
             type: string
       responses:
         '200':
-          description: Matching notices ordered by priority with 0 treated as the lowest priority, then latest first within the same priority. Soft-deleted notices are excluded. Notices whose `until` is reached are soft-deleted before the response is returned.
+          description: Active notices ordered required first, pinned second, then normal. Pinned notices sort by priority ascending; otherwise newer notices sort first, with id as a stable tie breaker. Soft-deleted notices are excluded. Notices whose `until` is reached are soft-deleted before the response is returned.
           content:
             application/json:
               schema:
@@ -7037,7 +7081,7 @@ paths:
                 $ref: '#/components/schemas/ArcadeNotice'
         '413': {description: Image exceeds 5 MiB or encoded body exceeds 16 MiB.}
         '400':
-          description: Invalid JSON or missing arcade id.
+          description: Invalid JSON, missing arcade/document/title, empty or oversized title, or invalid display_mode.
           content:
             application/json:
               schema:
@@ -7060,6 +7104,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The target arcade already has one active required notice or three active pinned notices. Expired and soft-deleted notices do not count. The failed mutation leaves all fields unchanged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code, display_mode, limit]
+                properties:
+                  error: {type: string}
+                  code: {type: string, enum: [notice_display_limit_exceeded]}
+                  display_mode: {type: string, enum: [required, pinned]}
+                  limit: {type: integer, enum: [1, 3]}
         '502':
           description: Create failure.
           content:
@@ -7070,7 +7126,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Developers and moderators may update every notice. Official account authors may update their own notices. Level-30+ supporter authors may update their own notices. Private drafts additionally require the draft creator or a developer/moderator.
+        Developers and moderators may update every notice. Official account authors may update their own notices and authorless legacy notices belonging to their own arcade. Level-30+ supporter authors may update their own notices. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
       x-upload-limits: {maxPhotos: 3, maxPhotoBytes: 5242880, maxBodyBytes: 16777216}
@@ -7096,7 +7152,7 @@ paths:
                 $ref: '#/components/schemas/ArcadeNotice'
         '413': {description: Image exceeds 5 MiB or encoded body exceeds 16 MiB.}
         '400':
-          description: Invalid JSON or missing notice id.
+          description: Invalid JSON, missing notice id, empty or oversized supplied title, or invalid display_mode.
           content:
             application/json:
               schema:
@@ -7119,6 +7175,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The target arcade already has one active required notice or three active pinned notices. Expired and soft-deleted notices do not count. The failed mutation leaves all fields unchanged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code, display_mode, limit]
+                properties:
+                  error: {type: string}
+                  code: {type: string, enum: [notice_display_limit_exceeded]}
+                  display_mode: {type: string, enum: [required, pinned]}
+                  limit: {type: integer, enum: [1, 3]}
         '502':
           description: Update failure.
           content:
@@ -7129,7 +7197,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/notice
       description: |
-        Developers and moderators may delete every notice. Official account authors may delete their own notices. Level-30+ supporter authors may delete their own notices. Private drafts additionally require the draft creator or a developer/moderator.
+        Developers and moderators may delete every notice. Official account authors may delete their own notices and authorless legacy notices belonging to their own arcade. Level-30+ supporter authors may delete their own notices. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
       requestBody:
@@ -11212,7 +11280,7 @@ paths:
       description: |-
         Requires account:access. Same payload, response and domain checks as DELETE /arcade/notice. Management operations are excluded even for staff.
 
-        Developers and moderators may delete every notice. Official account authors may delete their own notices. Level-30+ supporter authors may delete their own notices. Private drafts additionally require the draft creator or a developer/moderator.
+        Developers and moderators may delete every notice. Official account authors may delete their own notices and authorless legacy notices belonging to their own arcade. Level-30+ supporter authors may delete their own notices. Private drafts additionally require the draft creator or a developer/moderator.
       security:
       - delegatedOAuth:
         - account:access
@@ -11386,7 +11454,7 @@ paths:
       description: |-
         Requires account:access. Same payload, response and domain checks as PUT /arcade/notice. Management operations are excluded even for staff.
 
-        Developers and moderators may update every notice. Official account authors may update their own notices. Level-30+ supporter authors may update their own notices. Private drafts additionally require the draft creator or a developer/moderator.
+        Developers and moderators may update every notice. Official account authors may update their own notices and authorless legacy notices belonging to their own arcade. Level-30+ supporter authors may update their own notices. Private drafts additionally require the draft creator or a developer/moderator.
       security:
       - delegatedOAuth:
         - account:access

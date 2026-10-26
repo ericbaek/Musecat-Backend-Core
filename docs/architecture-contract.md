@@ -212,7 +212,7 @@ Definitions:
 | Immediate wiki edits on public arcade | deny | allow | allow | allow |
 | Arcade memo create/update/rollback | deny | authenticated users with arcade write access | authenticated users with arcade write access | authenticated users with arcade write access |
 | Arcade notice create | deny | deny; level-30+ supporters may create unless another official account manages the arcade through `owns` | official account may create only in own `owns` arcade | allow |
-| Arcade notice update/delete | deny | own authored notice only for level-30+ supporters | own authored notice only | allow |
+| Arcade notice update/delete | deny | own authored notice only for level-30+ supporters | own authored notice or authorless legacy notice in an owned arcade | allow |
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
 | Own feedback (`GET /user/feedback`) | deny | own records only | own records only | own records only |
@@ -525,6 +525,34 @@ single-record operations do not write arcade changelog or XP rows.
 | subway map version management | `POST /subway/map`, `PUT /subway/map`, `DELETE /subway/map?id=...` (developer/moderator only) |
 
 New frontend code MUST NOT reintroduce collection names, PocketBase record rules, collection filters, raw REST pagination, or PocketBase file URL construction as a compatibility layer. Sitemap, changelog timeline, draft list/delete, and photo atom management migrate to these custom routes.
+
+## Arcade notice presentation policy
+
+`arcade_notice.title` is separate from the existing topic `type`. Creation requires
+an explicit nonempty trimmed title; updates preserve it when omitted and reject an
+explicit empty value. The storage limit is 5000 Unicode characters. Existing topic
+categories, documents, photos, author identities and priorities are preserved.
+
+`display_mode` is `required`, `pinned`, or `normal` (the creation default). Per arcade,
+at most one active required notice and three active pinned notices are allowed.
+Active means not soft-deleted and without an expiry or with a future `until`.
+Creation and update recheck authorization, current arcade visibility and available
+capacity inside the same serialized write transaction as persistence. Updates
+exclude their own record from capacity counts; expiry changes also check capacity.
+Overflow returns 409 with code `notice_display_limit_exceeded`, the mode and its
+limit, without persisting any fields. Normal notices have no additional count cap.
+
+Public reads order required, pinned, then normal. Pinned notices use ascending
+priority; equal pinned priority and normal notices use newest-first ordering with
+id as the deterministic tie breaker. The client always expands the required notice
+and opens other notice bodies on demand.
+
+Developers/moderators retain management access to all notices. An official arcade
+account may additionally update/delete authorless legacy notices in its own `owns`
+arcades, without assigning itself as their author. Other authors' notices retain
+the existing author-only rule. Private arcade write restrictions remain unchanged.
+Full alone backfills existing database titles and presentation modes; Core's schema
+helper and bootstrap migration never migrate a deployed database.
 
 ## Rich-text validation and denied notice mutations
 
