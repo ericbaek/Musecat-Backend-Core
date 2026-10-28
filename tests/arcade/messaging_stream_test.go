@@ -3,6 +3,7 @@ package arcade_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -191,5 +192,86 @@ func TestMessagingStreamCancellationReleasesSlot(t *testing.T) {
 			t.Fatal("cancelled stream retained its slot")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestMessagingReadReceiptInvalidatesOnlyDMPeer(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, a := createAuthUserWithTags(t, app, []string{})
+	_, b := createAuthUserWithTags(t, app, []string{})
+	_, outsider := createAuthUserWithTags(t, app, []string{"moderator"})
+	c, err := messaging.Create(app, a.Id, messaging.CreateInput{Kind: "dm", PeerUserID: b.Id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = messaging.Send(app, a.Id, c.ID, messaging.SendInput{Text: "read me", ClientMessageID: "receipt"}); err != nil {
+		t.Fatal(err)
+	}
+	hub := messaging.Events(app)
+	sender, reader, unrelated := hub.Subscribe(a.Id), hub.Subscribe(b.Id), hub.Subscribe(outsider.Id)
+	defer hub.Unsubscribe(sender)
+	defer hub.Unsubscribe(reader)
+	defer hub.Unsubscribe(unrelated)
+	rollback := errors.New("rollback read")
+	if err = app.RunInTransaction(func(tx core.App) error {
+		if _, err := messaging.SetRead(tx, b.Id, c.ID, 1); err != nil {
+			return err
+		}
+		return rollback
+	}); !errors.Is(err, rollback) {
+		t.Fatal(err)
+	}
+	if len(sender.Events) != 0 || len(reader.Events) != 0 {
+		t.Fatal("rolled-back read emitted an event")
+	}
+	if summary, err := messaging.Get(app, a.Id, c.ID); err != nil || summary.CounterpartReadSequence == nil || *summary.CounterpartReadSequence != 0 {
+		t.Fatal("rolled-back read persisted", summary, err)
+	}
+	if _, err = messaging.SetRead(app, b.Id, c.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-sender.Events:
+		if event.Name != "conversation.changed" || event.Reason != "read" || event.ID != c.ID || event.LatestSequence != 1 {
+			t.Fatalf("wrong receipt event: %+v", event)
+		}
+	default:
+		t.Fatal("sender did not receive read receipt invalidation")
+	}
+	select {
+	case event := <-reader.Events:
+		if event.Name != "conversation.read" || event.LastReadSequence != 1 {
+			t.Fatalf("own read event changed: %+v", event)
+		}
+	default:
+		t.Fatal("reader did not receive own cursor")
+	}
+	if len(unrelated.Events) != 0 {
+		t.Fatal("read receipt leaked to nonparticipant")
+	}
+	for _, sequence := range []int{1, 0} {
+		if _, err = messaging.SetRead(app, b.Id, c.ID, sequence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(sender.Events) != 0 {
+		t.Fatal("unchanged cursor must not notify peer")
+	}
+
+	inquiry, err := messaging.Create(app, a.Id, messaging.CreateInput{Kind: "inquiry", Inbox: messaging.Identity{Type: "team", ID: "musecat"}, InitialMessage: messaging.SendInput{Text: "help", ClientMessageID: "inquiry"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for len(sender.Events) > 0 {
+		<-sender.Events
+	}
+	if _, err = messaging.SetRead(app, outsider.Id, inquiry.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(sender.Events) != 0 {
+		t.Fatal("inquiry must not expose responder reads")
+	}
+	if summary, err := messaging.Get(app, a.Id, inquiry.ID); err != nil || summary.CounterpartReadSequence != nil {
+		t.Fatal("inquiry receipt must be null", summary, err)
 	}
 }

@@ -382,6 +382,10 @@ func SetReadFor(app core.App, viewer Principal, id string, through int) (map[str
 			return apis.NewBadRequestError("Invalid read sequence.", nil)
 		}
 		row, e := tx.FindFirstRecordByFilter(Reads, "conversation={:c} && user={:u}", dbx.Params{"c": id, "u": user})
+		previous := 0
+		if e == nil {
+			previous = row.GetInt("last_read_sequence")
+		}
 		if e != nil {
 			row, err = record(tx, Reads, map[string]any{"conversation": id, "user": user, "last_read_sequence": through})
 		} else if through > row.GetInt("last_read_sequence") {
@@ -404,6 +408,17 @@ func SetReadFor(app core.App, viewer Principal, id string, through int) (map[str
 			}
 		}
 		afterCommit(tx, Event{Name: "conversation.read", ID: id, UserID: user, LastReadSequence: last})
+		if c.GetString("kind") == "dm" && last > previous {
+			audience, err := conversationAudience(tx, c)
+			if err != nil {
+				return err
+			}
+			for _, peer := range audience {
+				if peer != user {
+					afterCommit(tx, Event{Name: "conversation.changed", ID: id, UserID: peer, LatestSequence: c.GetInt("last_sequence"), Reason: "read"})
+				}
+			}
+		}
 		return nil
 	})
 	if err != nil {

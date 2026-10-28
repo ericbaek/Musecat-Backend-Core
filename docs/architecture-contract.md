@@ -1422,7 +1422,7 @@ idempotent response remains allowed after opt-out; it creates no new message.
 
 Short transactions allocate a per-conversation sequence and persist the message,
 latest pointer, inquiry status and recipient notification outbox together. Read cursors
-are individual, monotonic and bounded by the latest committed sequence. Unread counts
+are individual, monotonic and bounded by the latest committed sequence. DM summaries additionally expose `counterpartReadSequence` (zero before the peer reads); inquiries return null and never expose another reader's cursor. Advancing a DM cursor sends the peer a `conversation.changed` invalidation with reason `read` after commit; duplicate or older cursors do not notify the peer. The existing `conversation.read` event remains scoped to the reader's own account. Unread counts
 exclude the reader's actual sender user and their party, including other staff acting for the same inbox. Status
 changes do not reorder conversations. Latest summaries batch load parties/profiles,
 messages, preferences, blocks and reads; no conversation-by-conversation HTTP or SQL

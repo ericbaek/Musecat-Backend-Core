@@ -44,6 +44,7 @@ type Summary struct {
 	LastMessageAt            *string    `json:"lastMessageAt"`
 	UnreadCount              int        `json:"unreadCount"`
 	LastReadSequence         int        `json:"lastReadSequence"`
+	CounterpartReadSequence  *int       `json:"counterpartReadSequence"`
 	CanSend                  bool       `json:"canSend"`
 	CanManageStatus          bool       `json:"canManageStatus"`
 	AllowedSenderIdentities  []Identity `json:"allowedSenderIdentities"`

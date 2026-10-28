@@ -281,7 +281,7 @@ func summaries(app core.App, u *participant, rows []*core.Record) ([]Summary, er
 		result := []*core.Record{}
 		query := app.RecordQuery(collection).AndWhere(dbx.NewExp("conversation IN (SELECT value FROM json_each({:ids}))", params))
 		if col == Reads {
-			query.AndWhere(dbx.HashExp{"user": u.ID})
+			query.AndWhere(dbx.NewExp("(user={:u} OR conversation IN (SELECT id FROM messaging_conversation WHERE id IN (SELECT value FROM json_each({:ids})) AND kind='dm'))", params))
 		}
 		e = query.All(&result)
 		return result, e
@@ -328,9 +328,12 @@ func summaries(app core.App, u *participant, rows []*core.Record) ([]Summary, er
 		cases[q.GetString("conversation")] = q
 	}
 	reads := map[string]int{}
+	peerReads := map[string]int{}
 	for _, r := range rs {
 		if r.GetString("user") == u.ID {
 			reads[r.GetString("conversation")] = r.GetInt("last_read_sequence")
+		} else if r.GetString("user") == peerBy[r.GetString("conversation")] {
+			peerReads[r.GetString("conversation")] = r.GetInt("last_read_sequence")
 		}
 	}
 	var counts []struct {
@@ -413,6 +416,7 @@ func summaries(app core.App, u *participant, rows []*core.Record) ([]Summary, er
 		}
 		if s.Kind == "dm" {
 			peer := peerBy[c.Id]
+			s.CounterpartReadSequence = ptr(peerReads[c.Id])
 			s.Counterpart = parties["user:"+peer]
 			s.CanSend = can[peer]
 			if s.CanSend {
