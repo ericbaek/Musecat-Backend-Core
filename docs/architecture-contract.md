@@ -1561,3 +1561,35 @@ authorize remote completion. An already completed note returns 409, preserving i
 answer. Creation, completion and deletion grant no XP or arcade changelog rows.
 Requests and responses are private/no-store; raw collection rules stay locked.
 Full owns the guarded forward migration; Core migration is fresh-bootstrap only.
+
+### Inquiry automatic replies
+
+`inquiryContext` is an explicit creation intent, never inferred from a team recipient.
+Only the official-account entry sends `arcadeOfficial.ko-KR`, `.en-US` or `.ja-JP`;
+normal Musecat team conversations keep their existing behavior. An `arcade` intent
+loads only that arcade's enabled owner-authored bounded reply graph.
+GET `/user/inquiry-preview` (or the guest equivalent) reads the start reply and
+configuration revision without creating a conversation or message. Opening and
+closing an inquiry therefore leaves no empty rooms. Creation requires a first
+requester message/photo or choice and atomically stores the greeting as sequence 1
+and that first response. `botRevision` rejects outdated previews; `initialChoice`
+validates and advances a starting choice in that same transaction. Creation retries
+are idempotent across the requester and client key, including context and payload conflicts.
+
+`arcade.inquiry_bot` stores the owner configuration. `messaging_inquiry.bot_state`
+snapshots the flow for the room; `messaging_message.automated` and `bot_choices`
+record each server-authored reply. Existing rooms are unaffected by later edits.
+Every choice names the originating bot message and must match the current requester,
+node, label and target inside the message transaction. Stale or forged choices fail;
+retries return the original user message without generating another reply. Typed
+messages, terminal nodes and human responder messages end automatic progression.
+Automated replies use the inbox identity and do not impersonate a user, mark the
+inquiry recognised or generate a second operational notification. The original
+requester message still follows the canonical notification policy.
+
+Owner configuration uses authenticated custom `/user/inquiry-bots/arcade/{id}`
+GET/PUT endpoints with current arcade-management checks. Core bootstraps the three
+JSON fields and automated flag; Full adds them in its independent guarded migration.
+Neither migration rewrites conversation history or broadens raw collection rules.
+
+A current automated follow-up exposes `botCanRestart` while no later human message has been sent. The reserved `__restart` selection appends the requester action and the original starting node in the same transaction. It preserves every previous message, rejects stale/foreign actions, shares normal idempotency and rate limits, and cannot be used as an owner-defined choice ID.

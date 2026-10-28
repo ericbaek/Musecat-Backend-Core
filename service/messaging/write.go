@@ -101,6 +101,12 @@ func inputHash(in *SendInput) (string, error) {
 			Mentions []string
 		}{in.Text, hashes, in.Mentions})
 	}
+	if in.BotChoice != nil {
+		raw, _ = json.Marshal(struct {
+			Payload string
+			Choice  *BotSelection
+		}{string(raw), in.BotChoice})
+	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
 }
@@ -141,6 +147,12 @@ func CreateFor(app core.App, viewer Principal, in CreateInput) (Summary, bool, e
 	if in.Kind != "dm" && in.Kind != "inquiry" {
 		return Summary{}, false, apis.NewBadRequestError("Invalid conversation kind.", nil)
 	}
+	if in.InitialMessage.BotChoice != nil {
+		return Summary{}, false, apis.NewBadRequestError("Initial messages cannot select a reply.", nil)
+	}
+	if in.InquiryContext != "" && in.Kind != "inquiry" {
+		return Summary{}, false, apis.NewBadRequestError("Automation requires an inquiry.", nil)
+	}
 	if err := validateMentions(in.Kind, in.Inbox.Type, in.InitialMessage.Mentions); err != nil {
 		return Summary{}, false, err
 	}
@@ -150,6 +162,11 @@ func CreateFor(app core.App, viewer Principal, in CreateInput) (Summary, bool, e
 		hash, err = inputHash(&in.InitialMessage)
 		if err != nil {
 			return Summary{}, false, err
+		}
+
+		if in.InquiryContext != "" {
+			sum := sha256.Sum256([]byte(in.InquiryContext + "\x00" + in.BotRevision + "\x00" + in.InitialChoice + "\x00" + hash))
+			hash = hex.EncodeToString(sum[:])
 		}
 	}
 	err = app.RunInTransaction(func(tx core.App) error {
@@ -198,6 +215,9 @@ func CreateFor(app core.App, viewer Principal, in CreateInput) (Summary, bool, e
 		}
 		// Initial client keys are scoped to requester across inquiry creation retries.
 		prior, e := tx.FindFirstRecordByFilter(Messages, "conversation.kind='inquiry' && (sender_user={:u} || sender_guest={:u}) && client_message_id={:k} && sequence=1", dbx.Params{"u": user, "k": in.InitialMessage.ClientMessageID})
+		if automated, ae := tx.FindFirstRecordByFilter(Messages, "sequence=1 && client_message_id={:key} && automated=true", dbx.Params{"key": botRequestKey(user, in.InitialMessage.ClientMessageID)}); ae == nil {
+			prior, e = automated, nil
+		}
 		if e == nil {
 			q, e := inquiry(tx, prior.GetString("conversation"))
 			if e != nil || !u.requests(q) || q.GetString("inbox_type") != in.Inbox.Type || q.GetString("inbox_id") != in.Inbox.ID || prior.GetString("payload_hash") != hash {
@@ -232,7 +252,7 @@ func CreateFor(app core.App, viewer Principal, in CreateInput) (Summary, bool, e
 			return err
 		}
 		cid = c.Id
-		_, err = record(tx, Inquiries, map[string]any{"conversation": cid, "requester": user, "requester_type": u.Kind, "guest_key_hash": u.guestHash, "inbox_type": in.Inbox.Type, "inbox_id": in.Inbox.ID, "status": "waiting", "legacy_feedback_id": cid})
+		q, err := record(tx, Inquiries, map[string]any{"conversation": cid, "requester": user, "requester_type": u.Kind, "guest_key_hash": u.guestHash, "inbox_type": in.Inbox.Type, "inbox_id": in.Inbox.ID, "status": "waiting", "legacy_feedback_id": cid})
 		if err != nil {
 			return err
 		}
@@ -241,7 +261,46 @@ func CreateFor(app core.App, viewer Principal, in CreateInput) (Summary, bool, e
 				return err
 			}
 		}
+		cfg, err := inquiryBot(tx, in)
+		if err != nil {
+			return err
+		}
+		if in.BotRevision != "" && in.BotRevision != botRevision(cfg) {
+			return router.NewApiError(409, "Automatic replies changed. Refresh the inquiry preview.", nil)
+		}
+		if cfg.Enabled {
+			if err = appendBotReply(tx, c, q, cfg, cfg.Start, botRequestKey(user, in.InitialMessage.ClientMessageID), hash); err != nil {
+				return err
+			}
+		}
+		next := ""
+		var state *botState
+		if in.InitialChoice != "" {
+			if !cfg.Enabled || in.InitialChoice == "__restart" {
+				return apis.NewBadRequestError("Invalid initial reply choice.", nil)
+			}
+			selection := in.InitialMessage
+			selection.BotChoice = &BotSelection{MessageID: c.GetString("last_message"), ChoiceID: in.InitialChoice}
+			state, next, err = botTransition(c, q, u, selection)
+			if err != nil {
+				return err
+			}
+		}
 		_, err = saveMessage(tx, u, c, in.InitialMessage, Identity{u.Kind, user}, hash)
+		if err != nil {
+			return err
+		}
+		if next != "" {
+			return appendBotReply(tx, c, q, state.Config, next, "", "")
+		}
+		if cfg.Enabled {
+			var state botState
+			_ = json.Unmarshal([]byte(q.GetString("bot_state")), &state)
+			state.Active = false
+			q.Set("bot_state", state)
+			return tx.Save(q)
+		}
+
 		return err
 	})
 	if err != nil {
@@ -296,8 +355,37 @@ func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message,
 		if err = rateLimit(tx, user, cid, false); err != nil {
 			return err
 		}
+		if in.BotChoice != nil && acting.Type != "user" && acting.Type != "guest" {
+			return apis.NewBadRequestError("Only the requester can select a reply.", nil)
+		}
+		var q *core.Record
+		var state *botState
+		next := ""
+		if c.GetString("kind") == "inquiry" {
+			q, err = inquiry(tx, cid)
+			if err != nil {
+				return err
+			}
+			state, next, err = botTransition(c, q, u, in)
+			if err != nil {
+				return err
+			}
+		} else if in.BotChoice != nil {
+			return apis.NewBadRequestError("Reply choices require an inquiry.", nil)
+		}
 		saved, err = saveMessage(tx, u, c, in, acting, hash)
-		return err
+		if err != nil {
+			return err
+		}
+		if next != "" {
+			return appendBotReply(tx, c, q, state.Config, next, "", "")
+		}
+		if state != nil && state.Active {
+			state.Active = false
+			q.Set("bot_state", state)
+			return tx.Save(q)
+		}
+		return nil
 	})
 	if err != nil {
 		return Message{}, false, err

@@ -480,3 +480,7 @@ accounts may manage authorless legacy notices only in their owned arcade; no aut
 is fabricated. Full's migration preserves original notice content and timestamps.
 
 Shared check request creation, completion and removal are activity records in `arcade_check_note`; they do not change arcade information and create no `arcade_changelog` or XP entries. Information edits continue through the existing mutation endpoints.
+
+## Inquiry bot configuration
+
+`PUT /user/inquiry-bots/arcade/{id}` is an operational inbox setting. Like inquiry-routing settings, it does not create wiki edit history, change game/basic pointers or award XP. Current management authorization and the configuration write occur in one transaction. Existing inquiry flow snapshots and immutable arcade changelog rows are not rewritten.

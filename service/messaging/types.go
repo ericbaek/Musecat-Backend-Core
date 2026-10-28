@@ -18,6 +18,9 @@ type Attachment struct {
 	URL  string `json:"url"`
 }
 type Message struct {
+	BotCanRestart   bool         `json:"botCanRestart"`
+	Automated       bool         `json:"automated"`
+	BotChoices      []BotChoice  `json:"botChoices"`
 	ID              string       `json:"id"`
 	ConversationID  string       `json:"conversationId"`
 	Sequence        int          `json:"sequence"`
@@ -62,6 +65,7 @@ type MessagePage struct {
 	NextAfterSequence  *int      `json:"nextAfterSequence"`
 }
 type SendInput struct {
+	BotChoice       *BotSelection      `json:"botChoice,omitempty"`
 	LegacyOriginal  bool               `json:"-"`
 	Text            string             `json:"text"`
 	Mentions        []string           `json:"mentions,omitempty"`
@@ -70,6 +74,9 @@ type SendInput struct {
 	Photos          []*filesystem.File `json:"-"`
 }
 type CreateInput struct {
+	BotRevision    string    `json:"botRevision,omitempty"`
+	InitialChoice  string    `json:"initialChoice,omitempty"`
+	InquiryContext string    `json:"inquiryContext,omitempty"`
 	Kind           string    `json:"kind"`
 	PeerUserID     string    `json:"peerUserId"`
 	Inbox          Identity  `json:"inbox"`

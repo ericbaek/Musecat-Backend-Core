@@ -34,6 +34,7 @@ func RegisterRoutes(se *core.ServeEvent) {
 		out, err := messaging.ViewerIdentity(re.App, requestPrincipal(re))
 		return reply(re, 200, out, err)
 	})
+	guest.GET("/inquiry-preview", InquiryPreview)
 	guest.GET("/conversations", List)
 	guest.POST("/conversations", Create).Bind(apis.BodyLimit(MaxBodyBytes))
 	guest.GET("/conversations/{id}", Get)
@@ -43,6 +44,7 @@ func RegisterRoutes(se *core.ServeEvent) {
 	guest.PATCH("/conversations/{id}/inquiry", Status).Bind(apis.BodyLimit(4096))
 	guest.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo)
 	api := se.Router.Group("/user").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	api.GET("/inquiry-preview", InquiryPreview)
 	api.GET("/conversations", List)
 	api.POST("/conversations", Create).Bind(apis.BodyLimit(MaxBodyBytes))
 	api.GET("/conversations/{id}", Get)
@@ -51,6 +53,18 @@ func RegisterRoutes(se *core.ServeEvent) {
 	api.PUT("/conversations/{id}/read", Read).Bind(apis.BodyLimit(4096))
 	api.PATCH("/conversations/{id}/inquiry", Status).Bind(apis.BodyLimit(4096))
 	api.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo)
+	api.GET("/inquiry-bots/arcade/{id}", func(re *core.RequestEvent) error {
+		out, err := messaging.GetArcadeBot(re.App, re.Auth.Id, re.Request.PathValue("id"))
+		return reply(re, 200, out, err)
+	})
+	api.PUT("/inquiry-bots/arcade/{id}", func(re *core.RequestEvent) error {
+		var in messaging.BotConfig
+		if err := re.BindBody(&in); err != nil {
+			return re.BadRequestError("Invalid automatic replies.", err)
+		}
+		out, err := messaging.SetArcadeBot(re.App, re.Auth.Id, re.Request.PathValue("id"), in)
+		return reply(re, 200, out, err)
+	}).Bind(apis.BodyLimit(65536))
 	api.GET("/messaging/preferences", Preferences)
 	api.PUT("/messaging/preferences", SetPreferences).Bind(apis.BodyLimit(4096))
 	api.GET("/messaging/blocks", Blocks)
@@ -109,6 +123,11 @@ func parseSend(re *core.RequestEvent) (messaging.SendInput, error) {
 			return in, err
 		}
 	}
+	if v := re.Request.FormValue("botChoice"); v != "" {
+		if err := json.Unmarshal([]byte(v), &in.BotChoice); err != nil {
+			return in, err
+		}
+	}
 	files, err := re.FindUploadedFiles("photos")
 	if errors.Is(err, http.ErrMissingFile) {
 		err = nil
@@ -127,6 +146,9 @@ func Create(re *core.RequestEvent) error {
 	if strings.HasPrefix(strings.ToLower(re.Request.Header.Get("Content-Type")), "multipart/form-data") {
 		in.InitialMessage, err = parseSend(re)
 		in.Kind = re.Request.FormValue("kind")
+		in.InquiryContext = re.Request.FormValue("inquiryContext")
+		in.BotRevision = re.Request.FormValue("botRevision")
+		in.InitialChoice = re.Request.FormValue("initialChoice")
 		in.PeerUserID = re.Request.FormValue("peerUserId")
 		in.Inbox = messaging.Identity{Type: re.Request.FormValue("inboxType"), ID: re.Request.FormValue("inboxId")}
 	} else {
@@ -336,4 +358,11 @@ func Events(re *core.RequestEvent) error {
 			}
 		}
 	}
+}
+
+func InquiryPreview(re *core.RequestEvent) error {
+	query := re.Request.URL.Query()
+	in := messaging.CreateInput{Kind: "inquiry", InquiryContext: query.Get("context"), Inbox: messaging.Identity{Type: query.Get("inboxType"), ID: query.Get("inboxId")}}
+	out, err := messaging.PreviewInquiry(re.App, requestPrincipal(re), in)
+	return reply(re, 200, out, err)
 }

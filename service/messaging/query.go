@@ -115,12 +115,20 @@ func messageDTO(app core.App, r *core.Record, parties map[string]Party) Message 
 		}
 		acting = parties[key]
 	}
+	if r.GetBool("automated") {
+		sender = acting
+	}
+	var choices []BotChoice
+	_ = json.Unmarshal([]byte(r.GetString("bot_choices")), &choices)
+	if choices == nil {
+		choices = []BotChoice{}
+	}
 	photos := []Attachment{}
 	names := append(append([]string{}, r.GetStringSlice("photos")...), r.GetStringSlice("legacy_photos")...)
 	for _, f := range names {
 		photos = append(photos, Attachment{Name: f, URL: "/user/conversations/" + r.GetString("conversation") + "/attachments/" + r.Id + "/" + url.PathEscape(f)})
 	}
-	return Message{ID: r.Id, ConversationID: r.GetString("conversation"), Sequence: r.GetInt("sequence"), SenderUserID: r.GetString("sender_user"), Sender: sender, ActingAs: acting, ClientMessageID: r.GetString("client_message_id"), Text: r.GetString("text"), Mentions: append([]string{}, r.GetStringSlice("mentions")...), Photos: photos, CreatedAt: r.GetString("created")}
+	return Message{Automated: r.GetBool("automated"), BotChoices: choices, ID: r.Id, ConversationID: r.GetString("conversation"), Sequence: r.GetInt("sequence"), SenderUserID: r.GetString("sender_user"), Sender: sender, ActingAs: acting, ClientMessageID: r.GetString("client_message_id"), Text: r.GetString("text"), Mentions: append([]string{}, r.GetStringSlice("mentions")...), Photos: photos, CreatedAt: r.GetString("created")}
 }
 func LegacyConversation(app core.App, legacy string) (string, error) {
 	q, err := app.FindFirstRecordByFilter(Inquiries, "legacy_feedback_id={:id}", dbx.Params{"id": legacy})
@@ -427,6 +435,9 @@ func summaries(app core.App, u *participant, rows []*core.Record) ([]Summary, er
 			if q == nil {
 				return nil, fmt.Errorf("inquiry missing for %s", c.Id)
 			}
+			if s.LastMessage != nil {
+				s.LastMessage.BotCanRestart = canRestartBot(c, q)
+			}
 			s.Requester = ptr(parties[requesterType(q)+":"+q.GetString("requester")])
 			s.Inbox = ptr(parties[q.GetString("inbox_type")+":"+q.GetString("inbox_id")])
 			s.Counterpart = *s.Inbox
@@ -460,6 +471,12 @@ func HistoryFor(app core.App, viewer Principal, id string, before, after, limit 
 	if before < 0 || after < -1 || (before > 0 && after >= 0) || limit < 1 || limit > 200 || (after < 0 && limit > 100) {
 		return out, apis.NewBadRequestError("Invalid message pagination.", nil)
 	}
+	restartMessage := ""
+	if c.GetString("kind") == "inquiry" {
+		if q, e := inquiry(app, c.Id); e == nil && canRestartBot(c, q) {
+			restartMessage = c.GetString("last_message")
+		}
+	}
 	filter := "conversation={:c}"
 	params := dbx.Params{"c": id}
 	sort := "-sequence"
@@ -492,7 +509,9 @@ func HistoryFor(app core.App, viewer Principal, id string, before, after, limit 
 		return out, err
 	}
 	for _, m := range rows {
-		out.Items = append(out.Items, messageDTO(app, m, parties))
+		message := messageDTO(app, m, parties)
+		message.BotCanRestart = m.Id == restartMessage
+		out.Items = append(out.Items, message)
 	}
 	out.LatestSequence = c.GetInt("last_sequence")
 	if more && len(rows) > 0 {
