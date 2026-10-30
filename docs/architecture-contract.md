@@ -1068,7 +1068,11 @@ DM is one unique unordered user pair. Only those two active users can read its
 messages/files/events; staff has no DM override. Inquiries are separate cases with
 requester plus arcade or `team:musecat` inbox. Strict developer/moderator staff and
 current official owners may access shared inquiries. Historical responders are not
-permanent participants. Actual sender user and acting party are separately stored;
+permanent participants. Unscoped conversation lists retain every inquiry authorized
+by current staff, requester or official-owner access, including unmentioned arcade
+inquiries and earlier replies. The optional inbox scope narrows the list;
+requesterOnly restricts public contact surfaces to the caller's own inquiries.
+Mention metadata affects alerts, not conversation-list membership. Actual sender user and acting party are separately stored;
 when a requester is also a responder they explicitly choose their sending identity.
 Summaries expose `allowedSenderIdentities` and `allowedStatusTransitions` from the
 same inquiry policy used by writes. Requesters can choose waiting/solved; current
