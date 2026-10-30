@@ -38,8 +38,8 @@ func TestMessagingDMPrivacyIdempotencyAndRead(t *testing.T) {
 		t.Fatal("default recipient cannot receive", initial)
 	}
 	defaultList := call("GET", "/user/conversations", "", aToken, 200)
-	if defaultList["items"].([]any)[0].(map[string]any)["canSend"] != true {
-		t.Fatal("list policy disagrees with default receipt", defaultList)
+	if len(defaultList["items"].([]any)) != 0 {
+		t.Fatal("empty DM appeared before a message", defaultList)
 	}
 	call("PUT", "/user/messaging/preferences", `{"receive":"everyone"}`, bToken, 200)
 	call("PUT", "/user/messaging/preferences", `{"receive":"everyone"}`, aToken, 200)
@@ -75,7 +75,7 @@ func TestMessagingDMPrivacyIdempotencyAndRead(t *testing.T) {
 	if len(list["items"].([]any)) != 1 {
 		t.Fatal(list)
 	}
-	if got := list["items"].([]any)[0].(map[string]any); got["counterpartReadSequence"] != float64(1) {
+	if got := list["items"].([]any)[0].(map[string]any); got["counterpartReadSequence"] != float64(1) || got["canSend"] != true {
 		t.Fatal("list must include the persisted peer receipt", got)
 	}
 	call("PUT", "/user/messaging/blocks/"+a.Id, "", bToken, 204)
