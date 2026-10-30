@@ -91,7 +91,8 @@ func TestGuestFeedbackChat(t *testing.T) {
 	}
 	status := fmt.Sprintf(`{"feedbackId":%q,"status":"solved"}`, id)
 	call("PATCH", "/guest/feedback/thread", status, other, "", 404)
-	call("PATCH", "/guest/feedback/thread", status, key, "", 200)
+	call("PATCH", "/guest/feedback/thread", status, key, "", 400)
+	call("PATCH", "/user/feedback/thread", status, "", ownerToken, 200)
 	// Changing intake policy must preserve access to existing guest chats.
 	call("PUT", "/arcade/inquiry-settings", fmt.Sprintf(`{"arcade":%q,"mode":"internal","loginRequired":true}`, arcadeID), "", ownerToken, 200)
 	call("POST", "/support_feedback", fmt.Sprintf(`{"arcade":%q,"message":"New question"}`, arcadeID), key, "", 401)

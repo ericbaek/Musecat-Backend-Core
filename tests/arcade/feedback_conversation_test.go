@@ -81,10 +81,11 @@ func TestFeedbackConversationAccessRepliesAndNotifications(t *testing.T) {
 	call("PATCH", "/user/feedback/thread", statusBody("solved"), otherToken, 404)
 	call("PATCH", "/user/feedback/thread", statusBody("solved"), "", 401)
 	call("PATCH", "/user/feedback/thread", statusBody("recognised"), authorToken, 400)
-	call("PATCH", "/user/feedback/thread", statusBody("solved"), authorToken, 200)
+	call("PATCH", "/user/feedback/thread", statusBody("solved"), authorToken, 400)
+	call("PATCH", "/user/feedback/thread", statusBody("solved"), staffToken, 200)
 	feedbackRecord, _ = app.FindFirstRecordByFilter(messaging.Inquiries, "legacy_feedback_id={:id}", map[string]any{"id": id})
 	if feedbackRecord.GetString("status") != "solved" {
-		t.Fatal("author could not resolve")
+		t.Fatal("staff could not resolve")
 	}
 	call("PATCH", "/user/feedback/thread", statusBody("waiting"), staffToken, 200)
 	feedbackRecord, _ = app.FindFirstRecordByFilter(messaging.Inquiries, "legacy_feedback_id={:id}", map[string]any{"id": id})
@@ -108,7 +109,7 @@ func TestFeedbackConversationAccessRepliesAndNotifications(t *testing.T) {
 	if err := messaging.EnsureSchema(app); err != nil {
 		t.Fatal(err)
 	}
-	if thread = call("GET", "/user/feedback/thread?id="+id, "", authorToken, 200); len(thread["items"].([]any)) != 3 {
+	if thread = call("GET", "/user/feedback/thread?id="+id, "", authorToken, 200); len(thread["items"].([]any)) != 7 {
 		t.Fatal("migration lost messages")
 	}
 	_ = author

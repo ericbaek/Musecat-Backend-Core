@@ -33,7 +33,7 @@ func TestMessagingInquiryPermissionsAndOwnUnread(t *testing.T) {
 		identities []messaging.Identity
 		statuses   []string
 	}{
-		{requester, []messaging.Identity{{Type: "user", ID: requester.Id}}, []string{"waiting", "solved"}},
+		{requester, []messaging.Identity{{Type: "user", ID: requester.Id}}, []string{"waiting"}},
 		{staff, []messaging.Identity{{Type: "team", ID: "musecat"}}, []string{"waiting", "recognised", "solved"}},
 	} {
 		s, err := messaging.Get(app, tc.user.Id, c.ID)
@@ -46,6 +46,11 @@ func TestMessagingInquiryPermissionsAndOwnUnread(t *testing.T) {
 				t.Fatalf("%s status %s: %v", tc.user.Id, status, err)
 			}
 		}
+	}
+	if current, err := messaging.Get(app, requester.Id, c.ID); err != nil {
+		t.Fatal(err)
+	} else if _, err := messaging.SetRead(app, requester.Id, c.ID, current.LatestSequence); err != nil {
+		t.Fatal(err)
 	}
 	// A requester who gains a responder role can choose either identity. Their own
 	// inbox reply used to count as an unread incoming message for that same person.
@@ -74,7 +79,7 @@ func TestMessagingInquiryPermissionsAndOwnUnread(t *testing.T) {
 	if err != nil || s.UnreadCount != 1 {
 		t.Fatal(s, err)
 	}
-	if _, err = messaging.SetRead(app, requester.Id, c.ID, 3); err != nil {
+	if _, err = messaging.SetRead(app, requester.Id, c.ID, s.LatestSequence); err != nil {
 		t.Fatal(err)
 	}
 	s, err = messaging.Get(app, staff.Id, c.ID)

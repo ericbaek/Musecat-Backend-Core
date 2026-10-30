@@ -1404,7 +1404,7 @@ staff. Historical responders are not
 permanent participants. Actual sender user and acting party are separately stored;
 when a requester is also a responder they explicitly choose their sending identity.
 Summaries expose `allowedSenderIdentities` and `allowedStatusTransitions` from the
-same inquiry policy used by writes. Requesters can choose waiting/solved; current
+same inquiry policy used by writes. Requesters (including guests) can choose waiting only; current
 responders can choose waiting/recognised/solved. `canManageStatus` remains a
 compatibility field derived from the nonempty transition list. DM sender identities
 are empty when current receive/block/account policy prevents sending.
@@ -1593,3 +1593,23 @@ JSON fields and automated flag; Full adds them in its independent guarded migrat
 Neither migration rewrites conversation history or broadens raw collection rules.
 
 A current automated follow-up exposes `botCanRestart` while no later human message has been sent. The reserved `__restart` selection appends the requester action and the original starting node in the same transaction. It preserves every previous message, rejects stale/foreign actions, shares normal idempotency and rate limits, and cannot be used as an owner-defined choice ID.
+
+
+### Inquiry status history
+
+Only current strict staff or the current official arcade responder may mark an
+inquiry solved. This is enforced by the shared summary/mutation policy, including
+legacy and guest adapters. Requesters may reopen to waiting. Solved is not a
+sending restriction: a requester follow-up reopens to waiting and a responder
+follow-up changes to recognised.
+
+Every new status transition persists server-authored `statusChange: {from, to}`
+in the same transaction as the inquiry state. An explicit status action appends a
+textless message with the actual sender, acting identity, timestamp and next
+sequence. An automatic transition attaches the same metadata to its triggering
+message. A same-status action is a no-op; message retries retain the original
+transition without duplication. History, delta and realtime invalidation use the
+existing conversation permissions and sequence. Status-only entries do not
+create push notifications. Prior history is preserved without inventing past
+transitions. Full owns the guarded additive `status_change` JSON-field migration;
+Core only bootstraps it for fresh databases.

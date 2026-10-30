@@ -440,8 +440,7 @@ func saveMessage(tx core.App, u *participant, c *core.Record, in SendInput, acti
 		if acting.Type == "user" || acting.Type == "guest" {
 			status = "waiting"
 		}
-		q.Set("status", status)
-		if err = tx.Save(q); err != nil {
+		if err = changeInquiryStatus(tx, u, c, q, status, m); err != nil {
 			return nil, err
 		}
 	}
@@ -534,8 +533,10 @@ func SetStatusFor(app core.App, viewer Principal, id, status string) (Summary, e
 		if !slices.Contains(inquiryPolicy(u, q, Responder(tx, u.User, q)).statuses, status) {
 			return apis.NewBadRequestError("Invalid inquiry status.", nil)
 		}
-		q.Set("status", status)
-		if err = tx.Save(q); err != nil {
+		if q.GetString("status") == status {
+			return nil
+		}
+		if err = changeInquiryStatus(tx, u, c, q, status, nil); err != nil {
 			return err
 		}
 		audience, err := conversationAudience(tx, c)

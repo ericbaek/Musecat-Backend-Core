@@ -128,7 +128,9 @@ func messageDTO(app core.App, r *core.Record, parties map[string]Party) Message 
 	for _, f := range names {
 		photos = append(photos, Attachment{Name: f, URL: "/user/conversations/" + r.GetString("conversation") + "/attachments/" + r.Id + "/" + url.PathEscape(f)})
 	}
-	return Message{Automated: r.GetBool("automated"), BotChoices: choices, ID: r.Id, ConversationID: r.GetString("conversation"), Sequence: r.GetInt("sequence"), SenderUserID: r.GetString("sender_user"), Sender: sender, ActingAs: acting, ClientMessageID: r.GetString("client_message_id"), Text: r.GetString("text"), Mentions: append([]string{}, r.GetStringSlice("mentions")...), Photos: photos, CreatedAt: r.GetString("created")}
+	var statusChange *InquiryStatusChange
+	_ = json.Unmarshal([]byte(r.GetString("status_change")), &statusChange)
+	return Message{StatusChange: statusChange, Automated: r.GetBool("automated"), BotChoices: choices, ID: r.Id, ConversationID: r.GetString("conversation"), Sequence: r.GetInt("sequence"), SenderUserID: r.GetString("sender_user"), Sender: sender, ActingAs: acting, ClientMessageID: r.GetString("client_message_id"), Text: r.GetString("text"), Mentions: append([]string{}, r.GetStringSlice("mentions")...), Photos: photos, CreatedAt: r.GetString("created")}
 }
 func LegacyConversation(app core.App, legacy string) (string, error) {
 	q, err := app.FindFirstRecordByFilter(Inquiries, "legacy_feedback_id={:id}", dbx.Params{"id": legacy})

@@ -17,21 +17,27 @@ type Attachment struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
 }
+type InquiryStatusChange struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 type Message struct {
-	BotCanRestart   bool         `json:"botCanRestart"`
-	Automated       bool         `json:"automated"`
-	BotChoices      []BotChoice  `json:"botChoices"`
-	ID              string       `json:"id"`
-	ConversationID  string       `json:"conversationId"`
-	Sequence        int          `json:"sequence"`
-	SenderUserID    string       `json:"senderUserId"`
-	Sender          Party        `json:"sender"`
-	ActingAs        Party        `json:"actingAs"`
-	ClientMessageID string       `json:"clientMessageId"`
-	Text            string       `json:"text"`
-	Mentions        []string     `json:"mentions"`
-	Photos          []Attachment `json:"photos"`
-	CreatedAt       string       `json:"createdAt"`
+	StatusChange    *InquiryStatusChange `json:"statusChange,omitempty"`
+	BotCanRestart   bool                 `json:"botCanRestart"`
+	Automated       bool                 `json:"automated"`
+	BotChoices      []BotChoice          `json:"botChoices"`
+	ID              string               `json:"id"`
+	ConversationID  string               `json:"conversationId"`
+	Sequence        int                  `json:"sequence"`
+	SenderUserID    string               `json:"senderUserId"`
+	Sender          Party                `json:"sender"`
+	ActingAs        Party                `json:"actingAs"`
+	ClientMessageID string               `json:"clientMessageId"`
+	Text            string               `json:"text"`
+	Mentions        []string             `json:"mentions"`
+	Photos          []Attachment         `json:"photos"`
+	CreatedAt       string               `json:"createdAt"`
 }
 type Summary struct {
 	ID                       string     `json:"id"`
