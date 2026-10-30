@@ -97,7 +97,7 @@ func TestUnifiedGuestInquiriesUseCanonicalStorageAndAccountResponderProfiles(t *
 	call("GET", "/user/conversations/"+id, "", "", staffToken, 404)
 }
 
-func TestMessagingPublicProfilesRefreshWithoutOverwritingSnapshots(t *testing.T) {
+func TestMessagingProfilesUseCurrentUserReferenceWithoutSnapshots(t *testing.T) {
 	app := newArcadeTestApp(t)
 	_, author := createAuthUserWithTags(t, app, []string{})
 	_, staff := createAuthUserWithTags(t, app, []string{"moderator"})
@@ -113,7 +113,11 @@ func TestMessagingPublicProfilesRefreshWithoutOverwritingSnapshots(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := row.GetString("sender_name")
+	for _, name := range []string{"sender_name", "sender_avatar", "sender_roles"} {
+		if row.Collection().Fields.GetByName(name) != nil {
+			t.Fatalf("unexpected profile snapshot field %s", name)
+		}
+	}
 	info := ensureUserInfo(t, app, staff.Id)
 	info.Set("nickname", "Updated public name")
 	if err := app.Save(info); err != nil {
@@ -132,10 +136,6 @@ func TestMessagingPublicProfilesRefreshWithoutOverwritingSnapshots(t *testing.T)
 			t.Fatal(message)
 		}
 	}
-	row, _ = app.FindRecordById(messaging.Messages, sent.ID)
-	if row.GetString("sender_name") != snapshot {
-		t.Fatal("historical sender snapshot rewritten")
-	}
 	staff.Set("withdrawn", true)
 	if err := app.Save(staff); err != nil {
 		t.Fatal(err)
@@ -143,5 +143,26 @@ func TestMessagingPublicProfilesRefreshWithoutOverwritingSnapshots(t *testing.T)
 	history, err = messaging.History(app, author.Id, c.ID, 0, -1, 50)
 	if err != nil || history.Items[1].Sender.Name != "탈퇴한 사용자" {
 		t.Fatal("withdrawn profile exposed", history, err)
+	}
+}
+
+func TestMessagingUserReferenceDoesNotDeleteMessages(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, author := createAuthUserWithTags(t, app, []string{})
+	_, peer := createAuthUserWithTags(t, app, []string{})
+	room, err := messaging.Create(app, author.Id, messaging.CreateInput{Kind: "dm", PeerUserID: peer.Id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, _, err := messaging.Send(app, author.Id, room.ID, messaging.SendInput{Text: "Keep this message", ClientMessageID: "keep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Delete(author); err != nil {
+		t.Fatal(err)
+	}
+	history, err := messaging.History(app, peer.Id, room.ID, 0, -1, 50)
+	if err != nil || len(history.Items) != 1 || history.Items[0].ID != sent.ID || history.Items[0].Text != "Keep this message" || history.Items[0].Sender.Name != "탈퇴한 사용자" {
+		t.Fatal("deleted account lost message or profile fallback", history, err)
 	}
 }

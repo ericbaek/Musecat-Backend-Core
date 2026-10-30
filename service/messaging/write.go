@@ -409,25 +409,12 @@ func saveMessage(tx core.App, u *participant, c *core.Record, in SendInput, acti
 			return nil, router.NewApiError(429, "Please wait before uploading more photos.", nil)
 		}
 	}
-	sender := Party{Type: u.Kind, ID: u.ID, Name: "비회원", RoleTags: []string{}}
-	roles := []string{}
 	senderUser, senderGuest := "", u.ID
 	if u.Kind == "user" {
-		parties, err := loadParties(tx, []Identity{{"user", u.ID}})
-		if err != nil {
-			return nil, err
-		}
-		sender = parties["user:"+u.ID]
 		senderUser, senderGuest = u.ID, ""
-		roles = append(roles, u.User.GetStringSlice("tags")...)
-		for _, tag := range u.User.GetStringSlice("tag") {
-			if !slices.Contains(roles, tag) {
-				roles = append(roles, tag)
-			}
-		}
 	}
 	seq := c.GetInt("last_sequence") + 1
-	m, err := record(tx, Messages, map[string]any{"conversation": c.Id, "sequence": seq, "sender_user": senderUser, "sender_guest": senderGuest, "acting_type": acting.Type, "acting_id": acting.ID, "sender_name": sender.Name, "sender_avatar": sender.AvatarURL, "sender_roles": roles, "client_message_id": in.ClientMessageID, "payload_hash": hash, "text": in.Text, "mentions": in.Mentions, "photos": in.Photos})
+	m, err := record(tx, Messages, map[string]any{"conversation": c.Id, "sequence": seq, "sender_user": senderUser, "sender_guest": senderGuest, "acting_type": acting.Type, "acting_id": acting.ID, "client_message_id": in.ClientMessageID, "payload_hash": hash, "text": in.Text, "mentions": in.Mentions, "photos": in.Photos})
 	if err != nil {
 		return nil, err
 	}

@@ -1119,8 +1119,10 @@ feedback independently, preserves the first message and replies in created/id or
 and records source collection/record/file references. It never converts guests into
 synthetic users, never manufactures notifications, and initializes requester read to
 the imported last sequence while preserving existing notification unread flags.
-Legacy staff/official role snapshots come only from original flags; display names
-copied during migration are current snapshots, not claimed historical identities.
+Message authors reference the current user through an optional, non-cascading
+`sender_user` relation. Messages store no copied name, avatar, or role attributes.
+Deleting an account preserves message content; a missing author displays as a
+deleted user. Acting user, arcade, team, and guest identities remain separate.
 
 Arcade requester messages notify current official responders by default. Platform
 staff receive arcade notifications only with an explicit `musecat` mention; a staff
@@ -1201,7 +1203,7 @@ links remain valid frontend inputs. Neither kind needs an intermediate launcher.
 Message notification inboxes project the latest received event per user/conversation,
 including existing history, before keyset pagination and unread counting. Source
 message/event/delivery identities remain immutable. The title is the sending user
-snapshot or acting arcade/team; previews normalize whitespace and truncate at 160
+current profile or acting arcade/team; previews normalize whitespace and truncate at 160
 Unicode characters, with localized photo-only fallback. Access checks still precede
 projection. Acknowledging one message notification clears events only through that
 message sequence. Conversation read cursors also acknowledge corresponding inbox
