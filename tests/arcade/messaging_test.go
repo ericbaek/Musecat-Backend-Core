@@ -7,6 +7,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -340,6 +341,40 @@ func TestMessagingCreationQuotaCountsOnlyInitiator(t *testing.T) {
 			if err == nil || router.ToApiError(err).Status != 429 {
 				t.Fatal("own creation quota missing", err)
 			}
+		}
+	}
+}
+
+func TestMessagingEmptyDMIsListedOnlyAfterFirstMessage(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, sender := createAuthUserWithTags(t, app, []string{})
+	_, peer := createAuthUserWithTags(t, app, []string{})
+	if err := messaging.Preference(app, peer.Id, "everyone"); err != nil {
+		t.Fatal(err)
+	}
+	conversation, err := messaging.Create(app, sender.Id, messaging.CreateInput{Kind: "dm", PeerUserID: peer.Id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, viewer := range []string{sender.Id, peer.Id} {
+		for _, query := range []url.Values{{}, {"kind": {"dm"}}, {"q": {peer.GetString("username")}}} {
+			list, err := messaging.ListConversations(app, viewer, query)
+			if err != nil || len(list.Items) != 0 {
+				t.Fatal("empty DM appeared", list, err)
+			}
+		}
+	}
+	reopened, err := messaging.Create(app, sender.Id, messaging.CreateInput{Kind: "dm", PeerUserID: peer.Id})
+	if err != nil || reopened.ID != conversation.ID {
+		t.Fatal("reopening duplicated empty conversation", err)
+	}
+	if _, _, err := messaging.Send(app, sender.Id, conversation.ID, messaging.SendInput{Text: "First message", ClientMessageID: "first-message"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, viewer := range []string{sender.Id, peer.Id} {
+		list, err := messaging.ListConversations(app, viewer, url.Values{"kind": {"dm"}})
+		if err != nil || len(list.Items) != 1 || list.Items[0].ID != conversation.ID || list.Items[0].LatestSequence != 1 {
+			t.Fatal("sent DM missing", list, err)
 		}
 	}
 }

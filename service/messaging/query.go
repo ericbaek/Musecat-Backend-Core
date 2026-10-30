@@ -183,7 +183,7 @@ func ListFor(app core.App, viewer Principal, q url.Values) (List, error) {
 		}
 	}
 	acl, params := allowedSQL(u)
-	where := "(" + acl + ")"
+	where := "(" + acl + ") AND (c.kind!='dm' OR c.last_sequence>0)"
 	if kind := q.Get("kind"); kind != "" {
 		if kind != "dm" && kind != "inquiry" {
 			return out, apis.NewBadRequestError("Invalid kind.", nil)

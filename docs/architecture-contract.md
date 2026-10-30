@@ -1238,3 +1238,7 @@ transitions. Full owns the guarded additive `status_change` JSON-field migration
 Core only bootstraps it for fresh databases.
 
 Guest inquiries use the canonical messaging store and browser-scoped credentials, never synthetic user accounts. Current guest access survives intake-policy changes. Reply bots snapshot their owner configuration per inquiry; requester choices are validated and sequenced atomically. DM read cursors belong to each actual account and expose the counterpart cursor only for direct messages.
+
+Direct-message conversations enter conversation lists only after the first message
+is sent. Opening a peer DM may reuse an empty conversation without listing it for
+either participant. Inquiry visibility is unchanged.
