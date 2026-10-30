@@ -40,15 +40,28 @@ func TestInquiryStatusHistoryAndSendingAfterResolution(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := messaging.SetStatusFor(app, viewer, room.ID, "solved"); err == nil {
-					t.Fatal("requester resolved inquiry")
+				for _, status := range []string{"waiting", "recognised", "solved"} {
+					if _, err := messaging.SetStatusFor(app, viewer, room.ID, status); err == nil {
+						t.Fatal("requester mutated internal status")
+					}
 				}
+				subscription := messaging.Events(app).Subscribe(room.Requester.ID)
+				defer messaging.Events(app).Unsubscribe(subscription)
 				room, err = messaging.SetStatus(app, responder.Id, room.ID, "solved")
 				if err != nil || room.LatestSequence != 2 || !room.CanSend {
 					t.Fatal(room, err)
 				}
-				change := room.LastMessage.StatusChange
-				if change == nil || change.From != "waiting" || change.To != "solved" || room.LastMessage.SenderUserID != responder.Id || room.LastMessage.ActingAs.Type != inbox.Type {
+				if len(subscription.Events) != 0 {
+					t.Fatal("internal status event reached requester")
+				}
+				adminViewer := messaging.Principal{UserID: responder.Id}
+				history, err := messaging.HistoryFor(app, adminViewer, room.ID, 0, -1, 50)
+				if err != nil || len(history.Items) != 2 {
+					t.Fatal(history, err)
+				}
+				event := history.Items[1]
+				change := event.StatusChange
+				if change == nil || change.From != "waiting" || change.To != "solved" || event.SenderUserID != responder.Id || event.ActingAs.Type != inbox.Type {
 					t.Fatal("missing attributed history", room.LastMessage)
 				}
 				// Retrying the same action and rejected requester writes leave no extra rows.
@@ -59,12 +72,12 @@ func TestInquiryStatusHistoryAndSendingAfterResolution(t *testing.T) {
 					t.Fatal("requester bypassed permission on same status")
 				}
 				current, err := messaging.GetFor(app, viewer, room.ID)
-				if err != nil || !current.CanSend {
+				if err != nil || !current.CanSend || current.Status != nil || current.CanManageStatus || len(current.AllowedStatusTransitions) != 0 || current.LatestSequence != 1 || current.UnreadCount != 0 || current.LastMessage.Sequence != 1 || current.LastMessage.StatusChange != nil {
 					t.Fatal("completed composer disabled", current, err)
 				}
 				input := messaging.SendInput{Text: "Follow-up after completion", ClientMessageID: "follow-up"}
 				sent, _, err := messaging.SendFor(app, viewer, room.ID, input)
-				if err != nil || sent.StatusChange == nil || sent.StatusChange.From != "solved" || sent.StatusChange.To != "waiting" {
+				if err != nil || sent.StatusChange != nil {
 					t.Fatal("completed requester send failed", sent, err)
 				}
 				if _, replayed, err := messaging.SendFor(app, viewer, room.ID, input); err != nil || !replayed {
@@ -77,12 +90,27 @@ func TestInquiryStatusHistoryAndSendingAfterResolution(t *testing.T) {
 				if err != nil || sent.StatusChange == nil || sent.StatusChange.To != "recognised" {
 					t.Fatal("completed responder send failed", sent, err)
 				}
-				page, err := messaging.HistoryFor(app, viewer, room.ID, 0, -1, 50)
+				page, err := messaging.HistoryFor(app, adminViewer, room.ID, 0, -1, 50)
 				if err != nil || len(page.Items) != 5 {
 					t.Fatal("history not durable", page, err)
 				}
 				if page.Items[1].StatusChange == nil || page.Items[3].StatusChange == nil {
 					t.Fatal("explicit transition lost on reload", page)
+				}
+				public, err := messaging.HistoryFor(app, viewer, room.ID, 0, -1, 1)
+				if err != nil || len(public.Items) != 1 || public.Items[0].Text != "Responder follow-up" || public.Items[0].StatusChange != nil {
+					t.Fatal("internal history exposed", public, err)
+				}
+				for cursor := public.NextBeforeSequence; cursor != nil; {
+					public, err = messaging.HistoryFor(app, viewer, room.ID, *cursor, -1, 1)
+					if err != nil || len(public.Items) != 1 || public.Items[0].Text == "" || public.Items[0].StatusChange != nil {
+						t.Fatal("internal history exposed through pagination", public, err)
+					}
+					cursor = public.NextBeforeSequence
+				}
+				legacy, err := messaging.LegacyThreadFor(app, viewer, room.ID, "")
+				if err != nil || legacy["feedback"].(map[string]any)["status"] != nil {
+					t.Fatal("legacy status exposed", legacy, err)
 				}
 				for i, item := range page.Items {
 					if item.Sequence != i+1 {

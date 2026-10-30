@@ -39,7 +39,7 @@ func legacyItem(s Summary, first *core.Record) map[string]any {
 		id = *s.LegacyFeedbackID
 	}
 	photos := append(append([]string{}, first.GetStringSlice("photos")...), first.GetStringSlice("legacy_photos")...)
-	status := "waiting"
+	var status any
 	if s.Status != nil {
 		status = *s.Status
 	}
@@ -103,7 +103,7 @@ func LegacyListFor(app core.App, viewer Principal, createdBy, arcade, status str
 		}
 		ids := []string{}
 		for _, s := range page.Items {
-			if status != "" && (s.Status == nil || *s.Status != status) {
+			if status != "" && s.Status != nil && *s.Status != status {
 				continue
 			}
 			if createdBy != "" && s.Requester.ID != createdBy && !(viewer.UserID == createdBy && s.Counterpart.ID == s.Requester.ID) {

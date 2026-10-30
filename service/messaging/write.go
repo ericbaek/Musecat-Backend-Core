@@ -319,6 +319,7 @@ func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message,
 	}
 	var saved *core.Record
 	replayed := false
+	internal := false
 	err = app.RunInTransaction(func(tx core.App) error {
 		c, u, err := access(tx, viewer, cid)
 		if err != nil {
@@ -332,6 +333,7 @@ func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message,
 				return e
 			}
 			inboxType = q.GetString("inbox_type")
+			internal = Responder(tx, u.User, q)
 		}
 		if err := validateMentions(c.GetString("kind"), inboxType, in.Mentions); err != nil {
 			return err
@@ -390,7 +392,11 @@ func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message,
 	if err != nil {
 		return Message{}, false, err
 	}
-	return messageDTO(app, saved, nil), replayed, nil
+	message := messageDTO(app, saved, nil)
+	if !internal {
+		message.StatusChange = nil
+	}
+	return message, replayed, nil
 }
 func saveMessage(tx core.App, u *participant, c *core.Record, in SendInput, acting Identity, hash string) (*core.Record, error) {
 	if len(in.Photos) > 0 {
@@ -543,7 +549,14 @@ func SetStatusFor(app core.App, viewer Principal, id, status string) (Summary, e
 		if err != nil {
 			return err
 		}
-		afterCommit(tx, Event{Name: "conversation.changed", ID: id, LatestSequence: c.GetInt("last_sequence"), Reason: "status", Audience: audience})
+		internalAudience := []string{}
+		for _, userID := range audience {
+			user, e := ActiveUser(tx, userID)
+			if e == nil && Responder(tx, user, q) {
+				internalAudience = append(internalAudience, userID)
+			}
+		}
+		afterCommit(tx, Event{Name: "conversation.changed", ID: id, LatestSequence: c.GetInt("last_sequence"), Reason: "status", Audience: internalAudience})
 		return nil
 	})
 	if err != nil {

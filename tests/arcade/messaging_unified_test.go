@@ -82,7 +82,7 @@ func TestUnifiedGuestInquiriesUseCanonicalStorageAndAccountResponderProfiles(t *
 	}
 	call("PUT", "/guest/conversations/"+id+"/read", `{"throughSequence":3}`, key, "", 200)
 	call("POST", "/guest/conversations/"+id+"/messages", `{"text":"Follow-up","clientMessageId":"guest-followup"}`, key, "", 201)
-	if got := call("GET", "/guest/conversations/"+id, "", key, "", 200); got["status"] != "waiting" || got["unreadCount"] != float64(0) {
+	if got := call("GET", "/guest/conversations/"+id, "", key, "", 200); got["status"] != nil || got["unreadCount"] != float64(0) {
 		t.Fatal("guest status/read policy", got)
 	}
 	// Old entrypoints project the same canonical inquiry, without another store.

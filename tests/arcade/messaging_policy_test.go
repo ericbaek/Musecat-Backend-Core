@@ -33,11 +33,11 @@ func TestMessagingInquiryPermissionsAndOwnUnread(t *testing.T) {
 		identities []messaging.Identity
 		statuses   []string
 	}{
-		{requester, []messaging.Identity{{Type: "user", ID: requester.Id}}, []string{"waiting"}},
+		{requester, []messaging.Identity{{Type: "user", ID: requester.Id}}, []string{}},
 		{staff, []messaging.Identity{{Type: "team", ID: "musecat"}}, []string{"waiting", "recognised", "solved"}},
 	} {
 		s, err := messaging.Get(app, tc.user.Id, c.ID)
-		if err != nil || !reflect.DeepEqual(s.AllowedSenderIdentities, tc.identities) || !reflect.DeepEqual(s.AllowedStatusTransitions, tc.statuses) || !s.CanManageStatus {
+		if err != nil || !reflect.DeepEqual(s.AllowedSenderIdentities, tc.identities) || !reflect.DeepEqual(s.AllowedStatusTransitions, tc.statuses) || s.CanManageStatus != (len(tc.statuses) > 0) {
 			t.Fatalf("policy: %+v %v", s, err)
 		}
 		for _, status := range []string{"waiting", "recognised", "solved"} {

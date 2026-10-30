@@ -121,7 +121,7 @@ func TestFeedbackReplyPhotoAttachments(t *testing.T) {
 		t.Fatal(thread)
 	}
 	original := thread["feedback"].(map[string]any)
-	if original["message"] != "Original preserved" || original["status"] != "recognised" {
+	if original["message"] != "Original preserved" || original["status"] != nil {
 		t.Fatal("original/status changed")
 	}
 	notifications := call("GET", "/user/notifications", "", authorToken, 200)

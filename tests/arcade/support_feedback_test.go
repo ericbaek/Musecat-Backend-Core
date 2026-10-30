@@ -41,7 +41,7 @@ func TestCreateSupportFeedback_Success(t *testing.T) {
 		Body:           strings.NewReader(`{"message":"arcade detail page fails to load after update"}`),
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
-			`"status":"waiting"`,
+			`"status":null`,
 			`"message":"arcade detail page fails to load after update"`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {
@@ -96,7 +96,7 @@ func TestCreateSupportFeedback_MultipartWithPhotos(t *testing.T) {
 		Headers:        headers,
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
-			`"status":"waiting"`,
+			`"status":null`,
 			`"photos":[`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {

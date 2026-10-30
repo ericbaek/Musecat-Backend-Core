@@ -39,8 +39,6 @@ func changeInquiryStatus(tx core.App, u *participant, c, q *core.Record, status 
 			return err
 		}
 		c.Set("last_sequence", sequence)
-		c.Set("last_message", message.Id)
-		c.Set("last_message_at", message.GetString("created"))
 		if err = tx.Save(c); err != nil {
 			return err
 		}

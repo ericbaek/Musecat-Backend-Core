@@ -350,7 +350,7 @@ func summaries(app core.App, u *participant, rows []*core.Record) ([]Summary, er
 		ID    string `db:"id"`
 		Count int    `db:"count"`
 	}
-	err = app.DB().NewQuery(`SELECT m.conversation id,count(*) count FROM messaging_message m JOIN messaging_conversation c ON c.id=m.conversation LEFT JOIN messaging_inquiry i ON i.conversation=c.id LEFT JOIN messaging_read r ON r.conversation=c.id AND r.user={:u} WHERE c.id IN (SELECT value FROM json_each({:ids})) AND m.sequence>COALESCE(r.last_read_sequence,0) AND m.sender_user!={:u} AND ((c.kind='dm' AND m.sender_user!={:u}) OR (c.kind='inquiry' AND ((i.requester={:u} AND m.acting_type NOT IN ('user','guest')) OR (i.requester!={:u} AND m.acting_type IN ('user','guest'))))) GROUP BY m.conversation`).Bind(params).All(&counts)
+	err = app.DB().NewQuery(`SELECT m.conversation id,count(*) count FROM messaging_message m JOIN messaging_conversation c ON c.id=m.conversation LEFT JOIN messaging_inquiry i ON i.conversation=c.id LEFT JOIN messaging_read r ON r.conversation=c.id AND r.user={:u} WHERE c.id IN (SELECT value FROM json_each({:ids})) AND m.sequence>COALESCE(r.last_read_sequence,0) AND m.sender_user!={:u} AND (m.text!='' OR json_array_length(m.photos)>0 OR json_array_length(m.legacy_photos)>0) AND ((c.kind='dm' AND m.sender_user!={:u}) OR (c.kind='inquiry' AND ((i.requester={:u} AND m.acting_type NOT IN ('user','guest')) OR (i.requester!={:u} AND m.acting_type IN ('user','guest'))))) GROUP BY m.conversation`).Bind(params).All(&counts)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +447,6 @@ func summaries(app core.App, u *participant, rows []*core.Record) ([]Summary, er
 				s.Counterpart = *s.Requester
 			}
 			s.GuestChat = requesterType(q) == "guest" && q.GetString("guest_key_hash") != ""
-			s.Status = ptr(q.GetString("status"))
 			if id := q.GetString("legacy_feedback_id"); id != "" {
 				s.LegacyFeedbackID = ptr(id)
 			}
@@ -456,6 +455,12 @@ func summaries(app core.App, u *participant, rows []*core.Record) ([]Summary, er
 			s.AllowedStatusTransitions = permissions.statuses
 			s.CanSend = len(permissions.identities) > 0
 			s.CanManageStatus = len(permissions.statuses) > 0
+			if s.CanManageStatus {
+				s.Status = ptr(q.GetString("status"))
+			} else if s.LastMessage != nil {
+				s.LastMessage.StatusChange = nil
+				s.LatestSequence = s.LastMessage.Sequence
+			}
 		}
 		out = append(out, s)
 	}
@@ -466,20 +471,29 @@ func History(app core.App, user, id string, before, after, limit int) (MessagePa
 }
 func HistoryFor(app core.App, viewer Principal, id string, before, after, limit int) (MessagePage, error) {
 	out := MessagePage{Items: []Message{}}
-	c, _, err := access(app, viewer, id)
+	c, viewerParticipant, err := access(app, viewer, id)
 	if err != nil {
 		return out, err
 	}
 	if before < 0 || after < -1 || (before > 0 && after >= 0) || limit < 1 || limit > 200 || (after < 0 && limit > 100) {
 		return out, apis.NewBadRequestError("Invalid message pagination.", nil)
 	}
+	internal := true
 	restartMessage := ""
 	if c.GetString("kind") == "inquiry" {
-		if q, e := inquiry(app, c.Id); e == nil && canRestartBot(c, q) {
+		q, e := inquiry(app, c.Id)
+		if e != nil {
+			return out, e
+		}
+		internal = Responder(app, viewerParticipant.User, q)
+		if canRestartBot(c, q) {
 			restartMessage = c.GetString("last_message")
 		}
 	}
 	filter := "conversation={:c}"
+	if !internal {
+		filter += " && (text != '' || photos:length > 0 || legacy_photos:length > 0)"
+	}
 	params := dbx.Params{"c": id}
 	sort := "-sequence"
 	if before > 0 {
@@ -513,9 +527,19 @@ func HistoryFor(app core.App, viewer Principal, id string, before, after, limit 
 	for _, m := range rows {
 		message := messageDTO(app, m, parties)
 		message.BotCanRestart = m.Id == restartMessage
+		if !internal {
+			message.StatusChange = nil
+		}
 		out.Items = append(out.Items, message)
 	}
 	out.LatestSequence = c.GetInt("last_sequence")
+	if !internal {
+		latest, e := app.FindRecordById(Messages, c.GetString("last_message"))
+		if e != nil {
+			return out, e
+		}
+		out.LatestSequence = latest.GetInt("sequence")
+	}
 	if more && len(rows) > 0 {
 		if after >= 0 {
 			out.NextAfterSequence = ptr(rows[len(rows)-1].GetInt("sequence"))

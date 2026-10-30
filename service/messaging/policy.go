@@ -165,7 +165,6 @@ func inquiryPolicy(u *participant, q *core.Record, responder bool) inquiryPermis
 	p := inquiryPermissions{identities: []Identity{}, statuses: []string{}}
 	if u.requests(q) {
 		p.identities = append(p.identities, Identity{u.Kind, u.ID})
-		p.statuses = []string{"waiting"}
 	}
 	if responder {
 		p.identities = append(p.identities, Identity{q.GetString("inbox_type"), q.GetString("inbox_id")})
