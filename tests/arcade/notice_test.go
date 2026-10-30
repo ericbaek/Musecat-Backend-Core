@@ -26,6 +26,7 @@ func addOwnedArcade(tb testing.TB, app *tests.TestApp, user *core.Record, arcade
 func createNoticeBody(arcadeID string) []byte {
 	payload := map[string]any{
 		"arcade":   arcadeID,
+		"title":    "Notice",
 		"type":     "alert",
 		"document": noticeDocument("**notice**"),
 		"link":     "https://example.com/notice",
@@ -538,6 +539,9 @@ func TestArcadeNotice_MultipartDocumentRoundTripsAndStoresPhotos(t *testing.T) {
 		t.Fatalf("expected notice id in response")
 	}
 
+	if payload["title"] != "Notice" || payload["display_mode"] != "pinned" {
+		t.Fatalf("multipart policy metadata missing: %#v", payload)
+	}
 	if got := noticeDocumentText(payload["document"]); got != documentText {
 		t.Fatalf("expected document to round-trip unchanged, got %v", payload["document"])
 	}
@@ -594,6 +598,9 @@ func seedNoticeWithPriority(tb testing.TB, app *tests.TestApp, arcadeID string, 
 	rec.Set("type", "alert")
 	rec.Set("document", noticeDocument(message))
 	rec.Set("priority", priority)
+	if priority > 0 {
+		rec.Set("display_mode", "pinned")
+	}
 	if err := app.Save(rec); err != nil {
 		tb.Fatalf("failed to save arcade_notice: %v", err)
 	}
@@ -620,6 +627,12 @@ func buildNoticeMultipart(tb testing.TB, arcadeID, message string, files []uploa
 	}
 	if err := writer.WriteField("document", noticeDocumentJSON(message)); err != nil {
 		tb.Fatalf("failed to write document field: %v", err)
+	}
+	if err := writer.WriteField("title", "Notice"); err != nil {
+		tb.Fatal(err)
+	}
+	if err := writer.WriteField("display_mode", "pinned"); err != nil {
+		tb.Fatal(err)
 	}
 	if err := writer.WriteField("type", "alert"); err != nil {
 		tb.Fatalf("failed to write type field: %v", err)
@@ -700,7 +713,7 @@ func TestArcadeNotice_MalformedDocumentDoesNotPersist(t *testing.T) {
 	}
 	original, _ := json.Marshal(before.PublicExport())
 	for _, method := range []string{http.MethodPost, http.MethodPut} {
-		body, _ := json.Marshal(map[string]any{"id": noticeID, "arcade": arcadeID, "document": json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","content":{}}]}`)})
+		body, _ := json.Marshal(map[string]any{"id": noticeID, "arcade": arcadeID, "title": "Notice", "document": json.RawMessage(`{"type":"doc","content":[{"type":"paragraph","content":{}}]}`)})
 		res := executeJSONRequest(t, app, method, "/arcade/notice", string(body), headers)
 		res.Body.Close()
 		if res.StatusCode != http.StatusBadRequest {

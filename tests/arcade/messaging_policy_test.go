@@ -33,11 +33,11 @@ func TestMessagingInquiryPermissionsAndOwnUnread(t *testing.T) {
 		identities []messaging.Identity
 		statuses   []string
 	}{
-		{requester, []messaging.Identity{{Type: "user", ID: requester.Id}}, []string{"waiting", "solved"}},
+		{requester, []messaging.Identity{{Type: "user", ID: requester.Id}}, []string{}},
 		{staff, []messaging.Identity{{Type: "team", ID: "musecat"}}, []string{"waiting", "recognised", "solved"}},
 	} {
 		s, err := messaging.Get(app, tc.user.Id, c.ID)
-		if err != nil || !reflect.DeepEqual(s.AllowedSenderIdentities, tc.identities) || !reflect.DeepEqual(s.AllowedStatusTransitions, tc.statuses) || !s.CanManageStatus {
+		if err != nil || !reflect.DeepEqual(s.AllowedSenderIdentities, tc.identities) || !reflect.DeepEqual(s.AllowedStatusTransitions, tc.statuses) || s.CanManageStatus != (len(tc.statuses) > 0) {
 			t.Fatalf("policy: %+v %v", s, err)
 		}
 		for _, status := range []string{"waiting", "recognised", "solved"} {
@@ -46,6 +46,11 @@ func TestMessagingInquiryPermissionsAndOwnUnread(t *testing.T) {
 				t.Fatalf("%s status %s: %v", tc.user.Id, status, err)
 			}
 		}
+	}
+	if current, err := messaging.Get(app, requester.Id, c.ID); err != nil {
+		t.Fatal(err)
+	} else if _, err := messaging.SetRead(app, requester.Id, c.ID, current.LatestSequence); err != nil {
+		t.Fatal(err)
 	}
 	// A requester who gains a responder role can choose either identity. Their own
 	// inbox reply used to count as an unread incoming message for that same person.
@@ -74,7 +79,7 @@ func TestMessagingInquiryPermissionsAndOwnUnread(t *testing.T) {
 	if err != nil || s.UnreadCount != 1 {
 		t.Fatal(s, err)
 	}
-	if _, err = messaging.SetRead(app, requester.Id, c.ID, 3); err != nil {
+	if _, err = messaging.SetRead(app, requester.Id, c.ID, s.LatestSequence); err != nil {
 		t.Fatal(err)
 	}
 	s, err = messaging.Get(app, staff.Id, c.ID)
@@ -152,20 +157,20 @@ func TestMessagingArcadeNotificationMentionMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectRecipients(c.LastMessage.ID, owner.Id, staffOwner.Id)
-	if len(staffStream.Events) == 0 {
-		t.Fatal("muted notification also muted shared realtime")
+	if len(staffStream.Events) != 0 {
+		t.Fatal("uninvited staff received inquiry realtime")
 	}
 	if _, err := messaging.Get(app, moderator.Id, c.ID); err != nil {
-		t.Fatal("muted staff lost access", err)
+		t.Fatal("staff lost dashboard management access", err)
 	}
-	// Old queued alerts retain inbox visibility, but are suppressed at delivery.
+	// Old queued alerts do not surface unmentioned inquiries in personal inboxes.
 	col, _ := app.FindCollectionByNameOrId("user_notification")
 	old := core.NewRecord(col)
 	old.Set("user", moderator.Id)
 	old.Set("kind", "message")
 	old.Set("conversation", c.ID)
 	old.Set("message", c.LastMessage.ID)
-	if !messaging.NotificationVisible(app, moderator, old) || messaging.NotificationDeliverable(app, moderator, old) {
+	if messaging.NotificationVisible(app, moderator, old) || messaging.NotificationDeliverable(app, moderator, old) {
 		t.Fatal("old queued staff policy")
 	}
 	mention := messaging.SendInput{Text: "please help", ClientMessageID: "mention", Mentions: []string{"musecat", "musecat"}}
@@ -174,6 +179,12 @@ func TestMessagingArcadeNotificationMentionMatrix(t *testing.T) {
 		t.Fatal(m, err)
 	}
 	expectRecipients(m.ID, owner.Id, staffOwner.Id, moderator.Id, developer.Id)
+	if len(staffStream.Events) == 0 {
+		t.Fatal("invited staff did not receive inquiry realtime")
+	}
+	if _, err := messaging.Get(app, moderator.Id, c.ID); err != nil {
+		t.Fatal("explicit mention did not grant team access", err)
+	}
 	mention.Mentions = []string{"musecat"}
 	retry, replayed, err := messaging.Send(app, requester.Id, c.ID, mention)
 	if err != nil || !replayed || retry.ID != m.ID {

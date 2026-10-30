@@ -1210,3 +1210,25 @@ minutes, retaining the newest pending message. Deferral does not consume retries
 Skipped receipts never start the cooldown. Delivery rechecks read cursors and
 notification acknowledgement in addition to the existing recipient/access policy.
 Push title/body use the same sender and preview as the authenticated inbox.
+
+
+### Inquiry status history
+
+Only current strict staff or the current official arcade responder may mark an
+inquiry status. Status values and history are internal to these responders. This is enforced by the shared summary/mutation policy, including
+legacy and guest adapters. Requesters cannot read or change the internal state. Solved is not a
+sending restriction: a requester follow-up reopens to waiting and a responder
+follow-up changes to recognised.
+
+Every new status transition persists server-authored `statusChange: {from, to}`
+in the same transaction as the inquiry state. An explicit status action appends a
+textless message with the actual sender, acting identity, timestamp and next
+sequence. An automatic transition attaches the same metadata to its triggering
+message. A same-status action is a no-op; message retries retain the original
+transition without duplication. History, delta and realtime invalidation use the
+existing conversation permissions and sequence. Status-only entries do not
+create push notifications or requester SSE events, unread increments, sidebar preview changes or sorting changes. Requester history filters textless status entries before pagination, strips transition metadata from ordinary messages and send/retry responses, and returns null status and empty transitions. Legacy adapters follow the same projection. Prior history is preserved without inventing past
+transitions. Full owns the guarded additive `status_change` JSON-field migration;
+Core only bootstraps it for fresh databases.
+
+Guest inquiries use the canonical messaging store and browser-scoped credentials, never synthetic user accounts. Current guest access survives intake-policy changes. Reply bots snapshot their owner configuration per inquiry; requester choices are validated and sequenced atomically. DM read cursors belong to each actual account and expose the counterpart cursor only for direct messages.

@@ -31,7 +31,7 @@ func record(app core.App, col string, values map[string]any) (*core.Record, erro
 	return r, app.Save(r)
 }
 func existingRetry(app core.App, c, user, key string) (*core.Record, error) {
-	return app.FindFirstRecordByFilter(Messages, "conversation={:c} && sender_user={:u} && client_message_id={:k}", dbx.Params{"c": c, "u": user, "k": key})
+	return app.FindFirstRecordByFilter(Messages, "conversation={:c} && (sender_user={:u} || sender_guest={:u}) && client_message_id={:k}", dbx.Params{"c": c, "u": user, "k": key})
 }
 func inputHash(in *SendInput) (string, error) {
 	in.Text = strings.TrimSpace(in.Text)
@@ -101,12 +101,18 @@ func inputHash(in *SendInput) (string, error) {
 			Mentions []string
 		}{in.Text, hashes, in.Mentions})
 	}
+	if in.BotChoice != nil {
+		raw, _ = json.Marshal(struct {
+			Payload string
+			Choice  *BotSelection
+		}{string(raw), in.BotChoice})
+	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
 }
 func rateLimit(app core.App, user, c string, create bool) error {
 	since := time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05.000Z")
-	filter := "sender_user={:u} AND created>={:since}"
+	filter := "(sender_user={:u} OR sender_guest={:u}) AND created>={:since}"
 	params := dbx.Params{"u": user, "since": since}
 	collection := Messages
 	limit := 60
@@ -133,10 +139,19 @@ func Create(app core.App, user string, in CreateInput) (Summary, error) {
 	return summary, err
 }
 func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool, error) {
+	return CreateFor(app, Principal{UserID: user}, in)
+}
+func CreateFor(app core.App, viewer Principal, in CreateInput) (Summary, bool, error) {
 	replayed := false
 	var cid string
 	if in.Kind != "dm" && in.Kind != "inquiry" {
 		return Summary{}, false, apis.NewBadRequestError("Invalid conversation kind.", nil)
+	}
+	if in.InitialMessage.BotChoice != nil {
+		return Summary{}, false, apis.NewBadRequestError("Initial messages cannot select a reply.", nil)
+	}
+	if in.InquiryContext != "" && in.Kind != "inquiry" {
+		return Summary{}, false, apis.NewBadRequestError("Automation requires an inquiry.", nil)
 	}
 	if err := validateMentions(in.Kind, in.Inbox.Type, in.InitialMessage.Mentions); err != nil {
 		return Summary{}, false, err
@@ -148,13 +163,22 @@ func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool,
 		if err != nil {
 			return Summary{}, false, err
 		}
+
+		if in.InquiryContext != "" {
+			sum := sha256.Sum256([]byte(in.InquiryContext + "\x00" + in.BotRevision + "\x00" + in.InitialChoice + "\x00" + hash))
+			hash = hex.EncodeToString(sum[:])
+		}
 	}
 	err = app.RunInTransaction(func(tx core.App) error {
-		u, err := ActiveUser(tx, user)
+		u, err := viewer.resolve(tx)
 		if err != nil {
 			return err
 		}
+		user := u.ID
 		if in.Kind == "dm" {
+			if u.Kind != "user" {
+				return apis.NewForbiddenError("Guests may only create inquiries.", nil)
+			}
 			if user == in.PeerUserID {
 				return apis.NewBadRequestError("Cannot message yourself.", nil)
 			}
@@ -190,10 +214,13 @@ func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool,
 			return apis.NewBadRequestError("Invalid inbox.", nil)
 		}
 		// Initial client keys are scoped to requester across inquiry creation retries.
-		prior, e := tx.FindFirstRecordByFilter(Messages, "conversation.kind='inquiry' && sender_user={:u} && client_message_id={:k} && sequence=1", dbx.Params{"u": user, "k": in.InitialMessage.ClientMessageID})
+		prior, e := tx.FindFirstRecordByFilter(Messages, "conversation.kind='inquiry' && (sender_user={:u} || sender_guest={:u}) && client_message_id={:k} && sequence=1", dbx.Params{"u": user, "k": in.InitialMessage.ClientMessageID})
+		if automated, ae := tx.FindFirstRecordByFilter(Messages, "sequence=1 && client_message_id={:key} && automated=true", dbx.Params{"key": botRequestKey(user, in.InitialMessage.ClientMessageID)}); ae == nil {
+			prior, e = automated, nil
+		}
 		if e == nil {
 			q, e := inquiry(tx, prior.GetString("conversation"))
-			if e != nil || q.GetString("requester") != user || q.GetString("inbox_type") != in.Inbox.Type || q.GetString("inbox_id") != in.Inbox.ID || prior.GetString("payload_hash") != hash {
+			if e != nil || !u.requests(q) || q.GetString("inbox_type") != in.Inbox.Type || q.GetString("inbox_id") != in.Inbox.ID || prior.GetString("payload_hash") != hash {
 				return router.NewApiError(409, "clientMessageId was already used for different content.", nil)
 			}
 			cid = prior.GetString("conversation")
@@ -202,15 +229,19 @@ func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool,
 		}
 		if in.Inbox.Type == "arcade" {
 			arcade, e := tx.FindRecordById("arcade", in.Inbox.ID)
-			if e != nil || (!arcade.GetBool("public") && arcade.GetString("createdBy") != u.Id && !arcadereport.CanManage(u, arcade)) {
+			if e != nil || (!arcade.GetBool("public") && (u.User == nil || arcade.GetString("createdBy") != u.ID) && !arcadereport.CanManage(u.User, arcade)) {
 				return apis.NewNotFoundError("Arcade not found.", nil)
 			}
+
 			if supportfeedback.HasOfficialAccount(tx, arcade.Id) && supportfeedback.InquirySettings(arcade).Mode != "internal" {
 				code := "INQUIRY_DISABLED"
 				if supportfeedback.InquirySettings(arcade).Mode == "external" {
 					code = "INQUIRY_EXTERNAL"
 				}
 				return router.NewApiError(409, code, nil)
+			}
+			if u.Kind == "guest" && supportfeedback.HasOfficialAccount(tx, arcade.Id) && supportfeedback.InquirySettings(arcade).LoginRequired {
+				return router.NewApiError(401, "LOGIN_REQUIRED", nil)
 			}
 		}
 		if err = rateLimit(tx, user, "", true); err != nil {
@@ -221,36 +252,80 @@ func CreateWithReplay(app core.App, user string, in CreateInput) (Summary, bool,
 			return err
 		}
 		cid = c.Id
-		_, err = record(tx, Inquiries, map[string]any{"conversation": cid, "requester": user, "inbox_type": in.Inbox.Type, "inbox_id": in.Inbox.ID, "status": "waiting", "legacy_feedback_id": cid})
+		q, err := record(tx, Inquiries, map[string]any{"conversation": cid, "requester": user, "requester_type": u.Kind, "guest_key_hash": u.guestHash, "inbox_type": in.Inbox.Type, "inbox_id": in.Inbox.ID, "status": "waiting", "legacy_feedback_id": cid})
 		if err != nil {
 			return err
 		}
-		for _, p := range []Identity{{"user", user}, in.Inbox} {
+		for _, p := range []Identity{{u.Kind, user}, in.Inbox} {
 			if _, err = record(tx, Parties, map[string]any{"conversation": cid, "party_type": p.Type, "party_id": p.ID}); err != nil {
 				return err
 			}
 		}
-		_, err = saveMessage(tx, u, c, in.InitialMessage, Identity{"user", user}, hash)
+		cfg, err := inquiryBot(tx, in)
+		if err != nil {
+			return err
+		}
+		if in.BotRevision != "" && in.BotRevision != botRevision(cfg) {
+			return router.NewApiError(409, "Automatic replies changed. Refresh the inquiry preview.", nil)
+		}
+		if cfg.Enabled {
+			if err = appendBotReply(tx, c, q, cfg, cfg.Start, botRequestKey(user, in.InitialMessage.ClientMessageID), hash); err != nil {
+				return err
+			}
+		}
+		next := ""
+		var state *botState
+		if in.InitialChoice != "" {
+			if !cfg.Enabled || in.InitialChoice == "__restart" {
+				return apis.NewBadRequestError("Invalid initial reply choice.", nil)
+			}
+			selection := in.InitialMessage
+			selection.BotChoice = &BotSelection{MessageID: c.GetString("last_message"), ChoiceID: in.InitialChoice}
+			state, next, err = botTransition(c, q, u, selection)
+			if err != nil {
+				return err
+			}
+		}
+		_, err = saveMessage(tx, u, c, in.InitialMessage, Identity{u.Kind, user}, hash)
+		if err != nil {
+			return err
+		}
+		if next != "" {
+			return appendBotReply(tx, c, q, state.Config, next, "", "")
+		}
+		if cfg.Enabled {
+			var state botState
+			_ = json.Unmarshal([]byte(q.GetString("bot_state")), &state)
+			state.Active = false
+			q.Set("bot_state", state)
+			return tx.Save(q)
+		}
+
 		return err
 	})
 	if err != nil {
 		return Summary{}, false, err
 	}
-	summary, err := Get(app, user, cid)
+	summary, err := GetFor(app, viewer, cid)
 	return summary, replayed, err
 }
 func Send(app core.App, user, cid string, in SendInput) (Message, bool, error) {
+	return SendFor(app, Principal{UserID: user}, cid, in)
+}
+func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message, bool, error) {
 	hash, err := inputHash(&in)
 	if err != nil {
 		return Message{}, false, err
 	}
 	var saved *core.Record
 	replayed := false
+	internal := false
 	err = app.RunInTransaction(func(tx core.App) error {
-		c, u, err := Access(tx, user, cid)
+		c, u, err := access(tx, viewer, cid)
 		if err != nil {
 			return err
 		}
+		user := u.ID
 		inboxType := ""
 		if c.GetString("kind") == "inquiry" {
 			q, e := inquiry(tx, cid)
@@ -258,6 +333,7 @@ func Send(app core.App, user, cid string, in SendInput) (Message, bool, error) {
 				return e
 			}
 			inboxType = q.GetString("inbox_type")
+			internal = Responder(tx, u.User, q)
 		}
 		if err := validateMentions(c.GetString("kind"), inboxType, in.Mentions); err != nil {
 			return err
@@ -281,18 +357,51 @@ func Send(app core.App, user, cid string, in SendInput) (Message, bool, error) {
 		if err = rateLimit(tx, user, cid, false); err != nil {
 			return err
 		}
+		if in.BotChoice != nil && acting.Type != "user" && acting.Type != "guest" {
+			return apis.NewBadRequestError("Only the requester can select a reply.", nil)
+		}
+		var q *core.Record
+		var state *botState
+		next := ""
+		if c.GetString("kind") == "inquiry" {
+			q, err = inquiry(tx, cid)
+			if err != nil {
+				return err
+			}
+			state, next, err = botTransition(c, q, u, in)
+			if err != nil {
+				return err
+			}
+		} else if in.BotChoice != nil {
+			return apis.NewBadRequestError("Reply choices require an inquiry.", nil)
+		}
 		saved, err = saveMessage(tx, u, c, in, acting, hash)
-		return err
+		if err != nil {
+			return err
+		}
+		if next != "" {
+			return appendBotReply(tx, c, q, state.Config, next, "", "")
+		}
+		if state != nil && state.Active {
+			state.Active = false
+			q.Set("bot_state", state)
+			return tx.Save(q)
+		}
+		return nil
 	})
 	if err != nil {
 		return Message{}, false, err
 	}
-	return messageDTO(app, saved, nil), replayed, nil
+	message := messageDTO(app, saved, nil)
+	if !internal {
+		message.StatusChange = nil
+	}
+	return message, replayed, nil
 }
-func saveMessage(tx core.App, u, c *core.Record, in SendInput, acting Identity, hash string) (*core.Record, error) {
+func saveMessage(tx core.App, u *participant, c *core.Record, in SendInput, acting Identity, hash string) (*core.Record, error) {
 	if len(in.Photos) > 0 {
 		var used int
-		err := tx.DB().NewQuery("SELECT COALESCE(sum(json_array_length(photos)),0) FROM messaging_message WHERE sender_user={:u} AND created>={:since}").Bind(dbx.Params{"u": u.Id, "since": time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05.000Z")}).Row(&used)
+		err := tx.DB().NewQuery("SELECT COALESCE(sum(json_array_length(photos)),0) FROM messaging_message WHERE (sender_user={:u} OR sender_guest={:u}) AND created>={:since}").Bind(dbx.Params{"u": u.ID, "since": time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05.000Z")}).Row(&used)
 		if err != nil {
 			return nil, err
 		}
@@ -300,19 +409,25 @@ func saveMessage(tx core.App, u, c *core.Record, in SendInput, acting Identity, 
 			return nil, router.NewApiError(429, "Please wait before uploading more photos.", nil)
 		}
 	}
-	parties, err := loadParties(tx, []Identity{{"user", u.Id}})
-	if err != nil {
-		return nil, err
-	}
-	sender := parties["user:"+u.Id]
-	roles := append([]string{}, u.GetStringSlice("tags")...)
-	for _, tag := range u.GetStringSlice("tag") {
-		if !slices.Contains(roles, tag) {
-			roles = append(roles, tag)
+	sender := Party{Type: u.Kind, ID: u.ID, Name: "비회원", RoleTags: []string{}}
+	roles := []string{}
+	senderUser, senderGuest := "", u.ID
+	if u.Kind == "user" {
+		parties, err := loadParties(tx, []Identity{{"user", u.ID}})
+		if err != nil {
+			return nil, err
+		}
+		sender = parties["user:"+u.ID]
+		senderUser, senderGuest = u.ID, ""
+		roles = append(roles, u.User.GetStringSlice("tags")...)
+		for _, tag := range u.User.GetStringSlice("tag") {
+			if !slices.Contains(roles, tag) {
+				roles = append(roles, tag)
+			}
 		}
 	}
 	seq := c.GetInt("last_sequence") + 1
-	m, err := record(tx, Messages, map[string]any{"conversation": c.Id, "sequence": seq, "sender_user": u.Id, "acting_type": acting.Type, "acting_id": acting.ID, "sender_name": sender.Name, "sender_avatar": sender.AvatarURL, "sender_roles": roles, "client_message_id": in.ClientMessageID, "payload_hash": hash, "text": in.Text, "mentions": in.Mentions, "photos": in.Photos})
+	m, err := record(tx, Messages, map[string]any{"conversation": c.Id, "sequence": seq, "sender_user": senderUser, "sender_guest": senderGuest, "acting_type": acting.Type, "acting_id": acting.ID, "sender_name": sender.Name, "sender_avatar": sender.AvatarURL, "sender_roles": roles, "client_message_id": in.ClientMessageID, "payload_hash": hash, "text": in.Text, "mentions": in.Mentions, "photos": in.Photos})
 	if err != nil {
 		return nil, err
 	}
@@ -328,11 +443,10 @@ func saveMessage(tx core.App, u, c *core.Record, in SendInput, acting Identity, 
 			return nil, e
 		}
 		status := "recognised"
-		if acting.Type == "user" {
+		if acting.Type == "user" || acting.Type == "guest" {
 			status = "waiting"
 		}
-		q.Set("status", status)
-		if err = tx.Save(q); err != nil {
+		if err = changeInquiryStatus(tx, u, c, q, status, m); err != nil {
 			return nil, err
 		}
 	}
@@ -347,16 +461,24 @@ func saveMessage(tx core.App, u, c *core.Record, in SendInput, acting Identity, 
 	return m, nil
 }
 func SetRead(app core.App, user, id string, through int) (map[string]any, error) {
+	return SetReadFor(app, Principal{UserID: user}, id, through)
+}
+func SetReadFor(app core.App, viewer Principal, id string, through int) (map[string]any, error) {
 	last := 0
 	err := app.RunInTransaction(func(tx core.App) error {
-		c, _, err := Access(tx, user, id)
+		c, u, err := access(tx, viewer, id)
 		if err != nil {
 			return err
 		}
+		user := u.ID
 		if through < 0 || through > c.GetInt("last_sequence") {
 			return apis.NewBadRequestError("Invalid read sequence.", nil)
 		}
 		row, e := tx.FindFirstRecordByFilter(Reads, "conversation={:c} && user={:u}", dbx.Params{"c": id, "u": user})
+		previous := 0
+		if e == nil {
+			previous = row.GetInt("last_read_sequence")
+		}
 		if e != nil {
 			row, err = record(tx, Reads, map[string]any{"conversation": id, "user": user, "last_read_sequence": through})
 		} else if through > row.GetInt("last_read_sequence") {
@@ -379,17 +501,31 @@ func SetRead(app core.App, user, id string, through int) (map[string]any, error)
 			}
 		}
 		afterCommit(tx, Event{Name: "conversation.read", ID: id, UserID: user, LastReadSequence: last})
+		if c.GetString("kind") == "dm" && last > previous {
+			audience, err := conversationAudience(tx, c)
+			if err != nil {
+				return err
+			}
+			for _, peer := range audience {
+				if peer != user {
+					afterCommit(tx, Event{Name: "conversation.changed", ID: id, UserID: peer, LatestSequence: c.GetInt("last_sequence"), Reason: "read"})
+				}
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	s, err := Get(app, user, id)
+	s, err := GetFor(app, viewer, id)
 	return map[string]any{"conversationId": id, "lastReadSequence": last, "unreadCount": s.UnreadCount}, err
 }
 func SetStatus(app core.App, user, id, status string) (Summary, error) {
+	return SetStatusFor(app, Principal{UserID: user}, id, status)
+}
+func SetStatusFor(app core.App, viewer Principal, id, status string) (Summary, error) {
 	err := app.RunInTransaction(func(tx core.App) error {
-		c, u, err := Access(tx, user, id)
+		c, u, err := access(tx, viewer, id)
 		if err != nil {
 			return err
 		}
@@ -400,24 +536,33 @@ func SetStatus(app core.App, user, id, status string) (Summary, error) {
 		if err != nil {
 			return err
 		}
-		if !slices.Contains(inquiryPolicy(u, q, Responder(tx, u, q)).statuses, status) {
+		if !slices.Contains(inquiryPolicy(u, q, Responder(tx, u.User, q)).statuses, status) {
 			return apis.NewBadRequestError("Invalid inquiry status.", nil)
 		}
-		q.Set("status", status)
-		if err = tx.Save(q); err != nil {
+		if q.GetString("status") == status {
+			return nil
+		}
+		if err = changeInquiryStatus(tx, u, c, q, status, nil); err != nil {
 			return err
 		}
 		audience, err := conversationAudience(tx, c)
 		if err != nil {
 			return err
 		}
-		afterCommit(tx, Event{Name: "conversation.changed", ID: id, LatestSequence: c.GetInt("last_sequence"), Reason: "status", Audience: audience})
+		internalAudience := []string{}
+		for _, userID := range audience {
+			user, e := ActiveUser(tx, userID)
+			if e == nil && Responder(tx, user, q) {
+				internalAudience = append(internalAudience, userID)
+			}
+		}
+		afterCommit(tx, Event{Name: "conversation.changed", ID: id, LatestSequence: c.GetInt("last_sequence"), Reason: "status", Audience: internalAudience})
 		return nil
 	})
 	if err != nil {
 		return Summary{}, err
 	}
-	return Get(app, user, id)
+	return GetFor(app, viewer, id)
 }
 func Preference(app core.App, user, receive string) error {
 	if receive != "nobody" && receive != "everyone" {

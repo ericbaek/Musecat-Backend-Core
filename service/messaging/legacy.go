@@ -39,18 +39,23 @@ func legacyItem(s Summary, first *core.Record) map[string]any {
 		id = *s.LegacyFeedbackID
 	}
 	photos := append(append([]string{}, first.GetStringSlice("photos")...), first.GetStringSlice("legacy_photos")...)
-	status := "waiting"
+	var status any
 	if s.Status != nil {
 		status = *s.Status
 	}
 	requester := ""
 	if s.Requester != nil {
-		requester = s.Requester.ID
+		if s.Requester.Type == "user" {
+			requester = s.Requester.ID
+		}
 	}
-	return map[string]any{"id": id, "conversationId": s.ID, "message": first.GetString("text"), "status": status, "createdBy": requester, "arcade": arcade, "arcadeId": arcade, "arcadeName": s.Inbox.Name, "arcadeHasOfficial": s.Inbox.Type == "arcade", "photos": photos, "created": first.GetString("created"), "updated": s.LastMessageAt, "lastMessageAt": s.LastMessageAt}
+	return map[string]any{"id": id, "conversationId": s.ID, "guestChat": s.GuestChat, "message": first.GetString("text"), "status": status, "createdBy": requester, "arcade": arcade, "arcadeId": arcade, "arcadeName": s.Inbox.Name, "arcadeHasOfficial": s.Inbox.Type == "arcade", "photos": photos, "created": first.GetString("created"), "updated": s.LastMessageAt, "lastMessageAt": s.LastMessageAt}
 }
 func LegacyThread(app core.App, user, cid, beforeID string) (map[string]any, error) {
-	s, err := Get(app, user, cid)
+	return LegacyThreadFor(app, Principal{UserID: user}, cid, beforeID)
+}
+func LegacyThreadFor(app core.App, viewer Principal, cid, beforeID string) (map[string]any, error) {
+	s, err := GetFor(app, viewer, cid)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +71,7 @@ func LegacyThread(app core.App, user, cid, beforeID string) (map[string]any, err
 		}
 		before = m.GetInt("sequence")
 	}
-	page, err := History(app, user, cid, before, -1, 50)
+	page, err := HistoryFor(app, viewer, cid, before, -1, 50)
 	if err != nil {
 		return nil, err
 	}
@@ -83,22 +88,25 @@ func LegacyThread(app core.App, user, cid, beforeID string) (map[string]any, err
 	return map[string]any{"conversationId": cid, "feedback": feedback, "items": items, "next": next}, nil
 }
 func LegacyList(app core.App, user, createdBy, arcade, status string) ([]map[string]any, error) {
+	return LegacyListFor(app, Principal{UserID: user}, createdBy, arcade, status)
+}
+func LegacyListFor(app core.App, viewer Principal, createdBy, arcade, status string) ([]map[string]any, error) {
 	q := url.Values{"kind": {"inquiry"}, "limit": {"50"}}
 	if arcade != "" {
 		q.Set("inbox", "arcade:"+arcade)
 	}
 	out := []map[string]any{}
 	for {
-		page, err := ListConversations(app, user, q)
+		page, err := ListFor(app, viewer, q)
 		if err != nil {
 			return nil, err
 		}
 		ids := []string{}
 		for _, s := range page.Items {
-			if status != "" && (s.Status == nil || *s.Status != status) {
+			if status != "" && s.Status != nil && *s.Status != status {
 				continue
 			}
-			if createdBy != "" && s.Requester.ID != createdBy && s.Counterpart.ID != s.Requester.ID {
+			if createdBy != "" && s.Requester.ID != createdBy && !(viewer.UserID == createdBy && s.Counterpart.ID == s.Requester.ID) {
 				continue
 			}
 			ids = append(ids, s.ID)

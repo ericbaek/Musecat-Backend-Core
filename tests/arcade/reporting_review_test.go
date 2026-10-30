@@ -15,6 +15,7 @@ import (
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
 	"github.com/ericbaek/musecat-backend-core/handlers/arcade/reporting"
 	"github.com/ericbaek/musecat-backend-core/service/arcadereport"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -81,15 +82,17 @@ func TestReportingWritesRecheckPersistedAccount(t *testing.T) {
 	if err := app.Save(owner); err != nil {
 		t.Fatal(err)
 	}
-	feedbacks, _ := app.FindCollectionByNameOrId("support_feedback")
-	feedback := core.NewRecord(feedbacks)
-	feedback.Set("createdBy", author.Id)
-	feedback.Set("arcade", arcadeID)
-	feedback.Set("message", "Private inquiry")
-	feedback.Set("status", "waiting")
-	if err := app.Save(feedback); err != nil {
+	feedbackID := seedSupportFeedback(t, app, author.Id, "Private inquiry", "waiting")
+	inquiry, err := app.FindFirstRecordByFilter(messaging.Inquiries, "conversation={:c}", map[string]any{"c": feedbackID})
+	if err != nil {
 		t.Fatal(err)
 	}
+	inquiry.Set("inbox_type", "arcade")
+	inquiry.Set("inbox_id", arcadeID)
+	if err := app.Save(inquiry); err != nil {
+		t.Fatal(err)
+	}
+
 	// Simulate ownership revocation after authentication populated the request.
 	persisted, _ := app.FindRecordById("user", owner.Id)
 	persisted.Set("owns", []string{})
@@ -102,7 +105,7 @@ func TestReportingWritesRecheckPersistedAccount(t *testing.T) {
 		handler    func(*core.RequestEvent) error
 	}{
 		{"/review/create", fmt.Sprintf(`{"arcade":%q,"message":"new inquiry"}`, arcadeID), 404, arcadeadmin.CreateSupportFeedback},
-		{"/review/reply", fmt.Sprintf(`{"feedbackId":%q,"message":"reply"}`, feedback.Id), 404, arcadeadmin.ReplySupportFeedback},
+		{"/review/reply", fmt.Sprintf(`{"feedbackId":%q,"message":"reply"}`, feedbackID), 404, arcadeadmin.ReplySupportFeedback},
 		{"/review/settings", fmt.Sprintf(`{"arcade":%q,"mode":"internal"}`, arcadeID), 403, reporting.UpdateSettings},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
@@ -122,7 +125,7 @@ func TestReportingWritesRecheckPersistedAccount(t *testing.T) {
 			}
 		})
 	}
-	messages, err := app.FindRecordsByFilter("support_feedback_message", "feedback={:id}", "", 0, 0, map[string]any{"id": feedback.Id})
+	messages, err := app.FindRecordsByFilter(messaging.Messages, "conversation={:id} && sequence>1", "", 0, 0, map[string]any{"id": feedbackID})
 	if err != nil || len(messages) != 0 {
 		t.Fatal("revoked account posted a reply", err)
 	}

@@ -140,7 +140,7 @@ func Visible(app core.App, user, row *core.Record) bool {
 		return err == nil && active
 	}
 	if row.GetString("kind") == "feedback_reply" || row.GetString("kind") == "feedback_created" {
-		return feedbackVisible(app, user, row)
+		return false
 	}
 	if user == nil || user.GetBool("withdrawn") || row.GetString("user") != user.Id {
 		return false
@@ -164,9 +164,7 @@ func Item(app core.App, row *core.Record) map[string]any {
 	if row.GetString("kind") == ArcadeSetupKind {
 		return arcadeSetupItem(app, row)
 	}
-	if row.GetString("kind") == "feedback_reply" || row.GetString("kind") == "feedback_created" {
-		return feedbackItem(app, row)
-	}
+
 	name, game, message, reaction := "", "", "", ""
 	if arcade, err := app.FindRecordById("arcade", row.GetString("arcade")); err == nil {
 		if basic, err := app.FindRecordById("arcade_basic", arcade.GetString("basic")); err == nil {

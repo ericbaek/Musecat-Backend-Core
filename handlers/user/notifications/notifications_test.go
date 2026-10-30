@@ -133,18 +133,21 @@ func TestInboxBoundedPagingAndCurrentVisibility(t *testing.T) {
 	// Feedback shares the current access check across reply/created event kinds,
 	// but never carries staff authorization into the next polling request.
 	exec("DELETE FROM user_notification", nil)
-	exec("INSERT INTO support_feedback (id, createdBy) VALUES ('inquiry00000001', 'anotheruser0001')", nil)
-	for i, kind := range []string{"feedback_created", "feedback_reply"} {
+	exec("INSERT INTO user (id,username,tags) VALUES ('inboxrecipient1','recipient','[\"moderator\"]')", nil)
+	exec("INSERT INTO messaging_conversation (id,kind) VALUES ('inquiry00000001','inquiry')", nil)
+	exec("INSERT INTO messaging_inquiry (id,conversation,requester,inbox_type,inbox_id) VALUES ('inquirycase0001','inquiry00000001','anotheruser0001','team','musecat')", nil)
+	for i, kind := range []string{"message", "message"} {
 		insert(i, "", kind, false)
 	}
-	exec("UPDATE user_notification SET feedback='inquiry00000001'", nil)
+	exec("UPDATE user_notification SET conversation='inquiry00000001'", nil)
 	user.Set("tags", []string{"moderator"})
 	app.sourceReads = 0
 	rows, unread, _, err = listInbox(app, user, "")
-	if err != nil || len(rows) != 2 || unread != 2 || app.sourceReads != 1 {
+	if err != nil || len(rows) != 1 || unread != 1 || app.sourceReads != 2 {
 		t.Fatalf("feedback staff access: len=%d unread=%d sources=%d err=%v", len(rows), unread, app.sourceReads, err)
 	}
 	user.Set("tags", []string{})
+	exec("UPDATE user SET tags='[]' WHERE id='inboxrecipient1'", nil)
 	rows, unread, _, err = listInbox(app, user, "")
 	if err != nil || len(rows) != 0 || unread != 0 {
 		t.Fatalf("revoked feedback access: len=%d unread=%d err=%v", len(rows), unread, err)

@@ -27,7 +27,6 @@ var telegramNotifyCollections = []string{
 	collectionUserBan,
 	collectionUserReport,
 	collectionArcadeRequestAtom,
-	arcadeinternal.CollectionSupportFeedback,
 	arcadeinternal.CollectionSupporterRequest,
 }
 
@@ -136,8 +135,6 @@ func buildCollectionCreateTelegramMessage(app core.App, rec *core.Record) (strin
 		return buildUserBanTelegramMessage(rec), true
 	case collectionUserReport:
 		return buildUserReportTelegramMessage(app, rec), true
-	case arcadeinternal.CollectionSupportFeedback:
-		return buildSupportFeedbackTelegramMessage(app, rec), true
 	case arcadeinternal.CollectionSupporterRequest:
 		return buildSupporterRequestTelegramMessage(app, rec), true
 	default:
@@ -218,30 +215,6 @@ func buildUserBanTelegramMessage(rec *core.Record) string {
 	}
 	appendTelegramField(&b, "until", until)
 	appendTelegramField(&b, "created", strings.TrimSpace(rec.GetString("created")))
-
-	return b.String()
-}
-
-func buildSupportFeedbackTelegramMessage(app core.App, rec *core.Record) string {
-	createdByID := strings.TrimSpace(rec.GetString("createdBy"))
-	createdBy := loadUserSummary(app, createdByID)
-
-	var b strings.Builder
-	b.WriteString("[")
-	b.WriteString(arcadeinternal.CollectionSupportFeedback)
-	b.WriteString("]\n")
-	appendTelegramField(&b, "id", rec.Id)
-	appendTelegramField(&b, "status", strings.TrimSpace(rec.GetString("status")))
-	appendTelegramField(&b, "createdBy", createdByID)
-	appendTelegramField(&b, "createdByUsername", createdBy.Username)
-	appendTelegramField(&b, "createdByEmail", createdBy.Email)
-	appendTelegramField(&b, "created", strings.TrimSpace(rec.GetString("created")))
-
-	message := strings.TrimSpace(rec.GetString("message"))
-	if message != "" {
-		b.WriteString("message:\n")
-		b.WriteString(message)
-	}
 
 	return b.String()
 }

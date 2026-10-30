@@ -469,3 +469,8 @@ owners may review all their arcades through the scoped setup endpoint.
 not the base price. Base `value` may remain null for a PASELI-only price. Existing
 prices and immutable history are not migrated. Representative guest rows retain
 the PASELI amount alongside the base amount.
+
+
+### Notice presentation and inquiry configuration
+
+Notice titles and required/pinned display modes preserve the existing standalone notice history, timestamps and XP behavior. Current official accounts may manage legacy notices for their owned arcade. Active required/pinned caps are enforced atomically. Inquiry bot configuration is operational inbox policy and creates no arcade changelog entries or XP; existing conversation flow snapshots remain unchanged.

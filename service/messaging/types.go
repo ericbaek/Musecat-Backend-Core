@@ -17,18 +17,27 @@ type Attachment struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
 }
+type InquiryStatusChange struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
 type Message struct {
-	ID              string       `json:"id"`
-	ConversationID  string       `json:"conversationId"`
-	Sequence        int          `json:"sequence"`
-	SenderUserID    string       `json:"senderUserId"`
-	Sender          Party        `json:"sender"`
-	ActingAs        Party        `json:"actingAs"`
-	ClientMessageID string       `json:"clientMessageId"`
-	Text            string       `json:"text"`
-	Mentions        []string     `json:"mentions"`
-	Photos          []Attachment `json:"photos"`
-	CreatedAt       string       `json:"createdAt"`
+	StatusChange    *InquiryStatusChange `json:"statusChange,omitempty"`
+	BotCanRestart   bool                 `json:"botCanRestart"`
+	Automated       bool                 `json:"automated"`
+	BotChoices      []BotChoice          `json:"botChoices"`
+	ID              string               `json:"id"`
+	ConversationID  string               `json:"conversationId"`
+	Sequence        int                  `json:"sequence"`
+	SenderUserID    string               `json:"senderUserId"`
+	Sender          Party                `json:"sender"`
+	ActingAs        Party                `json:"actingAs"`
+	ClientMessageID string               `json:"clientMessageId"`
+	Text            string               `json:"text"`
+	Mentions        []string             `json:"mentions"`
+	Photos          []Attachment         `json:"photos"`
+	CreatedAt       string               `json:"createdAt"`
 }
 type Summary struct {
 	ID                       string     `json:"id"`
@@ -37,12 +46,14 @@ type Summary struct {
 	Inbox                    *Party     `json:"inbox"`
 	Requester                *Party     `json:"requester"`
 	Status                   *string    `json:"status"`
+	GuestChat                bool       `json:"guestChat"`
 	LegacyFeedbackID         *string    `json:"legacyFeedbackId"`
 	LatestSequence           int        `json:"latestSequence"`
 	LastMessage              *Message   `json:"lastMessage"`
 	LastMessageAt            *string    `json:"lastMessageAt"`
 	UnreadCount              int        `json:"unreadCount"`
 	LastReadSequence         int        `json:"lastReadSequence"`
+	CounterpartReadSequence  *int       `json:"counterpartReadSequence"`
 	CanSend                  bool       `json:"canSend"`
 	CanManageStatus          bool       `json:"canManageStatus"`
 	AllowedSenderIdentities  []Identity `json:"allowedSenderIdentities"`
@@ -60,6 +71,7 @@ type MessagePage struct {
 	NextAfterSequence  *int      `json:"nextAfterSequence"`
 }
 type SendInput struct {
+	BotChoice       *BotSelection      `json:"botChoice,omitempty"`
 	LegacyOriginal  bool               `json:"-"`
 	Text            string             `json:"text"`
 	Mentions        []string           `json:"mentions,omitempty"`
@@ -68,6 +80,9 @@ type SendInput struct {
 	Photos          []*filesystem.File `json:"-"`
 }
 type CreateInput struct {
+	BotRevision    string    `json:"botRevision,omitempty"`
+	InitialChoice  string    `json:"initialChoice,omitempty"`
+	InquiryContext string    `json:"inquiryContext,omitempty"`
 	Kind           string    `json:"kind"`
 	PeerUserID     string    `json:"peerUserId"`
 	Inbox          Identity  `json:"inbox"`

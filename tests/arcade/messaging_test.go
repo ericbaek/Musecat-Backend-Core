@@ -44,6 +44,9 @@ func TestMessagingDMPrivacyIdempotencyAndRead(t *testing.T) {
 	call("PUT", "/user/messaging/preferences", `{"receive":"everyone"}`, aToken, 200)
 	c := call("POST", "/user/conversations", fmt.Sprintf(`{"kind":"dm","peerUserId":%q}`, b.Id), aToken, 200)
 	id := c["id"].(string)
+	if c["counterpartReadSequence"] != float64(0) {
+		t.Fatal("new DM must have an unread peer cursor", c)
+	}
 	for _, token := range []string{staffToken, otherToken} {
 		call("GET", "/user/conversations/"+id, "", token, 404)
 		call("POST", "/user/conversations/"+id+"/messages", `{"text":"stolen","clientMessageId":"bad"}`, token, 404)
@@ -64,9 +67,15 @@ func TestMessagingDMPrivacyIdempotencyAndRead(t *testing.T) {
 	if got := call("GET", "/user/conversations/"+id, "", bToken, 200); got["lastReadSequence"] != float64(1) || got["unreadCount"] != float64(0) {
 		t.Fatal(got)
 	}
+	if got := call("GET", "/user/conversations/"+id, "", aToken, 200); got["counterpartReadSequence"] != float64(1) || got["lastReadSequence"] != float64(0) {
+		t.Fatal("peer receipt must not advance own read cursor", got)
+	}
 	list := call("GET", "/user/conversations", "", aToken, 200)
 	if len(list["items"].([]any)) != 1 {
 		t.Fatal(list)
+	}
+	if got := list["items"].([]any)[0].(map[string]any); got["counterpartReadSequence"] != float64(1) {
+		t.Fatal("list must include the persisted peer receipt", got)
 	}
 	call("PUT", "/user/messaging/blocks/"+a.Id, "", bToken, 204)
 	call("POST", "/user/conversations/"+id+"/messages", `{"text":"blocked","clientMessageId":"two"}`, aToken, 403)
@@ -146,7 +155,7 @@ func TestMessagingInquiry(t *testing.T) {
 		t.Fatal(m)
 	}
 	s, err := messaging.Get(app, a.Id, c.ID)
-	if err != nil || s.UnreadCount != 1 {
+	if err != nil || s.UnreadCount != 1 || s.CounterpartReadSequence != nil {
 		t.Fatal(s, err)
 	}
 	staff.Set("tags", []string{})

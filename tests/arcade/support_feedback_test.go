@@ -13,6 +13,7 @@ import (
 	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/security"
 
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
 )
@@ -40,7 +41,7 @@ func TestCreateSupportFeedback_Success(t *testing.T) {
 		Body:           strings.NewReader(`{"message":"arcade detail page fails to load after update"}`),
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
-			`"status":"waiting"`,
+			`"status":null`,
 			`"message":"arcade detail page fails to load after update"`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {
@@ -65,33 +66,20 @@ func TestCreateSupportFeedback_Success(t *testing.T) {
 			tb.Fatalf("expected createdBy empty for unauthenticated request, got %q", got)
 		}
 
-		rec, err := app.FindRecordById("support_feedback", feedbackID)
+		rec, err := app.FindFirstRecordByFilter(messaging.Inquiries, "legacy_feedback_id={:id}", map[string]any{"id": feedbackID})
 		if err != nil {
-			tb.Fatalf("failed to load support_feedback record: %v", err)
+			tb.Fatal(err)
 		}
-		if rec.GetString("status") != "waiting" {
-			tb.Fatalf("expected status waiting, got %q", rec.GetString("status"))
+		if rec.GetString("status") != "waiting" || rec.GetString("requester_type") != "guest" {
+			tb.Fatal("guest inquiry was not stored canonically")
 		}
-		if rec.GetString("createdBy") != "" {
-			tb.Fatalf("expected createdBy empty, got %q", rec.GetString("createdBy"))
+		if _, err := app.FindCollectionByNameOrId("support_feedback"); err == nil {
+			tb.Fatal("legacy collection exists in fresh Core")
 		}
-
-		if sentTelegramMessage == "" {
-			tb.Fatalf("expected telegram message to be sent")
-		}
-		if !strings.Contains(sentTelegramMessage, "[support_feedback]") {
-			tb.Fatalf("telegram message should include collection tag, got %q", sentTelegramMessage)
-		}
-		if !strings.Contains(sentTelegramMessage, feedbackID) {
-			tb.Fatalf("telegram message should include record id %q, got %q", feedbackID, sentTelegramMessage)
+		if sentTelegramMessage != "" || sentDiscordMessage != "" {
+			tb.Fatal("guest inquiry triggered legacy feedback broadcast")
 		}
 
-		if sentDiscordMessage == "" {
-			tb.Fatalf("expected discord message to be sent")
-		}
-		if !strings.Contains(sentDiscordMessage, "[support_feedback]") {
-			tb.Fatalf("discord message should include collection tag, got %q", sentDiscordMessage)
-		}
 	}
 
 	scenario.Test(t)
@@ -108,7 +96,7 @@ func TestCreateSupportFeedback_MultipartWithPhotos(t *testing.T) {
 		Headers:        headers,
 		ExpectedStatus: http.StatusOK,
 		ExpectedContent: []string{
-			`"status":"waiting"`,
+			`"status":null`,
 			`"photos":[`,
 		},
 		TestAppFactory: func(tb testing.TB) *tests.TestApp {
@@ -337,28 +325,29 @@ func seedSupportFeedback(
 ) string {
 	tb.Helper()
 
-	coll, err := app.FindCollectionByNameOrId("support_feedback")
+	viewer := messaging.Principal{UserID: createdBy}
+	if createdBy == "" {
+		viewer = messaging.Principal{GuestKey: strings.Repeat("a", 64)}
+	}
+	summary, _, err := messaging.CreateFor(app, viewer, messaging.CreateInput{Kind: "inquiry", Inbox: messaging.Identity{Type: "team", ID: "musecat"}, InitialMessage: messaging.SendInput{Text: message, ClientMessageID: security.RandomString(24)}})
 	if err != nil {
-		tb.Fatalf("failed to load support_feedback collection: %v", err)
+		tb.Fatal(err)
 	}
-
-	rec := core.NewRecord(coll)
-	rec.Set("message", message)
+	rec, err := app.FindFirstRecordByFilter(messaging.Inquiries, "conversation={:c}", map[string]any{"c": summary.ID})
+	if err != nil {
+		tb.Fatal(err)
+	}
 	rec.Set("status", status)
-	if createdBy != "" {
-		rec.Set("createdBy", createdBy)
-	}
-
 	if err := app.Save(rec); err != nil {
-		tb.Fatalf("failed to save support_feedback record: %v", err)
+		tb.Fatal(err)
 	}
-	return rec.Id
+	return summary.ID
 }
 
 func countSupportFeedback(tb testing.TB, app *tests.TestApp) (int, error) {
 	tb.Helper()
 
-	recs, err := app.FindRecordsByFilter("support_feedback", "", "", 0, 0, nil)
+	recs, err := app.FindRecordsByFilter(messaging.Inquiries, "", "", 0, 0, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -427,7 +416,7 @@ func TestReviewSupportFeedback(t *testing.T) {
 		tb.Helper()
 		defer res.Body.Close()
 
-		saved, err := app.FindRecordById("support_feedback", targetID)
+		saved, err := app.FindFirstRecordByFilter(messaging.Inquiries, "conversation={:c}", map[string]any{"c": targetID})
 		if err != nil {
 			tb.Fatalf("failed to load updated support feedback: %v", err)
 		}

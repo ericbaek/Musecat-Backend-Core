@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/pocketbase/dbx"
@@ -39,6 +40,24 @@ func ActiveUser(app core.App, id string) (*core.Record, error) {
 func inquiry(app core.App, id string) (*core.Record, error) {
 	return app.FindFirstRecordByFilter(Inquiries, "conversation={:id}", dbx.Params{"id": id})
 }
+
+// Persisted mention metadata surfaces arcade inquiries in personal chat lists
+// and staff realtime feeds. Dashboard management permissions remain separate.
+const musecatMentionSQL = `EXISTS(SELECT 1 FROM messaging_message m, json_each(m.mentions) mention WHERE m.conversation=c.id AND mention.value='musecat')`
+
+func mentionedConversations(app core.App, ids []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	raw, _ := json.Marshal(ids)
+	var rows []struct {
+		ID string `db:"id"`
+	}
+	err := app.DB().NewQuery("SELECT c.id FROM messaging_conversation c WHERE c.id IN (SELECT value FROM json_each({:ids})) AND " + musecatMentionSQL).Bind(dbx.Params{"ids": string(raw)}).All(&rows)
+	for _, row := range rows {
+		out[row.ID] = true
+	}
+	return out, err
+}
+
 func Responder(app core.App, u, c *core.Record) bool {
 	if supportfeedback.IsStaff(u) {
 		return true
@@ -51,7 +70,14 @@ func Responder(app core.App, u, c *core.Record) bool {
 	return supportfeedback.IsOfficial(app, u, f)
 }
 func Access(app core.App, userID, id string) (*core.Record, *core.Record, error) {
-	u, err := ActiveUser(app, userID)
+	c, p, err := access(app, Principal{UserID: userID}, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c, p.User, nil
+}
+func access(app core.App, viewer Principal, id string) (*core.Record, *participant, error) {
+	p, err := viewer.resolve(app)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -60,17 +86,17 @@ func Access(app core.App, userID, id string) (*core.Record, *core.Record, error)
 		return nil, nil, apis.NewNotFoundError("Conversation not found.", nil)
 	}
 	allowed := false
-	if c.GetString("kind") == "dm" {
-		_, err = app.FindFirstRecordByFilter(Parties, "conversation={:c} && party_type='user' && party_id={:u}", dbx.Params{"c": id, "u": userID})
+	if c.GetString("kind") == "dm" && p.Kind == "user" {
+		_, err = app.FindFirstRecordByFilter(Parties, "conversation={:c} && party_type='user' && party_id={:u}", dbx.Params{"c": id, "u": p.ID})
 		allowed = err == nil
 	} else if c.GetString("kind") == "inquiry" {
 		q, e := inquiry(app, id)
-		allowed = e == nil && (q.GetString("requester") == userID || Responder(app, u, q))
+		allowed = e == nil && (p.requests(q) || Responder(app, p.User, q))
 	}
 	if !allowed {
 		return nil, nil, apis.NewNotFoundError("Conversation not found.", nil)
 	}
-	return c, u, nil
+	return c, p, nil
 }
 func Receive(app core.App, userID string) string {
 	row, err := app.FindFirstRecordByFilter(Preferences, "user={:u}", dbx.Params{"u": userID})
@@ -96,14 +122,14 @@ func Peer(app core.App, id, user string) (string, error) {
 	}
 	return row.GetString("party_id"), nil
 }
-func actor(app core.App, u, c *core.Record, requested *Identity) (Identity, error) {
-	own := Identity{Type: "user", ID: u.Id}
+func actor(app core.App, u *participant, c *core.Record, requested *Identity) (Identity, error) {
+	own := Identity{Type: u.Kind, ID: u.ID}
 	if c.GetString("kind") == "dm" {
 		if requested != nil && *requested != own {
 			return own, apis.NewForbiddenError("Invalid sender identity.", nil)
 		}
-		peer, err := Peer(app, c.Id, u.Id)
-		if err != nil || !CanDM(app, u.Id, peer) {
+		peer, err := Peer(app, c.Id, u.ID)
+		if err != nil || !CanDM(app, u.ID, peer) {
 			return own, apis.NewForbiddenError("Recipient is unavailable.", nil)
 		}
 		return own, nil
@@ -112,7 +138,7 @@ func actor(app core.App, u, c *core.Record, requested *Identity) (Identity, erro
 	if err != nil {
 		return own, err
 	}
-	permissions := inquiryPolicy(u, q, Responder(app, u, q))
+	permissions := inquiryPolicy(u, q, Responder(app, u.User, q))
 	if requested == nil {
 		if len(permissions.identities) > 1 {
 			return own, apis.NewBadRequestError("Choose the sender identity.", nil)
@@ -135,11 +161,10 @@ type inquiryPermissions struct {
 	statuses   []string
 }
 
-func inquiryPolicy(u, q *core.Record, responder bool) inquiryPermissions {
+func inquiryPolicy(u *participant, q *core.Record, responder bool) inquiryPermissions {
 	p := inquiryPermissions{identities: []Identity{}, statuses: []string{}}
-	if q.GetString("requester") == u.Id {
-		p.identities = append(p.identities, Identity{"user", u.Id})
-		p.statuses = []string{"waiting", "solved"}
+	if u.requests(q) {
+		p.identities = append(p.identities, Identity{u.Kind, u.ID})
 	}
 	if responder {
 		p.identities = append(p.identities, Identity{q.GetString("inbox_type"), q.GetString("inbox_id")})

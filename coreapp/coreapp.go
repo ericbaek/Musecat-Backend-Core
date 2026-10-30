@@ -84,6 +84,8 @@ func configureDefaultRateLimits(app core.App) {
 		{Label: "GET /geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /reverse_geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geo", MaxRequests: 60, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /guest/conversations", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /guest/feedback/thread", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /support_feedback", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/feedback/thread", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 	}
@@ -107,6 +109,11 @@ func configureDefaultRateLimits(app core.App) {
 func RegisterAPIRoutes(se *core.ServeEvent) {
 	announcementhandler.RegisterRoutes(se)
 	messaginghandler.RegisterRoutes(se)
+	se.Router.GET("/guest/feedback", arcadeadmin.ListGuestSupportFeedback).Bind(arcadeadmin.RequireGuestFeedback())
+	se.Router.GET("/guest/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(arcadeadmin.RequireGuestFeedback())
+	se.Router.GET("/guest/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(arcadeadmin.RequireGuestFeedback())
+	se.Router.POST("/guest/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
+	se.Router.PATCH("/guest/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(4096))
 	se.Router.GET("/hello", handlers.HelloHandler)
 	se.Router.GET("/geo", handlers.GeoLookupHandler)
 	se.Router.GET("/geocode", handlers.GeocodeHandler)
