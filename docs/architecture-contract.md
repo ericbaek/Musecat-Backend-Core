@@ -1121,7 +1121,8 @@ synthetic users, never manufactures notifications, and initializes requester rea
 the imported last sequence while preserving existing notification unread flags.
 Message authors reference the current user through an optional, non-cascading
 `sender_user` relation. Messages store no copied name, avatar, or role attributes.
-Deleting an account preserves message content; a missing author displays as a
+Retry uniqueness applies only while a user or guest author reference exists, so
+clearing multiple deleted authors cannot collide. Deleting an account preserves message content; a missing author displays as a
 deleted user. Acting user, arcade, team, and guest identities remain separate.
 
 Arcade requester messages notify current official responders by default. Platform

@@ -166,3 +166,33 @@ func TestMessagingUserReferenceDoesNotDeleteMessages(t *testing.T) {
 		t.Fatal("deleted account lost message or profile fallback", history, err)
 	}
 }
+
+func TestMessagingDeletingBothAuthorsPreservesReusedClientMessageIDs(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, first := createAuthUserWithTags(t, app, []string{})
+	_, second := createAuthUserWithTags(t, app, []string{})
+	room, err := messaging.Create(app, first.Id, messaging.CreateInput{Kind: "dm", PeerUserID: second.Id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{}
+	for _, author := range []string{first.Id, second.Id} {
+		message, _, err := messaging.Send(app, author, room.ID, messaging.SendInput{Text: "Keep both", ClientMessageID: "same-local-id"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, message.ID)
+	}
+	if err := app.Delete(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Delete(second); err != nil {
+		t.Fatal("account deletion collided with another removed sender", err)
+	}
+	for _, id := range ids {
+		message, err := app.FindRecordById(messaging.Messages, id)
+		if err != nil || message.GetString("text") != "Keep both" {
+			t.Fatal("message lost", err)
+		}
+	}
+}

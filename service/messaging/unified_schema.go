@@ -32,7 +32,7 @@ func EnsureUnifiedSchema(app core.App) error {
 			if name == Messages {
 				col.RemoveIndex("idx_messaging_retry")
 				col.RemoveIndex("idx_messaging_initial_retry")
-				col.Indexes = append(col.Indexes, "CREATE UNIQUE INDEX idx_messaging_retry ON messaging_message (conversation,sender_user,sender_guest,client_message_id)")
+				col.Indexes = append(col.Indexes, "CREATE UNIQUE INDEX idx_messaging_retry ON messaging_message (conversation,sender_user,sender_guest,client_message_id) WHERE sender_user!='' OR sender_guest!=''")
 				col.Indexes = append(col.Indexes, "CREATE INDEX idx_messaging_initial_retry ON messaging_message (sender_user,sender_guest,client_message_id) WHERE sequence=1")
 			} else {
 				col.RemoveIndex("idx_messaging_guest")
