@@ -16,7 +16,11 @@ func LegacyMessage(m Message) map[string]any {
 		names = append(names, p.Name)
 	}
 	staff := slices.Contains(m.Sender.RoleTags, "staff") || slices.Contains(m.Sender.RoleTags, "moderator") || slices.Contains(m.Sender.RoleTags, "developer")
-	return map[string]any{"id": m.ID, "message": m.Text, "author": m.SenderUserID, "staff": staff, "official": !staff && m.ActingAs.Type == "arcade", "created": m.CreatedAt, "photos": names}
+	out := map[string]any{"id": m.ID, "message": m.Text, "author": m.SenderUserID, "staff": staff, "official": !staff && m.ActingAs.Type == "arcade", "created": m.CreatedAt, "photos": names}
+	if m.StatusChange != nil {
+		out["statusChange"] = m.StatusChange
+	}
+	return out
 }
 func LegacyItem(app core.App, s Summary) (map[string]any, error) {
 	first, err := app.FindFirstRecordByFilter(Messages, "conversation={:c} && sequence=1", dbx.Params{"c": s.ID})

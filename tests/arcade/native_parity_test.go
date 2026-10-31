@@ -150,7 +150,11 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 	call("GET", "/native/user/feedback/thread?id="+id, foreign, "", 404)
 	replyBody := fmt.Sprintf(`{"feedbackId":%q,"message":"Read this local reply"}`, id)
 	call("POST", "/native/user/feedback/thread", foreign, replyBody, 404)
-	call("POST", "/native/user/feedback/thread", moderator, replyBody, 201)
+	staffReply := call("POST", "/native/user/feedback/thread", moderator, replyBody, 201)
+	change, ok := staffReply["statusChange"].(map[string]any)
+	if !ok || change["from"] != "waiting" || change["to"] != "recognised" {
+		t.Fatal("native responder reply lost its automatic status transition", staffReply)
+	}
 	thread := call("GET", "/native/user/feedback/thread?id="+id, token, "", 200)
 	if len(thread["items"].([]any)) != 1 || thread["feedback"].(map[string]any)["status"] != nil {
 		t.Fatal(thread)
@@ -162,6 +166,9 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 	reply := thread["items"].([]any)[0].(map[string]any)
 	if reply["author"] != staff.Id || reply["message"] != "Read this local reply" || reply["staff"] != true {
 		t.Fatal("canonical reply changed its native author or text", reply)
+	}
+	if _, exists := reply["statusChange"]; exists {
+		t.Fatal("native requester received internal transition metadata on a text reply", reply)
 	}
 	inbox := call("GET", "/native/user/notifications", token, "", 200)
 	items := inbox["items"].([]any)
@@ -207,15 +214,33 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 	if err != nil || countErr != nil || afterDenied.LatestSequence != beforeDeniedSequence || afterDeniedNotifications != beforeDeniedNotifications {
 		t.Fatal("denied status mutations changed messages or notifications", afterDenied, err, countErr)
 	}
-	for _, status := range responder.AllowedStatusTransitions {
+	previousStatus := "recognised"
+	for index, status := range responder.AllowedStatusTransitions {
 		receipt := call("PATCH", "/native/user/feedback/thread", moderator, fmt.Sprintf(`{"feedbackId":%q,"status":%q}`, id, status), 200)
 		if receipt["status"] != status {
 			t.Fatal("native responder status receipt differs from the permitted transition", receipt)
 		}
+		internal := call("GET", "/native/user/feedback/thread?id="+id, moderator, "", 200)
+		history := internal["items"].([]any)
+		if len(history) != index+2 {
+			t.Fatal("native responder lost its text reply or status-only history", internal)
+		}
+		entry := history[len(history)-1].(map[string]any)
+		change, ok := entry["statusChange"].(map[string]any)
+		if !ok || change["from"] != previousStatus || change["to"] != status || entry["message"] != "" || len(entry["photos"].([]any)) != 0 || entry["author"] != staff.Id || entry["staff"] != true || entry["official"] != false || entry["created"] == "" {
+			t.Fatal("native responder status-only history lost its transition or existing reply fields", entry)
+		}
+		previousStatus = status
 	}
 	afterStatus := call("GET", "/native/user/feedback/thread?id="+id, token, "", 200)
 	if afterStatus["feedback"].(map[string]any)["status"] != nil || len(afterStatus["items"].([]any)) != 1 || len(afterStatus["allowedStatusTransitions"].([]any)) != 0 || afterStatus["canSend"] != true {
 		t.Fatal("internal status or status-history entries leaked to the requester", afterStatus)
+	}
+	for _, item := range afterStatus["items"].([]any) {
+		entry := item.(map[string]any)
+		if _, exists := entry["statusChange"]; exists || entry["message"] != "Read this local reply" {
+			t.Fatal("native requester JSON leaked internal transition history", entry)
+		}
 	}
 	call("POST", "/native/user/notifications/read", foreign, fmt.Sprintf(`{"id":%q}`, notification["id"]), 200)
 	if untouched := call("GET", "/native/user/notifications", token, "", 200); untouched["unread"] != float64(1) {
@@ -224,6 +249,19 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 	call("POST", "/native/user/notifications/read", token, fmt.Sprintf(`{"id":%q}`, notification["id"]), 200)
 	if read := call("GET", "/native/user/notifications", token, "", 200); read["unread"] != float64(0) {
 		t.Fatal("native acknowledgement did not clear the canonical reply notification", read)
+	}
+	followup := call("POST", "/native/user/feedback/thread", token, fmt.Sprintf(`{"feedbackId":%q,"message":"Requester follow-up"}`, id), 201)
+	if _, exists := followup["statusChange"]; exists || followup["message"] != "Requester follow-up" {
+		t.Fatal("native requester send receipt exposed the internal automatic transition", followup)
+	}
+	requesterHistory := call("GET", "/native/user/feedback/thread?id="+id, token, "", 200)
+	if len(requesterHistory["items"].([]any)) != 2 || requesterHistory["feedback"].(map[string]any)["status"] != nil {
+		t.Fatal("native requester follow-up changed the filtered history contract", requesterHistory)
+	}
+	for _, item := range requesterHistory["items"].([]any) {
+		if _, exists := item.(map[string]any)["statusChange"]; exists {
+			t.Fatal("native requester follow-up history exposed an internal transition", item)
+		}
 	}
 	call("POST", "/user/feedback/thread", token, replyBody, 401)
 	call("POST", "/native/arcade/request_admin", token, `{"message":"Native review request"}`, 200)

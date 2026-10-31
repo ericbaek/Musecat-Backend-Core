@@ -1649,7 +1649,13 @@ message. A same-status action is a no-op; message retries retain the original
 transition without duplication. History, delta and realtime invalidation use the
 existing conversation permissions and sequence. Status-only entries do not
 create push notifications or requester SSE events, unread increments, sidebar preview changes or sorting changes. Requester history filters textless status entries before pagination, strips transition metadata from ordinary messages and send/retry responses, and returns null status and empty transitions. Legacy adapters follow the same projection. Prior history is preserved without inventing past
-transitions. Full owns the guarded additive `status_change` JSON-field migration;
+transitions. Legacy reply projections retain optional `statusChange: {from, to}`
+only when the canonical actor-filtered message contains it; they do not compute
+permissions again. A responder's status-only legacy entry keeps `message:""`,
+`photos:[]`, and the existing author/role/timestamp fields so clients can render a
+status event instead of an empty reply. Requester history still excludes these
+entries, and requester text replies and send receipts omit the transition key.
+Full owns the guarded additive `status_change` JSON-field migration;
 Core only bootstraps it for fresh databases.
 
 Guest inquiries use the canonical messaging store and browser-scoped credentials, never synthetic user accounts. Current guest access survives intake-policy changes. Reply bots snapshot their owner configuration per inquiry; requester choices are validated and sequenced atomically. DM read cursors belong to each actual account and expose the counterpart cursor only for direct messages.

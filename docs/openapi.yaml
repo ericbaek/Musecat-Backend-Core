@@ -140,13 +140,31 @@ components:
                   properties:
                     image: {type: string}
                     alt: {type: string, maxLength: 3000}
+    LegacyFeedbackReply:
+      type: object
+      required: [id, message, author, staff, official, created, photos]
+      properties:
+        id: {type: string}
+        message: {type: string, description: Empty for a status-only entry visible to current responders.}
+        author: {type: string}
+        staff: {type: boolean}
+        official: {type: boolean}
+        created: {type: string}
+        photos: {type: array, items: {type: string}}
+        statusChange:
+          type: object
+          description: Optional server-authored transition from the canonical actor-filtered message. Omitted for requesters, including on ordinary text replies. Status-only entries are excluded entirely from requester history.
+          required: [from, to]
+          properties:
+            from: {type: string, enum: [waiting, recognised, solved]}
+            to: {type: string, enum: [waiting, recognised, solved]}
     LegacyFeedbackThread:
       type: object
       required: [conversationId, feedback, items, next, allowedStatusTransitions, canSend]
       properties:
         conversationId: {type: string}
         feedback: {type: object, description: Original inquiry projection; status is null for requesters.}
-        items: {type: array, items: {type: object}, description: Chronological legacy reply projections.}
+        items: {type: array, items: {$ref: '#/components/schemas/LegacyFeedbackReply'}, description: Chronological actor-filtered legacy reply projections.}
         next: {type: string, description: Older-page cursor or empty at end.}
         allowedStatusTransitions:
           type: array
@@ -7498,7 +7516,11 @@ paths:
                   items: {type: string, format: binary}
                   description: Images (content-sniffed, matching initial inquiry uploads); at most 15,000,000 bytes per file. Text or at least one photo is required.
       responses:
-        '201': {description: Persisted reply with server-derived author, staff/official role, and photos filename array. Reply photo bytes require the private thread/photo endpoint.}
+        '201':
+          description: Persisted reply with server-derived author, staff/official role, and photos filename array. Reply photo bytes require the private thread/photo endpoint.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegacyFeedbackReply'}
         '400': {description: Invalid reply}
         '401': {description: Authentication required}
         '404': {description: Missing or inaccessible inquiry}
@@ -9492,7 +9514,11 @@ x-musecat-joint-connection:
       requestBody:
         $ref: '#/paths/~1user~1feedback~1thread/post/requestBody'
       responses:
-        '201': {description: Persisted reply}
+        '201':
+          description: Persisted reply
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegacyFeedbackReply'}
         '400': {description: Invalid reply}
         '401': {description: Missing or malformed guest key}
         '404': {description: Missing or foreign inquiry}
@@ -13192,7 +13218,11 @@ x-musecat-joint-connection:
                   items: {type: string, format: binary}
                   description: Images (content-sniffed, matching initial inquiry uploads); at most 15,000,000 bytes per file. Text or at least one photo is required.
       responses:
-        '201': {description: Persisted reply with server-derived author, staff/official role, and photos filename array. Reply photo bytes require the private thread/photo endpoint.}
+        '201':
+          description: Persisted reply with server-derived author, staff/official role, and photos filename array. Reply photo bytes require the private thread/photo endpoint.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegacyFeedbackReply'}
         '400': {description: Invalid reply}
         '401': {description: Authentication required}
         '404': {description: Missing or inaccessible inquiry}
