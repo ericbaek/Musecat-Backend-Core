@@ -56,6 +56,7 @@ import (
 type Config struct {
 	// NativeAuthClients is an exact first-party device client/callback allowlist. Empty disables all native routes.
 	NativeAuthClients []nativeauth.Client
+	NativeWebClients  []nativeauth.WebClient
 	Delegation        *delegation.Manager
 	Connections       *connections.Manager
 	// Joint enables reciprocal consent for registered partners.
@@ -89,7 +90,7 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se, config.Connections)
-		nativeauth.RegisterRoutes(se, config.NativeAuthClients)
+		nativeauth.RegisterRoutes(se, config.NativeAuthClients, config.NativeWebClients...)
 		partnerApps := config.PartnerApps
 		if partnerApps == nil {
 			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, config.Joint, "")
