@@ -1654,7 +1654,11 @@ read-state changes never select another account from query input. The entire
 surface remains no-store and disabled with an empty native allowlist. Web JWTs
 do not authenticate these aliases and native tokens still do not authenticate
 ordinary web or partner routes. These routes add no schema or migration and do
-not enable APNs, passport trust/reset or general domain writes.
+not enable APNs or general domain writes. `Config.NativeRoutes` optionally lets
+the executable add its own domain aliases to the already authenticated, active
+native group. It is not called with an empty native allowlist. Full uses this
+extension for its existing passport trust/reset handlers; Core neither owns nor
+imports that Full-only policy.
 
 
 Guest inquiries use the canonical messaging store and browser-scoped credentials, never synthetic user accounts. Current guest access survives intake-policy changes. Reply bots snapshot their owner configuration per inquiry; requester choices are validated and sequenced atomically. DM read cursors belong to each actual account and expose the counterpart cursor only for direct messages.
