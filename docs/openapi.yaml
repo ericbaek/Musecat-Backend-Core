@@ -140,6 +140,19 @@ components:
                   properties:
                     image: {type: string}
                     alt: {type: string, maxLength: 3000}
+    LegacyFeedbackThread:
+      type: object
+      required: [conversationId, feedback, items, next, allowedStatusTransitions, canSend]
+      properties:
+        conversationId: {type: string}
+        feedback: {type: object, description: Original inquiry projection; status is null for requesters.}
+        items: {type: array, items: {type: object}, description: Chronological legacy reply projections.}
+        next: {type: string, description: Older-page cursor or empty at end.}
+        allowedStatusTransitions:
+          type: array
+          items: {type: string, enum: [waiting, recognised, solved]}
+          description: Same actor's canonical summary capability; empty for requesters, all three values for current responders.
+        canSend: {type: boolean, description: Same actor's current canonical sending capability; solved alone does not disable sending.}
     MessagingReport: {"type": "object", "properties": {"id": {"type": "string"}, "reporterId": {"type": "string"}, "messageId": {"type": "string"}, "reason": {"type": "string"}, "createdAt": {"type": "string"}, "message": {"$ref": "#/components/schemas/MessagingMessage"}}, "required": ["id", "reporterId", "messageId", "reason", "createdAt", "message"]}
     MessagingParty: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}, "name": {"type": "string"}, "avatarUrl": {"type": "string", "nullable": true}, "roleTags": {"type": "array", "items": {"type": "string"}}}, "required": ["type", "id", "name", "avatarUrl", "roleTags"]}
     MessagingIdentity: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "guest", "arcade", "team"]}, "id": {"type": "string"}}, "required": ["type", "id"]}
@@ -7452,6 +7465,9 @@ paths:
       responses:
         '200':
           description: Original inquiry, attachment filenames, chronological items and older-page cursor. conversationId identifies the canonical messaging inquiry for both account and guest authors. Private no-store.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegacyFeedbackThread'}
         '401': {description: Authentication required}
         '404': {description: Missing or inaccessible inquiry}
     post:
@@ -9458,7 +9474,11 @@ x-musecat-joint-connection:
         - {in: query, name: id, required: true, schema: {type: string}}
         - {in: query, name: before, schema: {type: string}}
       responses:
-        '200': {description: Same thread envelope as /user/feedback/thread with guestChat true; newest 50 replies and private cursor.}
+        '200':
+          description: Same thread envelope as /user/feedback/thread with guestChat true; newest 50 replies and private cursor.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegacyFeedbackThread'}
         '401': {description: Missing or malformed guest key}
         '404': {description: Missing or foreign inquiry}
     post:
@@ -13132,6 +13152,9 @@ x-musecat-joint-connection:
       responses:
         '200':
           description: Original inquiry, conversationId, attachment filenames, chronological items and older-page cursor. Requesters receive feedback.status=null and no internal status-history entries; current responders retain their internal status. Private no-store.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LegacyFeedbackThread'}
         '401': {description: Authentication required}
         '404': {description: Missing or inaccessible inquiry}
     post:

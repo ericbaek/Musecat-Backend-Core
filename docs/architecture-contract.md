@@ -1379,8 +1379,12 @@ status contract: authenticated `/native/support_feedback` creates canonical
 conversations, and `/native/user/feedback` plus its thread routes project the legacy
 shape with `conversationId` and nullable `status`. Requesters receive `status:null`
 and cannot resolve/reopen an inquiry; those PATCH attempts return 400 without
-changing messages or notifications. Current responders alone receive and may use
-the canonical `allowedStatusTransitions`; the existing native thread PATCH accepts
+changing messages or notifications. Shared legacy thread GET responses expose
+top-level `allowedStatusTransitions: string[]` and `canSend: boolean` directly from
+the same actor's canonical summary. Both fields are always present; requesters
+receive an empty transitions array and their current sending capability. Current
+responders alone receive and may use the three canonical transitions
+`waiting`, `recognised`, `solved`; the existing native thread PATCH accepts
 waiting/solved and the strict-reviewer PUT accepts recognised as well. Internal
 status history remains hidden from requesters, who can still send follow-ups.
 Replies notify the requester through the existing inbox with `kind:"message"`

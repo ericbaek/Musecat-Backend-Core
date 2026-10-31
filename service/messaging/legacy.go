@@ -85,7 +85,7 @@ func LegacyThreadFor(app core.App, viewer Principal, cid, beforeID string) (map[
 	if page.NextBeforeSequence != nil && len(items) > 0 {
 		next = items[0]["id"].(string)
 	}
-	return map[string]any{"conversationId": cid, "feedback": feedback, "items": items, "next": next}, nil
+	return map[string]any{"conversationId": cid, "feedback": feedback, "items": items, "next": next, "allowedStatusTransitions": s.AllowedStatusTransitions, "canSend": s.CanSend}, nil
 }
 func LegacyList(app core.App, user, createdBy, arcade, status string) ([]map[string]any, error) {
 	return LegacyListFor(app, Principal{UserID: user}, createdBy, arcade, status)

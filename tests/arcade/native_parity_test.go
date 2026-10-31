@@ -155,6 +155,10 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 	if len(thread["items"].([]any)) != 1 || thread["feedback"].(map[string]any)["status"] != nil {
 		t.Fatal(thread)
 	}
+	requesterTransitions, ok := thread["allowedStatusTransitions"].([]any)
+	if !ok || len(requesterTransitions) != 0 || thread["canSend"] != true {
+		t.Fatal("native requester thread lost its explicit canonical capabilities", thread)
+	}
 	reply := thread["items"].([]any)[0].(map[string]any)
 	if reply["author"] != staff.Id || reply["message"] != "Read this local reply" || reply["staff"] != true {
 		t.Fatal("canonical reply changed its native author or text", reply)
@@ -175,6 +179,16 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 	responder, err := messaging.Get(app, staff.Id, id)
 	if err != nil || !responder.CanManageStatus || strings.Join(responder.AllowedStatusTransitions, ",") != "waiting,recognised,solved" {
 		t.Fatal("current responder lost its authoritative status transitions", responder, err)
+	}
+	responderThread := call("GET", "/native/user/feedback/thread?id="+id, moderator, "", 200)
+	responderTransitions, ok := responderThread["allowedStatusTransitions"].([]any)
+	if !ok || len(responderTransitions) != 3 || responderThread["canSend"] != responder.CanSend || !responder.CanSend {
+		t.Fatal("native responder thread lost its canonical capabilities", responderThread)
+	}
+	for i, status := range responder.AllowedStatusTransitions {
+		if responderTransitions[i] != status {
+			t.Fatal("native responder transitions differ from canonical policy", responderThread)
+		}
 	}
 	beforeDeniedSequence := responder.LatestSequence
 	beforeDeniedNotifications, err := app.CountRecords("user_notification")
@@ -205,7 +219,7 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 		}
 	}
 	afterStatus := call("GET", "/native/user/feedback/thread?id="+id, token, "", 200)
-	if afterStatus["feedback"].(map[string]any)["status"] != nil || len(afterStatus["items"].([]any)) != 1 {
+	if afterStatus["feedback"].(map[string]any)["status"] != nil || len(afterStatus["items"].([]any)) != 1 || len(afterStatus["allowedStatusTransitions"].([]any)) != 0 || afterStatus["canSend"] != true {
 		t.Fatal("internal status or status-history entries leaked to the requester", afterStatus)
 	}
 	call("POST", "/native/user/notifications/read", foreign, fmt.Sprintf(`{"id":%q}`, notification["id"]), 200)
