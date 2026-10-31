@@ -17088,6 +17088,101 @@ paths:
         '403': {description: Account is inactive or banned.}
         '413': {description: Request body exceeds 4096 bytes.}
 
+  /native/user/visits:
+    get:
+      tags: [Users]
+      summary: Native owner visit summary
+      description: Reuses GET /user/visits and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
+      security: [{nativeSession: []}]
+      responses:
+        '200': {$ref: '#/paths/~1user~1visits/get/responses/200'}
+        '401': {description: Missing, expired or invalid native session.}
+        '403': {description: Account is inactive or banned.}
+        '502': {description: Failed to load the canonical read.}
+
+  /native/user/passport:
+    get:
+      tags: [Users]
+      summary: Native owner or shared passport
+      description: Reuses GET /user/passport and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
+      security: [{nativeSession: []}]
+      parameters:
+        - {$ref: '#/paths/~1user~1passport/get/parameters/0'}
+        - {$ref: '#/paths/~1user~1passport/get/parameters/1'}
+      responses:
+        '200': {$ref: '#/paths/~1user~1passport/get/responses/200'}
+        '400': {description: Invalid filter or pagination.}
+        '401': {description: Missing, expired or invalid native session.}
+        '403': {description: Account is inactive or banned.}
+        '404': {description: Private, missing or withdrawn target profile.}
+        '502': {description: Failed to load the canonical read.}
+
+  /native/user/passport/stamps:
+    get:
+      tags: [Users]
+      summary: Native owner or shared passport stamps
+      description: Reuses GET /user/passport/stamps and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
+      security: [{nativeSession: []}]
+      parameters:
+        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/0'}
+        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/1'}
+        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/2'}
+        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/3'}
+        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/4'}
+        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/5'}
+        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/6'}
+      responses:
+        '200': {$ref: '#/paths/~1user~1passport~1stamps/get/responses/200'}
+        '400': {description: Invalid filter or pagination.}
+        '401': {description: Missing, expired or invalid native session.}
+        '403': {description: Account is inactive or banned.}
+        '404': {description: Private, missing or withdrawn target profile.}
+        '502': {description: Failed to load the canonical read.}
+
+  /native/rankings:
+    get:
+      tags: [Users]
+      summary: Native authenticated rankings and viewer
+      description: Reuses GET /rankings and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
+      security: [{nativeSession: []}]
+      parameters:
+        - {$ref: '#/paths/~1rankings/get/parameters/0'}
+        - {$ref: '#/paths/~1rankings/get/parameters/1'}
+      responses:
+        '200': {$ref: '#/paths/~1rankings/get/responses/200'}
+        '400': {description: Invalid filter or pagination.}
+        '401': {description: Missing, expired or invalid native session.}
+        '403': {description: Account is inactive or banned.}
+        '502': {description: Failed to load the canonical read.}
+
+  /native/user/notifications:
+    get:
+      tags: [Users]
+      summary: Native account notification inbox
+      description: Reuses GET /user/notifications and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
+      security: [{nativeSession: []}]
+      parameters:
+        - {$ref: '#/paths/~1user~1notifications/get/parameters/0'}
+        - {$ref: '#/paths/~1user~1notifications/get/parameters/1'}
+      responses:
+        '200': {$ref: '#/paths/~1user~1notifications/get/responses/200'}
+        '401': {description: Missing, expired or invalid native session.}
+        '403': {description: Account is inactive or banned.}
+
+  /native/user/notifications/read:
+    post:
+      tags: [Users]
+      summary: Mark native account notifications read
+      description: Reuses the canonical read-state handler. A selected id changes only the authenticated account; a foreign id is a successful no-op. All marks all notifications for that account only. Active opaque native session required; web JWTs are rejected. Body limit 4096 bytes and all responses are no-store. No APNs or device registration is enabled.
+      security: [{nativeSession: []}]
+      requestBody: {$ref: '#/paths/~1user~1notifications~1read/post/requestBody'}
+      responses:
+        '200': {$ref: '#/paths/~1user~1notifications~1read/post/responses/200'}
+        '400': {description: Invalid notification selection.}
+        '401': {description: Missing, expired or invalid native session.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
   /native/user/me:
     get:
       tags: [Users]

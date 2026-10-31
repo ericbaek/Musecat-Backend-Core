@@ -258,6 +258,12 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 		{"/native/session/refresh", "post", "", []string{"200", "401", "403", "413"}},
 		{"/native/session/revoke", "post", "", []string{"204", "400", "413"}},
 		{"/native/user/me", "get", "nativeSession", []string{"200", "401", "403"}},
+		{"/native/user/visits", "get", "nativeSession", []string{"200", "401", "403"}},
+		{"/native/user/passport", "get", "nativeSession", []string{"200", "400", "401", "403", "404"}},
+		{"/native/user/passport/stamps", "get", "nativeSession", []string{"200", "400", "401", "403", "404"}},
+		{"/native/rankings", "get", "nativeSession", []string{"200", "400", "401", "403"}},
+		{"/native/user/notifications", "get", "nativeSession", []string{"200", "401", "403"}},
+		{"/native/user/notifications/read", "post", "nativeSession", []string{"200", "400", "401", "403", "413"}},
 	} {
 		op := contract.Paths[route.path].Post
 		if route.method == "get" {

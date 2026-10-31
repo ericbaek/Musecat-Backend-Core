@@ -90,7 +90,7 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se, config.Connections)
-		nativeauth.RegisterRoutes(se, config.NativeAuthClients, config.NativeWebClients...)
+		RegisterNativeAPIRoutes(se, config.NativeAuthClients, config.NativeWebClients...)
 		partnerApps := config.PartnerApps
 		if partnerApps == nil {
 			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, config.Joint, "")
@@ -120,6 +120,22 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		RegisterAccountDelegationRoutes(se, config.Delegation)
 		return se.Next()
 	})
+}
+
+// RegisterNativeAPIRoutes reuses canonical reads and inbox read state behind active opaque device sessions.
+// Domain handlers retain their existing visibility and account ownership policies.
+func RegisterNativeAPIRoutes(se *core.ServeEvent, clients []nativeauth.Client, webClients ...nativeauth.WebClient) *router.RouterGroup[*core.RequestEvent] {
+	secured := nativeauth.RegisterRoutes(se, clients, webClients...)
+	if secured == nil {
+		return nil
+	}
+	secured.GET("/user/visits", userhandler.GetMyVisits)
+	secured.GET("/user/passport", userhandler.GetMyPassport)
+	secured.GET("/user/passport/stamps", userhandler.GetMyPassportStamps)
+	secured.GET("/rankings", rankinghandler.List)
+	secured.GET("/user/notifications", usernotifications.List)
+	secured.POST("/user/notifications/read", usernotifications.Read)
+	return secured
 }
 
 func configureDefaultRateLimits(app core.App) {
