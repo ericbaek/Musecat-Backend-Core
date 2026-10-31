@@ -57,8 +57,11 @@ type Config struct {
 	// NativeAuthClients is an exact first-party device client/callback allowlist. Empty disables all native routes.
 	NativeAuthClients []nativeauth.Client
 	NativeWebClients  []nativeauth.WebClient
-	Delegation        *delegation.Manager
-	Connections       *connections.Manager
+	// NativeRoutes lets the executable register domain aliases behind the native session guard.
+	// It is never called when the native client allowlist is empty.
+	NativeRoutes func(*router.RouterGroup[*core.RequestEvent])
+	Delegation   *delegation.Manager
+	Connections  *connections.Manager
 	// Joint enables reciprocal consent for registered partners.
 	Joint *connections.JointManager
 	// PartnerApps is the Developer Center service. Executables that register its
@@ -90,7 +93,9 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se, config.Connections)
-		RegisterNativeAPIRoutes(se, config.NativeAuthClients, config.NativeWebClients...)
+		if secured := RegisterNativeAPIRoutes(se, config.NativeAuthClients, config.NativeWebClients...); secured != nil && config.NativeRoutes != nil {
+			config.NativeRoutes(secured)
+		}
 		partnerApps := config.PartnerApps
 		if partnerApps == nil {
 			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, config.Joint, "")
