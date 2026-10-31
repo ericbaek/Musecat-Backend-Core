@@ -66,6 +66,11 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    nativeSession:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: First-party device access credential; never a web JWT or delegated partner token.
   parameters:
     PartnerRequestId: {name: X-Request-Id, in: header, required: true, schema: {type: string, format: uuid}, description: Replays return the original result for ten minutes; changed requests with the same ID conflict.}
     LimitQuery:
@@ -3788,6 +3793,15 @@ components:
         fetched_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         payload: {$ref: '#/components/schemas/ExternalRecordEnvelope'}
+    NativeCredentials:
+      type: object
+      required: [access_token, refresh_token, expires_in, user_id]
+      properties:
+        access_token: {type: string, description: Opaque credential valid for 600 seconds.}
+        refresh_token: {type: string, description: Single-use rotating credential; family expires 30 days after exchange.}
+        expires_in: {type: integer, const: 600}
+        user_id: {type: string}
+
 paths:
   /arcade/check-notes:
     get:
@@ -16889,6 +16903,170 @@ paths:
         '401': {description: Authentication required.}
         '403': {description: Active developer or moderator required.}
         '404': {description: Missing story.}
+
+  /native/session/code:
+    post:
+      tags: [Users]
+      summary: Native session code
+      description: Browser server issues a 120-second single-use PKCE S256 code. Exact registered client and redirect required. Routes are disabled unless native clients are configured. All responses use no-store; request limit is 4096 bytes.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, redirect_uri, code_challenge]
+              properties:
+                client_id: {type: string}
+                redirect_uri: {type: string}
+                code_challenge: {type: string}
+      responses:
+        '200':
+          description: Authorization result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code]
+                properties:
+                  code: {type: string}
+        '400': {description: Invalid request.}
+        '401': {description: Invalid or expired credential.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
+  /native/session/exchange:
+    post:
+      tags: [Users]
+      summary: Native session exchange
+      description: Atomically redeem the authorization code with PKCE S256. Reject consumed, expired, or mismatched code. Routes are disabled unless native clients are configured. All responses use no-store; request limit is 4096 bytes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, code_verifier, client_id, redirect_uri]
+              properties:
+                code: {type: string}
+                code_verifier: {type: string}
+                client_id: {type: string}
+                redirect_uri: {type: string}
+      responses:
+        '200':
+          description: Authorization result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NativeCredentials'
+        '400': {description: Invalid request.}
+        '401': {description: Invalid or expired credential.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
+  /native/session/refresh:
+    post:
+      tags: [Users]
+      summary: Native session refresh
+      description: Rotate access and refresh credentials. Reuse of any consumed refresh credential revokes only its device family. Routes are disabled unless native clients are configured. All responses use no-store; request limit is 4096 bytes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: {type: string}
+      responses:
+        '200':
+          description: Authorization result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NativeCredentials'
+        '400': {description: Invalid request.}
+        '401': {description: Invalid or expired credential.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
+  /native/session/revoke:
+    post:
+      tags: [Users]
+      summary: Native session revoke
+      description: Idempotently revoke this device family. Accepts a previously rotated refresh credential; does not revoke web or partner grants. Routes are disabled unless native clients are configured. All responses use no-store; request limit is 4096 bytes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: {type: string}
+      responses:
+        '204': {description: Family revoked or already absent.}
+        '400': {description: Invalid request.}
+        '401': {description: Invalid or expired credential.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
+  /native/user/me:
+    get:
+      tags: [Users]
+      summary: Native authenticated profile
+      description: Reuses the existing profile handler behind the active opaque device-session guard. Disabled without a configured client allowlist; all responses use no-store.
+      security:
+        - nativeSession: []
+      responses:
+        '200':
+          description: Full profile for the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                id: me_123
+                created: "2026-03-30 10:15:00.000Z"
+                username: me_user
+                nickname: me_nick
+                countries: [KR, JP]
+                primary_country: KR
+                bio: public bio
+                avatar: ""
+                background: ""
+                tag: []
+                sns:
+                  items: []
+                withdrawn: false
+                series_public: false
+                warp: false
+                series: []
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PocketBaseAuthError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '403': {description: Account is inactive or banned.}
+        '404':
+          description: User record not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to build profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
 x-musecat-joint-connection:
   status: implemented

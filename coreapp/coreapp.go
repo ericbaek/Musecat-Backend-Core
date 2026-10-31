@@ -46,6 +46,7 @@ import (
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
 	subwayhandler "github.com/ericbaek/musecat-backend-core/handlers/subway"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/nativeauth"
 	"github.com/ericbaek/musecat-backend-core/partnerapp"
 )
 
@@ -53,8 +54,10 @@ import (
 // environment variables, registers migrations, or starts scheduled jobs.
 // A nil GeoResolver deliberately disables geographic lookup (fail closed).
 type Config struct {
-	Delegation  *delegation.Manager
-	Connections *connections.Manager
+	// NativeAuthClients is an exact first-party device client/callback allowlist. Empty disables all native routes.
+	NativeAuthClients []nativeauth.Client
+	Delegation        *delegation.Manager
+	Connections       *connections.Manager
 	// Joint enables reciprocal consent for registered partners.
 	Joint *connections.JointManager
 	// PartnerApps is the Developer Center service. Executables that register its
@@ -86,6 +89,7 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se, config.Connections)
+		nativeauth.RegisterRoutes(se, config.NativeAuthClients)
 		partnerApps := config.PartnerApps
 		if partnerApps == nil {
 			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, config.Joint, "")

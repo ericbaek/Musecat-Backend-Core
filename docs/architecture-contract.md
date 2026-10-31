@@ -1613,3 +1613,31 @@ existing conversation permissions and sequence. Status-only entries do not
 create push notifications or requester SSE events, unread increments, sidebar preview changes or sorting changes. Requester history filters textless status entries before pagination, strips transition metadata from ordinary messages and send/retry responses, and returns null status and empty transitions. Legacy adapters follow the same projection. Prior history is preserved without inventing past
 transitions. Full owns the guarded additive `status_change` JSON-field migration;
 Core only bootstraps it for fresh databases.
+
+
+## First-party native login sessions
+
+`nativeauth` adds opaque first-party device sessions independently of web JWTs and
+confidential partner delegation. The executable supplies an exact client/callback
+allowlist via `coreapp.Config.NativeAuthClients`; an empty allowlist registers no
+native routes. Existing connection, delegation, Developer Center and worker
+configuration remains unchanged.
+
+This login-only surface consists of `POST /native/session/code`, `/exchange`,
+`/refresh`, `/revoke` and `GET /native/user/me`. Code issuance requires the existing
+active web user; exchange binds the exact client, callback and S256 verifier.
+Single-use codes expire after 120 seconds, access after 10 minutes, and device
+families after 30 days. Refresh rotation retains consumed hashes; replay revokes
+only that device family. Access and refresh also require the family client ID
+to remain in the current allowlist. Refresh denial for a removed client commits
+family revocation, which survives later re-enablement. Password/token-key changes and withdrawal invalidate
+sessions. Existing active-account guards reject banned users before returning
+credentials or the profile. Native credentials never authenticate web or partner
+routes, and web JWTs never authenticate the native profile route.
+
+Only SHA-256 credential hashes are stored in three private SQL tables, without a
+PocketBase collection API. Core's fresh migration calls the reusable schema
+helper; existing Full databases use Full's independent additive migration and
+copy-only pre/postflight. Disabling the allowlist is the rollback: preserve
+consumed hashes and revoked-family history. Credentials and codes must not be
+logged. This integration does not enable native domain editing or push APIs.
