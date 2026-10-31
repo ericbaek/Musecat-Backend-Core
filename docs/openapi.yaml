@@ -66,6 +66,11 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    nativeSession:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: First-party device access credential; never a web JWT or delegated partner token.
   parameters:
     PartnerRequestId: {name: X-Request-Id, in: header, required: true, schema: {type: string, format: uuid}, description: Replays return the original result for ten minutes; changed requests with the same ID conflict.}
     LimitQuery:
@@ -165,7 +170,7 @@ components:
     MessagingReport: {"type": "object", "properties": {"id": {"type": "string"}, "reporterId": {"type": "string"}, "messageId": {"type": "string"}, "reason": {"type": "string"}, "createdAt": {"type": "string"}, "message": {"$ref": "#/components/schemas/MessagingMessage"}}, "required": ["id", "reporterId", "messageId", "reason", "createdAt", "message"]}
     MessagingParty: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}, "name": {"type": "string"}, "avatarUrl": {"type": "string", "nullable": true}, "roleTags": {"type": "array", "items": {"type": "string"}}}, "required": ["type", "id", "name", "avatarUrl", "roleTags"]}
     MessagingIdentity: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "guest", "arcade", "team"]}, "id": {"type": "string"}}, "required": ["type", "id"]}
-    MessagingMessage: {"type": "object", "properties": {"automated":{"type":"boolean"},"botCanRestart":{"type":"boolean","description":"Current requester may append a restart choice to return to the saved initial node without deleting any history."},"botChoices":{"type":"array","items":{"$ref":"#/components/schemas/InquiryBotChoice"}},"id": {"type": "string"}, "conversationId": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "senderUserId": {"type": "string", "description": "Actual authenticated author account; empty for guests. sender identifies the real public account or opaque guest, independently of actingAs."}, "sender": {"$ref": "#/components/schemas/MessagingParty"}, "actingAs": {"$ref": "#/components/schemas/MessagingParty"}, "clientMessageId": {"type": "string"}, "text": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string"}}, "required": ["name", "url"]}}, "createdAt": {"type": "string"}, "mentions": {"type": "array", "maxItems": 1, "items": {"type": "string", "enum": ["musecat"]}, "description": "Explicit MUSECAT notification mention. Only arcade inquiries support nonempty mentions; duplicates normalize to one. Omitted input becomes an empty array."}, "statusChange": {"type": "object", "description": "Internal server-authored persisted transition, visible only to current staff or official responders. Requester responses strip this metadata and omit textless status entries; never accepted from clients.", "properties": {"from": {"type": "string", "enum": ["waiting", "recognised", "solved"]}, "to": {"type": "string", "enum": ["waiting", "recognised", "solved"]}}, "required": ["from", "to"]}}, "required": ["id", "conversationId", "sequence", "senderUserId", "sender", "actingAs", "clientMessageId", "text", "photos", "createdAt", "mentions"]}
+    MessagingMessage: {"type": "object", "properties": {"automated":{"type":"boolean"},"botCanRestart":{"type":"boolean","description":"Current requester may append a restart choice to return to the saved initial node without deleting any history."},"botChoices":{"type":"array","items":{"$ref":"#/components/schemas/InquiryBotChoice"}},"id": {"type": "string"}, "conversationId": {"type": "string"}, "sequence": {"type": "integer", "minimum": 0}, "senderUserId": {"type": "string", "description": "Actual authenticated author account; empty for guests or deleted accounts. Profile name, avatar and roles resolve from the current user relation without stored profile copies. sender identifies the real public account or opaque guest, independently of actingAs."}, "sender": {"$ref": "#/components/schemas/MessagingParty"}, "actingAs": {"$ref": "#/components/schemas/MessagingParty"}, "clientMessageId": {"type": "string"}, "text": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "object", "properties": {"name": {"type": "string"}, "url": {"type": "string"}}, "required": ["name", "url"]}}, "createdAt": {"type": "string"}, "mentions": {"type": "array", "maxItems": 1, "items": {"type": "string", "enum": ["musecat"]}, "description": "Explicit MUSECAT notification mention. Only arcade inquiries support nonempty mentions; duplicates normalize to one. Omitted input becomes an empty array."}, "statusChange": {"type": "object", "description": "Internal server-authored persisted transition, visible only to current staff or official responders. Requester responses strip this metadata and omit textless status entries; never accepted from clients.", "properties": {"from": {"type": "string", "enum": ["waiting", "recognised", "solved"]}, "to": {"type": "string", "enum": ["waiting", "recognised", "solved"]}}, "required": ["from", "to"]}}, "required": ["id", "conversationId", "sequence", "senderUserId", "sender", "actingAs", "clientMessageId", "text", "photos", "createdAt", "mentions"]}
     ConversationSummary: {"type": "object", "properties": {"id": {"type": "string"}, "kind": {"type": "string", "enum": ["dm", "inquiry"]}, "counterpart": {"$ref": "#/components/schemas/MessagingParty"}, "inbox": {"allOf": [{"$ref": "#/components/schemas/MessagingParty"}], "nullable": true}, "requester": {"allOf": [{"$ref": "#/components/schemas/MessagingParty"}], "nullable": true}, "status": {"type": "string", "nullable": true, "enum": ["waiting", "recognised", "solved", null]}, "legacyFeedbackId": {"type": "string", "nullable": true}, "latestSequence": {"type": "integer", "minimum": 0}, "lastMessage": {"allOf": [{"$ref": "#/components/schemas/MessagingMessage"}], "nullable": true}, "lastMessageAt": {"type": "string", "nullable": true}, "unreadCount": {"type": "integer", "minimum": 0}, "lastReadSequence": {"type": "integer", "minimum": 0}, "counterpartReadSequence": {"type": "integer", "minimum": 0, "nullable": true, "description": "DM counterpart read cursor, zero before their first read. Null for inquiries."}, "canSend": {"type": "boolean"}, "canManageStatus": {"type": "boolean", "description": "Compatibility capability, true when allowedStatusTransitions is nonempty."}, "createdAt": {"type": "string"}, "allowedSenderIdentities": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingIdentity"}, "description": "Current permitted acting identities. Dual-role inquiry users explicitly choose one."}, "allowedStatusTransitions": {"type": "array", "items": {"type": "string", "enum": ["waiting", "recognised", "solved"]}, "description": "Current permitted status values: ordinary requesters receive no status or allowed transitions; current staff or official responders all three. Solved does not disable sending; subsequent messages reopen the inquiry; DM empty."}}, "required": ["allowedSenderIdentities", "allowedStatusTransitions"]}
     MessagingSend: {"type": "object", "properties": {"botChoice": {"type":"object","properties":{"messageId":{"type":"string"},"choiceId":{"type":"string"}},"required":["messageId","choiceId"]},"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string", "minLength": 1, "maxLength": 100}, "actingAs": {"$ref": "#/components/schemas/MessagingIdentity"}, "mentions": {"type": "array", "maxItems": 16, "items": {"type": "string", "enum": ["musecat"]}, "description": "Explicit MUSECAT notification mention. Only arcade inquiries support nonempty mentions; duplicates normalize to one. Omitted input becomes an empty array."}}, "required": ["clientMessageId"]}
     InquiryBotChoice: {"type":"object","properties":{"id":{"type":"string","maxLength":64},"label":{"type":"string","maxLength":80},"next":{"type":"string","maxLength":64}},"required":["id","label","next"]}
@@ -3788,6 +3793,15 @@ components:
         fetched_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
         payload: {$ref: '#/components/schemas/ExternalRecordEnvelope'}
+    NativeCredentials:
+      type: object
+      required: [access_token, refresh_token, expires_in, user_id]
+      properties:
+        access_token: {type: string, description: Opaque credential valid for 600 seconds.}
+        refresh_token: {type: string, description: Single-use rotating credential; family expires 30 days after exchange.}
+        expires_in: {type: integer, const: 600}
+        user_id: {type: string}
+
 paths:
   /arcade/check-notes:
     get:
@@ -8248,8 +8262,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: PUT /arcade/report-subscription
-      description: Compatibility entry that upserts one canonical device and enables its per-arcade preference. Credentials are not duplicated per arcade.
-      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      description: Compatibility entry that upserts one canonical device and enables its per-arcade preference. Credentials are not duplicated per arcade. Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -8280,8 +8293,7 @@ paths:
     delete:
       tags: [Arcade Mutations]
       summary: DELETE /arcade/report-subscription
-      description: Stores an explicit per-arcade opt-out and cancels pending report pushes for this arcade and device. The canonical device remains enabled for personal activity and other arcades.
-      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      description: Stores an explicit per-arcade opt-out and cancels pending report pushes for this arcade and device. The canonical device remains enabled for personal activity and other arcades. Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -16575,14 +16587,14 @@ paths:
     get:
       tags: ["Messaging"]
       summary: "List bounded authorized conversation summaries"
-      description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Incoming arcade inquiries without a persisted musecat mention are excluded from personal chat lists; use the matching arcade inbox scope for dashboard lists. Mentioned conversations appear in personal lists. Requesters retain their own conversations. Responses are private, no-store."
+      description: "Active user only. Direct-message conversations appear only after their first message; opening an empty DM does not add it to either participant's list. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
       security: [{"bearerAuth": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}, {"name": "requesterOnly", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Public contact entry: restrict results to inquiries created by this caller. Arcade admin dashboards omit this flag."}]
     post:
       tags: ["Messaging"]
       summary: "Create or find an unordered user pair, or create an independent inquiry"
-      description: "DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries are managed in the arcade admin dashboard by current official responders and platform staff. Explicit musecat mentions additionally surface that conversation in personal chat lists and notify active platform staff. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
+      description: "DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries are managed in the arcade admin dashboard by current official responders and platform staff. Explicit musecat mentions notify active platform staff; they are not required to list authorized inquiries. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
       security: [{"bearerAuth": []}]
       responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Existing or new DM, or idempotent inquiry replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}}
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingCreate"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "kind": {"type": "string", "enum": ["inquiry"]}, "inboxType": {"type": "string"}, "inboxId": {"type": "string"}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
@@ -16591,7 +16603,7 @@ paths:
     get:
       tags: ["Messaging"]
       summary: "Get a conversation summary"
-      description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Incoming arcade inquiries without a persisted musecat mention are excluded from personal chat lists; use the matching arcade inbox scope for dashboard lists. Mentioned conversations appear in personal lists. Requesters retain their own conversations. Responses are private, no-store."
+      description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
       security: [{"bearerAuth": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
@@ -16617,7 +16629,7 @@ paths:
     put:
       tags: ["Messaging"]
       summary: "Advance this user's read cursor"
-      description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Incoming arcade inquiries without a persisted musecat mention are excluded from personal chat lists; use the matching arcade inbox scope for dashboard lists. Mentioned conversations appear in personal lists. Requesters retain their own conversations. Responses are private, no-store."
+      description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
       security: [{"bearerAuth": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"conversationId": {"type": "string"}, "lastReadSequence": {"type": "integer", "minimum": 0}, "unreadCount": {"type": "integer", "minimum": 0}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
@@ -16890,10 +16902,169 @@ paths:
         '403': {description: Active developer or moderator required.}
         '404': {description: Missing story.}
 
-x-musecat-joint-connection:
-  status: implemented
-  public-endpoints-enabled: true
-  description: Active only for operator-approved registrations with both OAuth credentials and both server keys. See /developer/integration-spec.md.
+  /native/session/code:
+    post:
+      tags: [Users]
+      summary: Native session code
+      description: Browser server issues a 120-second single-use PKCE S256 code. Exact registered client and redirect required. Routes are disabled unless native clients are configured. All responses use no-store; request limit is 4096 bytes.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, redirect_uri, code_challenge]
+              properties:
+                client_id: {type: string}
+                redirect_uri: {type: string}
+                code_challenge: {type: string}
+      responses:
+        '200':
+          description: Authorization result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code]
+                properties:
+                  code: {type: string}
+        '400': {description: Invalid request.}
+        '401': {description: Invalid or expired credential.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
+  /native/session/exchange:
+    post:
+      tags: [Users]
+      summary: Native session exchange
+      description: Atomically redeem the authorization code with PKCE S256. Reject consumed, expired, or mismatched code. Routes are disabled unless native clients are configured. All responses use no-store; request limit is 4096 bytes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, code_verifier, client_id, redirect_uri]
+              properties:
+                code: {type: string}
+                code_verifier: {type: string}
+                client_id: {type: string}
+                redirect_uri: {type: string}
+      responses:
+        '200':
+          description: Authorization result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NativeCredentials'
+        '400': {description: Invalid request.}
+        '401': {description: Invalid or expired credential.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
+  /native/session/refresh:
+    post:
+      tags: [Users]
+      summary: Native session refresh
+      description: Rotate access and refresh credentials. Reuse of any consumed refresh credential revokes only its device family. Routes are disabled unless native clients are configured. All responses use no-store; request limit is 4096 bytes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: {type: string}
+      responses:
+        '200':
+          description: Authorization result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NativeCredentials'
+        '400': {description: Invalid request.}
+        '401': {description: Invalid or expired credential.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
+  /native/session/revoke:
+    post:
+      tags: [Users]
+      summary: Native session revoke
+      description: Idempotently revoke this device family. Accepts a previously rotated refresh credential; does not revoke web or partner grants. Routes are disabled unless native clients are configured. All responses use no-store; request limit is 4096 bytes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: {type: string}
+      responses:
+        '204': {description: Family revoked or already absent.}
+        '400': {description: Invalid request.}
+        '401': {description: Invalid or expired credential.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
+  /native/user/me:
+    get:
+      tags: [Users]
+      summary: Native authenticated profile
+      description: Reuses the existing profile handler behind the active opaque device-session guard. Disabled without a configured client allowlist; all responses use no-store.
+      security:
+        - nativeSession: []
+      responses:
+        '200':
+          description: Full profile for the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+              example:
+                id: me_123
+                created: "2026-03-30 10:15:00.000Z"
+                username: me_user
+                nickname: me_nick
+                countries: [KR, JP]
+                primary_country: KR
+                bio: public bio
+                avatar: ""
+                background: ""
+                tag: []
+                sns:
+                  items: []
+                withdrawn: false
+                series_public: false
+                warp: false
+                series: []
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PocketBaseAuthError'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '403': {description: Account is inactive or banned.}
+        '404':
+          description: User record not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Failed to build profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /developer/apps/{id}/records-key:
     parameters: [{name: id, in: path, required: true, schema: {type: string}}]
@@ -16930,15 +17101,14 @@ x-musecat-joint-connection:
     get:
       tags: ["Messaging"]
       summary: "List bounded authorized conversation summaries"
-      description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
+      description: Current browser guest credential only. Lists only inquiries owned by that guest; returns private, no-store summaries.
       security: [{"guestFeedbackKey": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}, {"name": "requesterOnly", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Public contact entry: restrict results to inquiries created by this caller. Arcade admin dashboards omit this flag."}]
     post:
-      description: Creates inquiries only. Guest credentials cannot create DMs or borrow account permissions.
       tags: ["Messaging"]
-      summary: "Create or find an unordered user pair, or create an independent inquiry"
-      description: "DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries are managed in the arcade admin dashboard by current official responders and platform staff. Explicit musecat mentions additionally surface that conversation in personal chat lists and notify active platform staff. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
+      summary: Create an independent guest inquiry
+      description: Guest credentials create inquiries only and cannot borrow account permissions. Returns 201, or 200 on an identical first-message retry. Uses canonical inquiry validation, bot previews, upload limits, idempotency and private no-store policy.
       security: [{"guestFeedbackKey": []}]
       responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Existing or new DM, or idempotent inquiry replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}}
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingCreate"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "kind": {"type": "string", "enum": ["inquiry"]}, "inboxType": {"type": "string"}, "inboxId": {"type": "string"}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
@@ -17028,3 +17198,8 @@ x-musecat-joint-connection:
                   type: {type: string, enum: [guest]}
                   id: {type: string}
         '401': {description: Missing or malformed browser credential.}
+
+x-musecat-joint-connection:
+  status: implemented
+  public-endpoints-enabled: true
+  description: Active only for operator-approved registrations with both OAuth credentials and both server keys. See /developer/integration-spec.md.

@@ -10,7 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 )
 
-func TestArcadeInquiryPersonalChatVisibilityRequiresExplicitMention(t *testing.T) {
+func TestArcadeInquiryPersonalListsPreserveAuthorizedHistory(t *testing.T) {
 	for _, guest := range []bool{false, true} {
 		t.Run(fmt.Sprintf("guest=%t", guest), func(t *testing.T) {
 			app := newArcadeTestApp(t)
@@ -46,6 +46,20 @@ func TestArcadeInquiryPersonalChatVisibilityRequiresExplicitMention(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
+			if !guest {
+				legacy, err := app.FindFirstRecordByFilter("messaging_inquiry", "conversation={:id}", map[string]any{"id": c.ID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				legacy.Set("requester_type", "")
+				if err := app.Save(legacy); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, stranger := createAuthUserWithTags(t, app, []string{})
+			if list, err := messaging.ListConversations(app, stranger.Id, url.Values{}); err != nil || len(list.Items) != 0 {
+				t.Fatal("unrelated user can list private inquiries", list, err)
+			}
 			for _, token := range []string{developerToken, moderatorToken} {
 				res := executeJSONRequest(t, app, "GET", "/user/feedback/thread?id="+c.ID, "", map[string]string{"Authorization": "Bearer " + token})
 				res.Body.Close()
@@ -55,8 +69,8 @@ func TestArcadeInquiryPersonalChatVisibilityRequiresExplicitMention(t *testing.T
 			}
 			for _, id := range []string{developer.Id, moderator.Id} {
 				listed, err := messaging.ListConversations(app, id, url.Values{})
-				if err != nil || len(listed.Items) != 0 {
-					t.Fatal("unmentioned inquiries leaked into staff personal chats", listed, err)
+				if err != nil || len(listed.Items) != 2 {
+					t.Fatal("authorized inquiries missing from staff personal chats", listed, err)
 				}
 				dashboard, err := messaging.ListConversations(app, id, url.Values{"inbox": {"arcade:" + arcadeID}})
 				if err != nil || len(dashboard.Items) != 2 {
@@ -71,8 +85,8 @@ func TestArcadeInquiryPersonalChatVisibilityRequiresExplicitMention(t *testing.T
 				}
 			}
 			personal, err := messaging.ListConversations(app, owner.Id, url.Values{})
-			if err != nil || len(personal.Items) != 0 {
-				t.Fatal("ordinary inquiries leaked into official personal chats", personal, err)
+			if err != nil || len(personal.Items) != 2 {
+				t.Fatal("authorized inquiries missing from official personal chats", personal, err)
 			}
 			dashboard, err := messaging.ListConversations(app, owner.Id, url.Values{"inbox": {"arcade:" + arcadeID}})
 			if err != nil || len(dashboard.Items) != 2 {
@@ -90,8 +104,8 @@ func TestArcadeInquiryPersonalChatVisibilityRequiresExplicitMention(t *testing.T
 			}
 			for _, id := range []string{owner.Id, developer.Id} {
 				list, err := messaging.ListConversations(app, id, url.Values{})
-				if err != nil || len(list.Items) != 0 {
-					t.Fatal("plain dashboard reply surfaced personal chat", list, err)
+				if err != nil || len(list.Items) != 2 {
+					t.Fatal("reply history missing from authorized personal chats", list, err)
 				}
 			}
 			sub := messaging.Events(app).Subscribe(developer.Id)
@@ -112,13 +126,13 @@ func TestArcadeInquiryPersonalChatVisibilityRequiresExplicitMention(t *testing.T
 				t.Fatal("mentioned conversation notification route")
 			}
 			personal, err = messaging.ListConversations(app, owner.Id, url.Values{})
-			if err != nil || len(personal.Items) != 1 || personal.Items[0].ID != c.ID {
+			if err != nil || len(personal.Items) != 2 || personal.Items[0].ID != c.ID {
 				t.Fatal("invited conversation personal list", personal, err)
 			}
 
 			for _, id := range []string{developer.Id, moderator.Id} {
 				listed, err := messaging.ListConversations(app, id, url.Values{})
-				if err != nil || len(listed.Items) != 1 || listed.Items[0].ID != c.ID || !listed.Items[0].CanSend {
+				if err != nil || len(listed.Items) != 2 || listed.Items[0].ID != c.ID || !listed.Items[0].CanSend {
 					t.Fatal("incorrect invited list", listed, err)
 				}
 				if _, err := messaging.Get(app, id, other.ID); err != nil {
@@ -140,6 +154,9 @@ func TestArcadeInquiryPersonalChatVisibilityRequiresExplicitMention(t *testing.T
 			developer.Set("tags", []string{})
 			if err := app.Save(developer); err != nil {
 				t.Fatal(err)
+			}
+			if list, err := messaging.ListConversations(app, developer.Id, url.Values{}); err != nil || len(list.Items) != 0 {
+				t.Fatal("revoked staff can list private inquiries", list, err)
 			}
 			if _, err := messaging.Get(app, developer.Id, c.ID); err == nil {
 				t.Fatal("revoked staff retained invitation access")

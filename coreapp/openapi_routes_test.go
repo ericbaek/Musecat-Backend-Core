@@ -10,6 +10,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	apidocs "github.com/ericbaek/musecat-backend-core/docs"
+	"gopkg.in/yaml.v2"
 )
 
 func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
@@ -205,6 +208,72 @@ func TestOpenAPIDocumentsMessagingRoutes(t *testing.T) {
 	for operation := range directRouteOperations(function.Body, routerGroupPrefixes(function.Body)) {
 		if !operations[operation] {
 			t.Errorf("Messaging OpenAPI missing %s", operation)
+		}
+	}
+}
+
+func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
+	var parsed map[string]any
+	if err := yaml.UnmarshalStrict(apidocs.OpenAPISpec(), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	type operation struct {
+		Security  []map[string][]string `yaml:"security"`
+		Responses map[string]any        `yaml:"responses"`
+	}
+	var contract struct {
+		Paths map[string]struct {
+			Get  *operation `yaml:"get"`
+			Post *operation `yaml:"post"`
+		} `yaml:"paths"`
+		Components struct {
+			SecuritySchemes map[string]struct {
+				Type         string `yaml:"type"`
+				Scheme       string `yaml:"scheme"`
+				BearerFormat string `yaml:"bearerFormat"`
+			} `yaml:"securitySchemes"`
+			Schemas map[string]any `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(apidocs.OpenAPISpec(), &contract); err != nil {
+		t.Fatal(err)
+	}
+	if scheme := contract.Components.SecuritySchemes["nativeSession"]; scheme.Type != "http" || scheme.Scheme != "bearer" || scheme.BearerFormat != "opaque" {
+		t.Fatal("native opaque security scheme is missing from components")
+	}
+	if _, ok := contract.Components.Schemas["NativeCredentials"]; !ok {
+		t.Fatal("native credential schema is missing from components")
+	}
+	for _, route := range []struct {
+		path, method, security string
+		statuses               []string
+	}{
+		{"/native/session/code", "post", "bearerAuth", []string{"200", "401", "403", "413"}},
+		{"/native/session/exchange", "post", "", []string{"200", "401", "403", "413"}},
+		{"/native/session/refresh", "post", "", []string{"200", "401", "403", "413"}},
+		{"/native/session/revoke", "post", "", []string{"204", "400", "413"}},
+		{"/native/user/me", "get", "nativeSession", []string{"200", "401", "403"}},
+	} {
+		op := contract.Paths[route.path].Post
+		if route.method == "get" {
+			op = contract.Paths[route.path].Get
+		}
+		if op == nil {
+			t.Fatalf("%s %s is not in the top-level paths object", route.method, route.path)
+		}
+		if route.security == "" {
+			if len(op.Security) != 0 {
+				t.Errorf("%s requires unintended bearer credentials", route.path)
+			}
+		} else if len(op.Security) != 1 {
+			t.Errorf("%s missing its credential boundary", route.path)
+		} else if _, ok := op.Security[0][route.security]; !ok {
+			t.Errorf("%s has the wrong credential boundary", route.path)
+		}
+		for _, status := range route.statuses {
+			if _, ok := op.Responses[status]; !ok {
+				t.Errorf("%s missing status %s", route.path, status)
+			}
 		}
 	}
 }
