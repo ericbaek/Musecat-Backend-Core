@@ -169,7 +169,7 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 		t.Fatal("native inquiry reply did not notify the requester", inbox)
 	}
 	notification := items[0].(map[string]any)
-	if notification["kind"] != "message" || notification["conversationId"] != id || notification["message"] != reply["message"] || notification["url"] != "/messages?conversation="+id {
+	if notification["kind"] != "message" || notification["conversationId"] != id || notification["conversationKind"] != "inquiry" || notification["legacyFeedbackId"] != id || notification["message"] != reply["message"] || notification["url"] != "/messages?conversation="+id {
 		t.Fatal("native inquiry notification lost its canonical conversation destination", notification)
 	}
 	requester, err := messaging.Get(app, owner.Id, id)
@@ -195,7 +195,7 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, status := range []string{"solved", "waiting"} {
+	for _, status := range []string{"solved", "waiting", "recognised"} {
 		denied := call("PATCH", "/native/user/feedback/thread", token, fmt.Sprintf(`{"feedbackId":%q,"status":%q}`, id, status), 400)
 		if denied["message"] != "Invalid inquiry status." {
 			t.Fatal("requester status rejection changed", denied)
@@ -208,12 +208,7 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 		t.Fatal("denied status mutations changed messages or notifications", afterDenied, err, countErr)
 	}
 	for _, status := range responder.AllowedStatusTransitions {
-		var receipt map[string]any
-		if status == "recognised" {
-			receipt = call("PUT", "/native/support_feedback", moderator, fmt.Sprintf(`{"id":%q,"status":%q}`, id, status), 200)
-		} else {
-			receipt = call("PATCH", "/native/user/feedback/thread", moderator, fmt.Sprintf(`{"feedbackId":%q,"status":%q}`, id, status), 200)
-		}
+		receipt := call("PATCH", "/native/user/feedback/thread", moderator, fmt.Sprintf(`{"feedbackId":%q,"status":%q}`, id, status), 200)
 		if receipt["status"] != status {
 			t.Fatal("native responder status receipt differs from the permitted transition", receipt)
 		}
@@ -296,4 +291,39 @@ func TestNativeReportReactionAndAccountScope(t *testing.T) {
 	call("GET", "/native/user/passport/stamps", token, "", 200)
 	call("GET", "/native/arcade/changelog?arcade="+arcade, token, "", 200)
 	call("PUT", "/native/user/visit-visibility", token, `{"visit_visibility":"invalid"}`, 400)
+}
+
+func TestNativeLegacyFeedbackThreadRejectsDirectMessages(t *testing.T) {
+	app := newArcadeTestApp(t)
+	nativeSession := nativeParitySession(t, app)
+	web, sender := createAuthUserWithTags(t, app, []string{})
+	peerWeb, peer := createAuthUserWithTags(t, app, []string{})
+	staffWeb, staff := createAuthUserWithTags(t, app, []string{"moderator"})
+	outsiderWeb, outsider := createAuthUserWithTags(t, app, []string{})
+	room, err := messaging.Create(app, sender.Id, messaging.CreateInput{Kind: "dm", PeerUserID: peer.Id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const secret = "Private DM must never become feedback"
+	if _, _, err := messaging.Send(app, sender.Id, room.ID, messaging.SendInput{Text: secret, ClientMessageID: "dm"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, spec := range []struct {
+		prefix string
+		tokens []string
+	}{
+		{"", []string{web, peerWeb, staffWeb, outsiderWeb}},
+		{"/native", []string{nativeSession(sender), nativeSession(peer), nativeSession(staff), nativeSession(outsider)}},
+	} {
+		path := spec.prefix + "/user/feedback/thread?id=" + room.ID
+		nativeParityJSON(t, app, "GET", path, "", "", 401)
+		for _, token := range spec.tokens {
+			for _, cursor := range []string{"", "&before=invalid"} {
+				out := nativeParityJSON(t, app, "GET", path+cursor, token, "", 404)
+				if out["feedback"] != nil || out["items"] != nil || strings.Contains(fmt.Sprint(out), secret) {
+					t.Fatal("DM content exposed through legacy inquiry read", out)
+				}
+			}
+		}
+	}
 }

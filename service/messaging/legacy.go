@@ -59,6 +59,9 @@ func LegacyThreadFor(app core.App, viewer Principal, cid, beforeID string) (map[
 	if err != nil {
 		return nil, err
 	}
+	if s.Kind != "inquiry" {
+		return nil, apis.NewNotFoundError("Inquiry not found.", nil)
+	}
 	feedback, err := LegacyItem(app, s)
 	if err != nil {
 		return nil, err

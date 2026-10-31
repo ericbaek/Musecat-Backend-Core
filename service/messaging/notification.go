@@ -248,11 +248,24 @@ func NotificationItem(app core.App, row *core.Record) map[string]any {
 }
 
 func NotificationItemLocalized(app core.App, row *core.Record, locale string) map[string]any {
-	target := "/messages?conversation=" + row.GetString("conversation")
-	if q, err := inquiry(app, row.GetString("conversation")); err == nil && q.GetString("inbox_type") == "arcade" && q.GetString("requester") != row.GetString("user") {
-		invited, err := mentionedConversations(app, []string{q.GetString("conversation")})
-		if err != nil || !invited[q.GetString("conversation")] {
-			target = "/arcade/" + url.PathEscape(q.GetString("inbox_id"))
+	cid := row.GetString("conversation")
+	target := "/messages?conversation=" + cid
+	conversationKind := ""
+	var legacyFeedbackID any
+	if c, err := app.FindRecordById(Conversations, cid); err == nil {
+		conversationKind = c.GetString("kind")
+	}
+	if conversationKind == "inquiry" {
+		if q, err := inquiry(app, cid); err == nil {
+			if id := q.GetString("legacy_feedback_id"); id != "" {
+				legacyFeedbackID = id
+			}
+			if q.GetString("inbox_type") == "arcade" && q.GetString("requester") != row.GetString("user") {
+				invited, err := mentionedConversations(app, []string{cid})
+				if err != nil || !invited[cid] {
+					target = "/arcade/" + url.PathEscape(q.GetString("inbox_id"))
+				}
+			}
 		}
 	}
 	name, preview := "", ""
@@ -279,5 +292,5 @@ func NotificationItemLocalized(app core.App, row *core.Record, locale string) ma
 			}
 		}
 	}
-	return map[string]any{"id": row.Id, "kind": "message", "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": name, "title": name, "gameName": "", "reaction": "", "message": preview, "conversationId": row.GetString("conversation"), "url": target}
+	return map[string]any{"id": row.Id, "kind": "message", "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": name, "title": name, "gameName": "", "reaction": "", "message": preview, "conversationId": cid, "conversationKind": conversationKind, "legacyFeedbackId": legacyFeedbackID, "url": target}
 }

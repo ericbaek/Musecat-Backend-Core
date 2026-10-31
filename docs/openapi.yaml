@@ -7469,7 +7469,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/LegacyFeedbackThread'}
         '401': {description: Authentication required}
-        '404': {description: Missing or inaccessible inquiry}
+        '404': {description: Missing or inaccessible inquiry; direct-message IDs also return 404 even for their participants.}
     post:
       tags: [User]
       summary: Append an immutable reply and atomically notify the other participant
@@ -7505,7 +7505,7 @@ paths:
         '413': {description: Photo or total multipart body exceeds upload limits}
     patch:
       tags: [User]
-      summary: Resolve or reopen an inquiry as its author, current scoped official, or strict staff
+      summary: Set internal inquiry status as a current responder; requesters cannot change it
       security:
         - bearerAuth: []
       requestBody:
@@ -7517,10 +7517,10 @@ paths:
               required: [feedbackId, status]
               properties:
                 feedbackId: {type: string}
-                status: {type: string, enum: [solved, waiting]}
+                status: {type: string, enum: [waiting, recognised, solved]}
       responses:
-        '200': {description: Persisted id and status. Private no-store. No reply is created.}
-        '400': {description: Invalid status}
+        '200': {description: Persisted id and status for a current responder. Internal status history is hidden from requesters and creates no external message notification. Private no-store.}
+        '400': {description: Invalid or requester-forbidden status; no messages or notifications are changed.}
         '401': {description: Authentication required}
         '404': {description: Missing or inaccessible inquiry}
         '413': {description: Request exceeds 4 KiB}
@@ -7549,6 +7549,9 @@ paths:
                       properties:
                         id: {type: string}
                         kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement]}
+                        conversationId: {type: string, description: Always present for kind=message; canonical conversation ID.}
+                        conversationKind: {type: string, enum: [dm, inquiry], description: Always present for kind=message and derived from the current canonical conversation kind. DM is never mapped to inquiry.}
+                        legacyFeedbackId: {type: string, nullable: true, description: Always present for kind=message; the inquiry's stored legacy_feedback_id or null when unmapped. Always null for DM.}
                         read: {type: boolean}
                         created: {type: string}
                         arcadeName: {type: string}
@@ -10505,14 +10508,18 @@ x-musecat-joint-connection:
                       required: [id, kind, read, created, arcadeName, gameName, message, reaction, url]
                       properties:
                         id: {type: string}
-                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup]}
+                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement]}
+                        conversationId: {type: string, description: Always present for kind=message; canonical conversation ID.}
+                        conversationKind: {type: string, enum: [dm, inquiry], description: Always present for kind=message and derived from the current canonical conversation kind. DM is never mapped to inquiry.}
+                        legacyFeedbackId: {type: string, nullable: true, description: Always present for kind=message; the inquiry's stored legacy_feedback_id or null when unmapped. Always null for DM.}
                         read: {type: boolean}
                         created: {type: string}
                         arcadeName: {type: string}
                         gameName: {type: string}
+                        title: {type: string, description: Localized announcement title or message sender identity.}
                         message: {type: string}
                         reaction: {type: string}
-                        url: {type: string, description: Server-generated relative deep link. arcade_setup opens /account/arcade-dashboard/setup.}
+                        url: {type: string, description: "Server-generated relative deep link. Canonical message notifications retain their existing /messages?conversation=id or scoped arcade destination; conversation metadata does not change routing or visibility. arcade_setup opens /account/arcade-dashboard/setup."}
                   unread: {type: integer, minimum: 0}
                   next: {type: string, description: Empty at the end of the inbox.}
         '401': {description: Authentication required.}
@@ -13156,7 +13163,7 @@ x-musecat-joint-connection:
             application/json:
               schema: {$ref: '#/components/schemas/LegacyFeedbackThread'}
         '401': {description: Authentication required}
-        '404': {description: Missing or inaccessible inquiry}
+        '404': {description: Missing or inaccessible inquiry; direct-message IDs also return 404 even for their participants.}
     post:
       tags: [User]
       summary: Append an immutable reply and atomically notify the other participant
@@ -13204,7 +13211,7 @@ x-musecat-joint-connection:
               required: [feedbackId, status]
               properties:
                 feedbackId: {type: string}
-                status: {type: string, enum: [solved, waiting]}
+                status: {type: string, enum: [waiting, recognised, solved]}
       responses:
         '200': {description: Persisted id and status for a permitted current responder. Internal status history is invisible to the requester; no external message notification is created. Private no-store.}
         '400': {description: Invalid or requester-forbidden status; no messages or notifications are changed.}

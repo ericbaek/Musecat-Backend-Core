@@ -68,8 +68,8 @@ func UpdateSupportFeedbackThreadStatus(re *core.RequestEvent) error {
 		ID     string `json:"feedbackId"`
 		Status string `json:"status"`
 	}
-	if err := re.BindBody(&body); err != nil || (body.Status != "waiting" && body.Status != "solved") {
-		return re.BadRequestError("Status must be solved or waiting.", nil)
+	if err := re.BindBody(&body); err != nil || (body.Status != "waiting" && body.Status != "recognised" && body.Status != "solved") {
+		return re.BadRequestError("Status must be waiting, recognised or solved.", nil)
 	}
 	s, err := messaging.SetStatusFor(re.App, feedbackPrincipal(re), mappedFeedback(re, body.ID), body.Status)
 	if err != nil {

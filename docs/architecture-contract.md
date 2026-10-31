@@ -960,7 +960,7 @@ New arcade inquiries create `feedback_created` notifications for current officia
 
 - A `fixed` flag reaction from a current developer/moderator or the official owner assigned to that arcade resolves immediately regardless of level. The reaction attribution and notification/XP transaction are preserved; other users retain the existing resolution-voting delay.
 
-Inquiry participants can PATCH `/user/feedback/thread` with `status: solved` to resolve or `waiting` to reopen without posting a reply. Current access is rechecked inside the status transaction; foreign and revoked participants receive 404. This operational status change does not award XP or alter message history. Replies retain the existing waiting/recognised transitions.
+Current inquiry responders can PATCH `/user/feedback/thread` with `waiting`, `recognised` or `solved`; requesters cannot read or change internal status. Current access and allowed transitions are rechecked inside the canonical transaction; foreign and revoked participants receive 404. Status changes create internal history visible only to current responders, without XP, arcade changelog or external message notifications. Replies retain the existing waiting/recognised transitions.
 
 ### Arcade inquiry destination
 
@@ -1384,11 +1384,15 @@ top-level `allowedStatusTransitions: string[]` and `canSend: boolean` directly f
 the same actor's canonical summary. Both fields are always present; requesters
 receive an empty transitions array and their current sending capability. Current
 responders alone receive and may use the three canonical transitions
-`waiting`, `recognised`, `solved`; the existing native thread PATCH accepts
-waiting/solved and the strict-reviewer PUT accepts recognised as well. Internal
+`waiting`, `recognised`, `solved`; native and web thread PATCH both accept all
+three through canonical `SetStatusFor` authorization. The strict-reviewer PUT
+continues to accept the same statuses. Internal
 status history remains hidden from requesters, who can still send follow-ups.
 Replies notify the requester through the existing inbox with `kind:"message"`
-and `/messages?conversation=<id>`. Native SDK status decoding, permission affordances
+and `/messages?conversation=<id>`. Message notifications always include the
+canonical `conversationKind` (`dm|inquiry`) and nullable `legacyFeedbackId`; only
+inquiries expose their actual stored legacy mapping, never an invented DM mapping.
+Native SDK status decoding, permission affordances
 and message-link routing must adopt this explicit policy migration before Full
 pins/deploys this integration. The basic/contacts/hours/GTK/game v1 contracts and
 opaque native authentication are unchanged. No new native messaging REST or SSE
@@ -1540,6 +1544,14 @@ inbox rows retain access-only visibility. Legacy arcade/guest feedback has no me
 metadata and likewise notifies official responders, with
 `FeedbackNotificationDeliverable` suppressing old queued staff-only pushes.
 Notification policy does not narrow conversation access or SSE audiences.
+Message inbox items retain canonical kind/id/read/preview/url and always include
+`conversationKind` from the current conversation plus `legacyFeedbackId` from the
+inquiry mapping (null when absent, and always null for DM). These additive fields
+neither change notification ACL checks nor redirect existing destinations.
+Legacy feedback thread GET first applies canonical conversation authorization,
+then rejects every non-inquiry with 404 before constructing the legacy first-message
+projection or processing a cursor.
+It never projects direct-message content into the legacy feedback shape.
 
 The single-process SSE hub publishes invalidations after commit only. Conversation
 audiences are resolved once per change and only their connected users are enqueued;

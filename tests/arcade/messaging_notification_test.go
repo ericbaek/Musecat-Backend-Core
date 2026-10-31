@@ -56,7 +56,8 @@ func TestMessagingNotificationGroupsPreviewAndRead(t *testing.T) {
 		t.Fatal(inbox)
 	}
 	latest := items[0].(map[string]any)
-	if latest["message"] != "내용 10" || latest["title"] == "" || latest["title"] == "뮤즈캣" {
+	legacy, hasLegacy := latest["legacyFeedbackId"]
+	if latest["conversationKind"] != "dm" || !hasLegacy || legacy != nil || latest["conversationId"] != c.ID || latest["url"] != "/messages?conversation="+c.ID || latest["kind"] != "message" || latest["read"] != false || latest["message"] != "내용 10" || latest["title"] == "" || latest["title"] == "뮤즈캣" {
 		t.Fatal(latest)
 	}
 	page := call("GET", "/user/notifications?before="+latest["id"].(string), "")
@@ -117,5 +118,41 @@ func TestMessagingNotificationGroupsPreviewAndRead(t *testing.T) {
 	}
 	if got := messaging.NotificationItemLocalized(app, n, "en"); got["message"] != "Sent a photo" {
 		t.Fatal(got)
+	}
+}
+
+func TestMessagingNotificationInquiryMetadataUsesCanonicalMapping(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, requester := createAuthUserWithTags(t, app, []string{})
+	_, responder := createAuthUserWithTags(t, app, []string{"moderator"})
+	room, _, err := messaging.CreateFor(app, messaging.Principal{UserID: requester.Id}, messaging.CreateInput{Kind: "inquiry", Inbox: messaging.Identity{Type: "team", ID: "musecat"}, InitialMessage: messaging.SendInput{Text: "Question", ClientMessageID: "initial"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, _, err := messaging.Send(app, responder.Id, room.ID, messaging.SendInput{Text: "Answer", ClientMessageID: "reply"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, err := app.FindFirstRecordByFilter(usernotification.Inbox, "user={:u} && message={:m}", dbx.Params{"u": requester.Id, "m": message.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inquiry, err := app.FindFirstRecordByFilter(messaging.Inquiries, "conversation={:c}", dbx.Params{"c": room.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, legacyID := range []string{"previous-feedback", ""} {
+		inquiry.Set("legacy_feedback_id", legacyID)
+		if err := app.Save(inquiry); err != nil {
+			t.Fatal(err)
+		}
+		item := messaging.NotificationItemLocalized(app, row, "en")
+		legacy, present := item["legacyFeedbackId"]
+		if item["conversationKind"] != "inquiry" || !present || (legacyID == "" && legacy != nil) || (legacyID != "" && legacy != legacyID) {
+			t.Fatal("notification invented or lost its canonical inquiry mapping", item)
+		}
+		if item["id"] != row.Id || item["kind"] != "message" || item["read"] != false || item["message"] != "Answer" || item["conversationId"] != room.ID || item["url"] != "/messages?conversation="+room.ID {
+			t.Fatal("metadata changed the canonical notification projection", item)
+		}
 	}
 }
