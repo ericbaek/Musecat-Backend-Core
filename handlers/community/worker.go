@@ -47,11 +47,21 @@ func RunDueTranslations(ctx context.Context, app core.App, translator Translator
 	if translator == nil {
 		return 0, fmt.Errorf("translator is required")
 	}
+	posts, postErr := runDueCollectionTranslations(ctx, app, translator, now, CollectionPost)
+	comments, commentErr := runDueCollectionTranslations(ctx, app, translator, now, CollectionComment)
+	return posts + comments, errors.Join(postErr, commentErr)
+}
+
+func runDueCollectionTranslations(ctx context.Context, app core.App, translator Translator, now time.Time, collection string) (int, error) {
+	filter := "status = 'active' && translation_attempts < {:max_attempts} && translate_after <= {:now} && (translation_status = 'pending' || translation_status = 'failed' || (translation_status = 'processing' && translation_started_at <= {:stale_before}))"
+	if collection == CollectionComment {
+		filter += " && post.status = 'active'"
+	}
 	now = now.UTC()
 	staleBefore := now.Add(-translationLease)
 	records, err := app.FindRecordsByFilter(
-		CollectionPost,
-		"status = 'active' && translation_attempts < {:max_attempts} && translate_after <= {:now} && (translation_status = 'pending' || translation_status = 'failed' || (translation_status = 'processing' && translation_started_at <= {:stale_before}))",
+		collection,
+		filter,
 		"translate_after",
 		translationBatchSize,
 		0,
@@ -64,7 +74,7 @@ func RunDueTranslations(ctx context.Context, app core.App, translator Translator
 	processed := 0
 	var runErrors []error
 	for _, candidate := range records {
-		claimed, source, sourceHash, attempt, err := claimTranslation(app, candidate.Id, now)
+		claimed, source, sourceHash, attempt, err := claimTranslation(app, collection, candidate.Id, now)
 		if err != nil {
 			runErrors = append(runErrors, err)
 			continue
@@ -77,14 +87,14 @@ func RunDueTranslations(ctx context.Context, app core.App, translator Translator
 		result, callErr := translator.Translate(callCtx, source)
 		cancel()
 		if callErr != nil {
-			if err := failTranslation(app, candidate.Id, sourceHash, attempt, now, callErr); err != nil {
+			if err := failTranslation(app, collection, candidate.Id, sourceHash, attempt, now, callErr); err != nil {
 				runErrors = append(runErrors, err)
 			} else {
 				processed++
 			}
 			continue
 		}
-		if err := completeTranslation(app, candidate.Id, sourceHash, attempt, result, now); err != nil {
+		if err := completeTranslation(app, collection, candidate.Id, sourceHash, attempt, result, now); err != nil {
 			runErrors = append(runErrors, err)
 			continue
 		}
@@ -93,14 +103,17 @@ func RunDueTranslations(ctx context.Context, app core.App, translator Translator
 	return processed, errors.Join(runErrors...)
 }
 
-func claimTranslation(app core.App, id string, now time.Time) (bool, SourceContent, string, int, error) {
+func claimTranslation(app core.App, collection, id string, now time.Time) (bool, SourceContent, string, int, error) {
 	var source SourceContent
 	var sourceHash string
 	attempt := 0
 	claimed := false
 	err := app.RunInTransaction(func(tx core.App) error {
-		record, err := tx.FindRecordById(CollectionPost, id)
+		record, err := tx.FindRecordById(collection, id)
 		if err != nil {
+			return nil
+		}
+		if collection == CollectionComment && activePost(tx, record.GetString("post")) != nil {
 			return nil
 		}
 		if !translationClaimable(record, now) {
@@ -141,11 +154,14 @@ func translationClaimable(record *core.Record, now time.Time) bool {
 	}
 }
 
-func completeTranslation(app core.App, id, sourceHash string, attempt int, result TranslationResult, now time.Time) error {
+func completeTranslation(app core.App, collection, id, sourceHash string, attempt int, result TranslationResult, now time.Time) error {
 	return app.RunInTransaction(func(tx core.App) error {
-		record, err := tx.FindRecordById(CollectionPost, id)
+		record, err := tx.FindRecordById(collection, id)
 		if err != nil {
 			return fmt.Errorf("reload translated post %s: %w", id, err)
+		}
+		if collection == CollectionComment && activePost(tx, record.GetString("post")) != nil {
+			return nil
 		}
 		if record.GetString("status") != "active" || record.GetString("translation_status") != "processing" || record.GetInt("translation_attempts") != attempt {
 			return nil
@@ -170,11 +186,14 @@ func completeTranslation(app core.App, id, sourceHash string, attempt int, resul
 	})
 }
 
-func failTranslation(app core.App, id, sourceHash string, attempt int, now time.Time, cause error) error {
+func failTranslation(app core.App, collection, id, sourceHash string, attempt int, now time.Time, cause error) error {
 	return app.RunInTransaction(func(tx core.App) error {
-		record, err := tx.FindRecordById(CollectionPost, id)
+		record, err := tx.FindRecordById(collection, id)
 		if err != nil {
 			return fmt.Errorf("reload failed translation %s: %w", id, err)
+		}
+		if collection == CollectionComment && activePost(tx, record.GetString("post")) != nil {
+			return nil
 		}
 		if record.GetString("status") != "active" || record.GetString("translation_status") != "processing" || record.GetInt("translation_attempts") != attempt || record.GetString("original_hash") != sourceHash {
 			return nil

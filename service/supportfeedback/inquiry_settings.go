@@ -13,6 +13,7 @@ type InquirySettingsData struct {
 	arcadereport.Settings
 	LoginRequired bool `json:"loginRequired"`
 	Configured    bool `json:"configured"`
+	BotEnabled    bool `json:"botEnabled"`
 }
 
 // Inquiry routing is independent from fault-report routing. Existing conversations remain accessible.
@@ -22,6 +23,13 @@ func InquirySettings(arcade *core.Record) InquirySettingsData {
 		if err := json.Unmarshal([]byte(arcade.GetString("inquiry_settings")), &s); err != nil {
 			s = InquirySettingsData{}
 		}
+	}
+	if arcade != nil {
+		var bot struct {
+			Enabled bool `json:"enabled"`
+		}
+		_ = json.Unmarshal([]byte(arcade.GetString("inquiry_bot")), &bot)
+		s.BotEnabled = bot.Enabled
 	}
 	s.Configured = s.Mode == "internal" || s.Mode == "external" || s.Mode == "disabled"
 	if !s.Configured {

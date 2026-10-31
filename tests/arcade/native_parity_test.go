@@ -3,8 +3,10 @@ package arcade_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/ericbaek/musecat-backend-core/coreapp"
 	"github.com/ericbaek/musecat-backend-core/nativeauth"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 )
@@ -136,22 +139,83 @@ func TestNativeFeedbackRequestsAndRoleIsolation(t *testing.T) {
 			call(route[0], "/native"+route[1], denied, `{}`, 401)
 		}
 	}
+	if _, err := app.FindCollectionByNameOrId("support_feedback"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("fresh canonical messaging fixture must not retain the legacy feedback collection", err)
+	}
 	created := call("POST", "/native/support_feedback", token, `{"message":"Native local help"}`, 200)
 	id := created["id"].(string)
-	if mustFindRecord(t, app, "support_feedback", id).GetString("createdBy") != owner.Id {
-		t.Fatal("feedback author changed")
+	if created["createdBy"] != owner.Id || created["conversationId"] != id || created["status"] != nil || mustFindRecord(t, app, messaging.Conversations, id).GetString("created_by") != owner.Id {
+		t.Fatal("native feedback did not preserve its author and canonical conversation projection", created)
 	}
 	call("GET", "/native/user/feedback/thread?id="+id, foreign, "", 404)
 	replyBody := fmt.Sprintf(`{"feedbackId":%q,"message":"Read this local reply"}`, id)
 	call("POST", "/native/user/feedback/thread", foreign, replyBody, 404)
 	call("POST", "/native/user/feedback/thread", moderator, replyBody, 201)
 	thread := call("GET", "/native/user/feedback/thread?id="+id, token, "", 200)
-	if len(thread["items"].([]any)) != 1 {
+	if len(thread["items"].([]any)) != 1 || thread["feedback"].(map[string]any)["status"] != nil {
 		t.Fatal(thread)
 	}
-	call("PATCH", "/native/user/feedback/thread", token, fmt.Sprintf(`{"feedbackId":%q,"status":"solved"}`, id), 200)
+	reply := thread["items"].([]any)[0].(map[string]any)
+	if reply["author"] != staff.Id || reply["message"] != "Read this local reply" || reply["staff"] != true {
+		t.Fatal("canonical reply changed its native author or text", reply)
+	}
+	inbox := call("GET", "/native/user/notifications", token, "", 200)
+	items := inbox["items"].([]any)
+	if len(items) != 1 || inbox["unread"] != float64(1) {
+		t.Fatal("native inquiry reply did not notify the requester", inbox)
+	}
+	notification := items[0].(map[string]any)
+	if notification["kind"] != "message" || notification["conversationId"] != id || notification["message"] != reply["message"] || notification["url"] != "/messages?conversation="+id {
+		t.Fatal("native inquiry notification lost its canonical conversation destination", notification)
+	}
+	requester, err := messaging.Get(app, owner.Id, id)
+	if err != nil || requester.Status != nil || requester.CanManageStatus || len(requester.AllowedStatusTransitions) != 0 || !requester.CanSend {
+		t.Fatal("requester received internal inquiry status permissions", requester, err)
+	}
+	responder, err := messaging.Get(app, staff.Id, id)
+	if err != nil || !responder.CanManageStatus || strings.Join(responder.AllowedStatusTransitions, ",") != "waiting,recognised,solved" {
+		t.Fatal("current responder lost its authoritative status transitions", responder, err)
+	}
+	beforeDeniedSequence := responder.LatestSequence
+	beforeDeniedNotifications, err := app.CountRecords("user_notification")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"solved", "waiting"} {
+		denied := call("PATCH", "/native/user/feedback/thread", token, fmt.Sprintf(`{"feedbackId":%q,"status":%q}`, id, status), 400)
+		if denied["message"] != "Invalid inquiry status." {
+			t.Fatal("requester status rejection changed", denied)
+		}
+	}
 	call("PATCH", "/native/user/feedback/thread", foreign, fmt.Sprintf(`{"feedbackId":%q,"status":"waiting"}`, id), 404)
-	call("PATCH", "/native/user/feedback/thread", token, fmt.Sprintf(`{"feedbackId":%q,"status":"waiting"}`, id), 200)
+	afterDenied, err := messaging.Get(app, staff.Id, id)
+	afterDeniedNotifications, countErr := app.CountRecords("user_notification")
+	if err != nil || countErr != nil || afterDenied.LatestSequence != beforeDeniedSequence || afterDeniedNotifications != beforeDeniedNotifications {
+		t.Fatal("denied status mutations changed messages or notifications", afterDenied, err, countErr)
+	}
+	for _, status := range responder.AllowedStatusTransitions {
+		var receipt map[string]any
+		if status == "recognised" {
+			receipt = call("PUT", "/native/support_feedback", moderator, fmt.Sprintf(`{"id":%q,"status":%q}`, id, status), 200)
+		} else {
+			receipt = call("PATCH", "/native/user/feedback/thread", moderator, fmt.Sprintf(`{"feedbackId":%q,"status":%q}`, id, status), 200)
+		}
+		if receipt["status"] != status {
+			t.Fatal("native responder status receipt differs from the permitted transition", receipt)
+		}
+	}
+	afterStatus := call("GET", "/native/user/feedback/thread?id="+id, token, "", 200)
+	if afterStatus["feedback"].(map[string]any)["status"] != nil || len(afterStatus["items"].([]any)) != 1 {
+		t.Fatal("internal status or status-history entries leaked to the requester", afterStatus)
+	}
+	call("POST", "/native/user/notifications/read", foreign, fmt.Sprintf(`{"id":%q}`, notification["id"]), 200)
+	if untouched := call("GET", "/native/user/notifications", token, "", 200); untouched["unread"] != float64(1) {
+		t.Fatal("foreign acknowledgement cleared the requester's notification", untouched)
+	}
+	call("POST", "/native/user/notifications/read", token, fmt.Sprintf(`{"id":%q}`, notification["id"]), 200)
+	if read := call("GET", "/native/user/notifications", token, "", 200); read["unread"] != float64(0) {
+		t.Fatal("native acknowledgement did not clear the canonical reply notification", read)
+	}
 	call("POST", "/user/feedback/thread", token, replyBody, 401)
 	call("POST", "/native/arcade/request_admin", token, `{"message":"Native review request"}`, 200)
 	call("POST", "/native/arcade/request_admin", token, `{"message":"`+strings.Repeat("🎮", 1200)+`"}`, 200)

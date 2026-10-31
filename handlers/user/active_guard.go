@@ -67,7 +67,7 @@ func HasStaffAccess(auth *core.Record) bool {
 	return false
 }
 
-func hasActiveStaffAccess(app core.App, auth *core.Record) (bool, error) {
+func HasActiveStaffAccess(app core.App, auth *core.Record) (bool, error) {
 	if !HasStaffAccess(auth) || auth.Collection().Name != CollectionUser {
 		return false, nil
 	}

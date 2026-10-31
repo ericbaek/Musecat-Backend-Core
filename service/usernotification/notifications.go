@@ -3,6 +3,7 @@ package usernotification
 import (
 	"fmt"
 	"github.com/ericbaek/musecat-backend-core/service/arcadereport"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"slices"
@@ -50,6 +51,9 @@ func enqueueDevicesTx(app core.App, row *core.Record, userID string) error {
 		return err
 	}
 	for _, device := range devices {
+		if row.GetString("kind") == AnnouncementKind && !AnnouncementLocaleAllowed(row, device.GetString("locale")) {
+			continue
+		}
 		if row.GetString("kind") == "report_created" {
 			user, err := app.FindRecordById("user", userID)
 			if err != nil {
@@ -129,6 +133,12 @@ func ReactionCreatedTx(app core.App, flag *core.Record, actor, reactionID string
 	return CreateTx(app, flag.GetString("createdBy"), actor, "report_reaction", "reaction:"+reactionID, flag, reactionID)
 }
 func Visible(app core.App, user, row *core.Record) bool {
+	if row.GetString("kind") == AnnouncementKind {
+		return announcementVisible(app, user, row)
+	}
+	if row.GetString("kind") == "message" {
+		return messaging.NotificationVisible(app, user, row)
+	}
 	if row.GetString("kind") == ArcadeSetupKind {
 		if user == nil || row.GetString("user") != user.Id {
 			return false
@@ -141,7 +151,7 @@ func Visible(app core.App, user, row *core.Record) bool {
 		return err == nil && active
 	}
 	if row.GetString("kind") == "feedback_reply" || row.GetString("kind") == "feedback_created" {
-		return feedbackVisible(app, user, row)
+		return false
 	}
 	if user == nil || user.GetBool("withdrawn") || row.GetString("user") != user.Id {
 		return false
@@ -156,12 +166,16 @@ func Visible(app core.App, user, row *core.Record) bool {
 	return arcade.GetBool("public") || arcadereport.CanManage(user, arcade)
 }
 func Item(app core.App, row *core.Record) map[string]any {
+	if row.GetString("kind") == AnnouncementKind {
+		return announcementItem(row, "ko")
+	}
+	if row.GetString("kind") == "message" {
+		return messaging.NotificationItem(app, row)
+	}
 	if row.GetString("kind") == ArcadeSetupKind {
-		return arcadeSetupItem(row)
+		return arcadeSetupItem(app, row)
 	}
-	if row.GetString("kind") == "feedback_reply" || row.GetString("kind") == "feedback_created" {
-		return feedbackItem(app, row)
-	}
+
 	name, game, message, reaction := "", "", "", ""
 	if arcade, err := app.FindRecordById("arcade", row.GetString("arcade")); err == nil {
 		if basic, err := app.FindRecordById("arcade_basic", arcade.GetString("basic")); err == nil {

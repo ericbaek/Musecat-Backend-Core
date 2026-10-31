@@ -7,192 +7,140 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
 
 const (
-	defaultGeminiBaseURL   = "https://generativelanguage.googleapis.com/v1beta"
-	defaultGeminiModel     = "gemini-2.5-flash-lite"
-	defaultDeepSeekBaseURL = "https://api.deepseek.com"
-	defaultDeepSeekModel   = "deepseek-v4-flash"
-	maxTranslationTokens   = 16384
+	defaultOpenAIBaseURL = "https://api.openai.com/v1"
+	defaultOpenAIModel   = "gpt-6-luna"
+	maxTranslationTokens = 16384
 )
 
 type SourceContent struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 }
-
 type LocalizedContent struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 }
-
 type TranslationResult map[string]LocalizedContent
-
 type Translator interface {
-	Translate(ctx context.Context, source SourceContent) (TranslationResult, error)
+	Translate(context.Context, SourceContent) (TranslationResult, error)
 }
-
 type TranslationConfig struct {
-	Provider string
-	APIKey   string
-	BaseURL  string
-	Model    string
-	Glossary string
+	APIKey          string
+	BaseURL         string
+	Model           string
+	Glossary        string
+	ReasoningEffort string
 }
-
-func NewConfiguredTranslator(config TranslationConfig, client *http.Client) (Translator, error) {
-	switch strings.ToLower(strings.TrimSpace(config.Provider)) {
-	case "", "gemini":
-		if strings.TrimSpace(config.BaseURL) == "" {
-			config.BaseURL = defaultGeminiBaseURL
-		}
-		if strings.TrimSpace(config.Model) == "" {
-			config.Model = defaultGeminiModel
-		}
-		return NewGeminiTranslator(config, client)
-	case "deepseek":
-		if strings.TrimSpace(config.BaseURL) == "" {
-			config.BaseURL = defaultDeepSeekBaseURL
-		}
-		if strings.TrimSpace(config.Model) == "" {
-			config.Model = defaultDeepSeekModel
-		}
-		return NewDeepSeekTranslator(config, client)
-	default:
-		return nil, fmt.Errorf("unsupported translation provider %q", config.Provider)
-	}
-}
-
-type GeminiTranslator struct {
+type OpenAITranslator struct {
 	config TranslationConfig
 	client *http.Client
 }
 
-func NewGeminiTranslator(config TranslationConfig, client *http.Client) (*GeminiTranslator, error) {
+func NewConfiguredTranslator(config TranslationConfig, client *http.Client) (Translator, error) {
 	config.APIKey = strings.TrimSpace(config.APIKey)
 	config.BaseURL = strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
 	config.Model = strings.TrimSpace(config.Model)
+	config.ReasoningEffort = strings.TrimSpace(config.ReasoningEffort)
 	if config.APIKey == "" {
-		return nil, fmt.Errorf("translation API key is not configured")
+		return nil, fmt.Errorf("OPENAI_API_KEY is not configured")
 	}
 	if config.BaseURL == "" {
-		return nil, fmt.Errorf("translation base URL is not configured")
+		config.BaseURL = defaultOpenAIBaseURL
 	}
 	if config.Model == "" {
-		return nil, fmt.Errorf("translation model is not configured")
+		config.Model = defaultOpenAIModel
+	}
+	if config.ReasoningEffort == "" {
+		config.ReasoningEffort = "none"
+	}
+	if config.ReasoningEffort != "none" && config.ReasoningEffort != "low" {
+		return nil, fmt.Errorf("translation reasoning effort must be none or low")
 	}
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &GeminiTranslator{config: config, client: client}, nil
+	return &OpenAITranslator{config: config, client: client}, nil
 }
 
-func (t *GeminiTranslator) Translate(ctx context.Context, source SourceContent) (TranslationResult, error) {
+func (t *OpenAITranslator) Translate(ctx context.Context, source SourceContent) (TranslationResult, error) {
 	source.Title = strings.TrimSpace(source.Title)
 	source.Body = strings.TrimSpace(source.Body)
 	if source.Body == "" {
 		return nil, fmt.Errorf("source body is empty")
 	}
-
-	input, err := json.Marshal(map[string]any{
-		"source_locale":  "ko-KR",
-		"target_locales": []string{"en-US", "ja-JP"},
-		"content":        source,
-	})
+	input, err := json.Marshal(map[string]any{"source_locale": OriginalLocale, "target_locales": []string{"en-US", "ja-JP"}, "content": source})
 	if err != nil {
-		return nil, fmt.Errorf("encode translation input: %w", err)
+		return nil, err
 	}
-
+	contentSchema := map[string]any{
+		"type": "object", "additionalProperties": false, "required": []string{"title", "body"},
+		"properties": map[string]any{"title": map[string]string{"type": "string"}, "body": map[string]string{"type": "string"}},
+	}
 	payload := map[string]any{
-		"system_instruction": map[string]any{
-			"parts": []map[string]string{{"text": translationSystemPrompt(t.config.Glossary)}},
-		},
-		"contents": []map[string]any{{
-			"role":  "user",
-			"parts": []map[string]string{{"text": string(input)}},
+		"model":                 t.config.Model,
+		"messages":              []map[string]string{{"role": "system", "content": translationSystemPrompt(t.config.Glossary)}, {"role": "user", "content": string(input)}},
+		"reasoning_effort":      t.config.ReasoningEffort,
+		"max_completion_tokens": maxTranslationTokens,
+		"store":                 false,
+		"response_format": map[string]any{"type": "json_schema", "json_schema": map[string]any{
+			"name": "community_translation", "strict": true,
+			"schema": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"en-US", "ja-JP"}, "properties": map[string]any{"en-US": contentSchema, "ja-JP": contentSchema}},
 		}},
-		"generationConfig": map[string]any{
-			"temperature":      0.1,
-			"maxOutputTokens":  maxTranslationTokens,
-			"responseMimeType": "application/json",
-			"thinkingConfig":   map[string]int{"thinkingBudget": 0},
-			"responseSchema": map[string]any{
-				"type":     "OBJECT",
-				"required": []string{"en-US", "ja-JP"},
-				"properties": map[string]any{
-					"en-US": localizedContentSchema(),
-					"ja-JP": localizedContentSchema(),
-				},
-			},
-		},
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("encode Gemini request: %w", err)
+		return nil, err
 	}
-
-	endpoint := t.config.BaseURL + "/models/" + url.PathEscape(t.config.Model) + ":generateContent"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.config.BaseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("build Gemini request: %w", err)
+		return nil, err
 	}
+	req.Header.Set("Authorization", "Bearer "+t.config.APIKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", t.config.APIKey)
-
 	res, err := t.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("call Gemini: %w", err)
+		return nil, fmt.Errorf("call OpenAI: %w", err)
 	}
 	defer res.Body.Close()
-
 	responseBody, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
-		return nil, fmt.Errorf("read Gemini response: %w", err)
+		return nil, err
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, fmt.Errorf("Gemini returned %d: %s", res.StatusCode, truncate(strings.TrimSpace(string(responseBody)), 1000))
+		return nil, fmt.Errorf("OpenAI returned HTTP %d", res.StatusCode)
 	}
-
 	var envelope struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
+		Choices []struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
+				Content string `json:"content"`
+				Refusal string `json:"refusal"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
 	if err := json.Unmarshal(responseBody, &envelope); err != nil {
-		return nil, fmt.Errorf("decode Gemini response: %w", err)
+		return nil, fmt.Errorf("decode OpenAI response: %w", err)
 	}
-	if len(envelope.Candidates) == 0 || len(envelope.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("Gemini returned no translation candidate")
+	if len(envelope.Choices) == 0 {
+		return nil, fmt.Errorf("OpenAI returned no translation")
 	}
-
+	choice := envelope.Choices[0]
+	if choice.FinishReason != "stop" || choice.Message.Refusal != "" {
+		return nil, fmt.Errorf("OpenAI translation incomplete or refused")
+	}
 	var result TranslationResult
-	raw := strings.TrimSpace(envelope.Candidates[0].Content.Parts[0].Text)
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return nil, fmt.Errorf("decode Gemini translation JSON: %w", err)
+	if err := json.Unmarshal([]byte(choice.Message.Content), &result); err != nil {
+		return nil, fmt.Errorf("decode OpenAI translation: %w", err)
 	}
 	if err := validateTranslationResult(result, source); err != nil {
 		return nil, err
 	}
 	return result, nil
-}
-
-func localizedContentSchema() map[string]any {
-	return map[string]any{
-		"type":     "OBJECT",
-		"required": []string{"title", "body"},
-		"properties": map[string]any{
-			"title": map[string]string{"type": "STRING"},
-			"body":  map[string]string{"type": "STRING"},
-		},
-	}
 }
 
 func translationSystemPrompt(extraGlossary string) string {

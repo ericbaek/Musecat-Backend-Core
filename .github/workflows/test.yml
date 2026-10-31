@@ -3,13 +3,18 @@ name: Test
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require main in the development branch
+        if: github.ref_name == 'dev' || github.base_ref == 'dev'
+        run: git merge-base --is-ancestor origin/main HEAD
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.0"

@@ -117,15 +117,20 @@ func TestNativeArcadeMemoAndNoticeDomainParity(t *testing.T) {
 		t.Fatal("invalid memo or memo editing changed revisions/XP unexpectedly")
 	}
 	// Notice creation remains role-gated, with exact official ownership and supporter level checks.
-	noticeBody := map[string]any{"arcade": public, "type": "alert", "document": doc, "link": "https://example.com", "priority": 2}
+	beforeMissingTitle, beforeMissingTitleXP := count("arcade_notice"), count("user_level_log")
+	missingTitle := request("POST", "/native/arcade/notice", owner, map[string]any{"arcade": public, "type": "alert", "document": doc}, 400)
+	if missingTitle["error"] != "title is required" || count("arcade_notice") != beforeMissingTitle || count("user_level_log") != beforeMissingTitleXP {
+		t.Fatal("missing native notice title changed state or returned the wrong validation error", missingTitle)
+	}
+	noticeBody := map[string]any{"arcade": public, "title": "Native notice", "display_mode": "normal", "type": "alert", "document": doc, "link": "https://example.com", "priority": 2}
 	request("POST", "/native/arcade/notice", token, noticeBody, 403)
 	request("POST", "/native/arcade/notice", lowSupporter, noticeBody, 403)
 	setUserLevel(t, app, supporter.Id, 30)
 	request("POST", "/native/arcade/notice", lowSupporter, noticeBody, 403) // another official manages this arcade
-	request("POST", "/native/arcade/notice", owner, map[string]any{"arcade": private, "type": "alert", "document": doc}, 403)
+	request("POST", "/native/arcade/notice", owner, map[string]any{"arcade": private, "title": "Private notice", "type": "alert", "document": doc}, 403)
 	created := request("POST", "/native/arcade/notice", owner, noticeBody, 200)
 	id := created["id"].(string)
-	if created["createdBy"] != official.Id || created["arcade"] != public {
+	if created["createdBy"] != official.Id || created["arcade"] != public || created["title"] != "Native notice" || created["display_mode"] != "normal" {
 		t.Fatal("notice author attribution changed", created)
 	}
 	// POST deliberately has no idempotency key: it is not safe for automatic client replay.
@@ -140,7 +145,7 @@ func TestNativeArcadeMemoAndNoticeDomainParity(t *testing.T) {
 		t.Fatal("denied notice mutation changed persisted state")
 	}
 	updated := request("PUT", "/native/arcade/notice", owner, map[string]any{"id": id, "link": ""}, 200)
-	if updated["link"] != "" || updated["type"] != "alert" || noticeDocumentText(updated["document"]) != strings.Repeat("memo", 1600) {
+	if updated["link"] != "" || updated["type"] != "alert" || updated["title"] != "Native notice" || updated["display_mode"] != "normal" || noticeDocumentText(updated["document"]) != strings.Repeat("memo", 1600) {
 		t.Fatal("notice metadata omission did not preserve content", updated)
 	}
 	request("PUT", "/native/arcade/notice", moderator, map[string]any{"id": id, "priority": 1}, 200)

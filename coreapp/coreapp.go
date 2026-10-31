@@ -13,6 +13,7 @@ import (
 	"github.com/ericbaek/musecat-backend-core/docs"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	"github.com/ericbaek/musecat-backend-core/handlers"
+	announcementhandler "github.com/ericbaek/musecat-backend-core/handlers/announcement"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
@@ -31,6 +32,7 @@ import (
 	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
 	communityhandler "github.com/ericbaek/musecat-backend-core/handlers/community"
 	gamecataloghandler "github.com/ericbaek/musecat-backend-core/handlers/gamecatalog"
+	messaginghandler "github.com/ericbaek/musecat-backend-core/handlers/messaging"
 	rankinghandler "github.com/ericbaek/musecat-backend-core/handlers/ranking"
 	searchhandler "github.com/ericbaek/musecat-backend-core/handlers/search"
 	statshandler "github.com/ericbaek/musecat-backend-core/handlers/stats"
@@ -117,6 +119,8 @@ func configureDefaultRateLimits(app core.App) {
 		{Label: "GET /geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /reverse_geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geo", MaxRequests: 60, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /guest/conversations", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /guest/feedback/thread", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /support_feedback", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /native/support_feedback", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/feedback/thread", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
@@ -142,6 +146,13 @@ func configureDefaultRateLimits(app core.App) {
 // It is exported so test applications and integration suites can wire the exact
 // same routing table without duplicating it.
 func RegisterAPIRoutes(se *core.ServeEvent) {
+	announcementhandler.RegisterRoutes(se)
+	messaginghandler.RegisterRoutes(se)
+	se.Router.GET("/guest/feedback", arcadeadmin.ListGuestSupportFeedback).Bind(arcadeadmin.RequireGuestFeedback())
+	se.Router.GET("/guest/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(arcadeadmin.RequireGuestFeedback())
+	se.Router.GET("/guest/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(arcadeadmin.RequireGuestFeedback())
+	se.Router.POST("/guest/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
+	se.Router.PATCH("/guest/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(4096))
 	se.Router.GET("/hello", handlers.HelloHandler)
 	se.Router.GET("/geo", handlers.GeoLookupHandler)
 	se.Router.GET("/geocode", handlers.GeocodeHandler)

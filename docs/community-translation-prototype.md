@@ -6,20 +6,23 @@ English and Japanese variants after a fixed five-minute edit window.
 ## Configuration
 
 ```dotenv
-MUSECAT_TRANSLATION_PROVIDER=deepseek
-DEEPSEEK_API_KEY=your-deepseek-api-key
-MUSECAT_TRANSLATION_MODEL=deepseek-v4-flash
-MUSECAT_TRANSLATION_BASE_URL=https://api.deepseek.com
+OPENAI_API_KEY=your-openai-api-key
+MUSECAT_TRANSLATION_MODEL=gpt-6-luna
+MUSECAT_TRANSLATION_BASE_URL=https://api.openai.com/v1
+MUSECAT_TRANSLATION_REASONING_EFFORT=none
 MUSECAT_TRANSLATION_GLOSSARY=maimai DX: preserve official spelling
 MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC=false
 ```
 
+OpenAI is the only translation provider. Requests use strict JSON Schema output,
+`store=false`, and `reasoning_effort=none` by default. Set the effort to `low` to
+compare quality. `OPENAI_API_KEY` must be set in the backend `.env`; never expose
+it in frontend environment variables. Full reads `.env` before `.env.community.local`,
+and already-set variables take precedence.
+
 When the API key is empty, the cron worker stays idle and Korean posts remain
-available with `translation_status=pending`. Provider failures retry at one,
-five, fifteen, and sixty-minute intervals, up to five total attempts.
-DeepSeek runs in non-thinking JSON mode so translation does not pay for
-unnecessary reasoning tokens. Gemini remains available by setting
-`MUSECAT_TRANSLATION_PROVIDER=gemini` and its matching key, model, and base URL.
+available with `translation_status=pending`. Failures retry at one, five, fifteen,
+and sixty-minute intervals, up to five total attempts.
 
 ## Smoke test
 
@@ -60,7 +63,7 @@ No provider call occurs during a read request.
   run a separate language-detection call.
 - Posts support an optional game series and flair; missing flair becomes
   `chitchat`.
-- Comments, reactions, mentions, reports, and media are intentionally deferred.
+- Comments, reactions, mentions, and reports are intentionally deferred.
 - Core defines the fresh-bootstrap schema. Backend Full must add the equivalent
   schema through its own guarded forward migration before deployment.
 
@@ -69,3 +72,15 @@ No provider call occurs during a read request.
 POST/PUT `/community/post` also accept multipart `body`, `title`, `game_series`, `flair` and repeated `photos` files. Maximum eight files per post, 10 MiB per file; JPEG, PNG, WebP and GIF content is verified server-side. JSON edits preserve existing photos; multipart edits append within the same total limit. Responses contain ordered `photos` filenames. Public PocketBase file delivery provides originals and `600x600`/`1200x0` thumbnails.
 
 GET `/community/posts?author=USER_ID&flair=achievement&has_images=true` selects image-bearing active achievements before pagination/counting. Flairs: achievement, question, tip, news, event, art, chitchat.
+
+## Author edit and delete
+
+The web timeline and detail card expose Edit/Delete only to the signed-in author.
+Editing loads the Korean original even when a translated version is being shown.
+PUT edits title (if present), body, game series and flair within the original fixed
+five-minute window; JSON edits preserve attached photos. Failed edits retain the draft.
+DELETE `/community/post?id=...` requires an active authenticated author, has no
+five-minute restriction and returns 204, including retries. It sets `status=deleted`,
+clears photos and translations and prevents further public reads and worker claims.
+Deletion does not physically erase the internal post tombstone or original text.
+The web asks for confirmation and refreshes the feed or returns from detail to the feed.

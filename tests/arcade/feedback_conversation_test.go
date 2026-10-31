@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"testing"
 )
@@ -52,7 +53,7 @@ func TestFeedbackConversationAccessRepliesAndNotifications(t *testing.T) {
 		t.Fatal("author not notified", unread)
 	}
 	item := unread["items"].([]any)[0].(map[string]any)
-	if item["kind"] != "feedback_reply" || item["url"] != "/support/feedback/"+id {
+	if item["kind"] != "message" || item["url"] != "/messages?conversation="+id {
 		t.Fatal(item)
 	}
 	reply(authorToken, "It still fails", 201)
@@ -61,7 +62,7 @@ func TestFeedbackConversationAccessRepliesAndNotifications(t *testing.T) {
 		t.Fatal("staff not notified", moderatorInbox)
 	}
 	reply(staffToken, "Now fixed", 201)
-	if got := call("GET", "/user/notifications", "", authorToken, 200); got["unread"] != float64(2) {
+	if got := call("GET", "/user/notifications", "", authorToken, 200); got["unread"] != float64(1) {
 		t.Fatal(got)
 	}
 	if got := call("GET", "/user/notifications", "", otherToken, 200); got["unread"] != float64(0) {
@@ -71,8 +72,8 @@ func TestFeedbackConversationAccessRepliesAndNotifications(t *testing.T) {
 	if len(thread["items"].([]any)) != 3 {
 		t.Fatal(thread)
 	}
-	feedbackRecord, _ := app.FindRecordById("support_feedback", id)
-	if feedbackRecord.GetString("message") != "Need help" || feedbackRecord.GetString("status") != "recognised" {
+	feedbackRecord, _ := app.FindFirstRecordByFilter(messaging.Inquiries, "legacy_feedback_id={:id}", map[string]any{"id": id})
+	if thread["feedback"].(map[string]any)["message"] != "Need help" || feedbackRecord.GetString("status") != "recognised" {
 		t.Fatal("original/status damaged")
 	}
 	// The filter is not a status action: participants explicitly resolve/reopen.
@@ -80,18 +81,19 @@ func TestFeedbackConversationAccessRepliesAndNotifications(t *testing.T) {
 	call("PATCH", "/user/feedback/thread", statusBody("solved"), otherToken, 404)
 	call("PATCH", "/user/feedback/thread", statusBody("solved"), "", 401)
 	call("PATCH", "/user/feedback/thread", statusBody("recognised"), authorToken, 400)
-	call("PATCH", "/user/feedback/thread", statusBody("solved"), authorToken, 200)
-	feedbackRecord, _ = app.FindRecordById("support_feedback", id)
+	call("PATCH", "/user/feedback/thread", statusBody("solved"), authorToken, 400)
+	call("PATCH", "/user/feedback/thread", statusBody("solved"), staffToken, 200)
+	feedbackRecord, _ = app.FindFirstRecordByFilter(messaging.Inquiries, "legacy_feedback_id={:id}", map[string]any{"id": id})
 	if feedbackRecord.GetString("status") != "solved" {
-		t.Fatal("author could not resolve")
+		t.Fatal("staff could not resolve")
 	}
 	call("PATCH", "/user/feedback/thread", statusBody("waiting"), staffToken, 200)
-	feedbackRecord, _ = app.FindRecordById("support_feedback", id)
+	feedbackRecord, _ = app.FindFirstRecordByFilter(messaging.Inquiries, "legacy_feedback_id={:id}", map[string]any{"id": id})
 	if feedbackRecord.GetString("status") != "waiting" {
 		t.Fatal("staff could not reopen")
 	}
 	call("PATCH", "/user/feedback/thread", statusBody("solved"), staffToken, 200)
-	call("PATCH", "/user/feedback/thread", statusBody("waiting"), authorToken, 200)
+	call("PATCH", "/user/feedback/thread", statusBody("waiting"), authorToken, 400)
 	// Role removal revokes private staff notifications and thread access.
 	staff.Set("tags", []string{})
 	staff.Set("tag", []string{})
@@ -104,7 +106,7 @@ func TestFeedbackConversationAccessRepliesAndNotifications(t *testing.T) {
 		t.Fatal("revoked staff saw inquiry", got)
 	}
 	// Migration is repeatable and keeps existing messages/read state.
-	if err := usernotification.EnsureFeedbackSchema(app); err != nil {
+	if err := messaging.EnsureSchema(app); err != nil {
 		t.Fatal(err)
 	}
 	if thread = call("GET", "/user/feedback/thread?id="+id, "", authorToken, 200); len(thread["items"].([]any)) != 3 {
@@ -150,7 +152,7 @@ func TestArcadeInquiryOfficialAccountIsolationAndAlerts(t *testing.T) {
 	inquiry := call("POST", "/support_feedback", createBody, authorToken, 200)
 	id := inquiry["id"].(string)
 	ownerInbox := call("GET", "/user/notifications", "", ownerToken, 200)
-	if ownerInbox["unread"] != float64(1) || ownerInbox["items"].([]any)[0].(map[string]any)["kind"] != "feedback_created" {
+	if ownerInbox["unread"] != float64(1) || ownerInbox["items"].([]any)[0].(map[string]any)["kind"] != "message" {
 		t.Fatal("official account did not receive new inquiry", ownerInbox)
 	}
 	call("GET", "/user/feedback/thread?id="+id, "", otherToken, 404)
@@ -172,13 +174,13 @@ func TestArcadeInquiryOfficialAccountIsolationAndAlerts(t *testing.T) {
 		t.Fatal("author not notified", got)
 	}
 	call("POST", "/user/feedback/thread", fmt.Sprintf(`{"feedbackId":%q,"message":"Follow up"}`, id), authorToken, 201)
-	if got := call("GET", "/user/notifications", "", ownerToken, 200); got["unread"] != float64(2) {
+	if got := call("GET", "/user/notifications", "", ownerToken, 200); got["unread"] != float64(1) {
 		t.Fatal("official followup alert missing", got)
 	}
 	statusBody := fmt.Sprintf(`{"feedbackId":%q,"status":"solved"}`, id)
 	call("PATCH", "/user/feedback/thread", statusBody, otherToken, 404)
 	call("PATCH", "/user/feedback/thread", statusBody, ownerToken, 200)
-	record, _ := app.FindRecordById("support_feedback", id)
+	record, _ := app.FindFirstRecordByFilter(messaging.Inquiries, "legacy_feedback_id={:id}", map[string]any{"id": id})
 	if record.GetString("status") != "solved" {
 		t.Fatal("official could not resolve")
 	}
@@ -188,16 +190,16 @@ func TestArcadeInquiryOfficialAccountIsolationAndAlerts(t *testing.T) {
 	deviceAuth := base64.RawURLEncoding.EncodeToString(make([]byte, 16))
 	call("PUT", "/user/notifications/device", fmt.Sprintf(`{"subscription":{"endpoint":"https://fcm.googleapis.com/fcm/send/inquiry-owner","keys":{"p256dh":%q,"auth":%q}},"locale":"en"}`, key, deviceAuth), ownerToken, 200)
 	followup := call("POST", "/user/feedback/thread", fmt.Sprintf(`{"feedbackId":%q,"message":"Question after resolution"}`, id), authorToken, 201)
-	record, _ = app.FindRecordById("support_feedback", id)
+	record, _ = app.FindFirstRecordByFilter(messaging.Inquiries, "legacy_feedback_id={:id}", map[string]any{"id": id})
 	if record.GetString("status") != "waiting" {
 		t.Fatal("requester follow-up did not reopen resolved inquiry")
 	}
 	inbox := call("GET", "/user/notifications", "", ownerToken, 200)
-	if inbox["unread"] != float64(3) {
+	if inbox["unread"] != float64(1) {
 		t.Fatal("resolved follow-up did not alert official", inbox)
 	}
-	notification, err := app.FindFirstRecordByFilter(usernotification.Inbox, "user={:user} && feedback_message={:message}", map[string]any{"user": owner.Id, "message": followup["id"]})
-	if err != nil || notification.GetString("kind") != "feedback_reply" {
+	notification, err := app.FindFirstRecordByFilter(usernotification.Inbox, "user={:user} && message={:message}", map[string]any{"user": owner.Id, "message": followup["id"]})
+	if err != nil || notification.GetString("kind") != "message" {
 		t.Fatal("missing follow-up notification", err)
 	}
 	deliveries, err := app.FindRecordsByFilter(usernotification.Deliveries, "notification={:notification}", "", 0, 0, map[string]any{"notification": notification.Id})

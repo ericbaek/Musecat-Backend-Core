@@ -45,7 +45,7 @@ func TestArcadeSetupNoticeDurableAndCurrentRole(t *testing.T) {
 		t.Fatal("notice must be account scoped")
 	}
 	item := usernotification.Item(app, notice)
-	if item["url"] != "/account/arcade-dashboard/setup" || item["message"] != "새 관리자 대시보드를 설정해주세요" {
+	if item["url"] != "/arcade/"+id+"?setup=dashboard" || item["message"] != "새 관리자 대시보드를 설정해주세요" {
 		t.Fatal(item)
 	}
 	deliveries, err := app.FindRecordsByFilter(usernotification.Deliveries, "notification={:notice}", "", 0, 0, dbx.Params{"notice": notice.Id})

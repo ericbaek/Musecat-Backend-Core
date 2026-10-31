@@ -12,7 +12,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
+	"github.com/ericbaek/musecat-backend-core/service/messaging"
 )
 
 func TestFeedbackReplyPhotoAttachments(t *testing.T) {
@@ -104,7 +104,7 @@ func TestFeedbackReplyPhotoAttachments(t *testing.T) {
 	call("GET", path, "", otherToken, 404)
 	call("GET", path, "", "", 401)
 	call("GET", path+"../wrong", "", authorToken, 404)
-	record, err := app.FindRecordById(supportfeedback.Messages, last["id"].(string))
+	record, err := app.FindRecordById(messaging.Messages, last["id"].(string))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestFeedbackReplyPhotoAttachments(t *testing.T) {
 	call("GET", raw, "", "", 404)
 	call("GET", raw, "", authorToken, 404)
 	for i := 0; i < 2; i++ {
-		if err := supportfeedback.EnsureReplyPhotosSchema(app); err != nil {
+		if err := messaging.EnsureSchema(app); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -120,15 +120,15 @@ func TestFeedbackReplyPhotoAttachments(t *testing.T) {
 	if len(thread["items"].([]any)) != 3 || len(thread["items"].([]any)[2].(map[string]any)["photos"].([]any)) != 3 {
 		t.Fatal(thread)
 	}
-	original, _ := app.FindRecordById("support_feedback", id)
-	if original.GetString("message") != "Original preserved" || original.GetString("status") != "recognised" {
+	original := thread["feedback"].(map[string]any)
+	if original["message"] != "Original preserved" || original["status"] != nil {
 		t.Fatal("original/status changed")
 	}
 	notifications := call("GET", "/user/notifications", "", authorToken, 200)
-	if notifications["unread"] != float64(2) {
+	if notifications["unread"] != float64(1) {
 		t.Fatal("image-only responder replies missing alerts", notifications)
 	}
-	notification, err := app.FindFirstRecordByFilter(usernotification.Inbox, "user={:user} && feedback_message={:message}", map[string]any{"user": author.Id, "message": last["id"]})
+	notification, err := app.FindFirstRecordByFilter(usernotification.Inbox, "user={:user} && message={:message}", map[string]any{"user": author.Id, "message": last["id"]})
 	if err != nil {
 		t.Fatal("image-only reply notification missing", err)
 	}

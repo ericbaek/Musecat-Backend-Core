@@ -72,6 +72,19 @@ func activeSetupOwner(app core.App, user *core.Record) (bool, error) {
 	return true, nil
 }
 
-func arcadeSetupItem(row *core.Record) map[string]any {
-	return map[string]any{"id": row.Id, "kind": ArcadeSetupKind, "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": "", "gameName": "", "message": "새 관리자 대시보드를 설정해주세요", "reaction": "", "url": "/account/arcade-dashboard/setup"}
+func arcadeSetupItem(app core.App, row *core.Record) map[string]any {
+	destination := "/account/arcade-dashboard/setup"
+	// Resolve against current ownership, as the existing onboarding endpoint does.
+	// Keep the event account-scoped so arcade removal cannot erase its identity.
+	user, err := app.FindRecordById("user", row.GetString("user"))
+	if err == nil && !user.GetBool("withdrawn") && slices.Contains(user.GetStringSlice("tags"), "arcade_owner") {
+		for _, id := range user.GetStringSlice("owns") {
+			if arcade, err := app.FindRecordById("arcade", id); err == nil {
+				destination = "/arcade/" + arcade.Id + "?setup=dashboard"
+				break
+			}
+		}
+	}
+
+	return map[string]any{"id": row.Id, "kind": ArcadeSetupKind, "read": row.GetBool("read"), "created": row.GetString("created"), "arcadeName": "", "gameName": "", "message": "새 관리자 대시보드를 설정해주세요", "reaction": "", "url": destination}
 }
