@@ -82,15 +82,9 @@ func RegisterRoutes(se *core.ServeEvent, clients []Client, webClients ...WebClie
 		return e.NoContent(204)
 	})
 	guard := &hook.Handler[*core.RequestEvent]{Func: func(e *core.RequestEvent) error {
-		auth := e.Request.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
-			return e.UnauthorizedError("Native session required", nil)
+		if err := authenticateNativeRecord(e, s); err != nil {
+			return err
 		}
-		u, err := s.Authenticate(e.App, strings.TrimPrefix(auth, "Bearer "))
-		if err != nil {
-			return e.UnauthorizedError("Native session required", nil)
-		}
-		e.Auth = u
 		return e.Next()
 	}}
 	secured := g.Group("").Bind(guard, user.RequireActiveUser())
@@ -155,4 +149,42 @@ func activeCredentials(e *core.RequestEvent, s Service, out Credentials) error {
 	h := hook.Hook[*core.RequestEvent]{}
 	h.Bind(guard)
 	return h.Trigger(e, func(e *core.RequestEvent) error { return e.JSON(http.StatusOK, out) })
+}
+
+// FirstPartyAuthentication is bound only to explicitly selected canonical routes.
+// PocketBase loads normal web JWTs first; raw REST, OAuth and delegated routes
+// never receive this adapter.
+func FirstPartyAuthentication(clients []Client) *hook.Handler[*core.RequestEvent] {
+	service := Service{Clients: clients}
+	return &hook.Handler[*core.RequestEvent]{
+		Id:       "firstPartyNativeAuthentication",
+		Priority: apis.DefaultLoadAuthTokenMiddlewarePriority + 1,
+		Func: func(e *core.RequestEvent) error {
+			if e.Auth != nil || len(clients) == 0 {
+				return e.Next()
+			}
+			header := e.Request.Header.Get("Authorization")
+			if !strings.HasPrefix(header, "Bearer ") || !challengePattern.MatchString(strings.TrimPrefix(header, "Bearer ")) {
+				return e.Next()
+			}
+			e.Response.Header().Set("Cache-Control", "no-store")
+			if err := authenticateNativeRecord(e, service); err != nil {
+				return err
+			}
+			return user.RequireActiveUser().Func(e)
+		},
+	}
+}
+
+func authenticateNativeRecord(e *core.RequestEvent, service Service) error {
+	header := e.Request.Header.Get("Authorization")
+	if !strings.HasPrefix(header, "Bearer ") {
+		return e.UnauthorizedError("Native session required", nil)
+	}
+	record, err := service.Authenticate(e.App, strings.TrimPrefix(header, "Bearer "))
+	if err != nil {
+		return e.UnauthorizedError("Native session required", nil)
+	}
+	e.Auth = record
+	return nil
 }

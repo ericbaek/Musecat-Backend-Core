@@ -9,6 +9,7 @@ import (
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
 
 	"github.com/ericbaek/musecat-backend-core/connections"
@@ -57,11 +58,8 @@ type Config struct {
 	// NativeAuthClients is an exact first-party device client/callback allowlist. Empty disables all native routes.
 	NativeAuthClients []nativeauth.Client
 	NativeWebClients  []nativeauth.WebClient
-	// NativeRoutes lets the executable register domain aliases behind the native session guard.
-	// It is never called when the native client allowlist is empty.
-	NativeRoutes func(*router.RouterGroup[*core.RequestEvent])
-	Delegation   *delegation.Manager
-	Connections  *connections.Manager
+	Delegation        *delegation.Manager
+	Connections       *connections.Manager
 	// Joint enables reciprocal consent for registered partners.
 	Joint *connections.JointManager
 	// PartnerApps is the Developer Center service. Executables that register its
@@ -92,10 +90,8 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		se.Router.Bind(clientIPForwarding(config.ClientIPForwardSecret))
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
-		RegisterAPIRoutes(se, config.Connections)
-		if secured := RegisterNativeAPIRoutes(se, config.NativeAuthClients, config.NativeWebClients...); secured != nil && config.NativeRoutes != nil {
-			config.NativeRoutes(secured)
-		}
+		registerAPIRoutes(se, config.NativeAuthClients, config.Connections)
+		nativeauth.RegisterRoutes(se, config.NativeAuthClients, config.NativeWebClients...)
 		partnerApps := config.PartnerApps
 		if partnerApps == nil {
 			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, config.Joint, "")
@@ -125,22 +121,6 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		RegisterAccountDelegationRoutes(se, config.Delegation)
 		return se.Next()
 	})
-}
-
-// RegisterNativeAPIRoutes reuses canonical reads and inbox read state behind active opaque device sessions.
-// Domain handlers retain their existing visibility and account ownership policies.
-func RegisterNativeAPIRoutes(se *core.ServeEvent, clients []nativeauth.Client, webClients ...nativeauth.WebClient) *router.RouterGroup[*core.RequestEvent] {
-	secured := nativeauth.RegisterRoutes(se, clients, webClients...)
-	if secured == nil {
-		return nil
-	}
-	secured.GET("/user/visits", userhandler.GetMyVisits)
-	secured.GET("/user/passport", userhandler.GetMyPassport)
-	secured.GET("/user/passport/stamps", userhandler.GetMyPassportStamps)
-	secured.GET("/rankings", rankinghandler.List)
-	secured.GET("/user/notifications", usernotifications.List)
-	secured.POST("/user/notifications/read", usernotifications.Read)
-	return secured
 }
 
 func configureDefaultRateLimits(app core.App) {
@@ -190,6 +170,10 @@ func configureDefaultRateLimits(app core.App) {
 // It is exported so test applications and integration suites can wire the exact
 // same routing table without duplicating it.
 func RegisterAPIRoutes(se *core.ServeEvent, managers ...*connections.Manager) {
+	registerAPIRoutes(se, nil, managers...)
+}
+
+func registerAPIRoutes(se *core.ServeEvent, nativeClients []nativeauth.Client, managers ...*connections.Manager) {
 	var manager *connections.Manager
 	if len(managers) > 0 {
 		manager = managers[0]
@@ -203,7 +187,7 @@ func RegisterAPIRoutes(se *core.ServeEvent, managers ...*connections.Manager) {
 	se.Router.POST("/guest/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
 	se.Router.PATCH("/guest/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(4096))
 	registerSessionRoutes(se.Router.RouterGroup)
-	registerAccountRoutes(se.Router.RouterGroup)
+	registerAccountRoutes(se.Router.RouterGroup, nativeClients...)
 }
 
 // AccountResource rejects management and unknown routes before any domain handler.
@@ -222,14 +206,18 @@ func registerSessionRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	creation := api.Group("/moderation/user").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
 	creation.POST("/arcade-account", userhandler.CreateArcadeAccount).Bind(apis.BodyLimit(16 << 10))
 }
-func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
+func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeClients ...nativeauth.Client) {
+	var firstPartyAuth []*hook.Handler[*core.RequestEvent]
+	if len(nativeClients) > 0 {
+		firstPartyAuth = append(firstPartyAuth, nativeauth.FirstPartyAuthentication(nativeClients))
+	}
 	api.GET("/hello", handlers.HelloHandler)
 	api.GET("/geo", handlers.GeoLookupHandler)
 	api.GET("/geocode", handlers.GeocodeHandler)
 	api.GET("/reverse_geocode", handlers.ReverseGeocodeHandler)
 	api.GET("/search", searchhandler.Search)
 	api.GET("/stats", statshandler.GetStats)
-	api.GET("/rankings", rankinghandler.List)
+	api.GET("/rankings", rankinghandler.List).Bind(firstPartyAuth...)
 	api.GET("/arcade/ranking", rankinghandler.ArcadeVisitRanking)
 	api.GET("/subway/map", subwayhandler.GetMap)
 	api.GET("/subway/map/file", subwayhandler.DownloadMapFile)
@@ -403,8 +391,8 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	authUser := api.Group("/user").Bind(apis.RequireAuth("user"))
 
 	authNotifications := api.Group("/user/notifications").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	authNotifications.GET("", usernotifications.List)
-	authNotifications.POST("/read", usernotifications.Read).Bind(apis.BodyLimit(4096))
+	authNotifications.GET("", usernotifications.List).Bind(firstPartyAuth...)
+	authNotifications.POST("/read", usernotifications.Read).Bind(firstPartyAuth...).Bind(apis.BodyLimit(4096))
 	authNotifications.POST("/device", usernotifications.DeviceStatus).Bind(apis.BodyLimit(4096))
 	authNotifications.PATCH("/device", usernotifications.SyncDeviceLocale).Bind(apis.BodyLimit(4096))
 	authNotifications.PUT("/device", usernotifications.SaveDevice).Bind(apis.BodyLimit(16384))
@@ -413,9 +401,9 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	authUser.PUT("/profile", userhandler.UpdateProfile).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(35<<20))
 	authUser.PUT("/game-preferences", userhandler.UpdateGamePreferences).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(128<<10))
 	authUser.POST("/check-in", userhandler.CheckIn).Bind(userhandler.RequireActiveUser())
-	api.GET("/user/passport", userhandler.GetMyPassport)
-	api.GET("/user/passport/stamps", userhandler.GetMyPassportStamps)
-	authUser.GET("/visits", userhandler.GetMyVisits).Bind(userhandler.RequireActiveUser())
+	api.GET("/user/passport", userhandler.GetMyPassport).Bind(firstPartyAuth...)
+	api.GET("/user/passport/stamps", userhandler.GetMyPassportStamps).Bind(firstPartyAuth...)
+	authUser.GET("/visits", userhandler.GetMyVisits).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
 	authUser.PUT("/countries", userhandler.UpdateCountries).Bind(userhandler.RequireActiveUser())
 	authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())
 	authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(userhandler.RequireActiveUser())

@@ -247,6 +247,27 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 	if _, ok := contract.Components.Schemas["NativeCredentials"]; !ok {
 		t.Fatal("native credential schema is missing from components")
 	}
+	for _, path := range []string{"/user/visits", "/user/passport", "/user/passport/stamps", "/rankings", "/user/notifications", "/user/notifications/read"} {
+		op := contract.Paths[path].Get
+		if path == "/user/notifications/read" {
+			op = contract.Paths[path].Post
+		}
+		if op == nil {
+			t.Fatalf("canonical operation missing: %s", path)
+		}
+		seen := map[string]bool{}
+		for _, alternative := range op.Security {
+			for scheme := range alternative {
+				seen[scheme] = true
+			}
+		}
+		if !seen["bearerAuth"] || !seen["nativeSession"] {
+			t.Fatalf("canonical auth alternatives missing: %s", path)
+		}
+		if _, exists := contract.Paths["/native"+path]; exists {
+			t.Fatalf("duplicate native domain URL remains: %s", path)
+		}
+	}
 	for _, route := range []struct {
 		path, method, security string
 		statuses               []string
@@ -258,12 +279,6 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 		{"/native/session/refresh", "post", "", []string{"200", "401", "403", "413"}},
 		{"/native/session/revoke", "post", "", []string{"204", "400", "413"}},
 		{"/native/user/me", "get", "nativeSession", []string{"200", "401", "403"}},
-		{"/native/user/visits", "get", "nativeSession", []string{"200", "401", "403"}},
-		{"/native/user/passport", "get", "nativeSession", []string{"200", "400", "401", "403", "404"}},
-		{"/native/user/passport/stamps", "get", "nativeSession", []string{"200", "400", "401", "403", "404"}},
-		{"/native/rankings", "get", "nativeSession", []string{"200", "400", "401", "403"}},
-		{"/native/user/notifications", "get", "nativeSession", []string{"200", "401", "403"}},
-		{"/native/user/notifications/read", "post", "nativeSession", []string{"200", "400", "401", "403", "413"}},
 	} {
 		op := contract.Paths[route.path].Post
 		if route.method == "get" {
