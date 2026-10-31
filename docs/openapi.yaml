@@ -66,6 +66,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    nativeWebClientBasic:
+      type: http
+      scheme: basic
+      description: Server-only native web-handoff client ID and secret. Never distributed to a native app or browser.
     nativeSession:
       type: http
       scheme: bearer
@@ -16901,6 +16905,77 @@ paths:
         '401': {description: Authentication required.}
         '403': {description: Active developer or moderator required.}
         '404': {description: Missing story.}
+
+  /native/session/web/code:
+    post:
+      tags: [Users]
+      summary: Authorize an owner web session from an active native device
+      description: Optional confidential BFF handoff. The exact native client and configured web issuer bind this S256 ticket to the current account and device family. Hash-only, single-use code expires in 60 seconds. Disabled unless web clients are configured. All responses use no-store; body limit 4096 bytes.
+      security:
+        - nativeSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, issuer, code_challenge]
+              properties:
+                client_id: {type: string}
+                issuer: {type: string, format: uri}
+                code_challenge: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+      responses:
+        '200':
+          description: One-time web authorization; never a web JWT.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, user_id, expires_in]
+                properties:
+                  code: {type: string, pattern: '^[A-Za-z0-9_-]{43}$'}
+                  user_id: {type: string}
+                  expires_in: {type: integer, enum: [60]}
+        '400': {description: Invalid JSON or S256 challenge.}
+        '401': {description: Invalid native family, client or issuer.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
+
+  /native/session/web/exchange:
+    post:
+      tags: [Users]
+      summary: Confidential BFF redemption of a native web authorization
+      description: Only the registered BFF may authenticate with HTTP Basic. Requires the exact client, issuer and S256 verifier, and rechecks the native family, current allowlist and active account. Wrong verifier does not consume the ticket; successful atomic consumption prevents replay. Returns a 900-second non-refreshable normal web JWT only to the server, which sets an HttpOnly cookie and must never forward this JSON, credential or token through app responses, URLs or JavaScript. Native bearer credentials remain invalid on existing web and partner routes. All responses use no-store; body limit 4096 bytes.
+      security:
+        - nativeWebClientBasic: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, code_verifier, client_id, issuer]
+              properties:
+                code: {type: string}
+                code_verifier: {type: string}
+                client_id: {type: string}
+                issuer: {type: string, format: uri}
+      responses:
+        '200':
+          description: Confidential server-only web credential.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, user_id, expires_in]
+                properties:
+                  token: {type: string}
+                  user_id: {type: string}
+                  expires_in: {type: integer, enum: [900]}
+        '400': {description: Invalid JSON.}
+        '401': {description: Invalid server credentials, ticket, PKCE or session binding.}
+        '403': {description: Account is inactive or banned.}
+        '413': {description: Request body exceeds 4096 bytes.}
 
   /native/session/code:
     post:

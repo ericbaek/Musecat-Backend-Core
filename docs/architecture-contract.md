@@ -1647,3 +1647,34 @@ Guest inquiries use the canonical messaging store and browser-scoped credentials
 Direct-message conversations enter conversation lists only after the first message
 is sent. Opening a peer DM may reuse an empty conversation without listing it for
 either participant. Inquiry visibility is unchanged.
+
+
+### Explicit native-to-web owner session handoff
+
+An optional `Config.NativeWebClients` adds only `POST /native/session/web/code`
+and `/native/session/web/exchange`; absent web clients leave both unregistered.
+The device requests a 60-second S256 code using its existing opaque native
+session, exact client ID and configured web issuer. The ticket stores only its
+hash and binds the account, device family, client, issuer and challenge in the
+private `native_auth_web_code` SQL ledger. Core fresh bootstrap and Full's
+independent additive migration call `InstallWebHandoffSchema`; Full must never
+import Core bootstrap migrations.
+
+Only the confidential BFF can redeem the code with HTTP Basic client ID/secret,
+exact issuer and PKCE verifier. Invalid verifiers do not consume it; successful
+redemption is atomic and single use. Redemption rechecks the current client
+allowlist, family expiry/revocation and active account/token key. It returns
+`{token,user_id,expires_in:900}` solely to the BFF. The token is a standard
+PocketBase static auth JWT, non-refreshable and valid for fifteen minutes. The
+BFF sets its existing HttpOnly cookie with at most that lifetime; it never
+forwards credentials to app JSON, URLs or JavaScript. The app sends only
+`{code,code_verifier}` to its approved web origin and isolates/clears the web data
+store on logout or account switch. An already redeemed JWT retains normal web
+auth semantics until expiry; native-family revocation prevents unredeemed tickets
+but does not retroactively revoke a separate web JWT.
+
+Existing web/partner routes still reject native bearer credentials and native
+routes still reject web JWTs. Both handoff routes are no-store with a 4096-byte
+body limit. Disabling the optional BFF configuration removes these routes while
+preserving consumed tickets and native session history. No credential, code,
+verifier or configured secret may be logged.

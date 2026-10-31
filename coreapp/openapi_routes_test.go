@@ -241,6 +241,9 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 	if scheme := contract.Components.SecuritySchemes["nativeSession"]; scheme.Type != "http" || scheme.Scheme != "bearer" || scheme.BearerFormat != "opaque" {
 		t.Fatal("native opaque security scheme is missing from components")
 	}
+	if scheme := contract.Components.SecuritySchemes["nativeWebClientBasic"]; scheme.Type != "http" || scheme.Scheme != "basic" {
+		t.Fatal("confidential web handoff scheme missing")
+	}
 	if _, ok := contract.Components.Schemas["NativeCredentials"]; !ok {
 		t.Fatal("native credential schema is missing from components")
 	}
@@ -248,6 +251,8 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 		path, method, security string
 		statuses               []string
 	}{
+		{"/native/session/web/code", "post", "nativeSession", []string{"200", "400", "401", "403", "413"}},
+		{"/native/session/web/exchange", "post", "nativeWebClientBasic", []string{"200", "400", "401", "403", "413"}},
 		{"/native/session/code", "post", "bearerAuth", []string{"200", "401", "403", "413"}},
 		{"/native/session/exchange", "post", "", []string{"200", "401", "403", "413"}},
 		{"/native/session/refresh", "post", "", []string{"200", "401", "403", "413"}},

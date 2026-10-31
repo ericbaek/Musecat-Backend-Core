@@ -22,8 +22,9 @@ var challengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 type Client struct{ ID, Callback string }
 type Service struct {
-	Clients []Client
-	Now     func() time.Time
+	Clients    []Client
+	WebClients []WebClient
+	Now        func() time.Time
 }
 type Credentials struct {
 	AccessToken  string `json:"access_token"`
