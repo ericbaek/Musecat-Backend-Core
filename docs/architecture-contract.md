@@ -1623,7 +1623,7 @@ allowlist via `coreapp.Config.NativeAuthClients`; an empty allowlist registers n
 native routes. Existing connection, delegation, Developer Center and worker
 configuration remains unchanged.
 
-This login-only surface consists of `POST /native/session/code`, `/exchange`,
+The base login surface consists of `POST /native/session/code`, `/exchange`,
 `/refresh`, `/revoke` and `GET /native/user/me`. Code issuance requires the existing
 active web user; exchange binds the exact client, callback and S256 verifier.
 Single-use codes expire after 120 seconds, access after 10 minutes, and device
@@ -1641,6 +1641,21 @@ helper; existing Full databases use Full's independent additive migration and
 copy-only pre/postflight. Disabling the allowlist is the rollback: preserve
 consumed hashes and revoked-family history. Credentials and codes must not be
 logged. This integration does not enable native domain editing or push APIs.
+
+Core also composes five existing authenticated reads through the same native
+session guard: `GET /native/user/visits`, `/user/passport`,
+`/user/passport/stamps`, `/rankings` and `/user/notifications` (all paths have
+the `/native` prefix). `POST /native/user/notifications/read` reuses the
+canonical account-scoped id/all read-state mutation with a 4096-byte body limit.
+The canonical handlers, response shapes, passport audience matrix, ranking
+viewer projection and current notification source ACL remain unchanged. Explicit
+passport targets retain the same summary/full/private policy; inbox queries and
+read-state changes never select another account from query input. The entire
+surface remains no-store and disabled with an empty native allowlist. Web JWTs
+do not authenticate these aliases and native tokens still do not authenticate
+ordinary web or partner routes. These routes add no schema or migration and do
+not enable APNs, passport trust/reset or general domain writes.
+
 
 Guest inquiries use the canonical messaging store and browser-scoped credentials, never synthetic user accounts. Current guest access survives intake-policy changes. Reply bots snapshot their owner configuration per inquiry; requester choices are validated and sequenced atomically. DM read cursors belong to each actual account and expose the counterpart cursor only for direct messages.
 
