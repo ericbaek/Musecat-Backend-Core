@@ -5883,6 +5883,7 @@ paths:
                 $ref: '#/components/schemas/StatsResponse'
   /rankings:
     get:
+      security: [{bearerAuth: []}, {nativeSession: []}, {}]
       tags: [Users]
       summary: /rankings
       parameters:
@@ -8044,7 +8045,7 @@ paths:
     get:
       summary: List the authenticated user's notifications
       description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. The durable arcade_setup notice remains visible to current active exact arcade_owner accounts regardless of saved inquiry/report modes; reading it never changes settings. Does not expose endpoints or subscription credentials.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}, description: Announcement title/summary language and audience filter; message team names and photo-only previews also use this locale.}
         - {name: before, in: query, schema: {type: string}, description: Last notification id from the previous page.}
@@ -8080,7 +8081,7 @@ paths:
   /user/notifications/read:
     post:
       summary: Persist read state for one or all own notifications
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9235,7 +9236,7 @@ paths:
     get:
       tags: [Users]
       summary: /user/visits
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       responses:
         '200':
           description: Authenticated user's profile-ready visit summary. It includes all visit days per arcade without raw GPS, accuracy, XP, or visit-record data.
@@ -9515,7 +9516,7 @@ paths:
       tags: [User]
       summary: Owner or shared passport
       description: Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; withdrawn profiles return 404. Private profiles return 404 except for active developers and moderators, who receive full visit dates. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
-      security: [{bearerAuth: []}, {}]
+      security: [{bearerAuth: []}, {nativeSession: []}, {}]
       parameters:
         - in: query
           name: user
@@ -9540,7 +9541,7 @@ paths:
       tags: [User]
       summary: Owner or shared passport
       description: Current public venues including closed ones. Omit user for authenticated owner. An explicit user ID allows anonymous summary/full access; withdrawn profiles return 404. Private profiles return 404 except for active developers and moderators, who receive full visit dates. Summary omits every visit date. Existing visibility settings take the new scope immediately. No shared caching or raw verification metadata.
-      security: [{bearerAuth: []}, {}]
+      security: [{bearerAuth: []}, {nativeSession: []}, {}]
       parameters:
         - in: query
           name: user
@@ -16945,7 +16946,7 @@ paths:
     post:
       tags: [Users]
       summary: Confidential BFF redemption of a native web authorization
-      description: Only the registered BFF may authenticate with HTTP Basic. Requires the exact client, issuer and S256 verifier, and rechecks the native family, current allowlist and active account. Wrong verifier does not consume the ticket; successful atomic consumption prevents replay. Returns a 900-second non-refreshable normal web JWT only to the server, which sets an HttpOnly cookie and must never forward this JSON, credential or token through app responses, URLs or JavaScript. Native bearer credentials remain invalid on existing web and partner routes. All responses use no-store; body limit 4096 bytes.
+      description: Only the registered BFF may authenticate with HTTP Basic. Requires the exact client, issuer and S256 verifier, and rechecks the native family, current allowlist and active account. Wrong verifier does not consume the ticket; successful atomic consumption prevents replay. Returns a 900-second non-refreshable normal web JWT only to the server, which sets an HttpOnly cookie and must never forward this JSON, credential or token through app responses, URLs or JavaScript. Native bearer credentials are accepted only on explicitly selected canonical first-party operations; unrelated web, raw collection, OAuth/OIDC, management and partner routes do not resolve them. All responses use no-store; body limit 4096 bytes.
       security:
         - nativeWebClientBasic: []
       requestBody:
@@ -17085,101 +17086,6 @@ paths:
         '204': {description: Family revoked or already absent.}
         '400': {description: Invalid request.}
         '401': {description: Invalid or expired credential.}
-        '403': {description: Account is inactive or banned.}
-        '413': {description: Request body exceeds 4096 bytes.}
-
-  /native/user/visits:
-    get:
-      tags: [Users]
-      summary: Native owner visit summary
-      description: Reuses GET /user/visits and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
-      security: [{nativeSession: []}]
-      responses:
-        '200': {$ref: '#/paths/~1user~1visits/get/responses/200'}
-        '401': {description: Missing, expired or invalid native session.}
-        '403': {description: Account is inactive or banned.}
-        '502': {description: Failed to load the canonical read.}
-
-  /native/user/passport:
-    get:
-      tags: [Users]
-      summary: Native owner or shared passport
-      description: Reuses GET /user/passport and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
-      security: [{nativeSession: []}]
-      parameters:
-        - {$ref: '#/paths/~1user~1passport/get/parameters/0'}
-        - {$ref: '#/paths/~1user~1passport/get/parameters/1'}
-      responses:
-        '200': {$ref: '#/paths/~1user~1passport/get/responses/200'}
-        '400': {description: Invalid filter or pagination.}
-        '401': {description: Missing, expired or invalid native session.}
-        '403': {description: Account is inactive or banned.}
-        '404': {description: Private, missing or withdrawn target profile.}
-        '502': {description: Failed to load the canonical read.}
-
-  /native/user/passport/stamps:
-    get:
-      tags: [Users]
-      summary: Native owner or shared passport stamps
-      description: Reuses GET /user/passport/stamps and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
-      security: [{nativeSession: []}]
-      parameters:
-        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/0'}
-        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/1'}
-        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/2'}
-        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/3'}
-        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/4'}
-        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/5'}
-        - {$ref: '#/paths/~1user~1passport~1stamps/get/parameters/6'}
-      responses:
-        '200': {$ref: '#/paths/~1user~1passport~1stamps/get/responses/200'}
-        '400': {description: Invalid filter or pagination.}
-        '401': {description: Missing, expired or invalid native session.}
-        '403': {description: Account is inactive or banned.}
-        '404': {description: Private, missing or withdrawn target profile.}
-        '502': {description: Failed to load the canonical read.}
-
-  /native/rankings:
-    get:
-      tags: [Users]
-      summary: Native authenticated rankings and viewer
-      description: Reuses GET /rankings and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
-      security: [{nativeSession: []}]
-      parameters:
-        - {$ref: '#/paths/~1rankings/get/parameters/0'}
-        - {$ref: '#/paths/~1rankings/get/parameters/1'}
-      responses:
-        '200': {$ref: '#/paths/~1rankings/get/responses/200'}
-        '400': {description: Invalid filter or pagination.}
-        '401': {description: Missing, expired or invalid native session.}
-        '403': {description: Account is inactive or banned.}
-        '502': {description: Failed to load the canonical read.}
-
-  /native/user/notifications:
-    get:
-      tags: [Users]
-      summary: Native account notification inbox
-      description: Reuses GET /user/notifications and its existing response, filtering, visibility and account ownership policies behind the active opaque native session guard. Disabled without a native client allowlist. All responses are no-store; web JWTs are rejected.
-      security: [{nativeSession: []}]
-      parameters:
-        - {$ref: '#/paths/~1user~1notifications/get/parameters/0'}
-        - {$ref: '#/paths/~1user~1notifications/get/parameters/1'}
-      responses:
-        '200': {$ref: '#/paths/~1user~1notifications/get/responses/200'}
-        '401': {description: Missing, expired or invalid native session.}
-        '403': {description: Account is inactive or banned.}
-
-  /native/user/notifications/read:
-    post:
-      tags: [Users]
-      summary: Mark native account notifications read
-      description: Reuses the canonical read-state handler. A selected id changes only the authenticated account; a foreign id is a successful no-op. All marks all notifications for that account only. Active opaque native session required; web JWTs are rejected. Body limit 4096 bytes and all responses are no-store. No APNs or device registration is enabled.
-      security: [{nativeSession: []}]
-      requestBody: {$ref: '#/paths/~1user~1notifications~1read/post/requestBody'}
-      responses:
-        '200': {$ref: '#/paths/~1user~1notifications~1read/post/responses/200'}
-        '400': {description: Invalid notification selection.}
-        '401': {description: Missing, expired or invalid native session.}
         '403': {description: Account is inactive or banned.}
         '413': {description: Request body exceeds 4096 bytes.}
 

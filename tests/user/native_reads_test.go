@@ -9,30 +9,21 @@ import (
 	"time"
 
 	"github.com/ericbaek/musecat-backend-core/coreapp"
-	ranking "github.com/ericbaek/musecat-backend-core/handlers/ranking"
-	user "github.com/ericbaek/musecat-backend-core/handlers/user"
-	notifications "github.com/ericbaek/musecat-backend-core/handlers/user/notifications"
+	"github.com/ericbaek/musecat-backend-core/testutil"
 	"github.com/pocketbase/dbx"
-	"github.com/pocketbase/pocketbase/apis"
+	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 )
 
 func nativeReadApp(t *testing.T, enabled bool) *tests.TestApp {
 	t.Helper()
-	app := newUserFetchTestApp(t)
-	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		if enabled {
-			coreapp.RegisterNativeAPIRoutes(e, nativeLoginClients)
-		} else {
-			coreapp.RegisterNativeAPIRoutes(e, nil)
-		}
-		e.Router.GET("/rankings", ranking.List)
-		inbox := e.Router.Group("/user/notifications").Bind(apis.RequireAuth("user"), user.RequireActiveUser())
-		inbox.GET("", notifications.List)
-		inbox.POST("/read", notifications.Read)
-		return e.Next()
-	})
+	app := testutil.NewTestApp(t)
+	config := coreapp.Config{}
+	if enabled {
+		config.NativeAuthClients = nativeLoginClients
+	}
+	coreapp.Configure(&pocketbase.PocketBase{App: app}, config)
 	return app
 }
 
@@ -51,7 +42,7 @@ func nativeReadRequest(t *testing.T, app *tests.TestApp, method, path, token str
 	if response.StatusCode != status {
 		t.Fatalf("%s %s status %d want %d", method, path, response.StatusCode, status)
 	}
-	if status != 404 && strings.HasPrefix(path, "/native/") && !strings.Contains(response.Header.Get("Cache-Control"), "no-store") {
+	if status != 404 && len(token) == 43 && !strings.Contains(response.Header.Get("Cache-Control"), "no-store") {
 		t.Fatal("native response must not be cached")
 	}
 	return response
@@ -80,7 +71,7 @@ func TestNativeReadsMatchCanonicalWireAndAccountVisibility(t *testing.T) {
 		}
 	}
 	for _, path := range nativeReadPaths {
-		native := nativeReadRequest(t, app, "GET", "/native"+path, token, nil, 200)
+		native := nativeReadRequest(t, app, "GET", path, token, nil, 200)
 		canonical := doUserRequest(t, app, "GET", path, map[string]string{"Authorization": "Bearer " + web}, "")
 		var actual, expected map[string]any
 		if err := json.NewDecoder(native.Body).Decode(&actual); err != nil {
@@ -116,7 +107,7 @@ func TestNativeReadsMatchCanonicalWireAndAccountVisibility(t *testing.T) {
 	if err := app.Save(info); err != nil {
 		t.Fatal(err)
 	}
-	summary := nativeReadRequest(t, app, "GET", "/native/user/passport/stamps?user="+other.Id, token, nil, 200)
+	summary := nativeReadRequest(t, app, "GET", "/user/passport/stamps?user="+other.Id, token, nil, 200)
 	var shared map[string]any
 	if err := json.NewDecoder(summary.Body).Decode(&shared); err != nil {
 		t.Fatal(err)
@@ -134,17 +125,17 @@ func TestNativeReadsMatchCanonicalWireAndAccountVisibility(t *testing.T) {
 	if err := app.Save(info); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/native/user/passport?user=", "/native/user/passport/stamps?user="} {
+	for _, path := range []string{"/user/passport?user=", "/user/passport/stamps?user="} {
 		nativeReadRequest(t, app, "GET", path+other.Id, token, nil, 404)
 	}
-	inbox := nativeReadRequest(t, app, "GET", "/native/user/notifications?user="+other.Id+"&before=foreigninbox001", token, nil, 200)
+	inbox := nativeReadRequest(t, app, "GET", "/user/notifications?user="+other.Id+"&before=foreigninbox001", token, nil, 200)
 	var page struct {
 		Items []any `json:"items"`
 	}
 	if err := json.NewDecoder(inbox.Body).Decode(&page); err != nil || len(page.Items) != 0 {
 		t.Fatal("foreign inbox cursor exposed data")
 	}
-	readPath := "/native/user/notifications/read"
+	readPath := "/user/notifications/read"
 	nativeReadRequest(t, app, "POST", readPath, token, map[string]any{"id": "foreigninbox001"}, 200)
 	foreign, err := app.FindRecordById("user_notification", "foreigninbox001")
 	if err != nil || foreign.GetBool("read") {
@@ -176,28 +167,61 @@ func TestNativeReadCredentialBoundaryBanAndDisabledRoutes(t *testing.T) {
 	web, owner := createAuthUser(t, app, true)
 	credentials := nativeLoginIssue(t, app, web)
 	for _, path := range nativeReadPaths {
-		for _, rejected := range []string{"", web, "not-a-native-session"} {
-			nativeReadRequest(t, app, "GET", "/native"+path, rejected, nil, 401)
+		nativeReadRequest(t, app, "GET", path, strings.Repeat("z", 43), nil, 401)
+		nativeReadRequest(t, app, "GET", path, web, nil, 200)
+		if !strings.HasPrefix(path, "/rankings") {
+			nativeReadRequest(t, app, "GET", path, "", nil, 401)
 		}
 	}
-	for _, rejected := range []string{"", web, "not-a-native-session"} {
-		nativeReadRequest(t, app, "POST", "/native/user/notifications/read", rejected, map[string]any{"all": true}, 401)
+	// Public guest reads retain their original audience, without device credentials.
+	nativeReadRequest(t, app, "GET", "/rankings?metric=xp&period=all", "", nil, 200)
+	nativeReadRequest(t, app, "GET", "/user/passport?user="+owner.Id, "", nil, 200)
+	for _, rejected := range []string{"", strings.Repeat("z", 43)} {
+		nativeReadRequest(t, app, "POST", "/user/notifications/read", rejected, map[string]any{"all": true}, 401)
 	}
-	nativeReadRequest(t, app, "POST", "/user/notifications/read", credentials.AccessToken, map[string]any{"all": true}, 401)
-	for _, path := range []string{"/user/visits", "/user/notifications"} {
-		nativeReadRequest(t, app, "GET", path, credentials.AccessToken, nil, 401)
+	nativeReadRequest(t, app, "POST", "/user/notifications/read", web, map[string]any{"all": true}, 200)
+	// The adapter is not inherited by unrelated first-party, raw, management or delegated APIs.
+	for _, route := range []struct {
+		method, path string
+		status       int
+	}{
+		{"GET", "/user/me", 401},
+		{"PUT", "/user/profile", 401},
+		{"POST", "/user/notifications/device", 401},
+		{"GET", "/user/conversations", 401},
+		{"POST", "/moderation/user/test-account", 401},
+		{"POST", "/api/collections/user/auth-refresh", 401},
+		{"GET", "/developer/v1/account/user/notifications", 403},
+	} {
+		response := doUserRequest(t, app, route.method, route.path, map[string]string{"Authorization": "Bearer " + credentials.AccessToken}, "{}")
+		response.Body.Close()
+		if response.StatusCode != route.status {
+			t.Fatalf("out-of-scope %s status %d want %d", route.path, response.StatusCode, route.status)
+		}
 	}
-	nativeReadRequest(t, app, "POST", "/native/user/notifications/read", credentials.AccessToken, map[string]any{"id": strings.Repeat("a", 5000)}, 413)
+	nativeReadRequest(t, app, "POST", "/user/notifications/read", credentials.AccessToken, map[string]any{"id": strings.Repeat("a", 5000)}, 413)
 	seedUserBanForUserTest(t, app, owner.Id, hashNormalizedEmailForUserTest(owner.Email()), "native_read_fixture", time.Now().Add(time.Hour))
 	for _, path := range nativeReadPaths {
-		nativeReadRequest(t, app, "GET", "/native"+path, credentials.AccessToken, nil, 403)
+		nativeReadRequest(t, app, "GET", path, credentials.AccessToken, nil, 403)
 	}
-	nativeReadRequest(t, app, "POST", "/native/user/notifications/read", credentials.AccessToken, map[string]any{"all": true}, 403)
-	disabled := nativeReadApp(t, false)
+	nativeReadRequest(t, app, "POST", "/user/notifications/read", credentials.AccessToken, map[string]any{"all": true}, 403)
+	nativeLoginRequest(t, app, "POST", "/native/session/revoke", "", map[string]string{"refresh_token": credentials.RefreshToken}, 204)
 	for _, path := range nativeReadPaths {
-		nativeReadRequest(t, disabled, "GET", "/native"+path, "", nil, 404)
+		nativeReadRequest(t, app, "GET", path, credentials.AccessToken, nil, 401)
 	}
-	for _, path := range []string{"/native/user/passport/reset", "/native/user/notifications/read", "/native/arcade/visit"} {
-		nativeReadRequest(t, disabled, "POST", path, strings.Repeat("a", 43), nil, 404)
+	disabled := nativeReadApp(t, false)
+	disabledWeb, _ := createAuthUser(t, disabled, true)
+	for _, path := range nativeReadPaths {
+		nativeReadRequest(t, disabled, "GET", path, disabledWeb, nil, 200)
+		response := doUserRequest(t, app, "GET", "/native"+path, nil, "")
+		response.Body.Close()
+		if response.StatusCode != 404 {
+			t.Fatalf("removed alias %s status %d", path, response.StatusCode)
+		}
+	}
+	response := doUserRequest(t, app, "POST", "/native/user/notifications/read", nil, "{}")
+	response.Body.Close()
+	if response.StatusCode != 404 {
+		t.Fatal("removed inbox alias is still registered")
 	}
 }

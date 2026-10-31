@@ -1632,8 +1632,10 @@ only that device family. Access and refresh also require the family client ID
 to remain in the current allowlist. Refresh denial for a removed client commits
 family revocation, which survives later re-enablement. Password/token-key changes and withdrawal invalidate
 sessions. Existing active-account guards reject banned users before returning
-credentials or the profile. Native credentials never authenticate web or partner
-routes, and web JWTs never authenticate the native profile route.
+credentials or the profile. Native credentials authenticate only the dedicated device protocol and the
+explicit canonical first-party operations below; raw collection, unrelated web,
+management, OAuth/OIDC and partner routes never resolve them. Web JWTs never
+authenticate the native profile route.
 
 Only SHA-256 credential hashes are stored in three private SQL tables, without a
 PocketBase collection API. Core's fresh migration calls the reusable schema
@@ -1642,24 +1644,24 @@ copy-only pre/postflight. Disabling the allowlist is the rollback: preserve
 consumed hashes and revoked-family history. Credentials and codes must not be
 logged. This integration does not enable native domain editing or push APIs.
 
-Core also composes five existing authenticated reads through the same native
-session guard: `GET /native/user/visits`, `/user/passport`,
-`/user/passport/stamps`, `/rankings` and `/user/notifications` (all paths have
-the `/native` prefix). `POST /native/user/notifications/read` reuses the
-canonical account-scoped id/all read-state mutation with a 4096-byte body limit.
-The canonical handlers, response shapes, passport audience matrix, ranking
-viewer projection and current notification source ACL remain unchanged. Explicit
-passport targets retain the same summary/full/private policy; inbox queries and
-read-state changes never select another account from query input. The entire
-surface remains no-store and disabled with an empty native allowlist. Web JWTs
-do not authenticate these aliases and native tokens still do not authenticate
-ordinary web or partner routes. These routes add no schema or migration and do
-not enable APNs or general domain writes. `Config.NativeRoutes` optionally lets
-the executable add its own domain aliases to the already authenticated, active
-native group. It is not called with an empty native allowlist. Full uses this
-extension for its existing passport trust/reset handlers; Core neither owns nor
-imports that Full-only policy.
+First-party passport, rankings and inbox clients share canonical URLs, DTOs and
+handlers. Only `GET /user/visits`, `/user/passport`, `/user/passport/stamps`,
+`/rankings`, `/user/notifications` and `POST /user/notifications/read` bind
+`nativeauth.FirstPartyAuthentication`. PocketBase loads normal web JWTs first;
+the adapter then resolves an opaque native bearer through the existing session
+and active-account guard. Guest public reads and web JWT behavior are unchanged.
+Native responses remain no-store, and an empty native allowlist never grants a
+native identity. Passport visibility, ranking viewer projection, inbox source ACL
+and account-owned read state retain the canonical policies.
 
+Full additionally binds this adapter to its existing passport trust/reset routes.
+There are no duplicate `/native` domain routes or executable-domain callback.
+The public `RegisterAPIRoutes` signature remains compatible and its default
+registration, delegated account registration, raw collection REST, OAuth/OIDC,
+partner, management and unrelated first-party operations do not bind the adapter.
+Native login, current-session identity and web-handoff protocol routes retain
+their dedicated credential boundaries. This adds no schema or migration and
+does not enable APNs or general native domain writes.
 
 Guest inquiries use the canonical messaging store and browser-scoped credentials, never synthetic user accounts. Current guest access survives intake-policy changes. Reply bots snapshot their owner configuration per inquiry; requester choices are validated and sequenced atomically. DM read cursors belong to each actual account and expose the counterpart cursor only for direct messages.
 
@@ -1692,8 +1694,9 @@ store on logout or account switch. An already redeemed JWT retains normal web
 auth semantics until expiry; native-family revocation prevents unredeemed tickets
 but does not retroactively revoke a separate web JWT.
 
-Existing web/partner routes still reject native bearer credentials and native
-routes still reject web JWTs. Both handoff routes are no-store with a 4096-byte
+Raw collection, unrelated web/session, management, OAuth/OIDC and partner
+routes still reject native bearer credentials. Dedicated native identity and
+web-code issuance routes still reject web JWTs. Both handoff routes are no-store with a 4096-byte
 body limit. Disabling the optional BFF configuration removes these routes while
 preserving consumed tickets and native session history. No credential, code,
 verifier or configured secret may be logged.
