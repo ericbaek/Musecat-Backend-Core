@@ -257,11 +257,7 @@ func NotificationItemLocalized(app core.App, row *core.Record, locale string) ma
 	}
 	name, preview := "", ""
 	if m, err := app.FindRecordById(Messages, row.GetString("message")); err == nil && m.GetString("conversation") == row.GetString("conversation") {
-		name = m.GetString("sender_name")
-		if m.GetString("acting_type") != "user" && m.GetString("acting_type") != "guest" {
-			parties, _ := loadParties(app, []Identity{{m.GetString("acting_type"), m.GetString("acting_id")}})
-			name = parties[m.GetString("acting_type")+":"+m.GetString("acting_id")].Name
-		}
+		name = messageDTO(app, m, nil).ActingAs.Name
 		if m.GetString("acting_type") == "team" {
 			if locale == "en" {
 				name = "Musecat Team"

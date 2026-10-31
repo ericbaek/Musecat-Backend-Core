@@ -13,11 +13,7 @@ func changeInquiryStatus(tx core.App, u *participant, c, q *core.Record, status 
 		return nil
 	}
 	if message == nil {
-		parties, err := loadParties(tx, []Identity{{Type: u.Kind, ID: u.ID}})
-		if err != nil {
-			return err
-		}
-		sender := parties[u.Kind+":"+u.ID]
+		var err error
 		senderUser, senderGuest := "", ""
 		if u.Kind == "user" {
 			senderUser = u.ID
@@ -31,7 +27,6 @@ func changeInquiryStatus(tx core.App, u *participant, c, q *core.Record, status 
 		sequence := c.GetInt("last_sequence") + 1
 		message, err = record(tx, Messages, map[string]any{
 			"conversation": c.Id, "sequence": sequence, "sender_user": senderUser, "sender_guest": senderGuest,
-			"sender_name": sender.Name, "sender_avatar": sender.AvatarURL, "sender_roles": sender.RoleTags,
 			"acting_type": acting.Type, "acting_id": acting.ID,
 			"client_message_id": fmt.Sprintf("status:%s:%d", c.Id, sequence), "mentions": []string{},
 		})

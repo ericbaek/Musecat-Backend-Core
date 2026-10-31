@@ -21,7 +21,11 @@ func loadParties(app core.App, ids []Identity) (map[string]Party, error) {
 	out := map[string]Party{}
 	users, arcades := []string{}, []string{}
 	for _, p := range ids {
-		out[p.Type+":"+p.ID] = Party{Type: p.Type, ID: p.ID, Name: "", RoleTags: []string{}}
+		name := ""
+		if p.Type == "user" {
+			name = "탈퇴한 사용자"
+		}
+		out[p.Type+":"+p.ID] = Party{Type: p.Type, ID: p.ID, Name: name, RoleTags: []string{}}
 		if p.Type == "user" && p.ID != "" {
 			users = append(users, p.ID)
 		} else if p.Type == "guest" {
@@ -94,10 +98,7 @@ func loadParties(app core.App, ids []Identity) (map[string]Party, error) {
 	return out, nil
 }
 func messageDTO(app core.App, r *core.Record, parties map[string]Party) Message {
-	sender := Party{Type: "user", ID: r.GetString("sender_user"), Name: r.GetString("sender_name"), RoleTags: append([]string{}, r.GetStringSlice("sender_roles")...)}
-	if avatar := r.GetString("sender_avatar"); avatar != "" {
-		sender.AvatarURL = ptr(avatar)
-	}
+	sender := Party{Type: "user", ID: r.GetString("sender_user"), Name: "탈퇴한 사용자", RoleTags: []string{}}
 	if guest := r.GetString("sender_guest"); guest != "" {
 		sender = Party{Type: "guest", ID: guest, Name: "비회원", RoleTags: []string{}}
 	}
@@ -182,7 +183,7 @@ func ListFor(app core.App, viewer Principal, q url.Values) (List, error) {
 		}
 	}
 	acl, params := allowedSQL(u)
-	where := "(" + acl + ")"
+	where := "(" + acl + ") AND (c.kind!='dm' OR c.last_sequence>0)"
 	if kind := q.Get("kind"); kind != "" {
 		if kind != "dm" && kind != "inquiry" {
 			return out, apis.NewBadRequestError("Invalid kind.", nil)
@@ -198,11 +199,6 @@ func ListFor(app core.App, viewer Principal, q url.Values) (List, error) {
 		where += " AND EXISTS(SELECT 1 FROM messaging_inquiry i WHERE i.conversation=c.id AND i.inbox_type={:it} AND i.inbox_id={:ii})"
 		params["it"] = parts[0]
 		params["ii"] = parts[1]
-	}
-	// Ordinary arcade inbox traffic belongs in that arcade's dashboard, not
-	// responders' personal chat lists. Requesters retain their own conversations.
-	if q.Get("inbox") == "" {
-		where += " AND (NOT EXISTS(SELECT 1 FROM messaging_inquiry i WHERE i.conversation=c.id AND i.inbox_type='arcade' AND i.requester!={:user}) OR " + musecatMentionSQL + ")"
 	}
 	if only := q.Get("requesterOnly"); only != "" {
 		if only != "true" && only != "false" {

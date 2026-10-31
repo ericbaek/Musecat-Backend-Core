@@ -1392,16 +1392,13 @@ inquiry data there. Schema helpers reject incompatible existing definitions.
 
 DM is one unique unordered user pair. Only those two active users can read its
 messages/files/events; staff has no DM override. Inquiries are separate cases with
-requester plus arcade or `team:musecat` inbox. Current official owners and strict
-developer/moderator staff retain inquiry management access in the arcade admin
-dashboard. Unmentioned incoming arcade inquiries are excluded from all responders'
-personal chat lists; the matching arcade inbox scope lists them in its dashboard.
-Public contact windows pass `requesterOnly=true` and list only the caller's own inquiries, even for staff or owners; management inboxes omit it.
-A persisted `musecat` mention makes only that conversation appear in the team's and
-official responders' personal chat lists, including subsequent follow-ups. Requesters
-retain their own conversations. Team inquiries remain accessible to strict current
-staff. Historical responders are not
-permanent participants. Actual sender user and acting party are separately stored;
+requester plus arcade or `team:musecat` inbox. Strict developer/moderator staff and
+current official owners may access shared inquiries. Historical responders are not
+permanent participants. Unscoped conversation lists retain every inquiry authorized
+by current staff, requester or official-owner access, including unmentioned arcade
+inquiries and earlier replies. The optional inbox scope narrows the list;
+requesterOnly restricts public contact surfaces to the caller's own inquiries.
+Mention metadata affects alerts, not conversation-list membership. Actual sender user and acting party are separately stored;
 when a requester is also a responder they explicitly choose their sending identity.
 Summaries expose `allowedSenderIdentities` and `allowedStatusTransitions` from the
 same inquiry policy used by writes. Ordinary requesters (including guests) receive no status or transitions; current
@@ -1426,7 +1423,7 @@ are individual, monotonic and bounded by the latest committed sequence. DM summa
 exclude the reader's actual sender user and their party, including other staff acting for the same inbox. Status
 changes do not reorder conversations. Latest summaries batch load parties/profiles,
 messages, preferences, blocks and reads; no conversation-by-conversation HTTP or SQL
-fanout is needed. Message text is stored once, on messaging_message. Inquiry rooms always expose each incoming actual sender in the timeline, even before a second responder speaks. Public message DTOs batch resolve the actual account’s current public nickname/avatar/roles; stored sender snapshots and report evidence remain historical. `actingAs` expresses the represented inbox independently of that public sender. Guest read cursors use the opaque guest identity and never generate account notifications.
+fanout is needed. Message text is stored once, on messaging_message. Inquiry rooms always expose each incoming actual sender in the timeline, even before a second responder speaks. Public message DTOs batch resolve the actual account’s current public nickname/avatar/roles; messages store no copied public profile fields; report evidence remains historical. `actingAs` expresses the represented inbox independently of that public sender. Guest read cursors use the opaque guest identity and never generate account notifications.
 
 Idempotency is unique per conversation/sender/clientMessageId. Payload comparison
 uses normalized text, ordered photo byte digests, canonical mentions and the resolved acting identity;
@@ -1447,8 +1444,11 @@ feedback independently, preserves the first message and replies in created/id or
 and records source collection/record/file references. It never converts guests into
 synthetic users, never manufactures notifications, and initializes requester read to
 the imported last sequence while preserving existing notification unread flags.
-Legacy staff/official role snapshots come only from original flags; display names
-copied during migration are current snapshots, not claimed historical identities.
+Message authors reference the current user through an optional, non-cascading
+`sender_user` relation. Messages store no copied name, avatar, or role attributes.
+Retry uniqueness applies only while a user or guest author reference exists, so
+clearing multiple deleted authors cannot collide. Deleting an account preserves message content; a missing author displays as a
+deleted user. Acting user, arcade, team, and guest identities remain separate.
 
 Arcade requester messages notify current official responders by default. Platform
 staff receive arcade notifications only with an explicit `musecat` mention; a staff
@@ -1459,10 +1459,10 @@ notification policy. Recipient accounts and bans are batch loaded, and at most 2
 devices per recipient are selected in one bounded query. Notification/delivery rows
 remain atomic with the message and use the existing durable delivery worker.
 Queued messages recheck the same policy through `NotificationDeliverable`; existing
-inbox rows recheck conversation access. Imported arcade/guest messages have no synthesized mention metadata; old staff notification/read/reply records never surface unmentioned cases in personal inboxes. Their preserved notification records use canonical conversation/message references and remain available to authorized management in the arcade dashboard.
-Personal chat lists and staff SSE/notification inboxes enforce the mention boundary.
-Dashboard lists, direct reads, files and mutations retain current official/staff management permissions. Notifications for unmentioned incoming arcade inquiries link to their arcade page rather than personal chat.
-Push delivery still requires a mention on the individual message for staff-only alerts.
+inbox rows retain access-only visibility. Legacy arcade/guest feedback has no mention
+metadata and likewise notifies official responders, with
+`FeedbackNotificationDeliverable` suppressing old queued staff-only pushes.
+Notification policy does not narrow conversation access or SSE audiences.
 
 The single-process SSE hub publishes invalidations after commit only. Conversation
 audiences are resolved once per change and only their connected users are enqueued;
@@ -1529,7 +1529,7 @@ links remain valid frontend inputs. Neither kind needs an intermediate launcher.
 Message notification inboxes project the latest received event per user/conversation,
 including existing history, before keyset pagination and unread counting. Source
 message/event/delivery identities remain immutable. The title is the sending user
-snapshot or acting arcade/team; previews normalize whitespace and truncate at 160
+current profile or acting arcade/team; previews normalize whitespace and truncate at 160
 Unicode characters, with localized photo-only fallback. Access checks still precede
 projection. Acknowledging one message notification clears events only through that
 message sequence. Conversation read cursors also acknowledge corresponding inbox
@@ -1641,3 +1641,9 @@ helper; existing Full databases use Full's independent additive migration and
 copy-only pre/postflight. Disabling the allowlist is the rollback: preserve
 consumed hashes and revoked-family history. Credentials and codes must not be
 logged. This integration does not enable native domain editing or push APIs.
+
+Guest inquiries use the canonical messaging store and browser-scoped credentials, never synthetic user accounts. Current guest access survives intake-policy changes. Reply bots snapshot their owner configuration per inquiry; requester choices are validated and sequenced atomically. DM read cursors belong to each actual account and expose the counterpart cursor only for direct messages.
+
+Direct-message conversations enter conversation lists only after the first message
+is sent. Opening a peer DM may reuse an empty conversation without listing it for
+either participant. Inquiry visibility is unchanged.

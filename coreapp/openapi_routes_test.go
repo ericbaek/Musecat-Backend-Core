@@ -213,6 +213,10 @@ func TestOpenAPIDocumentsMessagingRoutes(t *testing.T) {
 }
 
 func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
+	var parsed map[string]any
+	if err := yaml.UnmarshalStrict(apidocs.OpenAPISpec(), &parsed); err != nil {
+		t.Fatal(err)
+	}
 	type operation struct {
 		Security  []map[string][]string `yaml:"security"`
 		Responses map[string]any        `yaml:"responses"`
