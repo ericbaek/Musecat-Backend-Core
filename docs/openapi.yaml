@@ -92,6 +92,12 @@ components:
             ko: {$ref: '#/components/schemas/AnnouncementLocalization'}
             en: {$ref: '#/components/schemas/AnnouncementLocalization'}
             ja: {$ref: '#/components/schemas/AnnouncementLocalization'}
+    AnnouncementSlideLink:
+      type: object
+      required: [label, href]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 80}
+        href: {type: string, maxLength: 2048, description: "Internal path starting with / (not //) or absolute HTTPS URL without credentials, whitespace or backslashes."}
     AnnouncementLocalization:
       type: object
       required: [title, summary, slides]
@@ -109,6 +115,7 @@ components:
               fileName: {type: string}
               imageUrl: {type: string, description: Relative custom API image URL; draft and archived images require staff.}
               alt: {type: string, maxLength: 3000}
+              link: {$ref: '#/components/schemas/AnnouncementSlideLink'}
     AnnouncementPage:
       type: object
       required: [items, next]
@@ -137,6 +144,7 @@ components:
                   properties:
                     image: {type: string}
                     alt: {type: string, maxLength: 3000}
+                    link: {$ref: '#/components/schemas/AnnouncementSlideLink'}
     MessagingReport: {"type": "object", "properties": {"id": {"type": "string"}, "reporterId": {"type": "string"}, "messageId": {"type": "string"}, "reason": {"type": "string"}, "createdAt": {"type": "string"}, "message": {"$ref": "#/components/schemas/MessagingMessage"}}, "required": ["id", "reporterId", "messageId", "reason", "createdAt", "message"]}
     MessagingParty: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}, "name": {"type": "string"}, "avatarUrl": {"type": "string", "nullable": true}, "roleTags": {"type": "array", "items": {"type": "string"}}}, "required": ["type", "id", "name", "avatarUrl", "roleTags"]}
     MessagingIdentity: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "guest", "arcade", "team"]}, "id": {"type": "string"}}, "required": ["type", "id"]}

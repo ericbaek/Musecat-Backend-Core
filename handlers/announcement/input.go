@@ -8,9 +8,11 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/ericbaek/musecat-backend-core/service/announcement"
@@ -21,8 +23,9 @@ import (
 )
 
 type inputSlide struct {
-	Image string `json:"image"`
-	Alt   string `json:"alt"`
+	Image string             `json:"image"`
+	Alt   string             `json:"alt"`
+	Link  *announcement.Link `json:"link"`
 }
 type inputLocalization struct {
 	Title   string       `json:"title"`
@@ -112,6 +115,13 @@ func applyInput(row *core.Record, input mutationInput) error {
 			if utf8.RuneCountInString(alt) > 3000 {
 				return fmt.Errorf("alt text exceeds 3000 characters")
 			}
+			if slide.Link != nil {
+				slide.Link.Label = strings.TrimSpace(slide.Link.Label)
+				slide.Link.Href = strings.TrimSpace(slide.Link.Href)
+				if slide.Link.Label == "" || utf8.RuneCountInString(slide.Link.Label) > 80 || len(slide.Link.Href) > 2048 || !validLinkHref(slide.Link.Href) {
+					return fmt.Errorf("slide link requires a label (1..80 characters) and an internal path or HTTPS URL (up to 2048 bytes)")
+				}
+			}
 			filename := slide.Image
 			var file any = filename
 			if strings.HasPrefix(slide.Image, "upload:") {
@@ -130,7 +140,7 @@ func applyInput(row *core.Record, input mutationInput) error {
 			}
 			seen[filename] = true
 			files = append(files, file)
-			output.Slides = append(output.Slides, announcement.Slide{FileName: filename, Alt: alt})
+			output.Slides = append(output.Slides, announcement.Slide{FileName: filename, Alt: alt, Link: slide.Link})
 		}
 		if len(usedUploads) != len(input.Uploads[locale]) {
 			return fmt.Errorf("unreferenced uploads for %s", locale)
@@ -147,4 +157,18 @@ func applyInput(row *core.Record, input mutationInput) error {
 	row.Set("images", files)
 	row.Set("localizations", localized)
 	return nil
+}
+
+func validLinkHref(href string) bool {
+	if href == "" || strings.ContainsAny(href, "\\") || strings.ContainsFunc(href, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return false
+	}
+	parsed, err := url.Parse(href)
+	if err != nil {
+		return false
+	}
+	if strings.HasPrefix(href, "/") {
+		return !strings.HasPrefix(href, "//") && parsed.Host == "" && parsed.Scheme == ""
+	}
+	return parsed.Scheme == "https" && parsed.Hostname() != "" && parsed.User == nil
 }
