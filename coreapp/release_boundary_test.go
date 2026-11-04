@@ -10,14 +10,9 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-func TestConnectionFoundationExcludesUnpromotedRegistry(t *testing.T) {
+func TestIntegrationFoundationKeepsCompositionExplicit(t *testing.T) {
 	app := testutil.NewTestApp(t)
-	for _, name := range []string{"partner_application"} {
-		if _, err := app.FindCollectionByNameOrId(name); err == nil {
-			t.Errorf("external integration collection %s must not be bootstrapped", name)
-		}
-	}
-	for _, name := range []string{"external_account_connection", "external_service_connection", "external_connection_request", "external_joint_connection", "external_joint_request", "external_joint_outbox", "external_service_record", "oauth_authorization_request", "oauth_authorization_code", "oauth_delegated_token", "oauth_grant", "oauth_client_registration", "oauth_client_usage"} {
+	for _, name := range []string{"partner_application", "partner_application_event", "partner_conformance_run", "external_account_connection", "external_service_connection", "external_connection_request", "external_joint_connection", "external_joint_request", "external_joint_outbox", "external_service_record", "oauth_authorization_request", "oauth_authorization_code", "oauth_delegated_token", "oauth_grant", "oauth_client_registration", "oauth_client_usage"} {
 		collection, err := app.FindCollectionByNameOrId(name)
 		if err != nil {
 			t.Fatalf("OAuth schema missing %s: %v", name, err)

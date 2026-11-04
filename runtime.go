@@ -14,6 +14,7 @@ import (
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	"github.com/ericbaek/musecat-backend-core/handlers/community"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/partnerapp"
 )
 
 // configureRuntime is the composition root: select resources and scheduled jobs
@@ -52,13 +53,17 @@ func configureRuntime(app *pocketbase.PocketBase) error {
 	if err != nil {
 		return fmt.Errorf("configure joint partners: %w", err)
 	}
+	partnerApps := partnerapp.NewService(oauthServer, externalConnections, jointPartners, strings.TrimSpace(os.Getenv("MUSECAT_WEB_ORIGIN")))
 	coreapp.Configure(app, coreapp.Config{
+		PartnerApps: partnerApps,
 		Connections: externalConnections, Joint: jointPartners,
 		Delegation:            oauthServer,
 		ClientIPForwardSecret: strings.TrimSpace(os.Getenv("MUSECAT_IP_FORWARD_SECRET")),
 		GeoResolver:           resolver,
 		Documentation:         documentationConfig(),
 	})
+	partnerApps.RegisterSyncCron(app)
+	partnerApps.RegisterCheckCron(app)
 	connections.RegisterRequestCleanupCron(app)
 	externalConnections.RegisterRecordRefreshCron(app)
 	if jointPartners != nil {

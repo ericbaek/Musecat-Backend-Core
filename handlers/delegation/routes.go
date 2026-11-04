@@ -148,9 +148,6 @@ func RegisterRoutes(se *core.ServeEvent, m *delegation.Manager) {
 	se.Router.GET("/developer", func(re *core.RequestEvent) error {
 		return re.Blob(200, "text/html; charset=utf-8", apidocs.DeveloperHTML())
 	})
-	se.Router.GET("/developer/integration-spec.md", func(re *core.RequestEvent) error {
-		return re.Blob(200, "text/markdown; charset=utf-8", apidocs.PartnerIntegrationSpec())
-	})
 	se.Router.GET("/developer/sign-in-with-musecat.md", func(re *core.RequestEvent) error {
 		return re.Blob(200, "text/markdown; charset=utf-8", apidocs.SignInGuide())
 	})

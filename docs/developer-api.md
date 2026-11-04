@@ -1,24 +1,41 @@
 # Musecat Developer API
 
-This foundation exposes configured confidential OAuth clients and scoped custom
-resources. Configured reverse-provider links, reciprocal connections and records have separate
-first-party consent and API contracts. Developer Center self-service registration,
-production review and conformance remain separate releases.
+Connect a user's Musecat account once with `account:access` to use general user features on their behalf.
+Management functions and account-security operations are excluded, including for staff accounts.
+The development environment uses [Musecat Preview](https://preview.musecat.app) and OAuth issuer
+`https://db-dev.musecat.app`. Register development applications in the
+[Developer Center](https://preview.musecat.app/kr/developer); application credentials are issued
+there immediately for owner/tester development use; production use requires review. Other example domains in this guide are placeholders.
+Musecat is the OAuth authorization server for Direction A. Your server is the OAuth client.
+Direction B lets Musecat connect to your authorization server and read your users' records.
+Each direction has its own grant and tokens. The implemented reciprocal one-step flow coordinates
+both under explicit bilateral consent; independent single-direction OAuth remains available.
+See [`joint-connections.md`](joint-connections.md) and the
+[partner integration specification](partner-integration-spec.md) for consent and server endpoints.
+The implementation supports registered
+confidential server applications using Authorization Code with PKCE S256 and HTTP Basic client
+authentication. Opt-in OpenID Connect login is documented in [Sign in with Musecat](sign-in-with-musecat.md).
+The readonly login scope bundle is `openid profile arcade:read`; the general API delegation flow below uses `account:access`.
 
 ## Register your application
 
-The deployment owner registers each client through `MUSECAT_OAUTH_CLIENTS` with a
-unique ID, display name, stable server secret of at least 32 characters, exact
-callback URLs and explicit scopes. Keep secrets and opaque access/refresh tokens
-on the partner server. Browsers hold only that partner application's own session.
-There is no unauthenticated dynamic registration, password grant, implicit grant
-or browser-only client. Clients are not hardcoded.
+Create an application in Developer Center with an immutable partner ID, display name, contact
+and the direction you need. Direction A requires exact HTTPS callback URLs; development mode also accepts exact HTTP loopback callbacks at localhost, 127.0.0.1 or [::1]. Development registration is immediately usable by the owner and up to ten designated testers after structural validation; production use requires operator review. Generate the development client secret immediately. Opt into Sign in with Musecat if
+you need the readonly `openid profile arcade:read` scope bundle.
 
-Production callbacks require exact HTTPS URLs. A configured development client
-may use exact HTTP loopback callbacks and limits consent/token use to its explicit
-`allowed_user_ids` audience. Configuration changes invalidate existing consent;
-persistent registration epochs prevent removed and restored configurations from
-resurrecting old tokens. Deploy the same configured registry on every instance.
+A Direction B-only application needs no Direction A callback or Musecat-issued client secret.
+Declare your OAuth/records endpoints and service scopes and store your
+partner-issued credentials for Musecat in the application's Direction B settings. Joint consent
+requires both directions and its separate server keys. See
+[Developer Center](developer-center.md) for the registration contract.
+
+Keep client secrets, access tokens and refresh tokens on your server. Your browser should hold
+only your own application's session cookie. Developer Center development registration requires an active Musecat account; production publication requires operator approval; there is no unauthenticated OAuth dynamic registration, password
+grant, implicit grant or browser-only client. No partner is hardcoded.
+A change to a client's registered configuration invalidates existing grants until users consent again.
+Registration epochs are persisted at startup; disabling a client and later restoring the same
+configuration cannot revive its previous tokens. Deploy the same registry on all instances.
+Do not copy grants from a predecessor client when services merge into rhythm.info.
 
 ## Authorization flow
 
@@ -188,7 +205,8 @@ deployment; handle HTTP 429 without automatically restarting an authorization or
 The executable reads `MUSECAT_OAUTH_CLIENTS`, `MUSECAT_OAUTH_ISSUER` (HTTPS backend origin), and
 `MUSECAT_OAUTH_CONSENT_URL` (HTTPS Musecat consent page without query/fragment).
 Missing configuration disables authorization/token/resource endpoints. Invalid supplied
-configuration fails startup without printing secret values. Reverse-direction providers are outside this foundation and remain unconfigured.
+configuration fails startup without printing secret values. These are separate from
+`MUSECAT_EXTERNAL_PROVIDERS`, which configures the reverse direction of account linking.
 
 ```json
 [
@@ -216,6 +234,12 @@ Security basis: [OAuth 2.0](https://www.rfc-editor.org/rfc/rfc6749),
 [OAuth security best practices](https://www.rfc-editor.org/rfc/rfc9700),
 [revocation](https://www.rfc-editor.org/rfc/rfc7009),
 [authorization server metadata](https://www.rfc-editor.org/rfc/rfc8414).
+
+## Partner handoff
+
+CHUNITHM Info implementation brief: [`partners/chuniinfo/agent.md`](partners/chuniinfo/agent.md)
+in the source repository. Share it with this guide, `developer-openapi.yaml` and `joint-connections.md`. The partner brief
+is a repository handoff file, not an additional HTTP API endpoint.
 
 ### External profile visibility and arcade discovery
 

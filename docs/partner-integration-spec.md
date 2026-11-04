@@ -1,11 +1,5 @@
 # Musecat Partner Integration Specification v1
 
-> Release boundary: the configured provider/joint/record source phase requires the
-> Developer Center registry phase before v1 rollout. Incoming privacy invalidation
-> and its Musecat-issued records-key issuance/rotation are owned by that phase.
-> Do not activate this intermediate source pin as a complete privacy-capable v1
-> integration deployment. Unit protocol tests are not live partner certification.
-
 
 Status: Musecat-defined contract, 2026-10-18. This document is normative for every third-party
 platform that connects with Musecat. Partners implement it; they do not negotiate it. Values that

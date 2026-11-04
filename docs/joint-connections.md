@@ -17,7 +17,7 @@ revocation outbox. Failed or ambiguous approval requires a fresh intent. The set
 partial connections and remote revocations still awaiting delivery. Real partner integration,
 credential provisioning and deployment remain separate operational steps.
 
-This promotion configures reciprocal partners through the executable's static registry.
-Dynamic Developer Center registration is a separate phase; no application or partner key
-is created by publishing this source change. Live partner interoperability remains
-separate from mocked protocol tests.
+The executable combines its static registry with live Developer Center registrations.
+Both follow the same partner identity, generation and revocation rules. Publishing
+source creates no application/key or deployment configuration. Live partner
+interoperability remains separate from mocked protocol tests.

@@ -4,8 +4,9 @@ External account linking is independent of Musecat sign-in and of partner permis
 arcades. These endpoints verify an external account through an explicitly configured OAuth provider.
 Identity linking does not issue Musecat delegation tokens. Separately consented game records use the private/default-publication gates and endpoints below.
 
-This phase uses operator-configured providers and reciprocal partners. Developer Center
-self-service registration, production review and conformance workers are separate releases.
+Providers and reciprocal partners may be operator-configured or loaded from Developer
+Center development/production registrations. Both use the same provider, session,
+publication and generation checks; see `developer-center.md` for activation policy.
 
 ## Model and ownership
 

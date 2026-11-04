@@ -1294,8 +1294,8 @@ reads use the ordinary public audience. Authorized domain mutations retain their
 normal permission, transaction, immutable history, XP and cache contracts.
 Withdrawal revokes delegation state in the same account transaction.
 
-This foundation does not register reverse-provider connections, reciprocal joint
-flows, developer applications, conformance workers, native sessions or bot APIs.
+The configured OAuth unit is complemented by the connection and registry units
+below. Native sessions, bot APIs and check-note APIs remain separate source releases.
 Full must pin the exact reviewed published Core revision and own the guarded
 OAuth, OIDC nonce and usage-ledger forward migrations. Core's migrations initialize
 only fresh Core test/reference databases. Enabling configured clients additionally
@@ -1326,17 +1326,126 @@ then registers bounded cleanup, record-refresh and revocation-outbox jobs. Confi
 registers routes and supplied resources but never starts jobs or reads secrets. The
 shared public-IP-pinned HTTP transport rejects private/special targets, redirects and
 environment proxies. Injected clients remain trusted executable dependencies.
-Developer Center registration, publication review and conformance are separate phases.
-No native session, bot API or check-note feature is imported by this release unit.
+Registry-backed registration, publication review and conformance use the Developer
+Center contract below. Native session, bot and check-note APIs remain excluded.
 Core initializes fresh schemas only; Full owns matched guarded forward migrations.
 See `external-connections.md`, `joint-connections.md` and `partner-integration-spec.md`
 for complete identity, record, protocol and partner-interoperability contracts.
 
 
-### Record privacy rollout dependency
+### Complete registry-backed privacy transport
 
-The source split is a review boundary, not an independently deployable complete v1
-integration. Immediate incoming record invalidation and Musecat-issued records keys
-are authenticated by the Developer Center registry phase. Release configured
-connections/records with that cumulative phase before exposing them to users; do
-not claim immediate partner privacy invalidation from this intermediate pin.
+Incoming record invalidation and Musecat-issued records-key issuance/rotation are
+provided by the Developer Center registry in this cumulative source graph. The
+configured-connection intermediate source is not a complete v1 rollout by itself;
+Full must use the reviewed cumulative OAuth, connections and registry pin together.
+Live partner interoperability, production configuration and DB rehearsal remain
+separate required release evidence.
+
+## Developer Center: self-service partner registration
+
+Developer Center and external-connection JSON requests accept exactly one document with
+optional trailing whitespace. Decode a bounded body snapshot because PocketBase rewinds
+its body reader on EOF; a final read returning both bytes and EOF must not replay the body.
+Unknown fields, second documents, and route body-limit overflows remain rejected.
+
+`partner_application` and `partner_application_event` are locked base collections owned by
+`partnerapp`. An active user registers up to eight applications of the `musecat-partner-onboarding/v1`
+form (`partner_id`, localized name/description, contact and at least one direction). Direction A
+requires 1–8 redirect URIs; Direction B-only apps may omit `direction_a` or use empty redirects.
+`login_enabled` and joint declarations require nonempty Direction-A redirects; joint also requires
+Direction B. All declarations are validated structurally. Create and update immediately install the validated registration without moderator approval. Operators retain monitoring, suspend and reinstate through `/moderation/developer/apps/*`; mutations append immutable events. Legacy submit/approve endpoints are idempotent for registered apps and activate legacy drafts/queued forms. The form never carries credentials.
+
+Registration/update copies `submitted_form` to `approved_form` (historical storage names retained; status `approved` now means registered), validates the merged OAuth client registry
+(static executable clients plus live applications; duplicates and executable-owned IDs fail with
+409) and then calls `delegation.Manager.Reload`, which swaps the client map under a lock and runs
+`SynchronizeClients`. The existing registration epoch/config-hash mechanism therefore applies
+unchanged: a changed approved form or rotated secret is a new fingerprint and invalidates earlier
+grants; suspension disables the registration row so tokens fail with 503. The application `live`
+flag is true when either approved direction is active;
+`direction_a_declared`/`direction_a_live` distinguish OAuth capability. Direction A is live
+only with approved nonempty redirects, a generated secret and a non-suspended status. B-only
+apps never enter the OAuth registry, even if a previous approved version left a stored secret.
+Secret generation/rotation returns `invalid_state` for B-only apps. Owners generate the
+Direction-A client secret after registration; only its SHA-256 is stored and the plaintext is
+returned once with
+`no-store`/`no-referrer`.
+
+Direction B activates independently of Direction A and its secret from the same record: the owner
+stores the partner-issued Musecat client credentials (`PUT /developer/apps/{id}/credentials`), which are AES-GCM sealed with the connection
+key and bound to the application ID. When the approved form declares `direction_b`, the service
+maps it to a `connections.Provider` (`subject_field` fixed to `sub`, `client_secret_basic`,
+`require_issuer`, callback `<web origin>/api/user/connections/callback/<partner_id>`) and calls
+`connections.Manager.Reload`, so the partner appears in `GET /integrations/providers` at once.
+Issuer/callback collisions with static or other live providers fail approval or credential entry
+with 409. Suspension, credential removal or a missing connection key deactivates the provider;
+existing user connections remain listed and locally disconnectable. Joint declarations activate when approved with Direction B credentials, a sealed outbound server key and a hashed inbound server key.
+
+`coreapp.Configure` loads live applications on serve; executables register
+`partnerapp.Service.RegisterSyncCron` so other instances converge within a minute. These routes
+are outside the delegated `account:access` allowlist. Core bootstraps fresh schema; Full owns the
+guarded forward migration. See [`developer-center.md`](developer-center.md) for the full design.
+
+The owner-only `/developer/apps/{id}/console` exposes approved settings, paginated pairwise
+account identifiers and 14 UTC days of aggregate activity. Names require profile consent;
+account/token/generation restrictions still apply. `oauth_client_usage` is locked and stores
+only client, day, kind (`api`, `code`, `refresh`), requests and errors. Attributable failures
+count as errors; unknown credentials are not attributed. API includes UserInfo and delegated
+resources. Counters are best-effort and never roll back authentication or domain operations;
+no tokens, IPs, URLs, query strings or request bodies enter these aggregates. Cleanup retains
+30 days. Full owns the forward migration; Core creates only fresh bootstrap schema.
+Optional HTTPS website/privacy/terms/support URLs belong to the submitted and approved form;
+omitting them preserves old form hashes. Credential issuance history contains timestamps and
+rotation events, not recoverable secrets or a fabricated grace period.
+
+
+## Developer Center conformance execution
+
+`POST /developer/apps/{id}/checks` queues owner-authorized work; the matching GET returns
+safe history. Active strict reviewers use `/moderation/developer/apps/{id}/checks` with
+the existing reviewer policy. Raw `partner_conformance_run` access is locked. Each run freezes
+its submitted form and a revision of the form and credentials. Reports become stale after
+configuration changes or 30 days. Credentials, test subjects, remote response bodies and tokens
+are never projected or logged. Optional staging fixtures are sealed and cleared on completion,
+cancellation and interrupted-run recovery. One active run per app, a one-minute cooldown and
+three active runs per actor bound the queue; executables process bounded batches every minute.
+
+The runner performs outbound I/O outside transactions, with 10-second request and 90-second
+run deadlines, no redirects, no environment HTTP proxy and bounded response bodies. The default
+dialer rejects private, loopback, link-local, multicast, special and IPv4-embedded translation
+ranges, resolves and validates every address, then pins the selected public IP while preserving
+TLS hostname verification. Registered form endpoints are the only targets.
+
+Pass, fail, action_required and not_applicable remain distinct. A run is passed only when all
+applicable cases pass; missing staging fixtures produce incomplete, not success. Disposable refresh
+families are refreshed/revoked only with explicit consent. The runner never creates OAuth consent:
+Direction A requires an owner grant whose code was actually redeemed; its round-trip check is
+`not_applicable` for a B-only form. A successful joint round
+trip must be evidenced by the owner's normal joint connection and both
+live grant generations under the approved configuration. Operator approval remains a separate
+review action; checks do not silently change existing approval policy or active registrations.
+
+
+
+### Development audience and production review
+
+New applications use publication development and immediately support only their owner plus
+up to ten explicitly designated active test accounts. Owner tester management resolves exact
+usernames to internal IDs. Dynamic OAuth clients and B providers carry Development plus
+AllowedUserIDs; persistent fingerprints/epochs bind audience changes. Consent read/decision,
+code/refresh exchange, resource/UserInfo access, B start/complete/fetch and Joint actor paths
+must enforce the audience. Anonymous provider discovery and public record reads hide development
+providers. Static executable registrations remain unrestricted by default. The session-bound consent summary exposes publication and the exact registered redirect_uri from the validated pending authorization request so the user can see development status and the return destination before deciding. It does not expose client credentials or expand the requested scopes.
+
+Publication production requires an explicit owner request and operator approval of the current
+submitted form. Production edits do not overwrite the reviewed active snapshot; any edit cancels
+pending review. Rejection preserves active configuration. publication and review_status are
+separate from the legacy status enum. Full adds these fields and testers through a guarded
+migration and preserves existing active registrations as production. Core defines fresh schema.
+Exact HTTP localhost, 127.0.0.1 and [::1] redirects are accepted for development callbacks only;
+production requests reject them. Remote B/Joint fetch destinations retain public HTTPS and
+SSRF rules. Audience restriction never replaces user consent or public-profile visibility.
+
+### Development partner audiences
+
+Developer Center applications begin in development publication and are available only to the owner and up to ten explicitly assigned testers. Production publication requires operator approval. Dynamic Direction-B provider configurations include the current audience in their configuration fingerprint. Discovery filters development metadata by the authenticated user; starts, callback completion (including after network exchange), cached owner records, and fetch persistence enforce the current audience. Removing a tester blocks cached reads and prevents in-flight exchanges/fetches from restoring access. Development records are never returned by anonymous public profile reads, even if the tester set the local publication switch. Joint entry/consent shares the audience rule; owners can still revoke or disconnect their own old connection. Static operator-supplied provider configuration retains its existing production audience unless explicitly marked development.

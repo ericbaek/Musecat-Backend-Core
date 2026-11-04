@@ -11,6 +11,8 @@ import (
 	connectionhandler "github.com/ericbaek/musecat-backend-core/handlers/connections"
 	delegationhandler "github.com/ericbaek/musecat-backend-core/handlers/delegation"
 	jointhandler "github.com/ericbaek/musecat-backend-core/handlers/joint"
+	partnerapphandler "github.com/ericbaek/musecat-backend-core/handlers/partnerapp"
+	"github.com/ericbaek/musecat-backend-core/partnerapp"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -50,6 +52,7 @@ import (
 // environment variables, registers migrations, or starts scheduled jobs.
 // A nil GeoResolver deliberately disables geographic lookup (fail closed).
 type Config struct {
+	PartnerApps           *partnerapp.Service
 	Connections           *connections.Manager
 	Joint                 *connections.JointManager
 	Delegation            *delegation.Manager
@@ -80,9 +83,28 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		RegisterDocumentationRoutes(se, config.Documentation)
 		RegisterAPIRoutes(se, config.Connections)
 		jointhandler.RegisterRoutes(se, config.Joint)
-		if err := delegation.SynchronizeClients(se.App, config.Delegation); err != nil {
+		partnerApps := config.PartnerApps
+		if partnerApps == nil {
+			partnerApps = partnerapp.NewService(config.Delegation, config.Connections, config.Joint, "")
+		}
+		se.App.OnRecordAfterUpdateSuccess("user").BindFunc(func(e *core.RecordEvent) error {
+			if e.Record.GetBool("withdrawn") {
+				if err := partnerApps.Sync(e.App); err != nil {
+					e.App.Logger().Error("Failed to synchronize applications after owner withdrawal")
+				}
+			}
+			return e.Next()
+		})
+		if err := partnerApps.Sync(se.App); err != nil {
 			return err
 		}
+		if config.Delegation == nil {
+			if err := delegation.SynchronizeClients(se.App, nil); err != nil {
+				return err
+			}
+		}
+		partnerapphandler.RegisterRoutes(se, partnerApps)
+		partnerapphandler.RegisterRecordsInvalidationRoutes(se, partnerApps, config.Connections)
 		delegationhandler.RegisterRoutes(se, config.Delegation)
 		RegisterAccountDelegationRoutes(se, config.Delegation)
 		return se.Next()
@@ -96,6 +118,8 @@ func configureDefaultRateLimits(app core.App) {
 	settings := app.Settings()
 	settings.RateLimits.Enabled = true
 	defaults := []core.RateLimitRule{
+		{Label: "POST /developer/apps", MaxRequests: 30, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "PUT /developer/apps/", MaxRequests: 30, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/connections/start", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/connections/complete", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/joint/lookup", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},

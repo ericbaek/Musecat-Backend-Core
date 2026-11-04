@@ -33,3 +33,6 @@ When adding or changing an endpoint:
 - [Configured external account connections](external-connections.md)
 - [Reciprocal connections](joint-connections.md)
 - [Partner integration wire protocol](partner-integration-spec.md)
+
+- [Developer Center backend contract](developer-center.md)
+- [Partner release evidence and remaining interoperability](partner-release-readiness.md)

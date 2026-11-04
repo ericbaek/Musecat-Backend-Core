@@ -59,7 +59,7 @@ func TestOAuthContractsKeepCanonicalSchemasAndResolveReferences(t *testing.T) {
 	for path := range developer["paths"].(map[interface{}]interface{}) {
 		name := fmt.Sprint(path)
 		if strings.HasPrefix(name, "/native") || strings.HasPrefix(name, "/bot/") || strings.HasPrefix(name, "/developer/apps") || strings.HasPrefix(name, "/partner/") {
-			t.Errorf("unpromoted resource in static OAuth contract: %s", name)
+			t.Errorf("non-delegated management resource in external OAuth contract: %s", name)
 		}
 	}
 }
