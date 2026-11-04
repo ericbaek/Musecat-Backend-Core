@@ -202,6 +202,7 @@ func VisitArcade(re *core.RequestEvent) error {
 }
 
 func GetMyVisits(re *core.RequestEvent) error {
+	re.Response.Header().Set("Cache-Control", "private, no-store")
 	if re.Auth == nil {
 		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
 	}
@@ -213,11 +214,15 @@ func GetMyVisits(re *core.RequestEvent) error {
 		}
 		includeDates = visibility == "full"
 	}
-	stats, err := LoadVisitStats(re.App, re.Auth.Id, includeDates)
+	passport, err := loadPassport(re.App, re.Auth.Id, "all", !publicProfileAudience(re))
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load visit stats"})
 	}
-	return re.JSON(http.StatusOK, map[string]any{"stats": stats})
+	payload := map[string]any{"stats": projectVisitStats(passport, includeDates)}
+	if !publicProfileAudience(re) {
+		payload["timeline"] = passport.timeline
+	}
+	return re.JSON(http.StatusOK, payload)
 }
 func GetArcadeVisitStats(re *core.RequestEvent) error {
 	id := strings.TrimSpace(re.Request.URL.Query().Get("arcade"))
@@ -312,10 +317,11 @@ func visitSummary(r *core.Record) VisitSummary {
 }
 func LoadVisitStats(app core.App, userID string, includeVisitDays bool) (VisitStats, error) {
 	p, err := LoadPassport(app, userID, "all")
+	return projectVisitStats(p, includeVisitDays), err
+}
+
+func projectVisitStats(p Passport, includeVisitDays bool) VisitStats {
 	stats := VisitStats{TotalVisits: p.TotalVisits, DistinctArcades: p.DistinctArcades, TotalDistanceMeters: p.TotalDistanceMeters, Cities: p.Cities, DistinctCities: p.DistinctCities, UnclassifiedArcades: p.UnclassifiedArcades, Countries: []VisitCountry{}, Arcades: []ArcadeVisitCount{}}
-	if err != nil {
-		return stats, err
-	}
 	for _, c := range p.Countries {
 		stats.Countries = append(stats.Countries, VisitCountry{Country: c.Country, ArcadeCount: c.ArcadeCount, VisitCount: c.VisitCount})
 	}
@@ -329,7 +335,7 @@ func LoadVisitStats(app core.App, userID string, includeVisitDays bool) (VisitSt
 		}
 		stats.Arcades = append(stats.Arcades, item)
 	}
-	return stats, nil
+	return stats
 }
 
 func visitArcadePhotoURL(app core.App, arcadeID, photoMoleculeID string) string {

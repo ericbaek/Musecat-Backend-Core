@@ -13,6 +13,20 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
+// VisitTimelineEntry is an owner-only ordered verification at a current public
+// venue. Its identity is the unique arcade/day pair, never a raw visit record ID.
+type VisitTimelineEntry struct {
+	ID       string                 `json:"id"`
+	Arcade   string                 `json:"arcade"`
+	Name     string                 `json:"name"`
+	VisitDay string                 `json:"visit_day"`
+	Location *VisitTimelineLocation `json:"location"`
+}
+type VisitTimelineLocation struct {
+	Lat float64 `json:"lat"`
+	Lon float64 `json:"lon"`
+}
+
 type PassportCity struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -55,6 +69,7 @@ type PassportDay struct {
 	Visits  int `json:"visits"`
 }
 type Passport struct {
+	timeline             []VisitTimelineEntry
 	Visibility           string            `json:"visibility"`
 	CityCatalogAvailable bool              `json:"city_catalog_available"`
 	Year                 string            `json:"year"`
@@ -85,7 +100,14 @@ type passportRow struct {
 // LoadPassport is the single aggregation source for private details and public summaries.
 // It never queries a geo provider and only includes currently public arcades.
 func LoadPassport(app core.App, userID, year string) (Passport, error) {
+	return loadPassport(app, userID, year, false)
+}
+
+func loadPassport(app core.App, userID, year string, includeTimeline bool) (Passport, error) {
 	out := Passport{Visibility: "owner", Year: year, AvailableYears: []int{}, Countries: []PassportCountry{}, Cities: []PassportCity{}, Months: []PassportMonth{}, Weekdays: []PassportDay{}, TopArcades: []PassportStamp{}, Stamps: []PassportStamp{}}
+	if includeTimeline {
+		out.timeline = []VisitTimelineEntry{}
+	}
 	rows, err := app.DB().NewQuery(`SELECT v.arcade, COALESCE(b.name,''), a.country, a.photo, a.closed,
  v.visit_day, v.visited_at, b.location, COALESCE(c.id,''), COALESCE(c.name,''), COALESCE(c.admin1,''), c.location
  FROM arcade_visit v JOIN arcade a ON a.id=v.arcade LEFT JOIN arcade_basic b ON b.id=a.basic
@@ -137,13 +159,20 @@ func LoadPassport(app core.App, userID, year string) (Passport, error) {
 		}
 		selected := year == "all" || strconv.Itoa(day.Year()) == year
 		lat, lon, valid := readVisitLocation(r.location.String)
-		valid = valid && r.location.Valid
+		valid = valid && r.location.Valid && validVisitCoords(lat, lon)
 		if selected && valid && prevValid {
 			out.TotalDistanceMeters += visitDistanceMeters(prevLat, prevLon, lat, lon)
 		}
 		prevLat, prevLon, prevValid = lat, lon, valid && selected
 		if !selected {
 			continue
+		}
+		if includeTimeline {
+			var location *VisitTimelineLocation
+			if valid {
+				location = &VisitTimelineLocation{Lat: lat, Lon: lon}
+			}
+			out.timeline = append(out.timeline, VisitTimelineEntry{ID: r.arcade + ":" + r.day, Arcade: r.arcade, Name: r.name, VisitDay: r.day, Location: location})
 		}
 		firstInPeriod := stamp.VisitCount == 0
 		stamp.VisitCount++

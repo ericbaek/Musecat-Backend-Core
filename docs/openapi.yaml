@@ -1649,6 +1649,24 @@ components:
         last_page: {type: integer}
         total: {type: integer}
         items: {type: array, items: {$ref: '#/components/schemas/PassportStamp'}}
+    VisitTimelineEntry:
+      type: object
+      required: [id, arcade, name, visit_day, location]
+      properties:
+        id:
+          type: string
+          description: Stable arcade ID and local visit day joined by a colon. Never a raw visit-record ID.
+        arcade: {type: string}
+        name: {type: string}
+        visit_day: {type: string, format: date}
+        location:
+          type: object
+          nullable: true
+          required: [lat, lon]
+          description: Current registered public venue coordinates, never verification GPS. Missing or invalid coordinates are null; keep that event as a break between route segments.
+          properties:
+            lat: {type: number, minimum: -90, maximum: 90}
+            lon: {type: number, minimum: -180, maximum: 180}
     VisitStats:
       type: object
       required: [total_visits, distinct_arcades, total_distance_meters, countries, arcades, cities, distinct_cities, unclassified_arcades]
@@ -9389,14 +9407,18 @@ paths:
       security: [{bearerAuth: []}, {nativeSession: []}]
       responses:
         '200':
-          description: Authenticated user's profile-ready visit summary. It includes all visit days per arcade without raw GPS, accuracy, XP, or visit-record data.
+          description: Authenticated owner's existing profile-ready summary plus complete verification timeline in visited_at ascending and record-id ascending order. The response contains no raw timestamps, GPS, accuracy, XP or visit-record IDs. Each arcade/local-day pair occurs at most once. Timeline is never included in delegated account projections; other profile and Passport APIs remain unchanged. No shared caching.
           content:
             application/json:
               schema:
                 type: object
-                required: [stats]
+                required: [stats, timeline]
                 properties:
                   stats: {$ref: '#/components/schemas/VisitStats'}
+                  timeline:
+                    type: array
+                    description: Complete owner-only ordered visits, including revisits on later days and closed public venues. No pagination or truncation; response size grows with history. Older server versions omit this additive field, which means timeline unavailable, not an empty history.
+                    items: {$ref: '#/components/schemas/VisitTimelineEntry'}
   /user/visit-visibility:
     put:
       tags: [Users]
