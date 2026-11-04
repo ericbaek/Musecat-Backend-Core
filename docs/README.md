@@ -25,3 +25,14 @@ When adding or changing an endpoint:
 - Arcade game Delta API handoff: `/arcade-game-delta-api.md`
 - Supporter API notes: `/supporter-api.md`
 - Community translation prototype: `/community-translation-prototype.md`
+
+- [Configured developer OAuth API](developer-api.md)
+- [Developer wire contract](developer-openapi.yaml)
+- [Sign in with Musecat](sign-in-with-musecat.md)
+
+- [Configured external account connections](external-connections.md)
+- [Reciprocal connections](joint-connections.md)
+- [Partner integration wire protocol](partner-integration-spec.md)
+
+- [Developer Center backend contract](developer-center.md)
+- [Partner release evidence and remaining interoperability](partner-release-readiness.md)
