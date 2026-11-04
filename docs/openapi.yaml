@@ -36,13 +36,11 @@ components:
       in: header
       name: X-Feedback-Guest-Key
       description: A 64-character lowercase hexadecimal browser credential. Optional on guest POST /support_feedback to create a recoverable chat; required for all /guest/feedback routes. Only its SHA-256 digest is stored. Existing unkeyed submissions cannot be claimed.
- {type: http, scheme: bearer, description: Musecat-issued server key; distinct from OAuth tokens and secrets.}
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
   parameters:
- {name: X-Request-Id, in: header, required: true, schema: {type: string, format: uuid}, description: Replays return the original result for ten minutes; changed requests with the same ID conflict.}
     LimitQuery:
       name: limit
       in: query
@@ -3376,7 +3374,8 @@ components:
         review_outcome: {type: string, enum: [upheld, dismissed, actioned]}
         review_note: {type: string}
         created: {type: string}
-        updated: {type: string}    InquiryBotChoice: {"type":"object","properties":{"id":{"type":"string","maxLength":64},"label":{"type":"string","maxLength":80},"next":{"type":"string","maxLength":64}},"required":["id","label","next"]}
+        updated: {type: string}
+    InquiryBotChoice: {"type":"object","properties":{"id":{"type":"string","maxLength":64},"label":{"type":"string","maxLength":80},"next":{"type":"string","maxLength":64}},"required":["id","label","next"]}
     InquiryBotNode: {"type":"object","properties":{"id":{"type":"string","maxLength":64},"text":{"type":"string","maxLength":2000},"choices":{"type":"array","maxItems":6,"items":{"$ref":"#/components/schemas/InquiryBotChoice"}}},"required":["id","text","choices"]}
     InquiryBotConfig: {"type":"object","properties":{"enabled":{"type":"boolean"},"start":{"type":"string"},"nodes":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/InquiryBotNode"}}},"required":["enabled","start","nodes"]}
     InquiryBotPreview: {"type": "object", "required": ["text", "choices", "revision", "createdAt"], "properties": {"text": {"type": "string"}, "choices": {"type": "array", "items": {"$ref": "#/components/schemas/InquiryBotChoice"}}, "revision": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"}}}
