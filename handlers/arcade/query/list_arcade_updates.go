@@ -84,7 +84,7 @@ func listArcadeUpdates(re *core.RequestEvent, history bool) error {
 		params["country"] = country
 	}
 
-	visitFilter := strings.Join(filterParts, " AND ") + " AND ui.visit_visibility IN ('summary', 'full')"
+	visitFilter := strings.Join(filterParts, " AND ") + " AND ui.visit_visibility IN ('summary', 'full') AND COALESCE(ui.visit_timeline_hidden, 0) = 0"
 	if history {
 		visitFilter += " AND 0 = 1"
 	}

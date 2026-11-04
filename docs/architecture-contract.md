@@ -1243,3 +1243,10 @@ Guest inquiries use the canonical messaging store and browser-scoped credentials
 Direct-message conversations enter conversation lists only after the first message
 is sent. Opening a peer DM may reuse an empty conversation without listing it for
 either participant. Inquiry visibility is unchanged.
+
+The optional boolean `visit_timeline_hidden` on `PUT /user/visit-visibility`
+is independent of `visit_visibility`. It defaults to false, and omission
+preserves the saved value. Profile responses return the saved flag. When true,
+`GET /arcades/updates` excludes that account's existing and future visit entries;
+profile Passport statistics, maps and stamps retain their existing visibility rules.
+Private visits remain excluded regardless of this flag.

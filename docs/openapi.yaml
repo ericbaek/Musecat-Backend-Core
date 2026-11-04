@@ -1469,6 +1469,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/UserProfileSeries'
+        visit_timeline_hidden:
+          type: boolean
+          default: false
+          description: Excludes this account's visits from the home update timeline independently of profile visibility.
         visit_visibility:
           type: string
           enum: [private, summary, full]
@@ -1923,6 +1927,9 @@ components:
       required: [visit_visibility]
       properties:
         visit_visibility: {type: string, enum: [private, summary, full]}
+        visit_timeline_hidden:
+          type: boolean
+          description: Optional. Omission preserves the saved setting; true hides existing and future visits from the home timeline.
     ProfileCountriesRequest:
       type: object
       required: [countries, country_mode]
@@ -8660,7 +8667,15 @@ paths:
             schema: {$ref: '#/components/schemas/VisitVisibilityRequest'}
       responses:
         '200':
-          description: Updated public visit visibility.
+          description: Updated profile visit visibility and independent home timeline preference.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [visit_visibility, visit_timeline_hidden]
+                properties:
+                  visit_visibility: {type: string, enum: [private, summary, full]}
+                  visit_timeline_hidden: {type: boolean}
   /user/favorite-visibility:
     put:
       tags: [Users]
