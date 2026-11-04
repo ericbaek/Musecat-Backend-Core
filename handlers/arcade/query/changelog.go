@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/contribution"
 	"net/http"
 	"strconv"
 	"strings"
@@ -76,15 +77,16 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
 		item := map[string]any{
-			"id":      record.Id,
-			"arcade":  record.GetString("arcade"),
-			"changed": record.GetString("changed"),
-			"from":    record.Get("from"),
-			"to":      record.Get("to"),
-			"by":      record.GetString("by"),
-			"log":     record.Get("log"),
-			"created": record.Get("created"),
-			"updated": record.Get("updated"),
+			"id":                  record.Id,
+			"contribution_source": contribution.FromRecord(record),
+			"arcade":              record.GetString("arcade"),
+			"changed":             record.GetString("changed"),
+			"from":                record.Get("from"),
+			"to":                  record.Get("to"),
+			"by":                  record.GetString("by"),
+			"log":                 record.Get("log"),
+			"created":             record.Get("created"),
+			"updated":             record.Get("updated"),
 		}
 		if record.GetString("changed") == "memo" {
 			item["memo"] = memoDiff.Build(re.App, arcadeID, record.GetString("from"), record.GetString("to"))

@@ -130,6 +130,9 @@ func configureDefaultRateLimits(app core.App) {
 	settings := app.Settings()
 	settings.RateLimits.Enabled = true
 	defaults := []core.RateLimitRule{
+		{Label: "/bot/v1/", MaxRequests: 120, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /user/bot-keys", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+
 		{Label: "GET /oauth/authorize", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /oauth/token", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /oauth/consent", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
@@ -179,6 +182,7 @@ func registerAPIRoutes(se *core.ServeEvent, nativeClients []nativeauth.Client, m
 		manager = managers[0]
 	}
 	connectionhandler.RegisterRoutes(se, manager)
+	registerBotRoutes(se)
 	announcementhandler.RegisterRoutes(se)
 	messaginghandler.RegisterRoutes(se)
 	se.Router.GET("/guest/feedback", arcadeadmin.ListGuestSupportFeedback).Bind(arcadeadmin.RequireGuestFeedback())

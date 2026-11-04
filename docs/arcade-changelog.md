@@ -479,6 +479,24 @@ and rejected capacity or permission checks leave the record unchanged. Official
 accounts may manage authorless legacy notices only in their owned arcade; no author
 is fabricated. Full's migration preserves original notice content and timestamps.
 
+Notice titles and required/pinned display modes preserve the existing standalone notice history, timestamps and XP behavior. Current official accounts may manage legacy notices for their owned arcade. Active required/pinned caps are enforced atomically. Inquiry bot configuration is operational inbox policy and creates no arcade changelog entries or XP; existing conversation flow snapshots remain unchanged.
+
+## Bot contribution attribution
+
+A bot key authenticates as its issuing account only under `/bot/v1`. The normal
+changelog `by` relation remains that account; a separate immutable
+`contribution_source` snapshot stores `kind=bot`, the key record ID and bot name.
+Both arcade and user timeline responses include the source, including after key
+revocation. The frontend shows the account and bot name. Creation's initial basic
+changelog uses the same attribution. No secret, hash, authorization header or
+owner token fingerprint is exposed.
+
+Bot edits grant no XP, bot creation receives no public-conversion reward, bot
+changelog rows are excluded from draft reward backfill, and bot photo atoms
+remain ineligible after web application. Real web edits keep existing reward
+rules; unchanged saves do not convert prior bot work into rewarded contributions.
+Source snapshots and existing changelog rows are not rewritten on revocation.
+
 Shared check request creation, completion and removal are activity records in `arcade_check_note`; they do not change arcade information and create no `arcade_changelog` or XP entries. Information edits continue through the existing mutation endpoints.
 
 ## Inquiry bot configuration
