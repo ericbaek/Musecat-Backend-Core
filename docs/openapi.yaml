@@ -31,6 +31,7 @@ tags:
     description: Authenticated arcade editing endpoints.
 components:
   securitySchemes:
+    partnerBearer: {type: http, scheme: bearer, description: Musecat-issued server key; distinct from OAuth tokens and secrets.}
     delegatedOAuth:
       type: oauth2
       description: Musecat-issued opaque delegation tokens. Session JWTs are never
@@ -66,6 +67,7 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    PartnerRequestId: {name: X-Request-Id, in: header, required: true, schema: {type: string, format: uuid}, description: Replays return the original result for ten minutes; changed requests with the same ID conflict.}
     LimitQuery:
       name: limit
       in: query
@@ -92,6 +94,226 @@ components:
       schema:
         type: string
   schemas:
+    ExternalProvider:
+      type: object
+      required: [id, name, issuer, services]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        issuer: {type: string, format: uri}
+        services:
+          type: array
+          items: {$ref: '#/components/schemas/ExternalService'}
+    ExternalService:
+      type: object
+      required: [id, name, scopes]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        scopes: {type: array, items: {type: string}}
+    ExternalAccountConnection:
+      type: object
+      required: [id, provider, issuer, scopes, services, created, updated]
+      properties:
+        id: {type: string}
+        provider: {type: string}
+        issuer: {type: string, format: uri}
+        scopes: {type: array, items: {type: string}}
+        services:
+          type: array
+          items: {$ref: '#/components/schemas/ExternalServiceConnection'}
+        created: {type: string, format: date-time}
+        updated: {type: string, format: date-time}
+    ExternalServiceConnection:
+      type: object
+      description: Native CHUNITHM Info grants are public after OAuth consent; other providers default to private. Upstream privacy and development audience restrictions still apply.
+      required: [service, visibility, fields]
+      properties:
+        service: {type: string}
+        visibility:
+          type: string
+          enum: [private, public]
+          description: New and reauthorized grants are private. No publish API exists in this phase.
+        fields: {type: array, items: {type: string}}
+    ExternalConnectionStart:
+      type: object
+      additionalProperties: false
+      required: [provider, services]
+      properties:
+        provider: {type: string}
+        services:
+          type: array
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+          items: {type: string}
+      example: {provider: rhythm, services: [chunithm, sdvx]}
+    ExternalPublicRecord:
+      type: object
+      required: [provider, provider_name, service, service_name, fetched_at, updated_at, payload]
+      properties:
+        provider: {type: string}
+        provider_name: {type: string}
+        service: {type: string}
+        service_name: {type: string}
+        fetched_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        payload: {$ref: '#/components/schemas/ExternalRecordEnvelope'}
+    ExternalRecordEnvelope:
+      type: object
+      description: Validated musecat-records/v1 envelope. The partner subject is removed before storage. The fixed CHUNITHM Info adapter projects authorized @me profile/rating/stats/scores into this same envelope; recent plays remain unsupported until the upstream exposes their detail.
+      required: [spec, service, visibility, updated_at, source, fields, sections]
+      properties:
+        spec: {type: string, enum: [musecat-records/v1]}
+        game_schema: {type: string, enum: [musecat-game/maimai/v1, musecat-game/chunithm/v1, musecat-game/sdvx/v1, musecat-game/iidx/v1, musecat-game/nostalgia/v1], description: Optional semantic profile matching the service. Unspecified service IDs keep generic typed rendering.}
+        recent_plays: {$ref: '#/components/schemas/ExternalRecentPlays'}
+        selection: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/ExternalRecordSelection'}}
+        service: {type: string}
+        visibility: {type: string, enum: [public, private]}
+        updated_at: {type: string, format: date-time}
+        source: {type: object, required: [name], properties: {name: {type: string}, url: {type: string, format: uri}}}
+        player: {type: object, properties: {name: {type: string}, title: {type: string}, level: {type: integer}, team: {type: string}}}
+        fields:
+          type: array
+          maxItems: 24
+          items:
+            type: object
+            required: [key, label, type, value]
+            properties:
+              key: {type: string}
+              label: {$ref: '#/components/schemas/ExternalRecordLabel'}
+              type: {type: string, enum: [integer, decimal, string, percent, datetime, date, rank]}
+              value: {}
+              precision: {type: integer, minimum: 0, maximum: 6}
+        sections:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [key, label, columns, rows]
+            properties:
+              key: {type: string}
+              label: {$ref: '#/components/schemas/ExternalRecordLabel'}
+              columns: {type: array, maxItems: 8, items: {type: object, required: [key, label, type], properties: {key: {type: string}, label: {$ref: '#/components/schemas/ExternalRecordLabel'}, type: {type: string}}}}
+              rows: {type: array, maxItems: 50, items: {type: array, items: {}}}
+              total: {type: integer}
+              more_url: {type: string, format: uri}
+    ExternalRecentPlays:
+      type: object
+      required: [plays]
+      description: Latest first. IDs are provider-local; scores and performance metrics retain game-specific units. Omitted metrics are never zero-filled.
+      properties:
+        total: {type: integer, minimum: 0}
+        more_url: {type: string, format: uri, description: HTTPS source history URL.}
+        plays:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [played_at, song, chart, fields]
+            properties:
+              id: {type: string, maxLength: 128}
+              played_at: {type: string, format: date-time}
+              song:
+                type: object
+                required: [title]
+                properties:
+                  id: {type: string, maxLength: 128}
+                  title: {type: string, minLength: 1, maxLength: 256}
+                  artist: {type: string, maxLength: 256}
+                  image_url: {type: [string, "null"], format: uri, maxLength: 2048, description: Optional HTTPS song cover URL without credentials. Null or empty is omitted from the cached projection; no cover is fabricated.}
+              chart:
+                type: object
+                required: [difficulty]
+                properties:
+                  id: {type: string, maxLength: 128}
+                  difficulty: {type: string, minLength: 1, maxLength: 64}
+                  level: {type: string, maxLength: 32}
+                  mode: {type: string, maxLength: 64}
+              fields: {type: array, maxItems: 16, items: {$ref: '#/components/schemas/ExternalRecordField'}}
+    ExternalRecordField:
+      type: object
+      required: [key, label, type, value]
+      properties:
+        key: {type: string, maxLength: 64}
+        label: {$ref: '#/components/schemas/ExternalRecordLabel'}
+        type: {type: string, enum: [integer, decimal, string, percent, datetime, date, rank]}
+        value: {}
+        precision: {type: integer, minimum: 0, maximum: 6}
+    ExternalRecordLabel:
+      type: object
+      required: [en]
+      properties: {ko: {type: string}, en: {type: string}, ja: {type: string}}
+    ExternalRecordSelection:
+      type: object
+      required: [key, status]
+      description: Explains an omitted group or item. The corresponding data MUST be absent. Keys are player, fields, sections, recent_plays, fields.KEY or sections.KEY. Missing selection metadata means unspecified, never consent.
+      properties:
+        key: {type: string, maxLength: 73}
+        status: {type: string, enum: [denied, no_data, unsupported]}
+    ExternalRecordView:
+      type: object
+      required: [connection, provider, service, status, fetched_at, updated_at, payload]
+      properties:
+        connection: {type: string}
+        provider: {type: string}
+        service: {type: string}
+        status: {type: string, enum: [ok, private, unavailable, unsupported]}
+        error: {type: string, description: Machine code such as token_refresh, unauthorized, forbidden, not_found, rate_limited, invalid_envelope, provider_disabled, network, never_fetched. A rate_limited result honors persisted upstream Retry-After seconds before another request.}
+        fetched_at: {type: [string, 'null'], format: date-time}
+        updated_at: {type: [string, 'null'], format: date-time}
+        payload:
+          oneOf: [{$ref: '#/components/schemas/ExternalRecordEnvelope'}, {type: 'null'}]
+    ExternalConnectionComplete:
+      type: object
+      additionalProperties: false
+      required: [provider, state]
+      properties:
+        provider: {type: string}
+        state: {type: string, minLength: 43, maxLength: 43}
+        code: {type: string, maxLength: 4096}
+        error: {type: string, maxLength: 256}
+        iss:
+          type: string
+          description: Exact authorization response issuer. Required when the provider declares issuer support.
+      oneOf:
+        - required: [code]
+          properties:
+            code: {minLength: 1}
+            error: {maxLength: 0}
+        - required: [error]
+          properties:
+            error: {minLength: 1}
+            code: {maxLength: 0}
+    JointStatus:
+      type: object
+      properties:
+        id: {type: string}
+        partner: {type: string}
+        status: {type: string, enum: [pending, approving, partial, connected, degraded, cancelled, expired, invalidated, revoked]}
+        musecat_access: {type: boolean}
+        partner_access: {type: boolean}
+        remote_revocation_pending: {type: boolean}
+        expires_at: {type: string, format: date-time}
+    JointConsent:
+      type: object
+      required: [id, partner, partner_name, partner_account, services, manifest, expires_at]
+      properties:
+        id: {type: string}
+        partner: {type: string}
+        partner_name: {type: string}
+        partner_account: {type: string}
+        services: {type: array, items: {type: object, properties: {id: {type: string}, name: {type: string}}}}
+        manifest: {type: string, enum: [musecat-joint/v1]}
+        expires_at: {type: string, format: date-time}
+    PartnerJointStatus:
+      type: object
+      properties:
+        correlation_id: {type: string, format: uuid}
+        status: {type: string, enum: [pending, approving, partial, connected, degraded, cancelled, expired, invalidated, revoked]}
+        generation: {type: string}
+        musecat_access: {type: boolean}
+        partner_access: {type: boolean}
     Announcement:
       type: object
       required: [id, status, createdAt, updatedAt, publishedAt, viewed, localizations, locales]
@@ -3405,6 +3627,287 @@ components:
     InquiryBotConfig: {"type":"object","properties":{"enabled":{"type":"boolean"},"start":{"type":"string"},"nodes":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/InquiryBotNode"}}},"required":["enabled","start","nodes"]}
     InquiryBotPreview: {"type": "object", "required": ["text", "choices", "revision", "createdAt"], "properties": {"text": {"type": "string"}, "choices": {"type": "array", "items": {"$ref": "#/components/schemas/InquiryBotChoice"}}, "revision": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"}}}
 paths:
+  /integrations/providers:
+    get:
+      tags: [Users]
+      summary: List configured external account providers and game services
+      description: Safe metadata only. Anonymous callers see production providers; an authenticated owner or assigned tester also sees their development providers. Empty configuration returns an empty list. No credentials, tester IDs, or token endpoints are exposed.
+      responses:
+        '200':
+          description: Configured providers. Cache-Control is no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ExternalProvider'}
+  /user/connections:
+    get:
+      tags: [Users]
+      summary: List the active user's external account connections
+      security: [{bearerAuth: []}]
+      description: Owned projections only. External subjects, credentials and request secrets are omitted. Works when providers are disabled.
+      responses:
+        '200':
+          description: Owned connections. Cache-Control is no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ExternalAccountConnection'}
+        '401': {description: Missing or invalid user authentication.}
+        '403': {description: Withdrawn or banned account.}
+        '500': {description: Connection storage failure.}
+  /user/connections/start:
+    post:
+      tags: [Users]
+      summary: Begin an external account connection using Authorization Code and PKCE S256
+      security: [{bearerAuth: []}]
+      description: |
+        Accepts exactly one JSON document with optional trailing whitespace and rejects unknown fields.
+        Creates a five-minute, one-use request bound to the exact current Musecat token.
+        A new attempt cancels prior work for the user and issuer. Only registered services
+        and fixed HTTPS endpoints are used. The caller cannot supply an external subject or URL.
+        Runtime default limit is 10 requests per client IP per 600 seconds across both audiences.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ExternalConnectionStart'}
+      responses:
+        '200':
+          description: Authorization URL and expiry. Cache-Control is no-store.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorization_url, expires_at]
+                properties:
+                  authorization_url: {type: string, format: uri}
+                  expires_at: {type: string, format: date-time}
+        '400': {description: Invalid input, unknown or duplicate game service.}
+        '401': {description: Missing, invalid or changed initiating session.}
+        '403': {description: Withdrawn or banned account.}
+        '413': {description: Body exceeds 16384 bytes.}
+        '429': {description: Request rate limit exceeded.}
+        '500': {description: Connection storage failure.}
+        '503': {description: Linking is disabled or the provider is not configured.}
+  /partner/v1/records/invalidate:
+    post:
+      tags: [External Connections]
+      operationId: invalidatePartnerRecords
+      summary: Immediately remove cached records after a partner selection or privacy change
+      description: B-only and joint apps use the Musecat-issued records key. Idempotently purges only the authenticated provider's matching subject and service, without revealing whether a connection exists. A fetch already in flight cannot republish its old selection. Send after committing the reduced selection, retry failures durably, and do not claim completion until 204. Subsequent owner/background reads fetch the new selection.
+      security: [{partnerBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sub, service]
+              properties:
+                sub: {type: string, minLength: 1, maxLength: 256}
+                service: {type: string}
+      responses:
+        '204': {description: Purged or no matching connection. No identities returned.}
+        '400': {description: Invalid subject or undeclared service.}
+        '401': {description: Missing or invalid Musecat-issued records key.}
+        '429': {description: Retry with backoff.}
+  /user/records:
+    get:
+      tags: [Users]
+      summary: Public game records a user has published
+      description: Anonymous. Returns only services the user set public in Musecat whose currently configured provider/service has a cached partner envelope with public visibility, status ok and age below 24 hours. Served from cache (refreshed hourly for published records); never triggers a partner request. Cache-Control public, max-age=300.
+      parameters: [{name: user, in: query, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Published records., content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/ExternalPublicRecord'}}}}}}}
+        '400': {description: Missing user id.}
+        '404': {description: Unknown or withdrawn user.}
+  /user/connections/{id}/records/{service}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: service, in: path, required: true, schema: {type: string}}]
+    get:
+      tags: [Users]
+      summary: Owner view of one cached game record, fetching when stale
+      security: [{bearerAuth: []}]
+      description: Fetches from the partner when no cache exists or it is older than 24 hours; refresh=true forces a fetch unless one ran within the last minute or persisted upstream Retry-After backoff is still active. An expired access token is refreshed once and re-sealed. Partner records_private or a private envelope yields status private with no payload; the partner subject is validated against the connection and never returned.
+      parameters: [{name: refresh, in: query, required: false, schema: {type: boolean}}]
+      responses:
+        '200': {description: Record view. Cache-Control is no-store., content: {application/json: {schema: {$ref: '#/components/schemas/ExternalRecordView'}}}}
+        '401': {description: Missing, invalid or changed session.}
+        '403': {description: Withdrawn or banned account.}
+        '404': {description: Missing connection, another user's connection, or service not granted.}
+  /user/connections/{id}/services/{service}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}}, {name: service, in: path, required: true, schema: {type: string}}]
+    put:
+      tags: [Users]
+      summary: Set the Musecat-side publication switch for one game service
+      security: [{bearerAuth: []}]
+      description: public shows the service on the public profile only when the partner envelope is also public. Default is private. Never changes partner data.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [visibility], properties: {visibility: {type: string, enum: [public, private]}}}}}}
+      responses:
+        '200': {description: Updated grant., content: {application/json: {schema: {$ref: '#/components/schemas/ExternalServiceConnection'}}}}
+        '400': {description: Invalid visibility.}
+        '404': {description: Missing connection or service.}
+  /user/connections/complete:
+    post:
+      tags: [Users]
+      summary: Verify the approved external account and persist private game grants
+      security: [{bearerAuth: []}]
+      description: |
+        Requires the same Musecat token as start. The BFF forwards the code, state and issuer
+        from its provider-specific callback. Code exchange and authenticated user-info lookup
+        occur outside transactions. The server rechecks session validity, account restrictions,
+        issuer, expiry and live request before persistence. One claim consumes each attempt;
+        denied and failed exchanges require a fresh start. Reauthorization replaces game consent
+        with the requested services whose scopes were actually granted; grants default private.
+        Runtime default limit is 20 requests per client IP per 600 seconds across both audiences.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ExternalConnectionComplete'}
+      responses:
+        '200':
+          description: Safe connection projection. Cache-Control is no-store.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ExternalAccountConnection'}
+        '400': {description: Invalid, denied, expired, replayed, superseded or disconnected attempt, wrong session or issuer.}
+        '401': {description: Missing or invalid authentication, including credentials changed during exchange.}
+        '403': {description: Withdrawn or banned account, including restrictions added during exchange.}
+        '409': {description: Identity belongs to another Musecat user or a different external account is already connected for this issuer. No transfer occurs.}
+        '413': {description: Body exceeds 16384 bytes.}
+        '429': {description: Request rate limit exceeded.}
+        '500': {description: Connection storage failure.}
+        '502': {description: Provider exchange, identity lookup or identity validation failed. No provider error or credential is exposed.}
+        '503': {description: Provider disabled, unavailable or pending verifier cannot be decrypted.}
+  /user/connections/{id}:
+    delete:
+      tags: [Users]
+      summary: Locally unlink an owned external account
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string}
+      description: |
+        Atomically deletes the owned account, encrypted credentials, child game grants and pending
+        attempts for its issuer. This fences in-flight callbacks. Works with disabled providers.
+        Does not call or imply remote provider token revocation. No partner delegation is affected.
+      responses:
+        '204': {description: Local unlink completed. Cache-Control is no-store.}
+        '401': {description: Missing or invalid current user session.}
+        '403': {description: Withdrawn or banned account.}
+        '404': {description: Missing connection or connection owned by another user.}
+        '500': {description: Connection storage failure.}
+  /integrations/joint:
+    get:
+      summary: List active joint partner IDs
+      description: Anonymous callers see production partners. An authenticated owner or tester also sees their development partners.
+      responses:
+        '200': {description: Sorted IDs, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: string}}}}}}}
+  /user/joint:
+    get:
+      summary: List own joint connections and pending remote revocations
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Own status projections, content: {application/json: {schema: {type: object, properties: {items: {type: array, items: {$ref: '#/components/schemas/JointStatus'}}}}}}}
+        '401': {description: Active user session required.}
+  /user/joint/begin:
+    post:
+      summary: Start joint connection from Musecat
+      security: [{bearerAuth: []}]
+      description: return_to must match the configured consent web origin and /{locale}/connect/{partner}. Query strings and external origins are rejected.
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [partner, return_to], properties: {partner: {type: string}, return_to: {type: string, format: uri}}}}}}
+      responses:
+        '200': {description: Partner start URL and new correlation UUID, content: {application/json: {schema: {type: object, properties: {start_url: {type: string, format: uri}, correlation_id: {type: string, format: uuid}}}}}}
+        '400': {description: Invalid registered return URL.}
+        '503': {description: Joint connection unavailable.}
+  /user/joint/lookup:
+    post:
+      summary: Resolve a partner intent and bind the consent to the current session
+      security: [{bearerAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [partner, intent], properties: {partner: {type: string}, intent: {type: string, minLength: 43, maxLength: 512}}}}}}
+      responses:
+        '200': {description: Consent identities and service summary, content: {application/json: {schema: {$ref: '#/components/schemas/JointConsent'}}}}
+        '400': {description: Invalid, expired, consumed or differently bound intent.}
+        '502': {description: Partner lookup failed.}
+  /user/joint/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      summary: Read the session-bound joint consent
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Consent summary, content: {application/json: {schema: {$ref: '#/components/schemas/JointConsent'}}}}
+        '404': {description: Missing or foreign attempt.}
+    delete:
+      summary: Disconnect both sides
+      security: [{bearerAuth: []}]
+      description: Locally revokes only matching generations and atomically queues remote revocation. Independent later grants survive.
+      responses:
+        '204': {description: Local access revoked; remote notification may be pending.}
+        '404': {description: Missing or foreign attempt.}
+  /user/joint/{id}/status:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      summary: Recheck both verified joint connection legs
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Live status, content: {application/json: {schema: {$ref: '#/components/schemas/JointStatus'}}}}
+  /user/joint/{id}/approve:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Approve the joint manifest once
+      security: [{bearerAuth: []}]
+      description: Claims the attempt atomically, issues the Direction A code, calls partner receipts, redeems the Direction B code and verifies its subject. Failed/ambiguous requests require a fresh attempt.
+      responses:
+        '200': {description: Registered partner callback, content: {application/json: {schema: {type: object, properties: {redirect_uri: {type: string, format: uri}}}}}}
+        '400': {description: Expired, consumed or different session.}
+        '502': {description: Partner exchange failed; partial state retained.}
+  /user/joint/{id}/deny:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Deny a pending joint connection
+      security: [{bearerAuth: []}]
+      responses:
+        '200': {description: Partner callback carrying access_denied, content: {application/json: {schema: {type: object, properties: {redirect_uri: {type: string, format: uri}}}}}}
+  /partner/v1/joint/{correlation_id}:
+    parameters:
+      - {name: correlation_id, in: path, required: true, schema: {type: string, format: uuid}}
+      - {$ref: '#/components/parameters/PartnerRequestId'}
+    get:
+      summary: Partner polls only its own joint attempt
+      security: [{partnerBearer: []}]
+      responses:
+        '200': {description: Verified joint state, content: {application/json: {schema: {$ref: '#/components/schemas/PartnerJointStatus'}}}}
+        '401': {description: unauthorized_partner.}
+        '404': {description: Unknown pair.}
+  /partner/v1/revocations:
+    post:
+      summary: Revoke exactly one joint generation
+      security: [{partnerBearer: []}]
+      parameters:
+        - {$ref: '#/components/parameters/PartnerRequestId'}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [pair_id, generation, reason, revoked_at], properties: {pair_id: {type: string, format: uuid}, generation: {type: string, minLength: 1, maxLength: 64}, reason: {type: string, enum: [user, security, admin, superseded]}, revoked_at: {type: string, format: date-time}}}}}}
+      responses:
+        '200': {description: Idempotent generation-specific result, content: {application/json: {schema: {type: object, properties: {status: {type: string, enum: [revoked, already_revoked, unknown_generation]}}}}}}
+        '400': {description: invalid_request.}
+        '401': {description: unauthorized_partner.}
+        '409': {description: Request ID reused with a different body.}
   /developer/sign-in-with-musecat.md:
     get:
       tags: [OAuth delegation]

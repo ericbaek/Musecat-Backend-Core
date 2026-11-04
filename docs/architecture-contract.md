@@ -1301,3 +1301,42 @@ OAuth, OIDC nonce and usage-ledger forward migrations. Core's migrations initial
 only fresh Core test/reference databases. Enabling configured clients additionally
 requires the matched deployed WebCore consent frontend; no deployment or runtime
 secret change follows from publishing this source PR.
+
+
+## Configured external providers, reciprocal connections and records
+
+`connections` owns distinct external-account identity, per-service consent, encrypted
+provider credentials and bounded typed record caches. Browser callbacks remain bound
+to the initiating account/session, issuer, state, PKCE and exact provider configuration.
+Recheck fresh account/session authority after external I/O before committing. Linking
+never grants Musecat session credentials or silently transfers a foreign identity.
+Public record reads require both the user's selected publication and the provider's
+public envelope; private, stale, disabled or missing configurations suppress cached data.
+Provider retry/backoff survives restarts and prevents foreground refresh storms.
+
+Reciprocal partners coordinate independently proven incoming grants and outgoing
+connections through the joint ledger. Matching subject/generation evidence, partial
+failure rollback, durable revocation receipts and stable retry IDs prevent browser
+claims, duplicate events or old generations from replacing current access. Withdrawal
+removes private credentials and pending requests atomically while retaining required
+revocation delivery. Local unlink does not claim an unperformed remote revocation.
+
+The executable selects static providers, encryption key and reciprocal partners,
+then registers bounded cleanup, record-refresh and revocation-outbox jobs. Configure
+registers routes and supplied resources but never starts jobs or reads secrets. The
+shared public-IP-pinned HTTP transport rejects private/special targets, redirects and
+environment proxies. Injected clients remain trusted executable dependencies.
+Developer Center registration, publication review and conformance are separate phases.
+No native session, bot API or check-note feature is imported by this release unit.
+Core initializes fresh schemas only; Full owns matched guarded forward migrations.
+See `external-connections.md`, `joint-connections.md` and `partner-integration-spec.md`
+for complete identity, record, protocol and partner-interoperability contracts.
+
+
+### Record privacy rollout dependency
+
+The source split is a review boundary, not an independently deployable complete v1
+integration. Immediate incoming record invalidation and Musecat-issued records keys
+are authenticated by the Developer Center registry phase. Release configured
+connections/records with that cumulative phase before exposing them to users; do
+not claim immediate partner privacy invalidation from this intermediate pin.

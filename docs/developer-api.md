@@ -1,9 +1,9 @@
 # Musecat Developer API
 
 This foundation exposes configured confidential OAuth clients and scoped custom
-resources. Developer Center registration, reverse account linking, reciprocal
-connections and partner record adapters are separate releases; this phase does
-not enable those endpoints.
+resources. Configured reverse-provider links, reciprocal connections and records have separate
+first-party consent and API contracts. Developer Center self-service registration,
+production review and conformance remain separate releases.
 
 ## Register your application
 

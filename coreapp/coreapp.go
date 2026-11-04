@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/ericbaek/musecat-backend-core/connections"
 	"github.com/ericbaek/musecat-backend-core/delegation"
+	connectionhandler "github.com/ericbaek/musecat-backend-core/handlers/connections"
 	delegationhandler "github.com/ericbaek/musecat-backend-core/handlers/delegation"
+	jointhandler "github.com/ericbaek/musecat-backend-core/handlers/joint"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -47,6 +50,8 @@ import (
 // environment variables, registers migrations, or starts scheduled jobs.
 // A nil GeoResolver deliberately disables geographic lookup (fail closed).
 type Config struct {
+	Connections           *connections.Manager
+	Joint                 *connections.JointManager
 	Delegation            *delegation.Manager
 	GeoResolver           *geo.OfflineResolver
 	Documentation         DocumentationConfig
@@ -73,7 +78,8 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		se.Router.Bind(clientIPForwarding(config.ClientIPForwardSecret))
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
-		RegisterAPIRoutes(se)
+		RegisterAPIRoutes(se, config.Connections)
+		jointhandler.RegisterRoutes(se, config.Joint)
 		if err := delegation.SynchronizeClients(se.App, config.Delegation); err != nil {
 			return err
 		}
@@ -90,6 +96,11 @@ func configureDefaultRateLimits(app core.App) {
 	settings := app.Settings()
 	settings.RateLimits.Enabled = true
 	defaults := []core.RateLimitRule{
+		{Label: "POST /user/connections/start", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /user/connections/complete", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /user/joint/lookup", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /user/joint/begin", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "/partner/v1/", MaxRequests: 120, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /oauth/authorize", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /oauth/token", MaxRequests: 60, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /oauth/consent", MaxRequests: 20, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
@@ -121,7 +132,12 @@ func configureDefaultRateLimits(app core.App) {
 // RegisterAPIRoutes binds all application API routes to the ServeEvent router.
 // It is exported so test applications and integration suites can wire the exact
 // same routing table without duplicating it.
-func RegisterAPIRoutes(se *core.ServeEvent) {
+func RegisterAPIRoutes(se *core.ServeEvent, managers ...*connections.Manager) {
+	var manager *connections.Manager
+	if len(managers) > 0 {
+		manager = managers[0]
+	}
+	connectionhandler.RegisterRoutes(se, manager)
 	announcementhandler.RegisterRoutes(se)
 	messaginghandler.RegisterRoutes(se)
 	se.Router.GET("/guest/feedback", arcadeadmin.ListGuestSupportFeedback).Bind(arcadeadmin.RequireGuestFeedback())

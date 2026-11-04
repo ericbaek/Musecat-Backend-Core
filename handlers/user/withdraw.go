@@ -3,6 +3,7 @@ package user
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/connections"
 	"github.com/ericbaek/musecat-backend-core/delegation"
 	"net/http"
 	"strings"
@@ -148,6 +149,9 @@ func Withdraw(re *core.RequestEvent) error {
 			return fmt.Errorf("failed to update user_info: %w", err)
 		}
 
+		if err := connections.DeleteUserData(txApp, userRec.Id); err != nil {
+			return fmt.Errorf("failed to unlink external accounts: %w", err)
+		}
 		if err := delegation.DeleteUserData(txApp, userRec.Id); err != nil {
 			return fmt.Errorf("failed to revoke delegated apps: %w", err)
 		}

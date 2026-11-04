@@ -29,3 +29,7 @@ When adding or changing an endpoint:
 - [Configured developer OAuth API](developer-api.md)
 - [Developer wire contract](developer-openapi.yaml)
 - [Sign in with Musecat](sign-in-with-musecat.md)
+
+- [Configured external account connections](external-connections.md)
+- [Reciprocal connections](joint-connections.md)
+- [Partner integration wire protocol](partner-integration-spec.md)

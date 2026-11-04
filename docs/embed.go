@@ -28,3 +28,8 @@ func DeveloperOpenAPI() []byte { return append([]byte(nil), developerSpec...) }
 func DeveloperGuide() []byte   { return append([]byte(nil), developerGuide...) }
 func DeveloperHTML() []byte    { return append([]byte(nil), developerHTML...) }
 func SignInGuide() []byte      { return append([]byte(nil), signInGuide...) }
+
+//go:embed partner-integration-spec.md
+var partnerIntegrationSpec []byte
+
+func PartnerIntegrationSpec() []byte { return append([]byte(nil), partnerIntegrationSpec...) }
