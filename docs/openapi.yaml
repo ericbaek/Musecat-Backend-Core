@@ -2204,8 +2204,11 @@ components:
           $ref: '#/components/schemas/SupporterScoreResponse'
     UpdateArcadeHourRequest:
       type: object
-      required: [arcade, document]
+      required: [arcade]
       properties:
+        base_hour_id:
+          type: string
+          description: Original section relation ID. An explicit empty string expects no section. A mismatch returns 409 without changing data; omission preserves legacy last-writer-wins behavior.
         arcade:
           type: string
         Monday:
@@ -2930,6 +2933,9 @@ components:
       type: object
       required: [arcade, gtk]
       properties:
+        base_gtk_id:
+          type: string
+          description: Original section relation ID. An explicit empty string expects no section. A mismatch returns 409 without changing data; omission preserves legacy last-writer-wins behavior.
         arcade:
           type: string
         gtk:
@@ -2950,6 +2956,9 @@ components:
       type: object
       required: [arcade, sns]
       properties:
+        base_sns_id:
+          type: string
+          description: Original section relation ID. An explicit empty string expects no section. A mismatch returns 409 without changing data; omission preserves legacy last-writer-wins behavior.
         arcade:
           type: string
         sns:
@@ -4169,6 +4178,7 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcade
+      security: [{bearerAuth: []}, {nativeSession: []}, {}]
       description: |
         Returns only a public arcade (open or closed) and relation ids by default.
         Private arcades always return `404`; use authenticated `GET /arcade/draft` for a creator or developer/moderator draft read.
@@ -4419,8 +4429,7 @@ paths:
       tags: [Arcades]
       summary: /arcade/draft
       description: Reads a private draft only for its creator or a `developer|moderator`. Public records are intentionally rejected; clients use `/arcade` for public reads.
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - name: id
           in: query
@@ -5581,8 +5590,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/hour
       description: Active authenticated users may edit public arcades without a level threshold. Private drafts require the creator or a developer/moderator.
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -5638,6 +5646,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
+        '409':
+          description: The supplied base section ID is stale; no relation, changelog or XP changes were applied. Reload explicitly while preserving the draft.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '502':
           description: Transaction failed.
           content:
@@ -7497,8 +7510,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/basic
       description: Active authenticated users may edit public arcades without a level threshold; private drafts require the creator or a developer/moderator. Location changes are limited by the editor's level below 10 (at most 1 km), 10-14 (at most 5 km), 15-29 (at most 10 km), and 30 or above (any distance within the current country). Policy denials return a machine-readable code.
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -7719,8 +7731,7 @@ paths:
       tags: [Arcade Mutations]
       summary: /arcade/gtk
       description: Active authenticated users may edit public arcades without a level threshold. Private drafts require the creator or a developer/moderator.
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -7754,6 +7765,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
+        '409':
+          description: The supplied base section ID is stale; no relation, changelog or XP changes were applied. Reload explicitly while preserving the draft.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '502':
           description: Transaction failure.
           content:
@@ -7768,8 +7784,7 @@ paths:
         Creates a new `arcade_sns` molecule and writes the atoms under it.
         The success response returns the same expanded SNS shape used by `GET /arcade?expand=sns`.
         Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -7803,6 +7818,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
+        '409':
+          description: The supplied base section ID is stale; no relation, changelog or XP changes were applied. Reload explicitly while preserving the draft.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
         '502':
           description: Transaction failure.
           content:
@@ -7828,8 +7848,7 @@ paths:
         private edits do not award normal edit XP, and administrative bulk
         updates do not award it either.
         Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:

@@ -17,8 +17,9 @@ import (
 
 // UpdateArcadeGTKBody represents the request body for updating arcade GTK.
 type UpdateArcadeGTKBody struct {
-	Arcade string         `json:"arcade"`
-	GTK    []GTKAtomInput `json:"gtk"`
+	BaseGTKID *string        `json:"base_gtk_id,omitempty"`
+	Arcade    string         `json:"arcade"`
+	GTK       []GTKAtomInput `json:"gtk"`
 }
 
 type ParkingGeoInput struct {
@@ -252,6 +253,9 @@ func UpdateArcadeGTK(re *core.RequestEvent) error {
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
 		}
+		if body.BaseGTKID != nil && *body.BaseGTKID != strings.TrimSpace(arcadeRec.GetString("gtk")) {
+			return arcadeinternal.ErrArcadeRevisionConflict
+		}
 		prevAtoms, err := loadCurrentGTKAtoms(txApp, body.Arcade, strings.TrimSpace(arcadeRec.GetString("gtk")))
 		if err != nil {
 			return err
@@ -362,6 +366,9 @@ func UpdateArcadeGTK(re *core.RequestEvent) error {
 	}); err != nil {
 		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
 			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
+		if errors.Is(err, arcadeinternal.ErrArcadeRevisionConflict) {
+			return re.JSON(http.StatusConflict, map[string]any{"error": err.Error()})
 		}
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "transaction failed",
