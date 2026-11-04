@@ -1645,7 +1645,7 @@ consumed hashes and revoked-family history. Credentials and codes must not be
 logged. This integration does not enable native domain editing or push APIs.
 
 First-party passport, rankings and inbox clients share canonical URLs, DTOs and
-handlers. Only `GET /user/visits`, `/user/passport`, `/user/passport/stamps`,
+handlers. These passport/inbox operations `GET /user/visits`, `/user/passport`, `/user/passport/stamps`,
 `/rankings`, `/user/notifications` and `POST /user/notifications/read` bind
 `nativeauth.FirstPartyAuthentication`. PocketBase loads normal web JWTs first;
 the adapter then resolves an opaque native bearer through the existing session
@@ -1753,3 +1753,16 @@ XP. A mismatch returns 409 with no changes. Omission retains legacy behavior.
 Clients preserve their draft on conflict and never fetch a fresh ID to retry an
 old draft automatically. Basic and games retain their existing conditional
 write contracts. No schema or data migration is required for these guards.
+
+### Shared first-party ordinary reads
+
+Configured native sessions also authenticate only these canonical GET operations:
+`/user`, `/user/activity`, `/user/changelog`, `/supporter/score`,
+`/arcade/changelog`, `/arcade/request_admin`, `/arcade/drafts`, `/arcade/memo`
+and `/arcade/notice`. They invoke the web handlers and return the same DTOs.
+Existing active-account checks, public profile projection, history pagination,
+private arcade creator/reviewer visibility and owner-only draft/request lists
+remain authoritative. Notice lists remain public-arcade-only. When native clients are configured, invalid or revoked native sessions fail
+authentication even on public reads; an empty allowlist grants no native identity. The adapter
+is bound per GET operation; mutations, staff queues, raw REST and delegated
+routes gain no native credential support. No schema or migration is required.
