@@ -10,11 +10,20 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-func TestReleaseExcludesExternalIntegrations(t *testing.T) {
+func TestOAuthFoundationExcludesUnpromotedIntegrations(t *testing.T) {
 	app := testutil.NewTestApp(t)
-	for _, name := range []string{"external_account_connection", "external_joint_connection", "partner_application", "oauth_authorization_request"} {
+	for _, name := range []string{"external_account_connection", "external_joint_connection", "partner_application"} {
 		if _, err := app.FindCollectionByNameOrId(name); err == nil {
 			t.Errorf("external integration collection %s must not be bootstrapped", name)
+		}
+	}
+	for _, name := range []string{"oauth_authorization_request", "oauth_authorization_code", "oauth_delegated_token", "oauth_grant", "oauth_client_registration", "oauth_client_usage"} {
+		collection, err := app.FindCollectionByNameOrId(name)
+		if err != nil {
+			t.Fatalf("OAuth schema missing %s: %v", name, err)
+		}
+		if collection.ListRule != nil || collection.ViewRule != nil || collection.CreateRule != nil || collection.UpdateRule != nil || collection.DeleteRule != nil {
+			t.Fatalf("OAuth schema opened raw collection access: %s", name)
 		}
 	}
 	router, err := apis.NewRouter(app)

@@ -5,12 +5,14 @@ go 1.25.0
 require (
 	github.com/gabriel-vasile/mimetype v1.4.13
 	github.com/go-ozzo/ozzo-validation/v4 v4.3.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/pocketbase/dbx v1.12.0
 	github.com/pocketbase/pocketbase v0.39.9
 	golang.org/x/image v0.44.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/text v0.40.0
+	gopkg.in/yaml.v2 v2.2.2
 )
 
 require (
@@ -21,7 +23,6 @@ require (
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/ganigeorgiev/fexpr v0.6.0 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect

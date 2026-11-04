@@ -474,3 +474,12 @@ the PASELI amount alongside the base amount.
 ### Notice presentation and inquiry configuration
 
 Notice titles and required/pinned display modes preserve the existing standalone notice history, timestamps and XP behavior. Current official accounts may manage legacy notices for their owned arcade. Active required/pinned caps are enforced atomically. Inquiry bot configuration is operational inbox policy and creates no arcade changelog entries or XP; existing conversation flow snapshots remain unchanged.
+
+
+## Configured delegated account requests
+
+The scope-limited `/developer/v1/arcade/flag`, `/developer/v1/arcade/flag/reaction`
+and `/developer/v1/campaign/check` handlers reuse existing domain policy. The
+`account:access` transport reuses an explicit allowlist of normal user handlers.
+The verified user remains `by`/`createdBy`; delegation creates no separate arcade
+history or XP path and never substitutes a client-supplied user identity.

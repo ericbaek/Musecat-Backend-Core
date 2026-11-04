@@ -1267,3 +1267,37 @@ then call `CheckActiveUser` against the transaction app before committing. This
 checks current bans and the supplied account's withdrawal state. The helper does
 not authenticate a token, grant OAuth scopes, or replace the caller's fresh-record
 and session checks. No external integration routes or schema are enabled here.
+
+
+## Static delegated OAuth and OpenID Connect
+
+`delegation` owns confidential configured clients, consent requests, opaque grants,
+registration epochs, one-use PKCE codes, rotating refresh families and optional
+RS256 OpenID identity tokens. The public wire contract is embedded in
+`developer-openapi.yaml`; `developer-api.md` and `sign-in-with-musecat.md` describe
+protocol and operator configuration. First-party JWTs, delegated access tokens
+and ID tokens have distinct audiences and are never interchangeable.
+
+The executable explicitly selects issuer, deployed consent URL, client registry
+and persistent signing keys. Invalid supplied configuration fails startup without
+printing secrets; absent clients disable delegated authorization. Client removal,
+configuration changes, revocation, account restrictions and token-key changes
+invalidate the corresponding access. Registration synchronization at startup
+prevents removing and later restoring a client from resurrecting old grants.
+
+Consent is bound to a live first-party account/session and the exact registered
+callback. PKCE S256, nonce/state, one-use codes and refresh-family replay protection
+are checked by the server. Shared account handlers are exposed only behind the
+explicit `delegation.AccountRoutePatterns` allowlist. Management and account-security
+operations stay excluded, including for staff; connected profile/Passport/visit
+reads use the ordinary public audience. Authorized domain mutations retain their
+normal permission, transaction, immutable history, XP and cache contracts.
+Withdrawal revokes delegation state in the same account transaction.
+
+This foundation does not register reverse-provider connections, reciprocal joint
+flows, developer applications, conformance workers, native sessions or bot APIs.
+Full must pin the exact reviewed published Core revision and own the guarded
+OAuth, OIDC nonce and usage-ledger forward migrations. Core's migrations initialize
+only fresh Core test/reference databases. Enabling configured clients additionally
+requires the matched deployed WebCore consent frontend; no deployment or runtime
+secret change follows from publishing this source PR.
