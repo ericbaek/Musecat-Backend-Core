@@ -1243,3 +1243,29 @@ Guest inquiries use the canonical messaging store and browser-scoped credentials
 Direct-message conversations enter conversation lists only after the first message
 is sent. Opening a peer DM may reuse an empty conversation without listing it for
 either participant. Inquiry visibility is unchanged.
+
+## Account-owned bot credentials
+
+Personal bot keys are a distinct non-session credential for `/bot/v1` arcade
+creation and information editing. Issuance and use require founding supporter,
+supporter, designer, moderator or developer; official arcade ownership alone is
+insufficient. The live role is checked on each call. Owners retain list/revoke
+access after losing eligibility. See [`bot-api.md`](bot-api.md) and the bot
+operations in OpenAPI. A live key resolves the issuing account, rechecks expiry,
+revocation, account token-key fingerprint and active-account policy, and uses the
+existing handlers. Keys never authenticate web/session/raw collection APIs and
+cannot issue credentials or reach management routes. Each key permits 60 calls
+per minute; its quota and last use are stored atomically. Secrets are returned
+once, hashed at rest, and excluded from history and list responses.
+
+`service/contribution` wraps the request app and its nested transaction apps with
+a verified source. Saves of new arcade, changelog and photo-atom records retain
+an immutable `contribution_source` snapshot. `by`/`createdBy` remain the owner's
+user ID. Normal records have a null source. Bot edits earn no XP; creation origins,
+per-change backfill and photo eligibility preserve that policy across web/API
+handoffs. Deferred rewards for actual web changes use their persisted origin,
+including when a bot later publishes them. Legacy rewards are not reclassified.
+
+Bot API rollout is independent of the excluded external integration release.
+Future OAuth adapters may share attribution and domain policy; this release does
+not register Developer Center or broaden existing OAuth scopes.
