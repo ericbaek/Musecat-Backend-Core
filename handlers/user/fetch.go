@@ -18,7 +18,7 @@ func GetMe(re *core.RequestEvent) error {
 		})
 	}
 
-	profile, err := BuildProfileFromAuth(re.App, re.Auth)
+	profile, err := profileForRequest(re)
 	if err != nil {
 		if isNotFoundError(err) {
 			return re.JSON(http.StatusNotFound, map[string]any{
@@ -49,6 +49,8 @@ func GetUserByID(re *core.RequestEvent) error {
 	if staffErr != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to verify account restriction"})
 	}
+
+	isStaff = isStaff && !publicProfileAudience(re)
 
 	var (
 		profile *Profile

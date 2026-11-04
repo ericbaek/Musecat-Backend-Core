@@ -202,10 +202,19 @@ func VisitArcade(re *core.RequestEvent) error {
 }
 
 func GetMyVisits(re *core.RequestEvent) error {
+	re.Response.Header().Set("Cache-Control", "private, no-store")
 	if re.Auth == nil {
 		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
 	}
-	stats, err := LoadVisitStats(re.App, re.Auth.Id, true)
+	includeDates := true
+	if publicProfileAudience(re) {
+		_, visibility, status, err := passportAudienceForUser(re, re.Auth.Id)
+		if err != nil {
+			return re.JSON(status, map[string]any{"error": err.Error()})
+		}
+		includeDates = visibility == "full"
+	}
+	stats, err := LoadVisitStats(re.App, re.Auth.Id, includeDates)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load visit stats"})
 	}

@@ -1250,3 +1250,20 @@ preserves the saved value. Profile responses return the saved flag. When true,
 `GET /arcades/updates` excludes that account's existing and future visit entries;
 profile Passport statistics, maps and stamps retain their existing visibility rules.
 Private visits remain excluded regardless of this flag.
+
+
+## Connected-account handler boundary
+
+Trusted connected-app adapters may retain the verified account as the mutation
+actor while selecting `UsePublicProfileAudience` for reads and mutation responses.
+This internal request context must not be set from a browser field or query.
+It removes owner and staff projection overrides: profile fields, favorites,
+Passport and visit summaries follow the same visibility as an ordinary third-party
+read. A profile update does not return private owner fields through that audience.
+Normal first-party routes retain their existing owner/staff access.
+
+After external I/O, adapters reload the account and recheck its session binding,
+then call `CheckActiveUser` against the transaction app before committing. This
+checks current bans and the supplied account's withdrawal state. The helper does
+not authenticate a token, grant OAuth scopes, or replace the caller's fresh-record
+and session checks. No external integration routes or schema are enabled here.
