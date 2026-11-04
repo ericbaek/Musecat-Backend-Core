@@ -1707,3 +1707,22 @@ preserves the saved value. Profile responses return the saved flag. When true,
 `GET /arcades/updates` excludes that account's existing and future visit entries;
 profile Passport statistics, maps and stamps retain their existing visibility rules.
 Private visits remain excluded regardless of this flag.
+
+### Shared first-party arcade editing
+
+Configured first-party native sessions use the same canonical `GET /arcade`,
+`GET /arcade/draft`, and `PUT /arcade/basic|sns|hour|gtk|game` handlers as web JWTs.
+The adapter is bound to those operations only. Guest detail redaction, public
+open/closed contribution rules and creator/strict-reviewer private draft access
+remain unchanged. Raw collection REST and other arcade operations do not inherit
+native authentication. No native domain URL or response envelope is introduced.
+
+SNS, hours and GTK whole-section replacements accept optional `base_sns_id`,
+`base_hour_id` and `base_gtk_id` respectively. Web and native editors send the
+original section ID from their form baseline; an explicit empty string expects
+no existing section. After checking write permission, the transaction compares
+the supplied ID with the current relation before creating any rows, history or
+XP. A mismatch returns 409 with no changes. Omission retains legacy behavior.
+Clients preserve their draft on conflict and never fetch a fresh ID to retry an
+old draft automatically. Basic and games retain their existing conditional
+write contracts. No schema or data migration is required for these guards.

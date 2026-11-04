@@ -244,7 +244,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		arcadequery.RequireAdminAccess(),
 	)
 	// Public read endpoint: returns current relation ids for the arcade
-	api.GET("/arcade", arcadequery.GetArcadeValues)
+	api.GET("/arcade", arcadequery.GetArcadeValues).Bind(firstPartyAuth...)
 	api.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
 	api.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
 	// Detailed changelog rows require an active user through this custom API.
@@ -342,7 +342,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		userhandler.RequireActiveUser(),
 	)
 	authArcade.POST("/new", arcadebasic.NewArcade)
-	authArcade.GET("/draft", arcadequery.GetArcadeDraft)
+	authArcade.GET("/draft", arcadequery.GetArcadeDraft).Bind(firstPartyAuth...)
 	authArcade.GET("/drafts", arcadequery.ListMyArcadeDrafts)
 	authArcade.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
 	authArcade.GET("/public", arcadepublic.PreviewPublicArcade)
@@ -351,13 +351,13 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
 	authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart)
 	authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
-	authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic)
+	authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic).Bind(firstPartyAuth...)
 	authArcade.PUT("/public", arcadepublic.RequestPublicArcade)
 	authArcade.POST("/location-verification", arcadepublic.VerifyArcadeLocation)
-	authArcade.PUT("/gtk", arcadegtk.UpdateArcadeGTK)
-	authArcade.PUT("/sns", arcadesns.UpdateArcadeSNS)
-	authArcade.PUT("/hour", arcadehour.UpdateArcadeHour)
-	authArcade.PUT("/game", arcadegame.UpdateArcadeGame)
+	authArcade.PUT("/gtk", arcadegtk.UpdateArcadeGTK).Bind(firstPartyAuth...)
+	authArcade.PUT("/sns", arcadesns.UpdateArcadeSNS).Bind(firstPartyAuth...)
+	authArcade.PUT("/hour", arcadehour.UpdateArcadeHour).Bind(firstPartyAuth...)
+	authArcade.PUT("/game", arcadegame.UpdateArcadeGame).Bind(firstPartyAuth...)
 	authArcade.PUT("/photo", arcadephoto.UpdateArcadePhoto)
 	authArcade.PUT("/memo", arcadememo.UpdateArcadeMemo)
 	authArcade.POST("/check-notes", arcadechecknote.Mutate).Bind(apis.BodyLimit(16384))

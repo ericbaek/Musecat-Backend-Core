@@ -484,3 +484,12 @@ Shared check request creation, completion and removal are activity records in `a
 ## Inquiry bot configuration
 
 `PUT /user/inquiry-bots/arcade/{id}` is an operational inbox setting. Like inquiry-routing settings, it does not create wiki edit history, change game/basic pointers or award XP. Current management authorization and the configuration write occur in one transaction. Existing inquiry flow snapshots and immutable arcade changelog rows are not rewritten.
+
+## Conditional section replacement
+
+`PUT /arcade/sns`, `/arcade/hour` and `/arcade/gtk` accept optional
+`base_sns_id`, `base_hour_id` and `base_gtk_id` alongside their existing full
+section bodies. A supplied stale ID returns 409 before persistence and does not
+append a changelog or award XP. Explicit empty IDs protect first creation. An
+omitted base preserves legacy write behavior. Successful requests retain the
+existing immutable revision and diff format for both web and native clients.

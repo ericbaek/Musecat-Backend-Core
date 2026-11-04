@@ -16,8 +16,9 @@ import (
 
 // UpdateArcadeSNSBody represents the request body for updating arcade SNS.
 type UpdateArcadeSNSBody struct {
-	Arcade string         `json:"arcade"`
-	SNS    []SNSAtomInput `json:"sns"`
+	BaseSNSID *string        `json:"base_sns_id,omitempty"`
+	Arcade    string         `json:"arcade"`
+	SNS       []SNSAtomInput `json:"sns"`
 }
 
 // SNSAtomInput represents a single SNS atom to be saved under a SNS molecule.
@@ -84,6 +85,9 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 		}
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
+		}
+		if body.BaseSNSID != nil && *body.BaseSNSID != strings.TrimSpace(arcadeRec.GetString("sns")) {
+			return arcadeinternal.ErrArcadeRevisionConflict
 		}
 		prevAtoms, err := loadCurrentSNSAtoms(txApp, body.Arcade, strings.TrimSpace(arcadeRec.GetString("sns")))
 		if err != nil {
@@ -201,6 +205,9 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 	}); err != nil {
 		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
 			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
+		if errors.Is(err, arcadeinternal.ErrArcadeRevisionConflict) {
+			return re.JSON(http.StatusConflict, map[string]any{"error": err.Error()})
 		}
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "transaction failed",
