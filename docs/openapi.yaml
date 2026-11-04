@@ -3442,10 +3442,6 @@ components:
         review_note: {type: string}
         created: {type: string}
         updated: {type: string}
-    InquiryBotChoice: {"type":"object","properties":{"id":{"type":"string","maxLength":64},"label":{"type":"string","maxLength":80},"next":{"type":"string","maxLength":64}},"required":["id","label","next"]}
-    InquiryBotNode: {"type":"object","properties":{"id":{"type":"string","maxLength":64},"text":{"type":"string","maxLength":2000},"choices":{"type":"array","maxItems":6,"items":{"$ref":"#/components/schemas/InquiryBotChoice"}}},"required":["id","text","choices"]}
-    InquiryBotConfig: {"type":"object","properties":{"enabled":{"type":"boolean"},"start":{"type":"string"},"nodes":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/InquiryBotNode"}}},"required":["enabled","start","nodes"]}
-    InquiryBotPreview: {"type": "object", "required": ["text", "choices", "revision", "createdAt"], "properties": {"text": {"type": "string"}, "choices": {"type": "array", "items": {"$ref": "#/components/schemas/InquiryBotChoice"}}, "revision": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"}}}
 
     ExternalService:
       type: object
@@ -17367,7 +17363,7 @@ paths:
           description: User longitude. Provide together with `lat` to boost nearby arcade results.
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Search results grouped by resource bucket.
           content:
@@ -17425,7 +17421,7 @@ paths:
           description: "`free` uses OSM where applicable."
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Normalized geocoding candidates.
           content:
@@ -17438,11 +17434,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '429':
-          description: Client IP request limit exceeded, including authenticated requests.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '502':
           description: Upstream geocoding failure.
           content:
@@ -17480,7 +17471,7 @@ paths:
             type: string
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Normalized reverse geocoding result.
           content:
@@ -17493,11 +17484,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-        '429':
-          description: Client IP request limit exceeded, including authenticated requests.
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
         '502':
           description: Upstream reverse geocoding failure.
           content:
@@ -17521,7 +17507,7 @@ paths:
             enum: [en-US, ko-KR, ja-JP]
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Localized game catalog with cabinet-specific price defaults.
           content:
@@ -17639,7 +17625,7 @@ paths:
             type: boolean
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Distance-sorted paginated nearby results. The response also marks campaign-target arcades and includes campaigns that have pending targets in the current page.
           content:
@@ -17766,7 +17752,7 @@ paths:
           explode: true
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Arcade metadata with relation ids or expanded relation payloads.
           content:
@@ -17894,7 +17880,7 @@ paths:
           schema: {type: string}
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Arcade metadata with the same shape as `GET /arcade`.
           content:
@@ -17920,7 +17906,7 @@ paths:
       description: Lists the authenticated user's private drafts only.
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Own draft summaries.
           content:
@@ -17958,7 +17944,7 @@ paths:
             enum: [basic, game, hour, sns, gtk, photo, memo]
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Immutable changelog page.
           content:
@@ -17985,7 +17971,7 @@ paths:
         - botKeyAuth: []
       tags: [Arcade Mutations]
       summary: Preview public-conversion XP and requirements
-      description: Reads the creator's current level-based public-conversion requirements and currently eligible public-conversion (5 XP) and draft-backfill (2 XP per eligible changed area) without changing visibility or the XP ledger. Levels 0-4 require game, contact-or-hours, and facility-photo-or-location-verification; levels 5-9 require game and facility-photo-or-location-verification; levels 10+ require game only. Only the private arcade creator may call this endpoint.
+      description: Reads the creator's level-based publication requirements and eligible rewards without changing visibility or the XP ledger. Bot creation and edits award no XP; persisted eligible human contributions retain their existing rewards. Levels 0-4 require game, contact-or-hours, and facility-photo-or-location-verification; levels 5-9 require game and facility-photo-or-location-verification; levels 10+ require game only. Only the private arcade creator may call this endpoint.
       parameters:
         - name: arcade
           in: query
@@ -17993,7 +17979,7 @@ paths:
           schema: {type: string}
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Current XP preview for converting the private arcade to public.
           content:
@@ -18060,9 +18046,9 @@ paths:
               $ref: '#/components/schemas/ArcadeOnlyRequest'
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
-          description: Arcade is now public. The creator receives 5 XP for the conversion plus 2 XP for each eligible draft information area that has not already received its backfill.
+          description: Arcade is now public. Bot-origin creation and edits award no XP; only previously eligible human contributions retain their deferred rewards.
           content:
             application/json:
               schema:
@@ -18114,7 +18100,7 @@ paths:
           schema: {type: string}
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Photo atom list.
           content:
@@ -18150,7 +18136,7 @@ paths:
           description: Returns a configured square crop or a 680px-wide aspect-preserving thumbnail.
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Photo bytes.
           content:
@@ -18183,7 +18169,7 @@ paths:
               $ref: '#/components/schemas/NewArcadeRequest'
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Newly created arcade summary.
           content:
@@ -18237,7 +18223,7 @@ paths:
               $ref: '#/components/schemas/UpdateArcadeBasicRequest'
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Updated arcade basic relation.
           content:
@@ -18318,7 +18304,7 @@ paths:
                   note: 24 hours on Thursday
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Hour relation updated.
           content:
@@ -18373,7 +18359,7 @@ paths:
               $ref: '#/components/schemas/UpdateArcadeGTKRequest'
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: GTK relation updated.
           content:
@@ -18425,7 +18411,7 @@ paths:
               $ref: '#/components/schemas/UpdateArcadeSNSRequest'
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: SNS relation updated.
           content:
@@ -18475,10 +18461,7 @@ paths:
         (for example, a numeric credit count) and preserve their stored type.
         Fields and catalog references are validated only for submitted add/modify
         items; untouched revisions are preserved. The resulting list still requires
-        unique entry ids and version/cabinet pairs. Public game edits use a rolling
-        seven-day distinct-entry XP window with target `min(10, 2*n)`;
-        private edits do not award normal edit XP, and administrative bulk
-        updates do not award it either.
+        unique entry ids and version/cabinet pairs. Bot game edits award no XP, including deferred draft rewards.
         Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       requestBody:
         required: true
@@ -18488,7 +18471,7 @@ paths:
               $ref: '#/components/schemas/UpdateArcadeGameRequest'
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: Game relation updated.
           content:
@@ -18537,7 +18520,7 @@ paths:
         - botKeyAuth: []
       tags: [Arcade Mutations]
       summary: /arcade/photo
-      description: Pending atoms receive 4 XP each for campaign targets (double the normal 2 XP) when first published, up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
+      description: Bot-uploaded photo atoms award no XP, including when later applied through the website. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       requestBody:
         required: true
         content:
@@ -18549,9 +18532,9 @@ paths:
               photos: [atom_1, atom_2]
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
-          description: "Photo relation updated. XP is awarded only when pending atoms are first published: 4 XP per atom for campaign targets (double the normal 2 XP), up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a published atom awards no XP."
+          description: Photo relation updated. Bot contributions award no XP.
           content:
             application/json:
               schema:
@@ -18560,17 +18543,6 @@ paths:
                 arcade: arcade_123
                 photo: photo_molecule_123
                 count: 2
-                xp_feedback:
-                  previous_exp: 0
-                  new_exp: 2
-                  diff_exp: 2
-                  previous_percent_to_next_level: 0
-                  new_percent_to_next_level: 50
-                  previous_level: 0
-                  new_level: 0
-                  level_diff: 0
-                  remaining_exp_to_next_level: 2
-                  remaining_percent_to_next_level: 50
         '400':
           description: Invalid JSON or validation failure.
           content:
@@ -18623,7 +18595,7 @@ paths:
                 explode: true
       responses:
         '429':
-          description: Bot key exceeded 60 calls per minute; Retry-After is returned.
+          description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
           description: All files uploaded successfully.
           content:
@@ -18644,17 +18616,6 @@ paths:
                     atomId: atom_2
                     filename: ok2.jpg
                 failed: []
-                xp_feedback:
-                  previous_exp: 0
-                  new_exp: 5
-                  diff_exp: 5
-                  previous_percent_to_next_level: 0
-                  new_percent_to_next_level: 25
-                  previous_level: 0
-                  new_level: 1
-                  level_diff: 1
-                  remaining_exp_to_next_level: 3
-                  remaining_percent_to_next_level: 75
         '207':
           description: Partial success.
           content:
@@ -18675,17 +18636,6 @@ paths:
                   - index: 1
                     filename: bad.gif
                     reason: unsupported mime type - image/gif
-                xp_feedback:
-                  previous_exp: 0
-                  new_exp: 5
-                  diff_exp: 5
-                  previous_percent_to_next_level: 0
-                  new_percent_to_next_level: 25
-                  previous_level: 0
-                  new_level: 1
-                  level_diff: 1
-                  remaining_exp_to_next_level: 3
-                  remaining_percent_to_next_level: 75
         '400':
           description: Invalid multipart body or validation failure.
           content:
@@ -18724,17 +18674,6 @@ paths:
                   - index: 1
                     filename: bad2.gif
                     reason: unsupported mime type - image/gif
-                xp_feedback:
-                  previous_exp: 0
-                  new_exp: 0
-                  diff_exp: 0
-                  previous_percent_to_next_level: 0
-                  new_percent_to_next_level: 0
-                  previous_level: 0
-                  new_level: 0
-                  level_diff: 0
-                  remaining_exp_to_next_level: 4
-                  remaining_percent_to_next_level: 100
 
   /user/bot-keys:
     get:
