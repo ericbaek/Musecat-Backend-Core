@@ -4500,6 +4500,7 @@ paths:
       description: Lists the authenticated user's private drafts only.
       security:
         - bearerAuth: []
+        - nativeSession: []
       responses:
         '200':
           description: Own draft summaries.
@@ -4511,8 +4512,17 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: The native account is inactive or restricted by the existing active-user policy.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
   /arcade/memo:
     get:
+      security:
+        - {}
+        - bearerAuth: []
+        - nativeSession: []
       tags: [Arcades]
       summary: /arcade/memo
       description: Returns the current immutable memo revision. Public arcades are anonymously readable; private arcades require the creator or a developer/moderator bearer token.
@@ -4537,6 +4547,16 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid authentication on protected reads, or an invalid native bearer on public reads.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: The native account is inactive or restricted by the existing active-user policy.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
     put:
       tags: [Arcade Mutations]
       summary: /arcade/memo
@@ -4588,6 +4608,7 @@ paths:
       description: Detailed changelog requires an active authenticated user, including for public open/closed arcades. Private history is available only to the creator or a developer/moderator.
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: arcade
           in: query
@@ -5126,6 +5147,10 @@ paths:
           description: Failed to delete post.
   /user:
     get:
+      security:
+        - {}
+        - bearerAuth: []
+        - nativeSession: []
       tags: [Users]
       summary: /user
       description: Public profile by ID or username. Active developers and moderators receive owner-level fields with private, no-store caching. Restricted staff receive the public projection.
@@ -5172,6 +5197,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid authentication on protected reads, or an invalid native bearer on public reads.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: The native account is inactive or restricted by the existing active-user policy.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
   /user/me:
     get:
       tags: [Users]
@@ -5343,6 +5378,10 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
   /user/activity:
     get:
+      security:
+        - {}
+        - bearerAuth: []
+        - nativeSession: []
       tags: [Users]
       summary: /user/activity
       parameters:
@@ -5420,8 +5459,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid authentication on protected reads, or an invalid native bearer on public reads.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: The native account is inactive or restricted by the existing active-user policy.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
   /user/changelog:
     get:
+      security:
+        - {}
+        - bearerAuth: []
+        - nativeSession: []
       tags: [Users]
       summary: /user/changelog
       description: |
@@ -5495,6 +5548,7 @@ paths:
       summary: /supporter/score
       security:
         - bearerAuth: []
+        - nativeSession: []
       responses:
         '200':
           description: Current supporter XP ledger timeline.
@@ -5548,6 +5602,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: The native account is inactive or restricted by the existing active-user policy.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
   /supporter/request:
     post:
       tags: [Support]
@@ -6663,6 +6722,7 @@ paths:
       summary: /arcade/request_admin
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: arcade
           in: query
@@ -6687,6 +6747,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: The native account is inactive or restricted by the existing active-user policy.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
     post:
       tags: [Support]
       summary: /arcade/request_admin
@@ -7173,6 +7238,10 @@ paths:
         '502': {description: Delete failed.}
   /arcade/notice:
     get:
+      security:
+        - {}
+        - bearerAuth: []
+        - nativeSession: []
       tags: [Arcades]
       summary: /arcade/notice
       parameters:
@@ -7206,6 +7275,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid authentication on protected reads, or an invalid native bearer on public reads.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: The native account is inactive or restricted by the existing active-user policy.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
     post:
       tags: [Arcade Mutations]
       summary: /arcade/notice

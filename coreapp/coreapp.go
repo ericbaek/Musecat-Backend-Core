@@ -252,11 +252,11 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	api.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
 	api.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
 	// Detailed changelog rows require an active user through this custom API.
-	api.GET("/arcade/changelog", arcadequery.ListArcadeChangelog).Bind(
+	api.GET("/arcade/changelog", arcadequery.ListArcadeChangelog).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
-	api.GET("/arcade/memo", arcadememo.GetArcadeMemo)
+	api.GET("/arcade/memo", arcadememo.GetArcadeMemo).Bind(firstPartyAuth...)
 	api.GET("/arcade/check-notes", arcadechecknote.List)
 	api.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
 	// Public read endpoint: list all arcades with basic info + gameSeries ids
@@ -314,12 +314,12 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	catalogManagement.GET("/catalog/changes", gamecataloghandler.ListChanges)
 	catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
 	// Public user profile read endpoint
-	api.GET("/user", userhandler.GetUserByID)
+	api.GET("/user", userhandler.GetUserByID).Bind(firstPartyAuth...)
 	api.GET("/user/arcade-inquiry-onboarding", arcadereporting.InquiryOnboarding).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	api.GET("/user/activity", userhandler.GetUserActivity)
+	api.GET("/user/activity", userhandler.GetUserActivity).Bind(firstPartyAuth...)
 	// Public user-scoped changelog read endpoint; private arcade rows are
 	// returned only to their owner or strict reviewers.
-	api.GET("/user/changelog", userhandler.GetUserChangelog)
+	api.GET("/user/changelog", userhandler.GetUserChangelog).Bind(firstPartyAuth...)
 	api.GET("/user/feedback", arcadeadmin.ListMySupportFeedback).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
@@ -347,10 +347,10 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	)
 	authArcade.POST("/new", arcadebasic.NewArcade)
 	authArcade.GET("/draft", arcadequery.GetArcadeDraft).Bind(firstPartyAuth...)
-	authArcade.GET("/drafts", arcadequery.ListMyArcadeDrafts)
+	authArcade.GET("/drafts", arcadequery.ListMyArcadeDrafts).Bind(firstPartyAuth...)
 	authArcade.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
 	authArcade.GET("/public", arcadepublic.PreviewPublicArcade)
-	authArcade.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin)
+	authArcade.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin).Bind(firstPartyAuth...)
 	authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
 	authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
 	authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart)
@@ -380,7 +380,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authArcade.POST("/flag", arcadeflag.CreateArcadeFlag).Bind(apis.BodyLimit(arcadeflag.MaxFlagBodyBytes))
 	authArcade.POST("/flag/delete", arcadeflag.DeleteArcadeFlag)
 	authArcade.POST("/flag/reaction", arcadeflag.UpdateArcadeFlagReaction)
-	api.GET("/arcade/notice", arcadenotice.ListArcadeNotice)
+	api.GET("/arcade/notice", arcadenotice.ListArcadeNotice).Bind(firstPartyAuth...)
 	authArcade.POST("/notice", arcadenotice.CreateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
 	authArcade.PUT("/notice", arcadenotice.UpdateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
 	authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
@@ -449,7 +449,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
-	authSupporter.GET("/score", arcadeadmin.GetSupporterScore)
+	authSupporter.GET("/score", arcadeadmin.GetSupporterScore).Bind(firstPartyAuth...)
 	authSupporter.POST("/request", arcadeadmin.CreateSupporterRequest)
 }
 
