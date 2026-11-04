@@ -1250,3 +1250,15 @@ preserves the saved value. Profile responses return the saved flag. When true,
 `GET /arcades/updates` excludes that account's existing and future visit entries;
 profile Passport statistics, maps and stamps retain their existing visibility rules.
 Private visits remain excluded regardless of this flag.
+
+
+## Partner HTTP transport boundary
+
+External provider, reciprocal connection and conformance adapters use
+`connections.NewPartnerHTTPClient`. The default client rejects redirects,
+environment proxies and private/special destinations. DNS answers are all
+validated and the dialer connects to the checked IP while TLS retains the
+original host identity. Dial, TLS, response-header and overall request timeouts
+are bounded. An injected HTTP client is an executable-owned trusted dependency;
+its transport is preserved while redirect and overall timeout policies remain.
+This transport adds no provider registration, network job, endpoint or schema.
