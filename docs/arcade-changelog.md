@@ -470,8 +470,14 @@ not the base price. Base `value` may remain null for a PASELI-only price. Existi
 prices and immutable history are not migrated. Representative guest rows retain
 the PASELI amount alongside the base amount.
 
+### Notice presentation policy
 
-### Notice presentation and inquiry configuration
+Notice title and display-mode mutations retain the existing standalone notice
+history semantics; they do not rewrite arcade changelog history or award XP.
+Creation/update enforce the active required/pinned caps in their write transaction,
+and rejected capacity or permission checks leave the record unchanged. Official
+accounts may manage authorless legacy notices only in their owned arcade; no author
+is fabricated. Full's migration preserves original notice content and timestamps.
 
 Notice titles and required/pinned display modes preserve the existing standalone notice history, timestamps and XP behavior. Current official accounts may manage legacy notices for their owned arcade. Active required/pinned caps are enforced atomically. Inquiry bot configuration is operational inbox policy and creates no arcade changelog entries or XP; existing conversation flow snapshots remain unchanged.
 
@@ -490,3 +496,9 @@ changelog rows are excluded from draft reward backfill, and bot photo atoms
 remain ineligible after web application. Real web edits keep existing reward
 rules; unchanged saves do not convert prior bot work into rewarded contributions.
 Source snapshots and existing changelog rows are not rewritten on revocation.
+
+Shared check request creation, completion and removal are activity records in `arcade_check_note`; they do not change arcade information and create no `arcade_changelog` or XP entries. Information edits continue through the existing mutation endpoints.
+
+## Inquiry bot configuration
+
+`PUT /user/inquiry-bots/arcade/{id}` is an operational inbox setting. Like inquiry-routing settings, it does not create wiki edit history, change game/basic pointers or award XP. Current management authorization and the configuration write occur in one transaction. Existing inquiry flow snapshots and immutable arcade changelog rows are not rewritten.

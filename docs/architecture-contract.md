@@ -212,7 +212,7 @@ Definitions:
 | Immediate wiki edits on public arcade | deny | allow | allow | allow |
 | Arcade memo create/update/rollback | deny | authenticated users with arcade write access | authenticated users with arcade write access | authenticated users with arcade write access |
 | Arcade notice create | deny | deny; level-30+ supporters may create unless another official account manages the arcade through `owns` | official account may create only in own `owns` arcade | allow |
-| Arcade notice update/delete | deny | own authored notice only for level-30+ supporters | own authored notice only | allow |
+| Arcade notice update/delete | deny | own authored notice only for level-30+ supporters | own authored notice or authorless legacy notice in an owned arcade | allow |
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
 | Own feedback (`GET /user/feedback`) | deny | own records only | own records only | own records only |
@@ -525,6 +525,34 @@ single-record operations do not write arcade changelog or XP rows.
 | subway map version management | `POST /subway/map`, `PUT /subway/map`, `DELETE /subway/map?id=...` (developer/moderator only) |
 
 New frontend code MUST NOT reintroduce collection names, PocketBase record rules, collection filters, raw REST pagination, or PocketBase file URL construction as a compatibility layer. Sitemap, changelog timeline, draft list/delete, and photo atom management migrate to these custom routes.
+
+## Arcade notice presentation policy
+
+`arcade_notice.title` is separate from the existing topic `type`. Creation requires
+an explicit nonempty trimmed title; updates preserve it when omitted and reject an
+explicit empty value. The storage limit is 5000 Unicode characters. Existing topic
+categories, documents, photos, author identities and priorities are preserved.
+
+`display_mode` is `required`, `pinned`, or `normal` (the creation default). Per arcade,
+at most one active required notice and three active pinned notices are allowed.
+Active means not soft-deleted and without an expiry or with a future `until`.
+Creation and update recheck authorization, current arcade visibility and available
+capacity inside the same serialized write transaction as persistence. Updates
+exclude their own record from capacity counts; expiry changes also check capacity.
+Overflow returns 409 with code `notice_display_limit_exceeded`, the mode and its
+limit, without persisting any fields. Normal notices have no additional count cap.
+
+Public reads order required, pinned, then normal. Pinned notices use ascending
+priority; equal pinned priority and normal notices use newest-first ordering with
+id as the deterministic tie breaker. The client always expands the required notice
+and opens other notice bodies on demand.
+
+Developers/moderators retain management access to all notices. An official arcade
+account may additionally update/delete authorless legacy notices in its own `owns`
+arcades, without assigning itself as their author. Other authors' notices retain
+the existing author-only rule. Private arcade write restrictions remain unchanged.
+Full alone backfills existing database titles and presentation modes; Core's schema
+helper and bootstrap migration never migrate a deployed database.
 
 ## Rich-text validation and denied notice mutations
 
@@ -893,6 +921,303 @@ ordered list of non-withdrawn `arcade_owner` users whose `owns` relation include
 the arcade. Creation authorship alone does not establish official ownership.
 Profile details continue to use the public `/user` projection.
 
+## External account connections
+
+External game accounts use a separate connection ledger, not PocketBase sign-in external auths.
+`external_account_connection` has unique `(issuer, subject)` and `(user, issuer)` identities;
+`external_service_connection` attaches multiple separately authorized game services to one account.
+Names, emails and game-specific service IDs never replace the verified issuer/subject identity.
+New and reauthorized game grants are private with no selected public fields. Records and the
+explicit publication switch are separate APIs; acting on Musecat requires a separate delegated grant.
+
+`GET /integrations/providers` exposes only safe configured provider metadata. Active-user-only
+`GET /user/connections`, `POST /user/connections/start`, `POST /user/connections/complete`, and
+`DELETE /user/connections/{id}` manage owned connections. Raw REST for all connection collections
+is locked, and subject/credential/state/session/verifier fields are hidden. Responses never expose
+tokens or external subjects. Local disconnect works independently of provider availability and
+removes credentials, game grants and pending attempts atomically. Independent unlink is local-only;
+joint disconnect additionally queues generation-bound bilateral revocation. Withdrawal performs
+cleanup and queues joint notifications within its account transaction.
+
+Requests expire after five minutes, are bound to the exact initiating Musecat token, and use
+hashed state plus encrypted PKCE verifier. A single pending-to-exchanging claim clears the verifier
+before network I/O. Completion rechecks the current token, account restrictions, live claim,
+expiry, configured issuer and identity uniqueness in a second transaction. Disconnect, withdrawal,
+cleanup and newer attempts invalidate in-flight results. Subject conflicts return 409 without
+transferring or replacing an identity. Provider failures cannot be replayed with the same request.
+
+Only trusted executable-injected HTTPS providers are used; no public endpoint accepts URLs,
+credentials or external account IDs. Providers require distinct callback URIs, explicit client
+authentication and issuer checks. The adapter obtains a stable string subject through authenticated
+OAuth user-info; it does not implement ID-token-based OIDC verification. A changed issuer requires
+reconnection or a separately reviewed verified migration, including rhythm.info account unification.
+
+Core configuration performs no environment reads or scheduling. Executables select providers,
+require a base64 32-byte AES-GCM key, and schedule expired-request cleanup every five minutes.
+Runtime rate limits add 10 start and 20 complete requests per client IP per 600 seconds across
+both audiences without replacing existing operator rules. Full owns its independent guarded
+forward schema migration; Core migrations remain fresh-bootstrap only. These operations do not
+award XP or append arcade changelog history. See [external connections](external-connections.md)
+for configuration, reauthorization semantics, race handling and integration limitations.
+
+## Public developer API and OAuth delegation
+
+Musecat's OAuth authorization server is separate from `connections` (where Musecat is an OAuth
+client). `delegation` owns registered client epochs, five-minute authorization requests, grants,
+one-use PKCE codes and opaque access/refresh tokens. `handlers/delegation` exposes the public
+OAuth protocol and `/developer/v1/*` routes. `docs/developer-openapi.yaml` and
+`docs/developer-api.md` are the external developer contract, served independently of protected
+internal documentation at `/developer`.
+
+The executable injects trusted confidential-client configuration, issuer, consent application URL,
+and the existing `user.CheckActiveUser` policy. Core reads no environment variables. Registration
+is operator-controlled; no partner or external account merger is hardcoded. At startup, registered
+client configuration is synchronized transactionally into a locked registration table. Each change,
+removal or re-enablement changes its persisted epoch, so restoring an earlier configuration cannot
+resurrect pre-change tokens or pending approvals. Enabled registrations are capped at 128; startup
+work is bounded. All instances must deploy the same client registry. Missing configuration disables
+new OAuth operations, while user-owned grant listing and revocation remain available.
+
+Authorization validates the exact HTTPS callback, scopes, state and S256 challenge before redirecting
+to the fixed Musecat consent application. The first authenticated consent read binds the attempt to
+the current user and exact session token. The decision repeats active-account/session validation
+inside the transaction and accepts only a nonempty subset of requested permissions. Denial leaves
+an existing approval unchanged; approval replaces scopes and invalidates the previous grant generation.
+WebCore owns the consent UI/BFF at `/{locale}/oauth/authorize`, with a bullet permission summary and one explicit connection approval,
+same-origin CSRF protection, no-referrer, no-store and frame/analytics protection. Deploy and configure
+that HTTPS page before enabling clients. The API parses a bounded JSON snapshot because PocketBase's
+rewindable HTTP body can return data and EOF together; strict trailing-data checks must not reread it.
+
+Code redemption and refresh are atomic claims. Codes bind client, callback, S256 verifier and grant
+generation, and expire after 90 seconds. Access tokens last at most ten minutes; refresh rotation
+preserves a fixed 30-day family expiry. Reuse of a consumed code or refresh token revokes the current
+grant in a committed transaction. An older approval's replay cannot revoke a newer approval. Secrets,
+raw tokens and PKCE verifiers are never stored. Personal, OAuth and resource responses use no-store
+and no-referrer, including early middleware errors. OAuth/resource queries and referrers are redacted
+before PocketBase activity logging; ingress logs require corresponding operator redaction.
+
+Delegated bearer tokens work only on the explicitly mapped `/developer/v1/*` surface. The resource
+boundary resolves the current grant, registration epoch, expiry, account token-key fingerprint,
+active account and required scope before assigning the verified actor to an existing domain handler.
+The primary `account:access` scope maps the explicit general-user allowlist (currently 82 method/path
+pairs) into `/developer/v1/account`, reusing the original route registrations and domain guards.
+Management/moderation routes are rejected even for a staff actor; signup, withdrawal, credential
+changes, other-app authorization, reverse account linking and raw PocketBase routes are excluded.
+Unlisted/new operations fail closed. Legacy narrow scopes do not permit the account namespace;
+existing grants never broaden automatically. Omitted scopes default to account access only for a
+registered client that already permits that scope. Client changes invalidate grants for reapproval.
+Mutating account request attempts log the user, app-specific subject, method and path without
+bodies or credentials; committed domain history remains the authority for successful mutations.
+No delegated token is converted to a Musecat JWT. Public/closed/private visibility, ownership, staff
+checks, GPS eligibility, immutable history and XP rules remain in those handlers. In-flight accepted
+requests can finish after revocation; subsequent requests fail. The legacy `/developer/v1/me` identity endpoint exposes only the
+client-specific stable subject, username and nickname, without email, credentials or roles. The account namespace retains each documented domain
+projection, including normal profile resource IDs; these are distinct from the app-specific subject.
+
+Users revoke only their own grants, including apps absent from current configuration. Revocation
+also cancels their bound pending requests. Withdrawal deletes grants, codes, tokens and bound requests
+in its existing transaction; a password/account-key reset invalidates every old delegated token.
+Core's migration creates only fresh schema. Full must apply its independent guarded forward migration
+to existing installations and pin this Core revision. Both executables register bounded expiry cleanup.
+
+## Developer Center: self-service partner registration
+
+Developer Center and external-connection JSON requests accept exactly one document with
+optional trailing whitespace. Decode a bounded body snapshot because PocketBase rewinds
+its body reader on EOF; a final read returning both bytes and EOF must not replay the body.
+Unknown fields, second documents, and route body-limit overflows remain rejected.
+
+`partner_application` and `partner_application_event` are locked base collections owned by
+`partnerapp`. An active user registers up to eight applications of the `musecat-partner-onboarding/v1`
+form (`partner_id`, localized name/description, contact and at least one direction). Direction A
+requires 1–8 redirect URIs; Direction B-only apps may omit `direction_a` or use empty redirects.
+`login_enabled` and joint declarations require nonempty Direction-A redirects; joint also requires
+Direction B. All declarations are validated structurally. Create and update immediately install the validated registration without moderator approval. Operators retain monitoring, suspend and reinstate through `/moderation/developer/apps/*`; mutations append immutable events. Legacy submit/approve endpoints are idempotent for registered apps and activate legacy drafts/queued forms. The form never carries credentials.
+
+Registration/update copies `submitted_form` to `approved_form` (historical storage names retained; status `approved` now means registered), validates the merged OAuth client registry
+(static executable clients plus live applications; duplicates and executable-owned IDs fail with
+409) and then calls `delegation.Manager.Reload`, which swaps the client map under a lock and runs
+`SynchronizeClients`. The existing registration epoch/config-hash mechanism therefore applies
+unchanged: a changed approved form or rotated secret is a new fingerprint and invalidates earlier
+grants; suspension disables the registration row so tokens fail with 503. The application `live`
+flag is true when either approved direction is active;
+`direction_a_declared`/`direction_a_live` distinguish OAuth capability. Direction A is live
+only with approved nonempty redirects, a generated secret and a non-suspended status. B-only
+apps never enter the OAuth registry, even if a previous approved version left a stored secret.
+Secret generation/rotation returns `invalid_state` for B-only apps. Owners generate the
+Direction-A client secret after registration; only its SHA-256 is stored and the plaintext is
+returned once with
+`no-store`/`no-referrer`.
+
+Direction B activates independently of Direction A and its secret from the same record: the owner
+stores the partner-issued Musecat client credentials (`PUT /developer/apps/{id}/credentials`), which are AES-GCM sealed with the connection
+key and bound to the application ID. When the approved form declares `direction_b`, the service
+maps it to a `connections.Provider` (`subject_field` fixed to `sub`, `client_secret_basic`,
+`require_issuer`, callback `<web origin>/api/user/connections/callback/<partner_id>`) and calls
+`connections.Manager.Reload`, so the partner appears in `GET /integrations/providers` at once.
+Issuer/callback collisions with static or other live providers fail approval or credential entry
+with 409. Suspension, credential removal or a missing connection key deactivates the provider;
+existing user connections remain listed and locally disconnectable. Joint declarations activate when approved with Direction B credentials, a sealed outbound server key and a hashed inbound server key.
+
+`coreapp.Configure` loads live applications on serve; executables register
+`partnerapp.Service.RegisterSyncCron` so other instances converge within a minute. These routes
+are outside the delegated `account:access` allowlist. Core bootstraps fresh schema; Full owns the
+guarded forward migration. See [`developer-center.md`](developer-center.md) for the full design.
+
+The owner-only `/developer/apps/{id}/console` exposes approved settings, paginated pairwise
+account identifiers and 14 UTC days of aggregate activity. Names require profile consent;
+account/token/generation restrictions still apply. `oauth_client_usage` is locked and stores
+only client, day, kind (`api`, `code`, `refresh`), requests and errors. Attributable failures
+count as errors; unknown credentials are not attributed. API includes UserInfo and delegated
+resources. Counters are best-effort and never roll back authentication or domain operations;
+no tokens, IPs, URLs, query strings or request bodies enter these aggregates. Cleanup retains
+30 days. Full owns the forward migration; Core creates only fresh bootstrap schema.
+Optional HTTPS website/privacy/terms/support URLs belong to the submitted and approved form;
+omitting them preserves old form hashes. Credential issuance history contains timestamps and
+rotation events, not recoverable secrets or a fabricated grace period.
+
+## Reciprocal connection orchestration
+
+Approved joint registrations drive `/user/joint/*` and `/partner/v1/*` through
+`connections.JointManager`. The consent summary binds a verified partner subject, requested
+services, registered callback/PKCE challenge and the exact Musecat session to `musecat-joint/v1`.
+The approve action atomically claims the attempt, issues and binds the Direction A grant/code,
+then calls the partner receipt and redeems its Direction B code outside transactions. The
+userinfo subject is checked before persistence. A consumed/ambiguous attempt cannot be approved
+again. Both redeemed live grants are required for `connected`; partial state is never success.
+
+Partner routes accept only distinct server bearer keys, including the previous hashed key until
+the declared rotation deadline. `X-Request-Id` results are stored for ten minutes, scoped to
+partner, method, path and body. Keys and raw partner subjects are never projected to settings.
+The intent is hashed for binding and sealed until the approval claim clears its encrypted copy.
+
+Joint disconnect revokes only the matching grant and connection authorization generations and
+queues a remote notification in the same transaction. A later independent authorization survives
+an older revocation. Outbox errors are bounded codes; notifications retry with backoff indefinitely
+and never restore local access. Settings distinguish pending remote revocation. One-sided unlink
+remains local-only. OAuth refresh does not replace the connection's authorization generation.
+Core supplies fresh bootstrap schema; Full owns independent guarded forward migrations and job
+registration. No deployment or real-partner interoperability is implied by mock conformance tests.
+
+## Developer Center conformance execution
+
+`POST /developer/apps/{id}/checks` queues owner-authorized work; the matching GET returns
+safe history. Active strict reviewers use `/moderation/developer/apps/{id}/checks` with
+the existing reviewer policy. Raw `partner_conformance_run` access is locked. Each run freezes
+its submitted form and a revision of the form and credentials. Reports become stale after
+configuration changes or 30 days. Credentials, test subjects, remote response bodies and tokens
+are never projected or logged. Optional staging fixtures are sealed and cleared on completion,
+cancellation and interrupted-run recovery. One active run per app, a one-minute cooldown and
+three active runs per actor bound the queue; executables process bounded batches every minute.
+
+The runner performs outbound I/O outside transactions, with 10-second request and 90-second
+run deadlines, no redirects, no environment HTTP proxy and bounded response bodies. The default
+dialer rejects private, loopback, link-local, multicast, special and IPv4-embedded translation
+ranges, resolves and validates every address, then pins the selected public IP while preserving
+TLS hostname verification. Registered form endpoints are the only targets.
+
+Pass, fail, action_required and not_applicable remain distinct. A run is passed only when all
+applicable cases pass; missing staging fixtures produce incomplete, not success. Disposable refresh
+families are refreshed/revoked only with explicit consent. The runner never creates OAuth consent:
+Direction A requires an owner grant whose code was actually redeemed; its round-trip check is
+`not_applicable` for a B-only form. A successful joint round
+trip must be evidenced by the owner's normal joint connection and both
+live grant generations under the approved configuration. Operator approval remains a separate
+review action; checks do not silently change existing approval policy or active registrations.
+
+
+## Integration release preparation
+
+Owner withdrawal suspends all owned partner applications, disables the persistent OAuth
+registrations and wipes stored partner credentials and queued/running conformance fixtures in the
+same transaction. After commit, the current instance reloads its registries; other instances
+converge via the version poll. Registry building excludes restricted or missing owners; a withdrawn
+owner cannot be approved or reinstated. Withdrawal first preserves joint revocations in the
+non-personal outbox, then deletes personal connection/attempt data. Revocation retries keep the
+pair UUID as their `X-Request-Id` and the original body/time for idempotency.
+
+Public game records require a currently configured provider/service and a cache younger than
+24 hours. The locked record cache adds `retry_at`; owners and background workers honor upstream
+429 `Retry-After` seconds. Post-I/O persistence rechecks the current account authorization generation,
+credentials and service existence, preventing stale fetches from recreating disconnected data.
+The conformance runner and OAuth/record/joint adapters share the same default public-address-pinned,
+proxy-free HTTPS client. Full owns the independent guarded retry-column migration.
+See [release readiness](partner-release-readiness.md) for deployment and partner-dependent evidence.
+
+
+## Sign in with Musecat
+
+Approved applications may opt into `direction_a.login_enabled`. Only these dynamic clients gain
+`openid`, `profile` and `arcade:read` alongside their existing general API scope. OpenID requests
+require configured persistent RSA signing keys, session-bound nonce, PKCE S256 and explicit consent.
+Hidden nonce fields in the request/code ledgers bind the ID token to its initiating login. Full
+owns migration 1792030010; Core defines fresh bootstrap. Authorization-code exchange signs a
+ten-minute-or-shorter RS256 ID token inside the token-issuance transaction; failed signing cannot
+consume the code or leave tokens issued. Refresh does not reissue an ID token. Discovery and JWKS
+expose no private material. UserInfo requires an exact OpenID grant, reports only app-specific sub
+unless profile was approved, and shares the live revocation/account policy. General account access
+does not imply OpenID scope. ID tokens are rejected on resource APIs. Readonly login tokens cannot
+invoke the general write allowlist. See sign-in-with-musecat.md for the supported protocol profile.
+
+### External profile visibility and arcade discovery
+
+Connected-app profile reads use the ordinary third-party projection, even when the actor
+is the profile owner or staff. Private favorites and games are omitted, country display
+follows the public profile policy, and private passports/visit statistics return 404.
+Summary passports omit visit dates; full passports include them. Profile update responses
+use the same public projection. These read rules do not change authorized write operations.
+
+Bulk arcade enumeration is not part of the external API: `/developer/v1/arcades` is absent
+and `/developer/v1/account/arcades` is denied by the allowlist (including HEAD). Existing
+grants do not bypass this restriction. Individual arcade detail and paginated nearby
+search remain available; first-party `/arcades` retains its existing behavior.
+
+### External record selection and privacy invalidation
+
+The v1 record envelope accepts optional game semantic profiles, typed recent plays, and explicit unavailable selection metadata. The parser rejects data that contradicts a denied/no-data/unsupported item. A refresh replaces the entire payload. `POST /partner/v1/records/invalidate` authenticates a separately Musecat-issued server key scoped to an active B provider, matches only that provider's verified subject/service, atomically erases the payload, and returns identical 204 results for unknown subjects. No network call runs in that transaction. A concurrent upstream fetch started before the purge cannot restore old data; owner/background reads may refetch immediately. Public records use no-store. Existing client displays require refresh; undelivered partner notifications retain the normal freshness limit and cannot promise immediate privacy.
+
+### Incoming records invalidation key and profile pictures
+
+`POST /developer/apps/{id}/records-key` issues the incoming server key for any registered
+Direction-B app, including B-only. It shares the stored current/previous inbound key and
+configured rotation window with Joint when enabled, without granting Joint capability to
+B-only providers. Authentication checks the active owner and live B provider, and honors
+only the bounded previous-key grace. UserInfo exposes optional absolute `picture` only
+with explicit `profile` scope. `/developer/v1/me` uses the same public avatar URL with its
+existing profile access requirement. URLs use the configured issuer, never untrusted Host;
+missing avatars are omitted, and emails remain excluded.
+
+### Development audience and production review
+
+New applications use publication development and immediately support only their owner plus
+up to ten explicitly designated active test accounts. Owner tester management resolves exact
+usernames to internal IDs. Dynamic OAuth clients and B providers carry Development plus
+AllowedUserIDs; persistent fingerprints/epochs bind audience changes. Consent read/decision,
+code/refresh exchange, resource/UserInfo access, B start/complete/fetch and Joint actor paths
+must enforce the audience. Anonymous provider discovery and public record reads hide development
+providers. Static executable registrations remain unrestricted by default. The session-bound consent summary exposes publication and the exact registered redirect_uri from the validated pending authorization request so the user can see development status and the return destination before deciding. It does not expose client credentials or expand the requested scopes.
+
+Publication production requires an explicit owner request and operator approval of the current
+submitted form. Production edits do not overwrite the reviewed active snapshot; any edit cancels
+pending review. Rejection preserves active configuration. publication and review_status are
+separate from the legacy status enum. Full adds these fields and testers through a guarded
+migration and preserves existing active registrations as production. Core defines fresh schema.
+Exact HTTP localhost, 127.0.0.1 and [::1] redirects are accepted for development callbacks only;
+production requests reject them. Remote B/Joint fetch destinations retain public HTTPS and
+SSRF rules. Audience restriction never replaces user consent or public-profile visibility.
+
+### Development partner audiences
+
+Developer Center applications begin in development publication and are available only to the owner and up to ten explicitly assigned testers. Production publication requires operator approval. Dynamic Direction-B provider configurations include the current audience in their configuration fingerprint. Discovery filters development metadata by the authenticated user; starts, callback completion (including after network exchange), cached owner records, and fetch persistence enforce the current audience. Removing a tester blocks cached reads and prevents in-flight exchanges/fetches from restoring access. Development records are never returned by anonymous public profile reads, even if the tester set the local publication switch. Joint entry/consent shares the audience rule; owners can still revoke or disconnect their own old connection. Static operator-supplied provider configuration retains its existing production audience unless explicitly marked development.
+
+### CHUNITHM Info native records adapter
+
+The fixed CHUNITHM Info origin, authorize, token and `@me` endpoints select a native adapter. Arbitrary partner endpoints retain the generic `sub`/`iss` and `musecat-records/v1` contract. The native identity is `id`; OAuth callbacks may omit `iss`, while state/session binding, dedicated callback and S256 remain enforced. It requests profile/rating/stats/scores and projects only groups present in the response's granted `scopes`. Native records use the same subject validation, bounded typed envelope, cache and owner publication/development audience gates. The source documents no independent public flag; OAuth data grants plus Musecat's explicit publish control determine sharing. Concurrent native fetches coalesce and reload encrypted credentials to avoid rotated refresh-token replay.
+
+`@me` is fetched directly (without a game path suffix). Supported fields map to CHUNITHM rating/statistics and best30; absent metrics are not fabricated. Recent plays are explicitly unsupported until an upstream detail API is documented. Webhook notifications and Joint are not enabled by native OAuth registration; no webhook receiver URL should be advertised. Local unlink continues to commit without promising remote OAuth revocation.
+
+Native CHUNITHM Info OAuth consent publishes the granted `chunithm` service immediately. Other providers retain private-by-default publication. Disconnect removes the profile records; upstream privacy and development audience restrictions remain enforced.
+
 ## Custom game prices
 
 `custom_v1` uses the existing named numeric `PriceItem[]` contract, including
@@ -946,9 +1271,10 @@ Push is an explicit per-device browser opt-in; the in-app inbox is always enable
 
 ## Private inquiry conversations
 
-`support_feedback` preserves the original inquiry and photos. `support_feedback_message` stores immutable, chronological replies. `/user/feedback/thread` GET/POST/PATCH is restricted to the authenticated active inquiry author, current official account of the scoped arcade, or strict support staff (developer/moderator). Inaccessible ids return 404. The staff label and author are always server-derived. Replies contain up to 4000 characters and/or up to three images (15,000,000 bytes each; content-sniffed image validation matching initial inquiry uploads), and paged reads return the newest 50 in chronological order, with a private cursor for older messages.
+`messaging_conversation`, `messaging_party`, `messaging_inquiry`, `messaging_message` and `messaging_read` are the only active inquiry storage. The first submission and every reply are messages in one conversation, including guest inquiries. `/support_feedback`, `/user/feedback/*` and `/guest/feedback/*` are compatibility projections of that service and never read or write a second message store. Core fresh bootstrap removes the empty legacy collections; Full alone migrates populated history and retires them after file/data postflight. Exact current author, staff and arcade-owner access remains server-authorized. Guest credentials authorize only their own inquiries and never DMs.
 
-Reply, inquiry status and `feedback_reply` notification/queue writes share one transaction. Staff replies notify the inquiry author; ordinary MUSECAT inquiry replies notify current strict staff. Arcade inquiry requester messages notify current official responders, with canonical explicit mentions additionally notifying staff; legacy/guest messages have no mention metadata. Senders and restricted accounts do not receive notifications. User follow-up returns status to waiting; staff reply changes it to recognised. Original guest submissions remain supported, but guests have no authenticated conversation or inbox. Existing status review remains available. Feedback notifications recheck ownership/strict staff permissions when listed or delivered; revoking staff access hides them. Arcade/flag notification relations are optional so private inquiries do not fabricate arcade references. Push uses generic copy without private inquiry text. Raw reply collection API rules remain locked.
+Reply, inquiry status and `feedback_reply` notification/queue writes share one transaction. Staff replies notify the inquiry author; ordinary MUSECAT inquiry replies notify current strict staff. Arcade inquiry requester messages notify current official responders, with canonical explicit mentions additionally notifying staff; legacy/guest messages have no mention metadata. Senders and restricted accounts do not receive notifications. User follow-up returns status to waiting; staff reply changes it to recognised. Guest submissions with a valid `X-Feedback-Guest-Key` use canonical messaging. Only its SHA-256 digest is stored in the hidden inquiry `guest_key_hash`; `requester_type=guest` and an opaque, domain-separated requester ID identify the browser without a synthetic user account. The stored digest and raw credential never appear in DTOs or audit reports. `sender_user` stays empty for guest messages and `sender_guest` identifies their real guest participant. `/guest/conversations` supports the same inquiry list/create/history/send/read/status/attachment contracts as account conversations, with the same validation, sequencing, retry and notification policy. Guests cannot create DMs or impersonate another acting identity. Existing cookies survive migration; clearing them loses access. Historical unkeyed receipts remain staff-readable but cannot be claimed. Intake settings affect new inquiries, not existing access. The legacy guest endpoints are adapters to that same service. Existing status review remains available. Feedback notifications recheck ownership/strict staff permissions when listed or delivered; revoking staff access hides them. Arcade/flag notification relations are optional so private inquiries do not fabricate arcade references. Push uses generic copy without private inquiry text. Raw reply collection API rules remain locked.
+
 
 ### Arcade-scoped inquiries and push locale
 
@@ -1008,7 +1334,7 @@ mode still returns 409 first; without a current official account, retained owner
 and login preferences do not block moderator contact. Guests cannot create inquiries for
 private arcades. Guest inquiries keep an empty `createdBy`, appear in the official/staff
 queues, and notify current responders through the existing atomic inbox/push flow. Guest
-receipt does not issue a conversation token, expose private reads, or introduce guest chat
+receipt without a browser credential does not grant private reads; keyed guest submissions use the shared inquiry conversation
 or reply delivery. Existing historical access/status behavior is unchanged. No schema or
 production data migration is needed for this optional JSON key.
 
@@ -1075,7 +1401,7 @@ requesterOnly restricts public contact surfaces to the caller's own inquiries.
 Mention metadata affects alerts, not conversation-list membership. Actual sender user and acting party are separately stored;
 when a requester is also a responder they explicitly choose their sending identity.
 Summaries expose `allowedSenderIdentities` and `allowedStatusTransitions` from the
-same inquiry policy used by writes. Requesters can choose waiting/solved; current
+same inquiry policy used by writes. Ordinary requesters (including guests) receive no status or transitions; current
 responders can choose waiting/recognised/solved. `canManageStatus` remains a
 compatibility field derived from the nonempty transition list. DM sender identities
 are empty when current receive/block/account policy prevents sending.
@@ -1093,11 +1419,11 @@ idempotent response remains allowed after opt-out; it creates no new message.
 
 Short transactions allocate a per-conversation sequence and persist the message,
 latest pointer, inquiry status and recipient notification outbox together. Read cursors
-are individual, monotonic and bounded by the latest committed sequence. Unread counts
+are individual, monotonic and bounded by the latest committed sequence. DM summaries additionally expose `counterpartReadSequence` (zero before the peer reads); inquiries return null and never expose another reader's cursor. Advancing a DM cursor sends the peer a `conversation.changed` invalidation with reason `read` after commit; duplicate or older cursors do not notify the peer. The existing `conversation.read` event remains scoped to the reader's own account. Unread counts
 exclude the reader's actual sender user and their party, including other staff acting for the same inbox. Status
 changes do not reorder conversations. Latest summaries batch load parties/profiles,
 messages, preferences, blocks and reads; no conversation-by-conversation HTTP or SQL
-fanout is needed. Message text is stored once, on messaging_message.
+fanout is needed. Message text is stored once, on messaging_message. Inquiry rooms always expose each incoming actual sender in the timeline, even before a second responder speaks. Public message DTOs batch resolve the actual account’s current public nickname/avatar/roles; messages store no copied public profile fields; report evidence remains historical. `actingAs` expresses the represented inbox independently of that public sender. Guest read cursors use the opaque guest identity and never generate account notifications.
 
 Idempotency is unique per conversation/sender/clientMessageId. Payload comparison
 uses normalized text, ordered photo byte digests, canonical mentions and the resolved acting identity;
@@ -1113,8 +1439,7 @@ storage remains in place and is read only through the authorized mapping adapter
 
 Existing authenticated support create/reply/status routes delegate to canonical
 messaging and project their previous response shape. New authenticated inquiries do
-not create another independent support_feedback message store. Guest receipt intake
-and its staff queue stay on the legacy store. Full maps each historical authenticated
+not create another independent support_feedback message store. Guest intake and staff review use that same canonical store. Full maps each historical authenticated
 feedback independently, preserves the first message and replies in created/id order,
 and records source collection/record/file references. It never converts guests into
 synthetic users, never manufactures notifications, and initializes requester read to
@@ -1218,6 +1543,57 @@ Skipped receipts never start the cooldown. Delivery rechecks read cursors and
 notification acknowledgement in addition to the existing recipient/access policy.
 Push title/body use the same sender and preview as the authenticated inbox.
 
+## Arcade check request notes
+
+`/arcade/check-notes` is the only read/write contract for the locked
+`arcade_check_note` collection. Reads and creation have no distance restriction;
+public venues are anonymously readable and private venues retain creator/reviewer
+visibility. Active authenticated users with existing arcade write access may attach
+1–1000 character plain-text requests. Identical open requests from the same author
+are idempotent. Each arcade has at most 50 open notes; list returns at most 100,
+open first then newest. Authors or strict reviewers may remove notes remotely.
+
+Completing a note atomically records nonblank findings, answering user and timestamp.
+The server requires a current GPS fix within 300 meters of the arcade's current
+basic coordinates, accuracy at most 150 meters, and capture age at most 60 seconds
+(5 seconds future skew tolerated). Existing visits and campaign bypasses do not
+authorize remote completion. An already completed note returns 409, preserving its
+answer. Creation, completion and deletion grant no XP or arcade changelog rows.
+Requests and responses are private/no-store; raw collection rules stay locked.
+Full owns the guarded forward migration; Core migration is fresh-bootstrap only.
+
+### Inquiry automatic replies
+
+`inquiryContext` is an explicit creation intent, never inferred from a team recipient.
+Only the official-account entry sends `arcadeOfficial.ko-KR`, `.en-US` or `.ja-JP`;
+normal Musecat team conversations keep their existing behavior. An `arcade` intent
+loads only that arcade's enabled owner-authored bounded reply graph.
+GET `/user/inquiry-preview` (or the guest equivalent) reads the start reply and
+configuration revision without creating a conversation or message. Opening and
+closing an inquiry therefore leaves no empty rooms. Creation requires a first
+requester message/photo or choice and atomically stores the greeting as sequence 1
+and that first response. `botRevision` rejects outdated previews; `initialChoice`
+validates and advances a starting choice in that same transaction. Creation retries
+are idempotent across the requester and client key, including context and payload conflicts.
+
+`arcade.inquiry_bot` stores the owner configuration. `messaging_inquiry.bot_state`
+snapshots the flow for the room; `messaging_message.automated` and `bot_choices`
+record each server-authored reply. Existing rooms are unaffected by later edits.
+Every choice names the originating bot message and must match the current requester,
+node, label and target inside the message transaction. Stale or forged choices fail;
+retries return the original user message without generating another reply. Typed
+messages, terminal nodes and human responder messages end automatic progression.
+Automated replies use the inbox identity and do not impersonate a user, mark the
+inquiry recognised or generate a second operational notification. The original
+requester message still follows the canonical notification policy.
+
+Owner configuration uses authenticated custom `/user/inquiry-bots/arcade/{id}`
+GET/PUT endpoints with current arcade-management checks. Core bootstraps the three
+JSON fields and automated flag; Full adds them in its independent guarded migration.
+Neither migration rewrites conversation history or broadens raw collection rules.
+
+A current automated follow-up exposes `botCanRestart` while no later human message has been sent. The reserved `__restart` selection appends the requester action and the original starting node in the same transaction. It preserves every previous message, rejects stale/foreign actions, shares normal idempotency and rate limits, and cannot be used as an owner-defined choice ID.
+
 
 ### Inquiry status history
 
@@ -1237,6 +1613,55 @@ existing conversation permissions and sequence. Status-only entries do not
 create push notifications or requester SSE events, unread increments, sidebar preview changes or sorting changes. Requester history filters textless status entries before pagination, strips transition metadata from ordinary messages and send/retry responses, and returns null status and empty transitions. Legacy adapters follow the same projection. Prior history is preserved without inventing past
 transitions. Full owns the guarded additive `status_change` JSON-field migration;
 Core only bootstraps it for fresh databases.
+
+
+## First-party native login sessions
+
+`nativeauth` adds opaque first-party device sessions independently of web JWTs and
+confidential partner delegation. The executable supplies an exact client/callback
+allowlist via `coreapp.Config.NativeAuthClients`; an empty allowlist registers no
+native routes. Existing connection, delegation, Developer Center and worker
+configuration remains unchanged.
+
+The base login surface consists of `POST /native/session/code`, `/exchange`,
+`/refresh`, `/revoke` and `GET /native/user/me`. Code issuance requires the existing
+active web user; exchange binds the exact client, callback and S256 verifier.
+Single-use codes expire after 120 seconds, access after 10 minutes, and device
+families after 30 days. Refresh rotation retains consumed hashes; replay revokes
+only that device family. Access and refresh also require the family client ID
+to remain in the current allowlist. Refresh denial for a removed client commits
+family revocation, which survives later re-enablement. Password/token-key changes and withdrawal invalidate
+sessions. Existing active-account guards reject banned users before returning
+credentials or the profile. Native credentials authenticate only the dedicated device protocol and the
+explicit canonical first-party operations below; raw collection, unrelated web,
+management, OAuth/OIDC and partner routes never resolve them. Web JWTs never
+authenticate the native profile route.
+
+Only SHA-256 credential hashes are stored in three private SQL tables, without a
+PocketBase collection API. Core's fresh migration calls the reusable schema
+helper; existing Full databases use Full's independent additive migration and
+copy-only pre/postflight. Disabling the allowlist is the rollback: preserve
+consumed hashes and revoked-family history. Credentials and codes must not be
+logged. This integration does not enable native domain editing or push APIs.
+
+First-party passport, rankings and inbox clients share canonical URLs, DTOs and
+handlers. Only `GET /user/visits`, `/user/passport`, `/user/passport/stamps`,
+`/rankings`, `/user/notifications` and `POST /user/notifications/read` bind
+`nativeauth.FirstPartyAuthentication`. PocketBase loads normal web JWTs first;
+the adapter then resolves an opaque native bearer through the existing session
+and active-account guard. Guest public reads and web JWT behavior are unchanged.
+Native responses remain no-store, and an empty native allowlist never grants a
+native identity. Passport visibility, ranking viewer projection, inbox source ACL
+and account-owned read state retain the canonical policies.
+
+Full additionally binds this adapter to its existing passport trust/reset routes.
+There are no duplicate `/native` domain routes or executable-domain callback.
+The public `RegisterAPIRoutes` signature remains compatible and its default
+registration, delegated account registration, raw collection REST, OAuth/OIDC,
+partner, management and unrelated first-party operations do not bind the adapter.
+Native login, current-session identity and web-handoff protocol routes retain
+their dedicated credential boundaries. This adds no schema or migration and
+does not enable APNs or general native domain writes.
 
 Guest inquiries use the canonical messaging store and browser-scoped credentials, never synthetic user accounts. Current guest access survives intake-policy changes. Reply bots snapshot their owner configuration per inquiry; requester choices are validated and sequenced atomically. DM read cursors belong to each actual account and expose the counterpart cursor only for direct messages.
 
@@ -1277,3 +1702,35 @@ Bot API rollout is independent of the excluded external integration release.
 Future OAuth adapters may share attribution and domain policy; this release does
 not register Developer Center or broaden existing OAuth scopes.
 
+
+
+### Explicit native-to-web owner session handoff
+
+An optional `Config.NativeWebClients` adds only `POST /native/session/web/code`
+and `/native/session/web/exchange`; absent web clients leave both unregistered.
+The device requests a 60-second S256 code using its existing opaque native
+session, exact client ID and configured web issuer. The ticket stores only its
+hash and binds the account, device family, client, issuer and challenge in the
+private `native_auth_web_code` SQL ledger. Core fresh bootstrap and Full's
+independent additive migration call `InstallWebHandoffSchema`; Full must never
+import Core bootstrap migrations.
+
+Only the confidential BFF can redeem the code with HTTP Basic client ID/secret,
+exact issuer and PKCE verifier. Invalid verifiers do not consume it; successful
+redemption is atomic and single use. Redemption rechecks the current client
+allowlist, family expiry/revocation and active account/token key. It returns
+`{token,user_id,expires_in:900}` solely to the BFF. The token is a standard
+PocketBase static auth JWT, non-refreshable and valid for fifteen minutes. The
+BFF sets its existing HttpOnly cookie with at most that lifetime; it never
+forwards credentials to app JSON, URLs or JavaScript. The app sends only
+`{code,code_verifier}` to its approved web origin and isolates/clears the web data
+store on logout or account switch. An already redeemed JWT retains normal web
+auth semantics until expiry; native-family revocation prevents unredeemed tickets
+but does not retroactively revoke a separate web JWT.
+
+Raw collection, unrelated web/session, management, OAuth/OIDC and partner
+routes still reject native bearer credentials. Dedicated native identity and
+web-code issuance routes still reject web JWTs. Both handoff routes are no-store with a 4096-byte
+body limit. Disabling the optional BFF configuration removes these routes while
+preserving consumed tickets and native session history. No credential, code,
+verifier or configured secret may be logged.

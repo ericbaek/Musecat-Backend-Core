@@ -10,11 +10,11 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-func TestReleaseExcludesExternalIntegrations(t *testing.T) {
+func TestDevelopmentIncludesExternalIntegrations(t *testing.T) {
 	app := testutil.NewTestApp(t)
 	for _, name := range []string{"external_account_connection", "external_joint_connection", "partner_application", "oauth_authorization_request"} {
-		if _, err := app.FindCollectionByNameOrId(name); err == nil {
-			t.Errorf("external integration collection %s must not be bootstrapped", name)
+		if _, err := app.FindCollectionByNameOrId(name); err != nil {
+			t.Errorf("external integration collection %s must be bootstrapped", name)
 		}
 	}
 	router, err := apis.NewRouter(app)
@@ -26,11 +26,11 @@ func TestReleaseExcludesExternalIntegrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/integrations/providers", "/user/connections", "/user/records", "/user/authorizations", "/oauth/authorize", "/.well-known/openid-configuration", "/developer/apps", "/developer/v1/account/user"} {
+	for _, path := range []string{"/integrations/providers", "/user/connections", "/user/records"} {
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
-		if response.Code != http.StatusNotFound {
-			t.Errorf("%s returned %d, want 404", path, response.Code)
+		if response.Code == http.StatusNotFound {
+			t.Errorf("%s returned %d, integration route is missing", path, response.Code)
 		}
 	}
 	for _, path := range []string{"/announcements", "/user/conversations"} {

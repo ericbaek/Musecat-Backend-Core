@@ -7,10 +7,14 @@ import (
 
 	"github.com/pocketbase/pocketbase"
 
+	"github.com/ericbaek/musecat-backend-core/connections"
 	"github.com/ericbaek/musecat-backend-core/coreapp"
+	"github.com/ericbaek/musecat-backend-core/delegation"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	"github.com/ericbaek/musecat-backend-core/handlers/community"
+	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/partnerapp"
 )
 
 // configureRuntime is the composition root: select resources and scheduled jobs
@@ -34,11 +38,39 @@ func configureRuntime(app *pocketbase.PocketBase) error {
 			return fmt.Errorf("configure community translation: %w", err)
 		}
 	}
+	externalConnections, err := connections.ParseConfig(os.Getenv("MUSECAT_EXTERNAL_PROVIDERS"), os.Getenv("MUSECAT_CONNECTION_ENCRYPTION_KEY"))
+	if err != nil {
+		return fmt.Errorf("configure external connections: %w", err)
+	}
+	oauthServer, err := delegation.ParseConfig(os.Getenv("MUSECAT_OAUTH_CLIENTS"), strings.TrimSpace(os.Getenv("MUSECAT_OAUTH_ISSUER")), strings.TrimSpace(os.Getenv("MUSECAT_OAUTH_CONSENT_URL")), userhandler.CheckActiveUser)
+	if err != nil {
+		return fmt.Errorf("configure OAuth delegation: %w", err)
+	}
+	if err := oauthServer.ConfigureOIDC(os.Getenv("MUSECAT_OIDC_SIGNING_KEYS")); err != nil {
+		return err
+	}
+	jointPartners, err := connections.ParseJointConfig(os.Getenv("MUSECAT_JOINT_PARTNERS"), externalConnections, oauthServer)
+	if err != nil {
+		return fmt.Errorf("configure joint partners: %w", err)
+	}
+	partnerApps := partnerapp.NewService(oauthServer, externalConnections, jointPartners, strings.TrimSpace(os.Getenv("MUSECAT_WEB_ORIGIN")))
 	coreapp.Configure(app, coreapp.Config{
+		Joint: jointPartners, PartnerApps: partnerApps,
+		Delegation:            oauthServer,
+		Connections:           externalConnections,
 		ClientIPForwardSecret: strings.TrimSpace(os.Getenv("MUSECAT_IP_FORWARD_SECRET")),
 		GeoResolver:           resolver,
 		Documentation:         documentationConfig(),
 	})
+	connections.RegisterRequestCleanupCron(app)
+	externalConnections.RegisterRecordRefreshCron(app)
+	partnerApps.RegisterSyncCron(app)
+	partnerApps.RegisterCheckCron(app)
+	if jointPartners != nil {
+		connections.RegisterJointCleanupCron(app)
+		jointPartners.RegisterOutboxCron(app)
+	}
+	delegation.RegisterCleanupCron(app)
 	arcadeflag.RegisterAutoSolveCron(app)
 	community.RegisterTranslationCron(app, translator)
 	return nil

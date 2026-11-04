@@ -10,6 +10,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	apidocs "github.com/ericbaek/musecat-backend-core/docs"
+	"gopkg.in/yaml.v2"
 )
 
 func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
@@ -33,9 +36,14 @@ func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
 	}
 
 	operations := documentedOperations(string(spec))
-	routeDecl := routeFunction(t, file, "RegisterAPIRoutes")
-	prefixes := routerGroupPrefixes(routeDecl.Body)
-	directOps := directRouteOperations(routeDecl.Body, prefixes)
+	directOps := map[string]bool{}
+	for _, name := range []string{"registerSessionRoutes", "registerAccountRoutes"} {
+		routeDecl := routeFunction(t, file, name)
+		prefixes := routerGroupPrefixes(routeDecl.Body)
+		for op := range directRouteOperations(routeDecl.Body, prefixes) {
+			directOps[op] = true
+		}
+	}
 	if len(directOps) == 0 {
 		t.Fatal("expected non-empty direct route operations")
 	}
@@ -200,6 +208,98 @@ func TestOpenAPIDocumentsMessagingRoutes(t *testing.T) {
 	for operation := range directRouteOperations(function.Body, routerGroupPrefixes(function.Body)) {
 		if !operations[operation] {
 			t.Errorf("Messaging OpenAPI missing %s", operation)
+		}
+	}
+}
+
+func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
+	var parsed map[string]any
+	if err := yaml.UnmarshalStrict(apidocs.OpenAPISpec(), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	type operation struct {
+		Security  []map[string][]string `yaml:"security"`
+		Responses map[string]any        `yaml:"responses"`
+	}
+	var contract struct {
+		Paths map[string]struct {
+			Get  *operation `yaml:"get"`
+			Post *operation `yaml:"post"`
+		} `yaml:"paths"`
+		Components struct {
+			SecuritySchemes map[string]struct {
+				Type         string `yaml:"type"`
+				Scheme       string `yaml:"scheme"`
+				BearerFormat string `yaml:"bearerFormat"`
+			} `yaml:"securitySchemes"`
+			Schemas map[string]any `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(apidocs.OpenAPISpec(), &contract); err != nil {
+		t.Fatal(err)
+	}
+	if scheme := contract.Components.SecuritySchemes["nativeSession"]; scheme.Type != "http" || scheme.Scheme != "bearer" || scheme.BearerFormat != "opaque" {
+		t.Fatal("native opaque security scheme is missing from components")
+	}
+	if scheme := contract.Components.SecuritySchemes["nativeWebClientBasic"]; scheme.Type != "http" || scheme.Scheme != "basic" {
+		t.Fatal("confidential web handoff scheme missing")
+	}
+	if _, ok := contract.Components.Schemas["NativeCredentials"]; !ok {
+		t.Fatal("native credential schema is missing from components")
+	}
+	for _, path := range []string{"/user/visits", "/user/passport", "/user/passport/stamps", "/rankings", "/user/notifications", "/user/notifications/read"} {
+		op := contract.Paths[path].Get
+		if path == "/user/notifications/read" {
+			op = contract.Paths[path].Post
+		}
+		if op == nil {
+			t.Fatalf("canonical operation missing: %s", path)
+		}
+		seen := map[string]bool{}
+		for _, alternative := range op.Security {
+			for scheme := range alternative {
+				seen[scheme] = true
+			}
+		}
+		if !seen["bearerAuth"] || !seen["nativeSession"] {
+			t.Fatalf("canonical auth alternatives missing: %s", path)
+		}
+		if _, exists := contract.Paths["/native"+path]; exists {
+			t.Fatalf("duplicate native domain URL remains: %s", path)
+		}
+	}
+	for _, route := range []struct {
+		path, method, security string
+		statuses               []string
+	}{
+		{"/native/session/web/code", "post", "nativeSession", []string{"200", "400", "401", "403", "413"}},
+		{"/native/session/web/exchange", "post", "nativeWebClientBasic", []string{"200", "400", "401", "403", "413"}},
+		{"/native/session/code", "post", "bearerAuth", []string{"200", "401", "403", "413"}},
+		{"/native/session/exchange", "post", "", []string{"200", "401", "403", "413"}},
+		{"/native/session/refresh", "post", "", []string{"200", "401", "403", "413"}},
+		{"/native/session/revoke", "post", "", []string{"204", "400", "413"}},
+		{"/native/user/me", "get", "nativeSession", []string{"200", "401", "403"}},
+	} {
+		op := contract.Paths[route.path].Post
+		if route.method == "get" {
+			op = contract.Paths[route.path].Get
+		}
+		if op == nil {
+			t.Fatalf("%s %s is not in the top-level paths object", route.method, route.path)
+		}
+		if route.security == "" {
+			if len(op.Security) != 0 {
+				t.Errorf("%s requires unintended bearer credentials", route.path)
+			}
+		} else if len(op.Security) != 1 {
+			t.Errorf("%s missing its credential boundary", route.path)
+		} else if _, ok := op.Security[0][route.security]; !ok {
+			t.Errorf("%s has the wrong credential boundary", route.path)
+		}
+		for _, status := range route.statuses {
+			if _, ok := op.Responses[status]; !ok {
+				t.Errorf("%s missing status %s", route.path, status)
+			}
 		}
 	}
 }

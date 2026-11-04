@@ -85,6 +85,7 @@ func TestBulkUpdateArcadeGameVersion_Success(t *testing.T) {
 				t.Fatalf("bulk update schema still exposes %s", field)
 			}
 		}
+		var bulkID string
 		for i, arcadeID := range arcadeIDs {
 			arcade, err := app.FindRecordById("arcade", arcadeID)
 			if err != nil {
@@ -105,6 +106,18 @@ func TestBulkUpdateArcadeGameVersion_Success(t *testing.T) {
 			log := decodeAnyMap(tb, changes[0].Get("log"))
 			if got := log["type"]; got != "game_diff" {
 				t.Fatalf("expected game_diff, got %v", got)
+			}
+			if got := log["source"]; got != "bulk_version" {
+				t.Fatalf("expected bulk_version source, got %v", got)
+			}
+			logBulkID, _ := log["bulk_id"].(string)
+			if len(logBulkID) != 15 {
+				t.Fatalf("expected 15-character bulk_id, got %q", logBulkID)
+			}
+			if bulkID == "" {
+				bulkID = logBulkID
+			} else if logBulkID != bulkID {
+				t.Fatalf("expected all bulk rows to share bulk_id %q, got %q", bulkID, logBulkID)
 			}
 			if strings.Contains(string(mustJSON(tb, log)), "uncertain") || strings.Contains(string(mustJSON(tb, log)), "previous_version") {
 				t.Fatalf("bulk changelog contains removed concepts: %#v", log)
