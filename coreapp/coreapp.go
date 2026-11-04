@@ -18,6 +18,7 @@ import (
 	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
 	arcadecampaign "github.com/ericbaek/musecat-backend-core/handlers/arcade/campaign"
+	arcadechecknote "github.com/ericbaek/musecat-backend-core/handlers/arcade/checknote"
 	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
 	arcadegtk "github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
@@ -156,6 +157,7 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 	)
 	se.Router.GET("/arcade/memo", arcadememo.GetArcadeMemo)
+	se.Router.GET("/arcade/check-notes", arcadechecknote.List)
 	se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
 	// Public read endpoint: list all arcades with basic info + gameSeries ids
 	se.Router.GET("/arcades", arcadequery.ListArcades)
@@ -262,6 +264,9 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	authArcade.PUT("/game", arcadegame.UpdateArcadeGame)
 	authArcade.PUT("/photo", arcadephoto.UpdateArcadePhoto)
 	authArcade.PUT("/memo", arcadememo.UpdateArcadeMemo)
+	authArcade.POST("/check-notes", arcadechecknote.Mutate).Bind(apis.BodyLimit(16384))
+	authArcade.PUT("/check-notes", arcadechecknote.Mutate).Bind(apis.BodyLimit(16384))
+	authArcade.DELETE("/check-notes", arcadechecknote.Mutate).Bind(apis.BodyLimit(16384))
 	authArcade.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)
 	authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
 	// Allow up to 10 * 20MB photo files (+multipart overhead) in a single request.
