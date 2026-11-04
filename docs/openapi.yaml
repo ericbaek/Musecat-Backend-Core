@@ -126,6 +126,12 @@ components:
             ko: {$ref: '#/components/schemas/AnnouncementLocalization'}
             en: {$ref: '#/components/schemas/AnnouncementLocalization'}
             ja: {$ref: '#/components/schemas/AnnouncementLocalization'}
+    AnnouncementSlideLink:
+      type: object
+      required: [label, href]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 80}
+        href: {type: string, maxLength: 2048, description: "Internal path starting with / (not //) or absolute HTTPS URL without credentials, whitespace or backslashes."}
     AnnouncementLocalization:
       type: object
       required: [title, summary, slides]
@@ -143,6 +149,7 @@ components:
               fileName: {type: string}
               imageUrl: {type: string, description: Relative custom API image URL; draft and archived images require staff.}
               alt: {type: string, maxLength: 3000}
+              link: {$ref: '#/components/schemas/AnnouncementSlideLink'}
     AnnouncementPage:
       type: object
       required: [items, next]
@@ -171,6 +178,7 @@ components:
                   properties:
                     image: {type: string}
                     alt: {type: string, maxLength: 3000}
+                    link: {$ref: '#/components/schemas/AnnouncementSlideLink'}
     MessagingReport: {"type": "object", "properties": {"id": {"type": "string"}, "reporterId": {"type": "string"}, "messageId": {"type": "string"}, "reason": {"type": "string"}, "createdAt": {"type": "string"}, "message": {"$ref": "#/components/schemas/MessagingMessage"}}, "required": ["id", "reporterId", "messageId", "reason", "createdAt", "message"]}
     MessagingParty: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "arcade", "team"]}, "id": {"type": "string"}, "name": {"type": "string"}, "avatarUrl": {"type": "string", "nullable": true}, "roleTags": {"type": "array", "items": {"type": "string"}}}, "required": ["type", "id", "name", "avatarUrl", "roleTags"]}
     MessagingIdentity: {"type": "object", "properties": {"type": {"type": "string", "enum": ["user", "guest", "arcade", "team"]}, "id": {"type": "string"}}, "required": ["type", "id"]}
@@ -1499,6 +1507,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/UserProfileSeries'
+        visit_timeline_hidden:
+          type: boolean
+          default: false
+          description: Excludes this account's visits from the home update timeline independently of profile visibility.
         visit_visibility:
           type: string
           enum: [private, summary, full]
@@ -1953,6 +1965,9 @@ components:
       required: [visit_visibility]
       properties:
         visit_visibility: {type: string, enum: [private, summary, full]}
+        visit_timeline_hidden:
+          type: boolean
+          description: Optional. Omission preserves the saved setting; true hides existing and future visits from the home timeline.
     ProfileCountriesRequest:
       type: object
       required: [countries, country_mode]
@@ -9259,7 +9274,15 @@ paths:
             schema: {$ref: '#/components/schemas/VisitVisibilityRequest'}
       responses:
         '200':
-          description: Updated public visit visibility.
+          description: Updated profile visit visibility and independent home timeline preference.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [visit_visibility, visit_timeline_hidden]
+                properties:
+                  visit_visibility: {type: string, enum: [private, summary, full]}
+                  visit_timeline_hidden: {type: boolean}
   /user/favorite-visibility:
     put:
       tags: [Users]

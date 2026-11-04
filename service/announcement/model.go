@@ -12,9 +12,15 @@ import (
 
 var Locales = []string{"ko", "en", "ja"}
 
+type Link struct {
+	Label string `json:"label"`
+	Href  string `json:"href"`
+}
+
 type Slide struct {
 	FileName string `json:"fileName"`
 	Alt      string `json:"alt"`
+	Link     *Link  `json:"link,omitempty"`
 }
 type Localization struct {
 	Title   string  `json:"title"`
@@ -59,9 +65,13 @@ func URL(id string) string { return "/community/updates?announcement=" + url.Que
 func Item(record *core.Record, viewed bool) map[string]any {
 	localizations := map[string]any{}
 	for locale, content := range Read(record) {
-		slides := make([]map[string]string, 0, len(content.Slides))
+		slides := make([]map[string]any, 0, len(content.Slides))
 		for _, slide := range content.Slides {
-			slides = append(slides, map[string]string{"id": slide.FileName, "fileName": slide.FileName, "alt": slide.Alt, "imageUrl": "/announcements/" + record.Id + "/images/" + url.PathEscape(slide.FileName)})
+			item := map[string]any{"id": slide.FileName, "fileName": slide.FileName, "alt": slide.Alt, "imageUrl": "/announcements/" + record.Id + "/images/" + url.PathEscape(slide.FileName)}
+			if slide.Link != nil {
+				item["link"] = slide.Link
+			}
+			slides = append(slides, item)
 		}
 		localizations[locale] = map[string]any{"title": content.Title, "summary": content.Summary, "slides": slides}
 	}

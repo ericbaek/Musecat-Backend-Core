@@ -55,30 +55,31 @@ type BackgroundPosition struct {
 }
 
 type Profile struct {
-	ID                 string             `json:"id"`
-	Created            string             `json:"created"`
-	Username           string             `json:"username"`
-	Nickname           string             `json:"nickname"`
-	Level              int                `json:"level"`
-	Countries          []string           `json:"countries"`
-	CountryMode        string             `json:"country_mode"`
-	PrimaryCountry     string             `json:"primary_country"`
-	Bio                string             `json:"bio"`
-	Avatar             string             `json:"avatar"`
-	Background         string             `json:"background"`
-	BackgroundPosition BackgroundPosition `json:"background_position"`
-	Tag                []string           `json:"tag"`
-	Owns               *[]string          `json:"owns,omitempty"`
-	OwnedArcades       *[]OwnedArcade     `json:"owned_arcades,omitempty"`
-	FavoriteArcades    *[]FavoriteArcade  `json:"favorite_arcades,omitempty"`
-	SNS                ProfileSNS         `json:"sns"`
-	Withdrawn          bool               `json:"withdrawn"`
-	SeriesPublic       bool               `json:"series_public"`
-	Warp               *bool              `json:"warp,omitempty"`
-	Series             []ProfileSeries    `json:"series,omitempty"`
-	VisitVisibility    string             `json:"visit_visibility,omitempty"`
-	FavoriteVisibility string             `json:"favorite_visibility,omitempty"`
-	VisitStats         *VisitStats        `json:"visit_stats,omitempty"`
+	ID                  string             `json:"id"`
+	Created             string             `json:"created"`
+	Username            string             `json:"username"`
+	Nickname            string             `json:"nickname"`
+	Level               int                `json:"level"`
+	Countries           []string           `json:"countries"`
+	CountryMode         string             `json:"country_mode"`
+	PrimaryCountry      string             `json:"primary_country"`
+	Bio                 string             `json:"bio"`
+	Avatar              string             `json:"avatar"`
+	Background          string             `json:"background"`
+	BackgroundPosition  BackgroundPosition `json:"background_position"`
+	Tag                 []string           `json:"tag"`
+	Owns                *[]string          `json:"owns,omitempty"`
+	OwnedArcades        *[]OwnedArcade     `json:"owned_arcades,omitempty"`
+	FavoriteArcades     *[]FavoriteArcade  `json:"favorite_arcades,omitempty"`
+	SNS                 ProfileSNS         `json:"sns"`
+	Withdrawn           bool               `json:"withdrawn"`
+	SeriesPublic        bool               `json:"series_public"`
+	Warp                *bool              `json:"warp,omitempty"`
+	Series              []ProfileSeries    `json:"series,omitempty"`
+	VisitTimelineHidden bool               `json:"visit_timeline_hidden"`
+	VisitVisibility     string             `json:"visit_visibility,omitempty"`
+	FavoriteVisibility  string             `json:"favorite_visibility,omitempty"`
+	VisitStats          *VisitStats        `json:"visit_stats,omitempty"`
 }
 
 func FetchMergedProfile(app core.App, userID string) (*Profile, error) {
@@ -173,6 +174,7 @@ func mergeProfileFromRecords(app core.App, userRec *core.Record, userInfoRec *co
 		backgroundPosition = parseBackgroundPosition(userInfoRec.GetString("background_position"))
 		out.SNS = parseProfileSNS(userInfoRec)
 		out.SeriesPublic = userInfoRec.GetBool("series_public")
+		out.VisitTimelineHidden = userInfoRec.GetBool("visit_timeline_hidden")
 		out.VisitVisibility = visitVisibility(userInfoRec.GetString("visit_visibility"))
 		out.FavoriteVisibility = favoriteVisibility(userInfoRec.GetString("favorite_visibility"))
 		profileCountries = publicProfileCountries(app, userRec, userInfoRec, includePrivateSeries)

@@ -411,3 +411,44 @@ func TestAnnouncementPushChoiceAndPublishedEdits(t *testing.T) {
 		})
 	}
 }
+
+func TestAnnouncementSlideLinksPersistValidateAndClear(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, _ := createAuthUserWithTags(t, app, []string{"moderator"})
+	item := uploadAnnouncement(t, app, token, []string{"ko"})
+	id := item["id"].(string)
+	slides := item["localizations"].(map[string]any)["ko"].(map[string]any)["slides"].([]any)
+	first := slides[0].(map[string]any)["fileName"].(string)
+	second := slides[1].(map[string]any)["fileName"].(string)
+	body := func(link any) map[string]any {
+		slide := map[string]any{"image": first, "alt": "first"}
+		if link != nil {
+			slide["link"] = link
+		}
+		return map[string]any{"localizations": map[string]any{"ko": map[string]any{"title": "Blog", "summary": "", "slides": []any{map[string]any{"image": second, "alt": "second"}, slide}}}}
+	}
+	for _, href := range []string{"javascript:alert(1)", "//example.com", "/\\example.com", "https://user:pass@example.com", "https://", "https://example.com/a b", "http://example.com"} {
+		announcementCall(t, app, "PUT", "/moderation/announcements/"+id, token, body(map[string]string{"label": "Read", "href": href}), 400)
+	}
+	for _, link := range []map[string]string{{"label": "", "href": "/blog"}, {"label": "Read", "href": ""}} {
+		announcementCall(t, app, "PUT", "/moderation/announcements/"+id, token, body(link), 400)
+	}
+	for _, href := range []string{"/developer/blog/poster-project", "https://example.com/blog"} {
+		announcementCall(t, app, "PUT", "/moderation/announcements/"+id, token, body(map[string]string{"label": " Read ", "href": href}), 200)
+		announcementCall(t, app, "POST", "/moderation/announcements/"+id+"/publish", token, map[string]any{"locales": []string{"ko"}}, 200)
+		public := announcementCall(t, app, "GET", "/announcements/"+id, "", nil, 200)
+		got := public["localizations"].(map[string]any)["ko"].(map[string]any)["slides"].([]any)
+		if got[0].(map[string]any)["link"] != nil {
+			t.Fatal("link moved to another image")
+		}
+		link := got[1].(map[string]any)["link"].(map[string]any)
+		if link["label"] != "Read" || link["href"] != href {
+			t.Fatal(link)
+		}
+	}
+	cleared := announcementCall(t, app, "PUT", "/moderation/announcements/"+id, token, body(nil), 200)
+	got := cleared["localizations"].(map[string]any)["ko"].(map[string]any)["slides"].([]any)
+	if got[1].(map[string]any)["link"] != nil {
+		t.Fatal("link not removed")
+	}
+}

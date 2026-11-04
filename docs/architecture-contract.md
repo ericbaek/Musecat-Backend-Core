@@ -1481,7 +1481,7 @@ multi-replica broker is deliberately outside the current single-container deploy
 Korean, English and Japanese image stories. Staff (`developer|moderator`) use only
 custom `/moderation/announcements` APIs. Drafts may be incomplete; publication
 accepts an explicit nonempty subset of `ko|en|ja` and requires a title, 1–12 valid
-PNG/JPEG/WebP images only in those selected locales. Image alt text is optional. The selected
+PNG/JPEG/WebP images only in those selected locales. Image alt text is optional. Each slide may include a localized `link` with a 1–80-character label and an internal path or credential-free HTTPS URL (up to 2048 bytes). Links reject protocol-relative URLs, whitespace, controls and backslashes; omitted links preserve image-only behavior. Links are stored in the existing localization JSON and survive reorder and published edits. The selected
 locale set becomes immutable after publication. Unselected variants
 remain private to staff and never appear in public metadata or image reads.
 Image text is never assumed to translate automatically. JSON metadata preserves
@@ -1700,3 +1700,10 @@ web-code issuance routes still reject web JWTs. Both handoff routes are no-store
 body limit. Disabling the optional BFF configuration removes these routes while
 preserving consumed tickets and native session history. No credential, code,
 verifier or configured secret may be logged.
+
+The optional boolean `visit_timeline_hidden` on `PUT /user/visit-visibility`
+is independent of `visit_visibility`. It defaults to false, and omission
+preserves the saved value. Profile responses return the saved flag. When true,
+`GET /arcades/updates` excludes that account's existing and future visit entries;
+profile Passport statistics, maps and stamps retain their existing visibility rules.
+Private visits remain excluded regardless of this flag.
