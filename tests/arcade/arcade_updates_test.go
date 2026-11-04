@@ -320,6 +320,42 @@ func TestListArcadeUpdates_IncludesOnlyPublicVisits(t *testing.T) {
 	}
 }
 
+func TestListArcadeUpdates_VisitTimelineOptOut(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, user := createAuthUser(t, app)
+	base := time.Date(2030, 3, 26, 9, 0, 0, 0, time.UTC)
+	arcade, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Visit", Address: "A", Location: location{Lat: 37.1, Lon: 127.1}, Country: "KR"})
+	setArcadeVisibilityAndUpdated(t, app, arcade, true, false, base)
+	seedArcadeVisit(t, app, user.Id, arcade, base)
+	for _, visibility := range []string{"summary", "full", "private"} {
+		setVisitVisibility(t, app, user.Id, visibility)
+		for _, hidden := range []bool{false, true, false} {
+			info, err := app.FindRecordById("user_info", user.Id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			info.Set("visit_timeline_hidden", hidden)
+			if err := app.Save(info); err != nil {
+				t.Fatal(err)
+			}
+			res := executeJSONRequest(t, app, http.MethodGet, "/arcades/updates", "", nil)
+			var items []map[string]any
+			err = json.NewDecoder(res.Body).Decode(&items)
+			res.Body.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 1
+			if hidden || visibility == "private" {
+				want = 0
+			}
+			if res.StatusCode != 200 || len(items) != want {
+				t.Fatalf("visibility=%s hidden=%v: status=%d items=%#v", visibility, hidden, res.StatusCode, items)
+			}
+		}
+	}
+}
+
 func setVisitVisibility(tb testing.TB, app *tests.TestApp, userID, visibility string) {
 	tb.Helper()
 	rec, err := app.FindRecordById("user_info", userID)

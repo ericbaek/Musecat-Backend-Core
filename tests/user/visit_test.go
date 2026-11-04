@@ -391,3 +391,59 @@ func testVisitDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	a := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(toRad(lat1))*math.Cos(toRad(lat2))*math.Sin(dLon/2)*math.Sin(dLon/2)
 	return 6371000 * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }
+
+func TestVisitTimelineVisibilitySetting(t *testing.T) {
+	app := newUserFetchTestApp(t)
+	token, user := createAuthUser(t, app, true)
+	arcade := seedVisitArcade(t, app, "Asia/Seoul")
+	seedProfileVisit(t, app, user.Id, arcade.Id, "2026-07-22", time.Date(2026, 7, 22, 1, 0, 0, 0, time.UTC))
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	for _, body := range []string{
+		`{"visit_visibility":"summary","visit_timeline_hidden":true}`,
+		`{"visit_visibility":"full"}`,
+	} {
+		res := doUserRequest(t, app, http.MethodPut, "/user/visit-visibility", headers, body)
+		if res.StatusCode != 200 {
+			t.Fatalf("update status=%d", res.StatusCode)
+		}
+		res.Body.Close()
+		info, err := app.FindRecordById("user_info", user.Id)
+		if err != nil || !info.GetBool("visit_timeline_hidden") {
+			t.Fatalf("opt-out must be saved and preserved: %v", err)
+		}
+	}
+	res := doUserRequest(t, app, http.MethodGet, "/user/me", headers, "")
+	var profile map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&profile); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if profile["visit_timeline_hidden"] != true || profile["visit_visibility"] != "full" {
+		t.Fatalf("settings missing: %#v", profile)
+	}
+	res = doUserRequest(t, app, http.MethodGet, "/user?id="+user.Id, nil, "")
+	profile = map[string]any{}
+	if err := json.NewDecoder(res.Body).Decode(&profile); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if profile["visit_stats"] == nil {
+		t.Fatal("timeline opt-out must preserve public profile visits")
+	}
+	for _, body := range []string{`{"visit_visibility":"full","visit_timeline_hidden":"false"}`, `{"visit_visibility":"invalid","visit_timeline_hidden":false}`} {
+		res = doUserRequest(t, app, http.MethodPut, "/user/visit-visibility", headers, body)
+		res.Body.Close()
+		if res.StatusCode != 400 {
+			t.Fatalf("invalid body status=%d", res.StatusCode)
+		}
+	}
+	res = doUserRequest(t, app, http.MethodPut, "/user/visit-visibility", headers, `{"visit_visibility":"full","visit_timeline_hidden":false}`)
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("restore status=%d", res.StatusCode)
+	}
+	info, _ := app.FindRecordById("user_info", user.Id)
+	if info.GetBool("visit_timeline_hidden") {
+		t.Fatal("expected opt-out cleared")
+	}
+}

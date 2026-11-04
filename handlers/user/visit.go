@@ -234,7 +234,8 @@ func UpdateVisitVisibility(re *core.RequestEvent) error {
 		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
 	}
 	var body struct {
-		Visibility string `json:"visit_visibility"`
+		Visibility     string `json:"visit_visibility"`
+		TimelineHidden *bool  `json:"visit_timeline_hidden"`
 	}
 	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body"})
@@ -248,10 +249,13 @@ func UpdateVisitVisibility(re *core.RequestEvent) error {
 		return re.JSON(http.StatusConflict, map[string]any{"error": "user_info is required"})
 	}
 	rec.Set("visit_visibility", v)
+	if body.TimelineHidden != nil {
+		rec.Set("visit_timeline_hidden", *body.TimelineHidden)
+	}
 	if err := re.App.Save(rec); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to update visit visibility"})
 	}
-	return re.JSON(http.StatusOK, map[string]any{"visit_visibility": v})
+	return re.JSON(http.StatusOK, map[string]any{"visit_visibility": v, "visit_timeline_hidden": rec.GetBool("visit_timeline_hidden")})
 }
 
 func UpdateFavoriteVisibility(re *core.RequestEvent) error {

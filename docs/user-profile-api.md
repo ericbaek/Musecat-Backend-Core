@@ -503,3 +503,10 @@ transactions. Core's schema migration bootstraps only a fresh test database.
 `POST /arcade/visit` additionally returns `first_visit_to_arcade`, true only for the newly
 committed first visit; duplicate same-day requests return false and never award another
 stamp or XP. The first visit awards 5 XP and a revisit awards 2 XP. Passport is GPS visit evidence, not play evidence.
+
+The optional boolean `visit_timeline_hidden` on `PUT /user/visit-visibility`
+is independent of `visit_visibility`. It defaults to false, and omission
+preserves the saved value. Profile responses return the saved flag. When true,
+`GET /arcades/updates` excludes that account's existing and future visit entries;
+profile Passport statistics, maps and stamps retain their existing visibility rules.
+Private visits remain excluded regardless of this flag.

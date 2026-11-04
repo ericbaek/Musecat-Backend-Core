@@ -3272,6 +3272,7 @@ func init() {
 						"system": false,
 						"type": "autodate"
 					},
+					{ "name": "visit_timeline_hidden", "type": "bool" },
 					{
 						"hidden": false,
 						"id": "select895892755",
