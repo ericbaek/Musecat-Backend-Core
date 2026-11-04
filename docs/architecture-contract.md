@@ -699,6 +699,28 @@ summary/full settings take the new scope immediately; there is no versioned opt-
 `visibility` in the response tells the web which projection was applied.
 `city_catalog_available=false` distinguishes missing reference data from zero cities.
 
+The direct owner `GET /user/visits` response additionally includes `timeline`,
+a complete array of verification events ordered by stored UTC `visited_at` and
+record ID ascending. Its safe event ID is `arcade:visit_day`; a revisit on a later
+local day remains a separate event. The unique `(user, arcade, visit_day)` rule
+still deduplicates a second verification at the same venue on that local day.
+Each event exposes only that identity, arcade ID/name, stored local `visit_day`
+and nullable current registered venue coordinates. No verification GPS, accuracy,
+XP, raw visit-record ID or precise timestamp is returned. A null coordinate event
+remains in order and interrupts adjacent route legs; do not reconnect around it.
+These are straight lines between verification venues, not a recorded travel path.
+
+The owner timeline ignores public Passport visibility and the independent home
+feed opt-out, but continues to exclude currently private venues. It is omitted
+from delegated account projections even when their Passport visibility is full,
+and from all public profile/Passport DTOs. Owner responses are private, no-store.
+The existing all-time loader remains complete and unpaginated: timeline adds no
+query or per-venue lookup, but response size grows with history. No silent cap or
+client reconstruction from per-venue summaries is permitted. Older binaries omit
+the additive field; clients must treat that as unavailable, distinct from `[]`.
+The existing Full visit schema/indexes already contain the ordered facts. This
+extension requires a Core pin and Full binary deployment, with no data migration.
+
 Periods use stored local `visit_day`; active days deduplicate those date strings even
 across countries. New discoveries use lifetime first chronological verification.
 Distances use current locations, with both consecutive endpoints inside the selected
