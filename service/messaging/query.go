@@ -148,6 +148,9 @@ func GetFor(app core.App, viewer Principal, id string) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
+	if c.GetString("kind") == "plaza" {
+		return plazaSummary(c, u.ID), nil
+	}
 	items, err := summaries(app, u, []*core.Record{c})
 	if err != nil {
 		return Summary{}, err

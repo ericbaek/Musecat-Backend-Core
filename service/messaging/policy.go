@@ -86,7 +86,9 @@ func access(app core.App, viewer Principal, id string) (*core.Record, *participa
 		return nil, nil, apis.NewNotFoundError("Conversation not found.", nil)
 	}
 	allowed := false
-	if c.GetString("kind") == "dm" && p.Kind == "user" {
+	if c.GetString("kind") == "plaza" {
+		allowed = c.Id == PlazaID && p.Kind == "user"
+	} else if c.GetString("kind") == "dm" && p.Kind == "user" {
 		_, err = app.FindFirstRecordByFilter(Parties, "conversation={:c} && party_type='user' && party_id={:u}", dbx.Params{"c": id, "u": p.ID})
 		allowed = err == nil
 	} else if c.GetString("kind") == "inquiry" {
@@ -124,6 +126,12 @@ func Peer(app core.App, id, user string) (string, error) {
 }
 func actor(app core.App, u *participant, c *core.Record, requested *Identity) (Identity, error) {
 	own := Identity{Type: u.Kind, ID: u.ID}
+	if c.GetString("kind") == "plaza" {
+		if u.Kind != "user" || (requested != nil && *requested != own) {
+			return own, apis.NewForbiddenError("Invalid sender identity.", nil)
+		}
+		return own, nil
+	}
 	if c.GetString("kind") == "dm" {
 		if requested != nil && *requested != own {
 			return own, apis.NewForbiddenError("Invalid sender identity.", nil)
