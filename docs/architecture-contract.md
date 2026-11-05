@@ -345,7 +345,13 @@ Existing Full installations require their own guarded forward migration to
 lock the existing `user_info` update rule before this API cutover.
 
 `GET /rankings` always returns the public top 100. User metrics include explorer,
-visits, XP, level, and photographer. The `arcade_visits` metric returns public
+visits, XP, level, and photographer. For `metric=level` (all time only), `score`
+is `min(XP-derived level, 10 + floor(completed days since user.created * 90 / 365))`.
+Elapsed days are complete 24-hour periods at the request's UTC time, clamped at zero.
+Ranking and the top-100 cutoff use this capped level; equal levels share a rank,
+with nickname and user ID providing stable display order. `profile.level` always
+retains the uncapped XP-derived level. XP metrics, stored XP, profile levels and
+feature permissions are unaffected. The `arcade_visits` metric returns public
 arcades ranked by the total XP awarded by their completed visit-verification
 records; the response displays the verification count separately and includes
 the first publicly readable photo from the current photo molecule when one is

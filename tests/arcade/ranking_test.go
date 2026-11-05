@@ -68,7 +68,7 @@ func TestRankings_MetricsAndVisibility(t *testing.T) {
 	assertRankingTop(t, app, "/rankings?metric=explorer&period=week", explorer.Id, 2)
 	assertRankingTop(t, app, "/rankings?metric=visits&period=week", explorer.Id, 3)
 	assertRankingTop(t, app, "/rankings?metric=xp&period=week", explorer.Id, 10)
-	assertRankingTop(t, app, "/rankings?metric=level&period=all", photographer.Id, 16)
+	assertRankingTop(t, app, "/rankings?metric=level&period=all", photographer.Id, 10)
 	assertRankingTop(t, app, "/rankings?metric=photographer&period=week", photographer.Id, 1)
 	assertArcadeRankingTop(t, app, "/rankings?metric=arcade_visits&period=week", arcadeTwo, 20, 2, "/arcade/photo/file?id="+rankingPhoto)
 	assertExplorerDistance(t, app, "/rankings?metric=explorer&period=week", explorer.Id)
@@ -243,10 +243,11 @@ func TestRankings_ReturnsAuthenticatedViewerRankOutsideLeaderboard(t *testing.T)
 	app := newArcadeTestApp(t)
 
 	viewerToken, viewer := createAuthUser(t, app)
-	seedUserLevelExp(t, app, viewer.Id, 1)
+	seedUserLevelExp(t, app, viewer.Id, 1_000)
 	for index := 0; index < 101; index++ {
 		_, higherRankedUser := createAuthUser(t, app)
-		seedUserLevelExp(t, app, higherRankedUser.Id, 1_000+index)
+		seedUserLevelExp(t, app, higherRankedUser.Id, 300+index)
+		setRecordCreated(t, app, "user", higherRankedUser.Id, time.Now().UTC().Add(-365*24*time.Hour))
 	}
 
 	guest := executeJSONRequest(t, app, http.MethodGet, "/rankings?metric=level&period=all", "", nil)
@@ -278,8 +279,10 @@ func TestRankings_ReturnsAuthenticatedViewerRankOutsideLeaderboard(t *testing.T)
 		} `json:"entries"`
 		Viewer *struct {
 			Rank    int `json:"rank"`
+			Score   int `json:"score"`
 			Profile struct {
-				ID string `json:"id"`
+				ID    string `json:"id"`
+				Level int    `json:"level"`
 			} `json:"profile"`
 		} `json:"viewer"`
 	}
@@ -294,7 +297,7 @@ func TestRankings_ReturnsAuthenticatedViewerRankOutsideLeaderboard(t *testing.T)
 			t.Fatal("viewer must not be inserted into the top-100 leaderboard")
 		}
 	}
-	if payload.Viewer == nil || payload.Viewer.Profile.ID != viewer.Id || payload.Viewer.Rank != 102 {
+	if payload.Viewer == nil || payload.Viewer.Profile.ID != viewer.Id || payload.Viewer.Rank != 102 || payload.Viewer.Score != 10 || payload.Viewer.Profile.Level != 60 {
 		t.Fatalf("unexpected viewer entry: %#v", payload.Viewer)
 	}
 }

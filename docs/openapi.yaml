@@ -499,7 +499,9 @@ components:
         primary_country:
           type: string
           description: Primary profile country as an ISO 3166-1 alpha-2 code, or an empty string when unset.
-        level: {type: integer}
+        level:
+          type: integer
+          description: Uncapped XP-derived profile level, including in level rankings.
         tags:
           type: array
           items: {type: string}
@@ -509,7 +511,10 @@ components:
           required: [rank, score, profile]
           properties:
             rank: {type: integer}
-            score: {type: integer, format: int64}
+            score:
+              type: integer
+              format: int64
+              description: For metric=level, min(profile.level, 10 + floor(completed days since signup * 90 / 365)); equal scores share a rank. Other metrics retain their activity counts or XP.
             profile: {$ref: '#/components/schemas/RankingProfile'}
             stats: {$ref: '#/components/schemas/RankingStats'}
         - type: object
