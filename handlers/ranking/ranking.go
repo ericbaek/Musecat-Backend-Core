@@ -55,6 +55,10 @@ type rankingStats struct {
 	TravelDistanceKm int64 `json:"travel_distance_km"`
 }
 
+type xpRankingStats struct {
+	LevelChange int `json:"level_change"`
+}
+
 type arcadeRankingStats struct {
 	VisitCount int64 `json:"visit_count"`
 }
@@ -209,6 +213,12 @@ func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, 
 	if m == metricExplorer {
 		item.Stats = &rankingStats{}
 	}
+	if m == metricXP {
+		previousExp := max(0, exp-int(rankingScore))
+		item.Stats = &xpRankingStats{
+			LevelChange: item.Profile.Level - userhandler.LevelFromExp(previousExp),
+		}
+	}
 	return item, leaderboardPosition, nil
 }
 
@@ -317,16 +327,23 @@ func metricQuery(app core.App, m metric, start string, now time.Time) (string, d
 		params["now_ms"] = now.UnixMilli()
 		// Invert round((6*level^2 + 110*level)/29): the integer numerator
 		// must be <= 29*exp+14. Keep profile.level based on the original XP.
-		source = `SELECT ul.user, MIN(
-  CAST((SQRT(12100.0 + 24.0 * (29.0 * ul.exp + 14)) - 110) / 12 AS INTEGER),
-  10 + CAST(MAX(0, CAST(
-    ({:now_ms} - CAST(ROUND(unixepoch(u.created, 'subsec') * 1000) AS INTEGER))
-    / 86400000 AS INTEGER
-  )) * 90 / 365 AS INTEGER)
-) AS score
-FROM user_level ul
-INNER JOIN "user" u ON u.id = ul.user
-WHERE ul.exp > 0`
+		source = `SELECT user, MIN(xp_level, CASE
+  WHEN age_days <= 30 THEN 10 + age_days * 40 / 30
+  WHEN age_days <= 45 THEN 50 + (age_days - 30) * 25 / 15
+  WHEN age_days <= 365 THEN 75 + (age_days - 45) * 25 / 320
+  ELSE 100 + (age_days - 365) * 90 / 365
+END) AS score
+FROM (
+  SELECT ul.user,
+    CAST((SQRT(12100.0 + 24.0 * (29.0 * ul.exp + 14)) - 110) / 12 AS INTEGER) AS xp_level,
+    MAX(0, CAST(
+      ({:now_ms} - CAST(ROUND(unixepoch(u.created, 'subsec') * 1000) AS INTEGER))
+      / 86400000 AS INTEGER
+    )) AS age_days
+  FROM user_level ul
+  INNER JOIN "user" u ON u.id = ul.user
+  WHERE ul.exp > 0
+)`
 	case metricPhotographer:
 		source = `SELECT createdBy AS user, COUNT(*) AS score FROM arcade_photo_atoms WHERE public = 1` + filterFor("created") + ` GROUP BY createdBy`
 	}

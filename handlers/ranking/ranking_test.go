@@ -56,11 +56,14 @@ func TestLevelRankingCapBoundaries(t *testing.T) {
 	}{
 		{"signup", 0, 10},
 		{"future signup", -24 * time.Hour, 10},
-		{"four days", 4 * 24 * time.Hour, 10},
-		{"before fifth day", 5*24*time.Hour - time.Millisecond, 10},
-		{"fifth day", 5 * 24 * time.Hour, 11},
-		{"before level 30", 82*24*time.Hour - time.Millisecond, 29},
-		{"level 30", 82 * 24 * time.Hour, 30},
+		{"first day", 24 * time.Hour, 11},
+		{"before day 30", 30*24*time.Hour - time.Millisecond, 48},
+		{"day 30", 30 * 24 * time.Hour, 50},
+		{"before day 44", 44*24*time.Hour - time.Millisecond, 71},
+		{"day 44", 44 * 24 * time.Hour, 73},
+		{"before day 45", 45*24*time.Hour - time.Millisecond, 73},
+		{"day 45", 45 * 24 * time.Hour, 75},
+		{"day 46", 46 * 24 * time.Hour, 75},
 		{"before first year", 365*24*time.Hour - time.Millisecond, 99},
 		{"first year", 365 * 24 * time.Hour, 100},
 		{"second year", 730 * 24 * time.Hour, 190},
@@ -131,6 +134,93 @@ func TestLevelRankingOrdersAndTiesByCappedLevel(t *testing.T) {
 		got := entries[i]
 		if got.Score != want.score || got.Rank != want.rank || got.Profile.Level != want.level {
 			t.Fatalf("entry %d: score=%d rank=%d level=%d; want %+v", i, got.Score, got.Rank, got.Profile.Level, want)
+		}
+	}
+}
+
+func TestXPRankingReturnsActualPeriodLevelGain(t *testing.T) {
+	app := testutil.NewTestApp(t)
+	now := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+	id := seedRankingUser(t, app, "growth", now.AddDate(-2, 0, 0), 1000)
+	collection, err := app.FindCollectionByNameOrId("user_level_log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, tc := range []struct{ days, previous, current int }{{400, 0, 100}, {200, 100, 300}, {60, 300, 500}, {10, 500, 800}, {1, 800, 1000}} {
+		log := core.NewRecord(collection)
+		log.Set("user", id)
+		log.Set("kind", fmt.Sprintf("xp:period-growth:%d", i))
+		log.Set("previous_exp", tc.previous)
+		log.Set("new_exp", tc.current)
+		log.Set("diff_exp", tc.current-tc.previous)
+		if err := app.Save(log); err != nil {
+			t.Fatal(err)
+		}
+		_, err := app.DB().NewQuery(`UPDATE user_level_log SET created={:created} WHERE id={:id}`).Bind(dbx.Params{"id": log.Id, "created": now.Add(-time.Duration(tc.days) * 24 * time.Hour).Format(types.DefaultDateLayout)}).Execute()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		period period
+		xp     int64
+		gain   int
+	}{{periodWeek, 200, 7}, {periodMonth, 500, 20}, {periodHalfYear, 700, 30}, {periodYear, 900, 46}, {periodAll, 1000, 60}} {
+		t.Run(string(tc.period), func(t *testing.T) {
+			entries, viewer, err := load(app, context.Background(), metricXP, tc.period, now, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 1 || viewer == nil {
+				t.Fatalf("missing entries/viewer: %+v %+v", entries, viewer)
+			}
+			for _, got := range []entry{entries[0], *viewer} {
+				stats, ok := got.Stats.(*xpRankingStats)
+				if !ok || stats.LevelChange != tc.gain || got.Score != tc.xp || got.Profile.Level != 60 {
+					t.Fatalf("score=%d profile.level=%d stats=%+v; want XP=%d, gain=%d, original level=60", got.Score, got.Profile.Level, got.Stats, tc.xp, tc.gain)
+				}
+			}
+		})
+	}
+}
+
+func TestXPRankingUsesNetXPAndAllowsZeroLevelGain(t *testing.T) {
+	app := testutil.NewTestApp(t)
+	now := time.Now().UTC()
+	collection, err := app.FindCollectionByNameOrId("user_level_log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name          string
+		current, gain int
+		changes       [][2]int
+	}{
+		{"no-level-up", 1000, 0, [][2]int{{999, 1000}}},
+		{"net-reversal", 900, 4, [][2]int{{800, 1000}, {1000, 900}}},
+	} {
+		id := seedRankingUser(t, app, tc.name, now.AddDate(-1, 0, 0), tc.current)
+		for i, change := range tc.changes {
+			log := core.NewRecord(collection)
+			log.Set("user", id)
+			log.Set("kind", fmt.Sprintf("xp:net:%d", i))
+			log.Set("previous_exp", change[0])
+			log.Set("new_exp", change[1])
+			log.Set("diff_exp", change[1]-change[0])
+			if err := app.Save(log); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, viewer, err := load(app, context.Background(), metricXP, periodWeek, now, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if viewer == nil {
+			t.Fatal("missing XP viewer")
+		}
+		stats, ok := viewer.Stats.(*xpRankingStats)
+		if !ok || stats.LevelChange != tc.gain {
+			t.Fatalf("stats=%+v; want gain=%d", viewer.Stats, tc.gain)
 		}
 	}
 }

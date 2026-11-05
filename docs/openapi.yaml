@@ -514,9 +514,12 @@ components:
             score:
               type: integer
               format: int64
-              description: For metric=level, min(profile.level, 10 + floor(completed days since signup * 90 / 365)); equal scores share a rank. Other metrics retain their activity counts or XP.
+              description: For metric=level, the smaller of profile.level and the account-age cap, interpolated through completed days 0=10, 30=50, 45=75 and 365=100 (fractions discarded); after day 365, add floor((days-365)*90/365). Equal scores share a rank. Other metrics retain their activity counts or XP.
             profile: {$ref: '#/components/schemas/RankingProfile'}
-            stats: {$ref: '#/components/schemas/RankingStats'}
+            stats:
+              oneOf:
+                - $ref: '#/components/schemas/RankingStats'
+                - $ref: '#/components/schemas/RankingXpStats'
         - type: object
           required: [rank, score, arcade]
           properties:
@@ -529,6 +532,14 @@ components:
       required: [travel_distance_km]
       properties:
         travel_distance_km: {type: integer, format: int64}
+    RankingXpStats:
+      type: object
+      required: [level_change]
+      properties:
+        level_change:
+          type: integer
+          minimum: 0
+          description: Actual levels gained from the period's net XP, computed as profile.level minus the XP-derived level at max(0, current XP - score). Present for metric=xp, including viewer entries.
     RankingArcade:
       type: object
       required: [id, name, country]
