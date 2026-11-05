@@ -146,7 +146,7 @@ func load(app core.App, ctx context.Context, m metric, p period, now time.Time, 
 		return loadArcadeRankings(app, ctx, p, now)
 	}
 
-	query, params := metricQuery(app, m, rangeStart(p, now))
+	query, params := metricQuery(app, m, rangeStart(p, now), now)
 	where := "WHERE leaderboard_position <= {:limit}"
 	if viewerID != "" {
 		params["viewer"] = viewerID
@@ -206,9 +206,6 @@ func scanUserEntry(rows interface{ Scan(dest ...any) error }, m metric) (entry, 
 	profileCountries := userhandler.ProfileCountriesFromJSON(countries)
 	_, item.Profile.PrimaryCountry = userhandler.ResolveStoredProfileCountries(profileCountries, countryMode, autoPrimaryCountry)
 	item.Profile.Tags = parseTags(tags)
-	if m == metricLevel {
-		item.Score = int64(item.Profile.Level)
-	}
 	if m == metricExplorer {
 		item.Stats = &rankingStats{}
 	}
@@ -298,7 +295,7 @@ func parseTags(raw string) []string {
 	return tags
 }
 
-func metricQuery(app core.App, m metric, start string) (string, dbx.Params) {
+func metricQuery(app core.App, m metric, start string, now time.Time) (string, dbx.Params) {
 	params := dbx.Params{"limit": leaderboardLimit}
 	filterFor := func(column string) string {
 		if start == "" {
@@ -317,11 +314,27 @@ func metricQuery(app core.App, m metric, start string) (string, dbx.Params) {
 	case metricXP:
 		source = `SELECT user, SUM(diff_exp) AS score FROM user_level_log WHERE 1=1` + filterFor("created") + ` GROUP BY user HAVING SUM(diff_exp) > 0`
 	case metricLevel:
-		source = `SELECT user, exp AS score FROM user_level WHERE exp > 0`
+		params["now_ms"] = now.UnixMilli()
+		// Invert round((6*level^2 + 110*level)/29): the integer numerator
+		// must be <= 29*exp+14. Keep profile.level based on the original XP.
+		source = `SELECT ul.user, MIN(
+  CAST((SQRT(12100.0 + 24.0 * (29.0 * ul.exp + 14)) - 110) / 12 AS INTEGER),
+  10 + CAST(MAX(0, CAST(
+    ({:now_ms} - CAST(ROUND(unixepoch(u.created, 'subsec') * 1000) AS INTEGER))
+    / 86400000 AS INTEGER
+  )) * 90 / 365 AS INTEGER)
+) AS score
+FROM user_level ul
+INNER JOIN "user" u ON u.id = ul.user
+WHERE ul.exp > 0`
 	case metricPhotographer:
 		source = `SELECT createdBy AS user, COUNT(*) AS score FROM arcade_photo_atoms WHERE public = 1` + filterFor("created") + ` GROUP BY createdBy`
 	}
 
+	scoreFilter := "scores.score > 0"
+	if m == metricLevel {
+		scoreFilter = "scores.score >= 0"
+	}
 	visitVisibility := ""
 	if m == metricExplorer || m == metricVisits {
 		visitVisibility = " AND COALESCE(NULLIF(ui.visit_visibility, ''), 'summary') IN ('summary', 'full')"
@@ -358,11 +371,11 @@ INNER JOIN "user" u ON u.id = scores.user
 LEFT JOIN user_info ui ON ui.id = u.id
 LEFT JOIN user_level ul ON ul.user = u.id
 WHERE COALESCE(u.withdrawn, 0) = 0
-  AND scores.score > 0%s
+  AND %s%s
 )
 SELECT score, id, nickname, username, avatar, countries, country_mode, auto_primary_country, exp, tags, rank, leaderboard_position
 FROM ranked
-`, source, userTags, visitVisibility), params
+`, source, userTags, scoreFilter, visitVisibility), params
 }
 
 func attachExplorerDistances(app core.App, ctx context.Context, entries []entry, viewer *entry, start string) error {
