@@ -381,3 +381,39 @@ func setRecordCreated(t *testing.T, app *tests.TestApp, table, id string, ts tim
 		t.Fatalf("failed to set %s.created: %v", table, err)
 	}
 }
+
+func TestRankings_XPLevelChangeWireContract(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	seedUserLevelExp(t, app, user.Id, 1000)
+	seedSupporterLedgerEntry(t, app, user.Id, "xp:ranking-growth", 800, 1000, time.Now().UTC().Add(-time.Hour))
+	res := executeJSONRequest(t, app, http.MethodGet, "/rankings?metric=xp&period=week", "", map[string]string{"Authorization": "Bearer " + token})
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+	type growthEntry struct {
+		Score   int `json:"score"`
+		Profile struct {
+			Level int `json:"level"`
+		} `json:"profile"`
+		Stats struct {
+			LevelChange *int `json:"level_change"`
+		} `json:"stats"`
+	}
+	var payload struct {
+		Entries []growthEntry `json:"entries"`
+		Viewer  *growthEntry  `json:"viewer"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Entries) != 1 || payload.Viewer == nil {
+		t.Fatalf("missing entries/viewer: %+v", payload)
+	}
+	for _, got := range []growthEntry{payload.Entries[0], *payload.Viewer} {
+		if got.Score != 200 || got.Profile.Level != 60 || got.Stats.LevelChange == nil || *got.Stats.LevelChange != 7 {
+			t.Fatalf("unexpected XP growth entry: %+v", got)
+		}
+	}
+}
