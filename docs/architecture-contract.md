@@ -1268,7 +1268,10 @@ once, hashed at rest, and excluded from history and list responses.
 `service/contribution` wraps the request app and its nested transaction apps with
 a verified source. Saves of new arcade, changelog and photo-atom records retain
 an immutable `contribution_source` snapshot. `by`/`createdBy` remain the owner's
-user ID. Normal records have a null source. Bot edits earn no XP; creation origins,
+user ID. Bot names are private to the issuing account: custom history responses
+omit the name for every other viewer, including staff. Raw record responses never
+expose the stored attribution snapshot. Public UI uses a BOT badge without the name.
+Normal records have a null source. Bot edits earn no XP; creation origins,
 per-change backfill and photo eligibility preserve that policy across web/API
 handoffs. Deferred rewards for actual web changes use their persisted origin,
 including when a bot later publishes them. Legacy rewards are not reclassified.

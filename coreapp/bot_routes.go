@@ -13,13 +13,24 @@ import (
 	search "github.com/ericbaek/musecat-backend-core/handlers/search"
 	user "github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/ericbaek/musecat-backend-core/service/botaccess"
+	"github.com/ericbaek/musecat-backend-core/service/contribution"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/hook"
 )
 
 // The bot namespace is deliberately limited to arcade creation and information
 // edits. Registering a web/partner route never automatically exposes it to bots.
 func registerBotRoutes(se *core.ServeEvent) {
+	// Raw photo metadata is publicly readable. Stored attribution must only be
+	// serialized through the viewer-aware custom history endpoints.
+	se.App.OnRecordEnrich("arcade", "arcade_changelog", "arcade_photo_atoms").Bind(&hook.Handler[*core.RecordEnrichEvent]{
+		Id: "__botContributionPrivacy__",
+		Func: func(e *core.RecordEnrichEvent) error {
+			e.Record.Hide(contribution.Field)
+			return e.Next()
+		},
+	})
 	keys := se.Router.Group("/user/bot-keys").Bind(apis.RequireAuth("user"), user.RequireActiveUser(), apis.BodyLimit(4096))
 	keys.GET("", botaccess.List)
 	keys.POST("", botaccess.Create)

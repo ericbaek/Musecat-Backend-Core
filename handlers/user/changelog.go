@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/ericbaek/musecat-backend-core/service/botaccess"
+	"github.com/ericbaek/musecat-backend-core/service/contribution"
 	"net/http"
 	"strconv"
 	"strings"
@@ -138,7 +139,7 @@ LIMIT {:limit} OFFSET {:offset}
 				"details": err.Error(),
 			})
 		}
-		var source any
+		var source *contribution.Source
 		if value := userChangelogString(raw, "contribution_source"); value != "" {
 			if err := json.Unmarshal([]byte(value), &source); err != nil {
 				return re.InternalServerError("Invalid contribution source.", err)
@@ -151,7 +152,7 @@ LIMIT {:limit} OFFSET {:offset}
 			"changed":     userChangelogString(raw, "changed"),
 		}
 		if includeDetails {
-			item["contribution_source"] = source
+			item["contribution_source"] = contribution.ForViewer(source, userChangelogString(raw, "by"), re.Auth.Id)
 			var log any
 			if value := userChangelogString(raw, "log"); value != "" {
 				if err := json.Unmarshal([]byte(value), &log); err != nil {

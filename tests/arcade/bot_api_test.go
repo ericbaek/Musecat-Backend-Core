@@ -167,6 +167,54 @@ func TestBotCreationAndEditsRetainAccountAndBotIdentity(t *testing.T) {
 	}
 }
 
+func TestBotNamesArePrivateToTheirIssuingAccount(t *testing.T) {
+	app := newArcadeTestApp(t)
+	stubGeoLookup(t)
+	ownerSession, owner := createAuthUserWithTags(t, app, []string{"founding_supporter"})
+	visitorSession, _ := createAuthUserWithTags(t, app, nil)
+	reviewerSession, _ := createAuthUserWithTags(t, app, []string{"developer"})
+	const privateName = "PRIVATE_BOT_NAME_SENTINEL"
+	key, keyID := issueBotKey(t, app, ownerSession, privateName)
+	created := botRequest(t, app, key, "POST", "/bot/v1/arcade/new", `{"name":"Privacy fixture","address":"Seoul","location":{"lat":37.5665,"lon":126.978}}`, 200)
+	arcadeID := created["id"].(string)
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arcade.Set("public", true)
+	if err := app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range []string{visitorSession, reviewerSession} {
+		for _, path := range []string{"/arcade/changelog?arcade=" + arcadeID, "/user/changelog?user=" + owner.Id} {
+			response := botRequest(t, app, session, "GET", path, "", 200)
+			items := response["items"].([]any)
+			if len(items) != 1 {
+				t.Fatalf("expected one visible bot edit: %v", response)
+			}
+			source := items[0].(map[string]any)["contribution_source"].(map[string]any)
+			if source["kind"] != "bot" || source["id"] != keyID {
+				t.Fatal("public BOT marker must retain verified attribution")
+			}
+			if _, present := source["name"]; present {
+				t.Fatal("bot name must be omitted for visitors and reviewers")
+			}
+			raw, _ := json.Marshal(response)
+			if strings.Contains(string(raw), privateName) {
+				t.Fatal("private bot name leaked elsewhere in the response")
+			}
+		}
+	}
+	botRequest(t, app, ownerSession, "DELETE", "/user/bot-keys/"+keyID, "", 204)
+	for _, path := range []string{"/arcade/changelog?arcade=" + arcadeID, "/user/changelog?user=" + owner.Id + "&bot=" + keyID} {
+		response := botRequest(t, app, ownerSession, "GET", path, "", 200)
+		source := response["items"].([]any)[0].(map[string]any)["contribution_source"].(map[string]any)
+		if source["name"] != privateName {
+			t.Fatal("owner must retain immutable bot names after redaction and revocation")
+		}
+	}
+}
+
 func TestBotPublicEditsEarnNoXPButWebEditsStillDo(t *testing.T) {
 	app := newArcadeTestApp(t)
 	stubGeoLookup(t)
@@ -221,6 +269,10 @@ func TestBotGamePhotoAndPublicationFlow(t *testing.T) {
 		t.Fatalf("bot public preview awards XP: %v", xpPreview)
 	}
 	botRequest(t, app, key, "PUT", "/bot/v1/arcade/public", fmt.Sprintf(`{"arcade":%q}`, id), 200)
+	metadata := botRequest(t, app, "", "GET", "/api/collections/arcade_photo_atoms/records/"+atomID, "", 200)
+	if _, present := metadata["contribution_source"]; present {
+		t.Fatal("raw public photo metadata must not expose stored bot attribution")
+	}
 	after, _ := xp.LoadCurrentExp(app, owner.Id)
 	if after != before {
 		t.Fatalf("bot publication awarded XP: %d -> %d", before, after)

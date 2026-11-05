@@ -74,11 +74,11 @@ components:
   schemas:
     ContributionSource:
       type: [object, 'null']
-      required: [kind, id, name]
+      required: [kind, id]
       properties:
         kind: {type: string, description: Server-verified contribution origin. Bot API writes use bot.}
         id: {type: string, description: Credential identifier, never its secret.}
-        name: {type: string, description: Immutable bot name at the time of the change.}
+        name: {type: string, description: Immutable bot name at the time of the change. Only returned to the issuing account; omitted for every other viewer.}
     BotKeyMetadata:
       type: object
       required: [id, name, prefix, created, expires, revoked, last_used]

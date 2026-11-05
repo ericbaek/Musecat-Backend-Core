@@ -74,7 +74,10 @@ attendance, visit verification, moderation and unlisted routes are excluded.
 
 Arcade and account history return `contribution_source: {kind, id, name}` for bot
 work. `id` identifies the credential record, not the secret. Normal historical
-rows retain a null source. The website shows the issuing account and **Bot: name**.
+rows retain a null source. Bot names are private to the issuing account. History responses omit `name` for
+all other viewers, including staff; the website shows the issuing account and a
+**BOT** badge without the name. Raw public photo metadata never exposes the stored
+attribution snapshot.
 Revoking a key does not rewrite or erase its earlier contributions.
 
 Bot edits grant no XP. Bot-created arcades receive no creation/publication reward,

@@ -490,3 +490,10 @@ changelog rows are excluded from draft reward backfill, and bot photo atoms
 remain ineligible after web application. Real web edits keep existing reward
 rules; unchanged saves do not convert prior bot work into rewarded contributions.
 Source snapshots and existing changelog rows are not rewritten on revocation.
+
+## Bot name privacy
+
+Bot contribution names are private to the issuing account. Arcade and user history
+responses retain the verified bot kind and identifier but omit its name for every
+other viewer, including reviewers. Owner-only history retains immutable names even
+after key revocation. Raw photo metadata does not expose stored contribution data.

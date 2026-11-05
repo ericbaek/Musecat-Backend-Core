@@ -8,11 +8,24 @@ import (
 
 const Field = "contribution_source"
 
-// Source is an immutable public snapshot, never a credential or a caller-supplied claim.
+// Source is an immutable stored snapshot, never a credential or a caller-supplied claim.
 type Source struct {
 	Kind string `json:"kind"`
 	ID   string `json:"id"`
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
+}
+
+// ForViewer keeps bot names private to the account that performed the edit.
+// The stored snapshot is never modified by response redaction.
+func ForViewer(source *Source, ownerID, viewerID string) *Source {
+	if source == nil {
+		return nil
+	}
+	visible := *source
+	if visible.Kind == "bot" && (viewerID == "" || viewerID != ownerID) {
+		visible.Name = ""
+	}
+	return &visible
 }
 
 type attributedApp struct {
