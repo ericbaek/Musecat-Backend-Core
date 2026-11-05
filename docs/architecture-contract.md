@@ -1250,3 +1250,17 @@ preserves the saved value. Profile responses return the saved flag. When true,
 `GET /arcades/updates` excludes that account's existing and future visit entries;
 profile Passport statistics, maps and stamps retain their existing visibility rules.
 Private visits remain excluded regardless of this flag.
+
+### Deployment public-read policy
+
+`service/readpolicy.Register` installs an optional, app-scoped check before public
+arcade detail, authenticated expanded nearby pages, and detailed arcade/user
+history are written. It receives the actual exposed public arcade IDs; errors
+abort the entire response. Core has no quota, CAPTCHA provider, or policy state.
+Without registration the check is a no-op. Full owns deployment policy and routes.
+
+Anonymous `/arcades/nearby` responses omit `game_series` and `game`, including
+`expand=true`. Guest campaign summaries are empty because they contain game
+version/series bundles and machine counts. Series filtering remains available; cabinet filtering still
+requires authentication. Authenticated expansion/ranking and 15-row pagination
+are preserved. `/arcades` is a separate summary contract and is unchanged.

@@ -683,7 +683,26 @@ func TestNearbyIncludesCampaignsForVisibleArcades(t *testing.T) {
 		t.Fatalf("failed to move arcade: %v", err)
 	}
 
-	response := executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?lat=37.5&lon=127.0&game_series="+seriesID, "", nil)
+	guest := executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?lat=37.5&lon=127.0&expand=true&game_series="+seriesID, "", nil)
+	var guestPayload struct {
+		Items     []map[string]any `json:"items"`
+		Campaigns []any            `json:"campaigns"`
+	}
+	if err := json.NewDecoder(guest.Body).Decode(&guestPayload); err != nil {
+		t.Fatal(err)
+	}
+	guest.Body.Close()
+	if guest.StatusCode != 200 || len(guestPayload.Campaigns) != 0 {
+		t.Fatal("guest campaign series disclosure", guestPayload)
+	}
+	for _, item := range guestPayload.Items {
+		for _, key := range []string{"game", "game_series", "campaigns"} {
+			if _, ok := item[key]; ok {
+				t.Fatalf("guest exposed %s", key)
+			}
+		}
+	}
+	response := executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?lat=37.5&lon=127.0&game_series="+seriesID, "", map[string]string{"Authorization": "Bearer " + token})
 	var payload struct {
 		Items     []map[string]any `json:"items"`
 		Campaigns []map[string]any `json:"campaigns"`

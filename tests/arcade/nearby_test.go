@@ -78,9 +78,11 @@ func TestNearby_SortsByDistanceFromCachedCandidates(t *testing.T) {
 		if got := item["id"]; got != wantIDs[i] {
 			t.Fatalf("expected item[%d] id %q, got %v", i, wantIDs[i], got)
 		}
-		series, ok := item["game_series"].([]any)
-		if !ok || len(series) != 1 || series[0] != seriesID {
-			t.Fatalf("expected item[%d] game_series to contain %q, got %#v", i, seriesID, item["game_series"])
+		if _, ok := item["game_series"]; ok {
+			t.Fatalf("guest series disclosure: %#v", item)
+		}
+		if _, ok := item["game"]; ok {
+			t.Fatalf("guest game disclosure: %#v", item)
 		}
 		distance, ok := item["distance_km"].(float64)
 		if !ok {
@@ -306,7 +308,7 @@ func TestNearby_RejectsCabinetFiltersWithoutAuthentication(t *testing.T) {
 
 func TestNearby_ExpandsQuerySeriesAndAppliesDistanceLimit(t *testing.T) {
 	app := newArcadeTestApp(t)
-	_, user := createAuthUser(t, app)
+	token, user := createAuthUser(t, app)
 	seriesID := seedNearbyGameSeries(t, app, "Nearby Series")
 	seriesID2 := seedNearbyGameSeries(t, app, "Other Series")
 	versionID := seedNearbyGameSeriesVersion(t, app, seriesID, "Nearby Version")
@@ -342,7 +344,7 @@ func TestNearby_ExpandsQuerySeriesAndAppliesDistanceLimit(t *testing.T) {
 	seedNearbyGameAtom(t, app, farMoleculeID, versionID)
 	seedNearbyGameAtom(t, app, farMoleculeID, versionID2)
 
-	res := executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?game_series="+seriesID+"&lat=37.5665&lon=126.9780&expand=true&distance_limit=3", "", nil)
+	res := executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?game_series="+seriesID+"&lat=37.5665&lon=126.9780&expand=true&distance_limit=3", "", map[string]string{"Authorization": "Bearer " + token})
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", res.StatusCode)
 	}
@@ -428,7 +430,7 @@ func TestNearby_ExpandsQuerySeriesAndAppliesDistanceLimit(t *testing.T) {
 
 func TestNearby_ExpandBoostsMachineCountRanking(t *testing.T) {
 	app := newArcadeTestApp(t)
-	_, user := createAuthUser(t, app)
+	token, user := createAuthUser(t, app)
 	seriesID := seedNearbyGameSeries(t, app, "MyMai")
 	versionID := seedNearbyGameSeriesVersion(t, app, seriesID, "MyMai Version")
 
@@ -452,7 +454,7 @@ func TestNearby_ExpandBoostsMachineCountRanking(t *testing.T) {
 	bAtomID := seedNearbyGameAtom(t, app, bMoleculeID, versionID)
 	setNearbyAtomQuantity(t, app, bAtomID, 4)
 
-	res := executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?game_series="+seriesID+"&lat=37.5665&lon=126.9780&expand=true", "", nil)
+	res := executeJSONRequest(t, app, http.MethodGet, "/arcades/nearby?game_series="+seriesID+"&lat=37.5665&lon=126.9780&expand=true", "", map[string]string{"Authorization": "Bearer " + token})
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", res.StatusCode)
 	}

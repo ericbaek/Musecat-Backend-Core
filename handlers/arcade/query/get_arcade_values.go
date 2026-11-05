@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"net/http"
 	"net/url"
 	"slices"
@@ -70,6 +71,9 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 		})
 	}
 	if !allowDraft {
+		if err := readpolicy.Check(re, rec.Id); err != nil {
+			return err
+		}
 		// Analytics is deliberately best effort and never changes the public
 		// detail response if event persistence is temporarily unavailable.
 		_ = arcadeanalytics.RecordPageView(re.App, rec.Id, q.Get("source"), q["game_series"])
