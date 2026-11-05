@@ -1260,6 +1260,7 @@ abort the entire response. Core has no quota, CAPTCHA provider, or policy state.
 Without registration the check is a no-op. Full owns deployment policy and routes.
 
 Anonymous `/arcades/nearby` responses omit `game_series` and `game`, including
-`expand=true`. Series filtering remains available; cabinet filtering still
+`expand=true`. Guest campaign summaries are empty because they contain game
+version/series bundles and machine counts. Series filtering remains available; cabinet filtering still
 requires authentication. Authenticated expansion/ranking and 15-row pagination
 are preserved. `/arcades` is a separate summary contract and is unchanged.

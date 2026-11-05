@@ -260,19 +260,23 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 			CabinetID: filter.CabinetID,
 		})
 	}
-	nearbyCampaigns, err := arcadeinternal.BuildNearbyCampaigns(re.App, campaignFilters)
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to load nearby campaign targets",
-			"details": err.Error(),
-		})
-	}
-	campaignSummaries, err := decorateNearbyCampaigns(re.App, results[start:end], nearbyCampaigns)
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to build nearby campaigns",
-			"details": err.Error(),
-		})
+	campaignSummaries := []map[string]any{}
+	if re.Auth != nil {
+		nearbyCampaigns, err := arcadeinternal.BuildNearbyCampaigns(re.App, campaignFilters)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{
+				"error":   "failed to load nearby campaign targets",
+				"details": err.Error(),
+			})
+		}
+		campaignSummaries, err = decorateNearbyCampaigns(re.App, results[start:end], nearbyCampaigns)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{
+				"error":   "failed to build nearby campaigns",
+				"details": err.Error(),
+			})
+		}
+
 	}
 	countryTotals := summarizeCountryTotals(results)
 	response := map[string]any{

@@ -4219,6 +4219,7 @@ paths:
       description: |
         Guests receive venue summaries without game_series or game fields.
         expand=true exposes game details only to authenticated users.
+        Guest campaign summaries are empty because they contain game version bundles.
         Deployment read policies may reject an entire expanded page with 429.
       parameters:
         - name: game_filter
