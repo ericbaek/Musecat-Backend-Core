@@ -1263,7 +1263,9 @@ revocation, account token-key fingerprint and active-account policy, and uses th
 existing handlers. Keys never authenticate web/session/raw collection APIs and
 cannot issue credentials or reach management routes. Each key permits 60 calls
 per minute; its quota and last use are stored atomically. Secrets are returned
-once, hashed at rest, and excluded from history and list responses.
+once, hashed at rest, and excluded from history and list responses. Bot keys have
+no automatic expiry; existing expiry timestamps are ignored. Every unrevoked key
+counts toward the five-key account limit.
 
 `service/contribution` wraps the request app and its nested transaction apps with
 a verified source. Saves of new arcade, changelog and photo-atom records retain

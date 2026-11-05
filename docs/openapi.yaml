@@ -81,13 +81,12 @@ components:
         name: {type: string, description: Immutable bot name at the time of the change. Only returned to the issuing account; omitted for every other viewer.}
     BotKeyMetadata:
       type: object
-      required: [id, name, prefix, created, expires, revoked, last_used]
+      required: [id, name, prefix, created, revoked, last_used]
       properties:
         id: {type: string}
         name: {type: string, minLength: 1, maxLength: 60}
         prefix: {type: string}
         created: {type: string}
-        expires: {type: string}
         revoked: {type: string}
         last_used: {type: string}
     Announcement:
@@ -10975,7 +10974,7 @@ x-musecat-joint-connection:
         '403': {description: Inactive account.}
     post:
       summary: Issue a bot key owned by the authenticated account
-      description: A completed active profile with founding_supporter, supporter, designer, moderator or developer is required. At most five active keys; keys expire after 90 days. The secret is returned once and only its SHA-256 hash is stored.
+      description: A completed active profile with founding_supporter, supporter, designer, moderator or developer is required. At most five unrevoked keys. Keys have no automatic expiry, including keys issued under the former expiry policy. The secret is returned once and only its SHA-256 hash is stored.
       security: [{bearerAuth: []}]
       requestBody:
         required: true

@@ -37,7 +37,7 @@ func noStore(re *core.RequestEvent) {
 }
 
 func projection(record *core.Record) map[string]any {
-	return map[string]any{"id": record.Id, "name": record.GetString("name"), "prefix": record.GetString("prefix"), "created": record.GetString("created"), "expires": record.GetString("expires"), "revoked": record.GetString("revoked"), "last_used": record.GetString("last_used")}
+	return map[string]any{"id": record.Id, "name": record.GetString("name"), "prefix": record.GetString("prefix"), "created": record.GetString("created"), "revoked": record.GetString("revoked"), "last_used": record.GetString("last_used")}
 }
 
 func List(re *core.RequestEvent) error {
@@ -84,7 +84,7 @@ func Create(re *core.RequestEvent) error {
 	token := tokenPrefix + base64.RawURLEncoding.EncodeToString(secret)
 	var record *core.Record
 	err = re.App.RunInTransaction(func(tx core.App) error {
-		active, err := tx.CountRecords(Keys, dbx.NewExp("owner={:owner} AND revoked='' AND expires>{:now}", dbx.Params{"owner": re.Auth.Id, "now": time.Now().UTC().Format("2006-01-02 15:04:05.000Z")}))
+		active, err := tx.CountRecords(Keys, dbx.NewExp("owner={:owner} AND revoked=''", dbx.Params{"owner": re.Auth.Id}))
 		if err != nil {
 			return err
 		}
@@ -101,7 +101,6 @@ func Create(re *core.RequestEvent) error {
 		record.Set("key_hash", digest(token))
 		record.Set("owner_key_hash", digest(re.Auth.TokenKey()))
 		record.Set("prefix", token[:len(tokenPrefix)+8])
-		record.Set("expires", time.Now().UTC().AddDate(0, 0, 90))
 		return tx.Save(record)
 	})
 	if err != nil {
@@ -148,7 +147,7 @@ func RequireKey() *hook.Handler[*core.RequestEvent] {
 		var source contribution.Source
 		err := re.App.RunInTransaction(func(tx core.App) error {
 			record, err := tx.FindFirstRecordByData(Keys, "key_hash", digest(parts[1]))
-			if err != nil || record.GetString("revoked") != "" || !record.GetDateTime("expires").Time().After(time.Now().UTC()) {
+			if err != nil || record.GetString("revoked") != "" {
 				return errInvalidKey
 			}
 			owner, err = tx.FindRecordById("user", record.GetString("owner"))

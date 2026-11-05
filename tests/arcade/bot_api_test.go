@@ -78,15 +78,25 @@ func TestBotKeysAreAccountBoundAndNotSessions(t *testing.T) {
 	botRequest(t, app, key, "GET", "/bot/v1/arcade/drafts", "", 401)
 }
 
-func TestBotKeyExpiryLimitAndAccountRestriction(t *testing.T) {
+func TestBotKeysDoNotExpireAndRetainRateAndAccountRestrictions(t *testing.T) {
 	app := newArcadeTestApp(t)
 	session, owner := createAuthUserWithTags(t, app, []string{"founding_supporter"})
 	key, id := issueBotKey(t, app, session, "Importer")
 	stored, _ := app.FindRecordById(botaccess.Keys, id)
+	if stored.GetString("expires") != "" {
+		t.Fatal("new bot keys must not have an expiry date")
+	}
+	listed := botRequest(t, app, session, "GET", "/user/bot-keys", "", 200)
+	if _, present := listed["items"].([]any)[0].(map[string]any)["expires"]; present {
+		t.Fatal("metadata must not expose a removed expiry policy")
+	}
+	botRequest(t, app, key, "GET", "/bot/v1/arcade/drafts", "", 200)
 	stored.Set("expires", time.Now().Add(-time.Hour))
 	if err := app.Save(stored); err != nil {
 		t.Fatal(err)
 	}
+	botRequest(t, app, key, "GET", "/bot/v1/arcade/drafts", "", 200)
+	botRequest(t, app, session, "DELETE", "/user/bot-keys/"+id, "", 204)
 	botRequest(t, app, key, "GET", "/bot/v1/arcade/drafts", "", 401)
 	key, id = issueBotKey(t, app, session, "Limited")
 	stored, _ = app.FindRecordById(botaccess.Keys, id)
@@ -343,6 +353,14 @@ func TestBotKeyListRetainsOldBotsAndEnforcesActiveLimit(t *testing.T) {
 	var activeID string
 	for index := 0; index < 5; index++ {
 		_, activeID = issueBotKey(t, app, session, fmt.Sprintf("Active %d", index))
+		record, err := app.FindRecordById(botaccess.Keys, activeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Set("expires", time.Now().Add(-time.Hour))
+		if err := app.Save(record); err != nil {
+			t.Fatal(err)
+		}
 	}
 	botRequest(t, app, session, "POST", "/user/bot-keys", `{"name":"Over limit"}`, 400)
 	botRequest(t, app, session, "DELETE", "/user/bot-keys/"+activeID, "", 204)

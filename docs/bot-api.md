@@ -15,9 +15,10 @@ Only completed, active accounts with `founding_supporter`, `supporter`, `designe
 `moderator` or `developer` may issue and use keys. Ordinary accounts and
 `arcade_owner` alone are not eligible. Entitlement is rechecked on every call;
 removing it blocks existing keys. Owners can still list/revoke their own keys.
-An eligible account may hold five active keys. Each key expires after 90
-days. Issue a replacement and revoke the old key to rotate credentials. The key
-list returns safe metadata, expiry, revocation and last-used time, never the
+An eligible account may hold five unrevoked keys. Keys have no automatic expiry,
+including keys issued under the former expiry policy. Issue a replacement and
+revoke the old key to rotate credentials. The key list returns safe metadata,
+revocation and last-used time, never the
 secret or digest. Bot names are immutable snapshots in committed history.
 
 The account-session endpoints are `GET|POST /user/bot-keys` and
@@ -107,7 +108,9 @@ existing OAuth tokens must not gain new permissions implicitly.
 ## Release
 
 Core owns fresh-bootstrap schema and API semantics. Full owns
-`1794900000_bot_api.go`, its independent additive production migration. Release
+`1794900000_bot_api.go`, its independent additive production migration, and
+`1795100000_bot_keys_without_expiry.go`, which makes the legacy date optional
+without rewriting existing keys. Release
 Core first, then pin that exact revision in Full before publishing its binary.
 Run Full's migration preflight/dry run on a disposable copied database as required
 by its migration contract. Do not run Core migrations against Full or production.
