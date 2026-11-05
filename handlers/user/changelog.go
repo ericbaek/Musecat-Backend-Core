@@ -3,6 +3,7 @@ package user
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"net/http"
 	"strconv"
 	"strings"
@@ -87,7 +88,7 @@ WHERE %s
 	rows, err := re.App.DB().NewQuery(fmt.Sprintf(`
 SELECT
 	c.id,
-	c.arcade,
+	c.arcade, a.public AS arcade_public,
 	COALESCE(ab.name, '') AS arcade_name,
 	c.changed%s
 FROM arcade_changelog c
@@ -106,6 +107,7 @@ LIMIT {:limit} OFFSET {:offset}
 	defer rows.Close()
 
 	items := make([]map[string]any, 0, perPage)
+	publicDetailIDs := []string{}
 	for rows.Next() {
 		raw := dbx.NullStringMap{}
 		if err := rows.ScanMap(raw); err != nil {
@@ -121,6 +123,9 @@ LIMIT {:limit} OFFSET {:offset}
 			"changed":     userChangelogString(raw, "changed"),
 		}
 		if includeDetails {
+			if userChangelogString(raw, "arcade_public") == "1" {
+				publicDetailIDs = append(publicDetailIDs, userChangelogString(raw, "arcade"))
+			}
 			var log any
 			if value := userChangelogString(raw, "log"); value != "" {
 				if err := json.Unmarshal([]byte(value), &log); err != nil {
@@ -150,6 +155,12 @@ LIMIT {:limit} OFFSET {:offset}
 		}
 	}
 
+	if err := rows.Close(); err != nil {
+		return re.InternalServerError("Failed to release history query.", nil)
+	}
+	if err := readpolicy.Check(re, publicDetailIDs...); err != nil {
+		return err
+	}
 	lastPage := int64(0)
 	if total > 0 {
 		lastPage = (total + int64(perPage) - 1) / int64(perPage)

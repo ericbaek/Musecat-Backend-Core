@@ -36,13 +36,11 @@ components:
       in: header
       name: X-Feedback-Guest-Key
       description: A 64-character lowercase hexadecimal browser credential. Optional on guest POST /support_feedback to create a recoverable chat; required for all /guest/feedback routes. Only its SHA-256 digest is stored. Existing unkeyed submissions cannot be claimed.
- {type: http, scheme: bearer, description: Musecat-issued server key; distinct from OAuth tokens and secrets.}
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
   parameters:
- {name: X-Request-Id, in: header, required: true, schema: {type: string, format: uuid}, description: Replays return the original result for ten minutes; changed requests with the same ID conflict.}
     LimitQuery:
       name: limit
       in: query
@@ -644,6 +642,29 @@ components:
         location:
           $ref: '#/components/schemas/Location'
         game_series:
+          type: array
+          items:
+            type: string
+    NearbyArcadeSummary:
+      type: object
+      required: [id, country, updated]
+      properties:
+        updated:
+          type: string
+          format: date-time
+          description: Persisted arcade aggregate update time; cache rebuilds do not change it.
+        id:
+          type: string
+        country:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        location:
+          $ref: '#/components/schemas/Location'
+        game_series:
+          description: Omitted for anonymous nearby requests, including expand=true.
           type: array
           items:
             type: string
@@ -1292,7 +1313,7 @@ components:
           type: array
           items:
             allOf:
-              - $ref: '#/components/schemas/ArcadeSummary'
+              - $ref: '#/components/schemas/NearbyArcadeSummary'
               - type: object
                 required: [distance_km]
                 properties:
@@ -1300,7 +1321,9 @@ components:
                     type: number
                     format: double
                   game:
-                    $ref: '#/components/schemas/ArcadeGameValue'
+                    allOf:
+                      - $ref: '#/components/schemas/ArcadeGameValue'
+                    description: Authenticated expanded requests only; omitted for guests.
                   campaigns:
                     type: array
                     description: Campaigns with at least one pending target in this arcade.
@@ -3376,7 +3399,8 @@ components:
         review_outcome: {type: string, enum: [upheld, dismissed, actioned]}
         review_note: {type: string}
         created: {type: string}
-        updated: {type: string}    InquiryBotChoice: {"type":"object","properties":{"id":{"type":"string","maxLength":64},"label":{"type":"string","maxLength":80},"next":{"type":"string","maxLength":64}},"required":["id","label","next"]}
+        updated: {type: string}
+    InquiryBotChoice: {"type":"object","properties":{"id":{"type":"string","maxLength":64},"label":{"type":"string","maxLength":80},"next":{"type":"string","maxLength":64}},"required":["id","label","next"]}
     InquiryBotNode: {"type":"object","properties":{"id":{"type":"string","maxLength":64},"text":{"type":"string","maxLength":2000},"choices":{"type":"array","maxItems":6,"items":{"$ref":"#/components/schemas/InquiryBotChoice"}}},"required":["id","text","choices"]}
     InquiryBotConfig: {"type":"object","properties":{"enabled":{"type":"boolean"},"start":{"type":"string"},"nodes":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/InquiryBotNode"}}},"required":["enabled","start","nodes"]}
     InquiryBotPreview: {"type": "object", "required": ["text", "choices", "revision", "createdAt"], "properties": {"text": {"type": "string"}, "choices": {"type": "array", "items": {"$ref": "#/components/schemas/InquiryBotChoice"}}, "revision": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"}}}
@@ -4192,6 +4216,10 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcades/nearby
+      description: |
+        Guests receive venue summaries without game_series or game fields.
+        expand=true exposes game details only to authenticated users.
+        Deployment read policies may reject an entire expanded page with 429.
       parameters:
         - name: game_filter
           in: query
@@ -7673,8 +7701,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: PUT /arcade/report-subscription
-      description: Compatibility entry that upserts one canonical device and enables its per-arcade preference. Credentials are not duplicated per arcade.
-      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      description: "Compatibility entry that upserts one canonical device and enables its per-arcade preference. Credentials are not duplicated per arcade. Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE)."
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -7705,8 +7732,7 @@ paths:
     delete:
       tags: [Arcade Mutations]
       summary: DELETE /arcade/report-subscription
-      description: Stores an explicit per-arcade opt-out and cancels pending report pushes for this arcade and device. The canonical device remains enabled for personal activity and other arcades.
-      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      description: "Stores an explicit per-arcade opt-out and cancels pending report pushes for this arcade and device. The canonical device remains enabled for personal activity and other arcades. Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE)."
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -9488,10 +9514,9 @@ x-musecat-joint-connection:
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}, {"name": "requesterOnly", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Public contact entry: restrict results to inquiries created by this caller. Arcade admin dashboards omit this flag."}]
     post:
-      description: Creates inquiries only. Guest credentials cannot create DMs or borrow account permissions.
       tags: ["Messaging"]
       summary: "Create or find an unordered user pair, or create an independent inquiry"
-      description: "DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries are managed in the arcade admin dashboard by current official responders and platform staff. Explicit musecat mentions notify active platform staff; they are not required to list authorized inquiries. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
+      description: "Creates inquiries only. Guest credentials cannot create DMs or borrow account permissions. DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries are managed in the arcade admin dashboard by current official responders and platform staff. Explicit musecat mentions notify active platform staff; they are not required to list authorized inquiries. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
       security: [{"guestFeedbackKey": []}]
       responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Existing or new DM, or idempotent inquiry replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}}
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingCreate"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "kind": {"type": "string", "enum": ["inquiry"]}, "inboxType": {"type": "string"}, "inboxId": {"type": "string"}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
