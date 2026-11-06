@@ -1281,3 +1281,31 @@ requires authentication. Authenticated expansion/ranking and 15-row pagination
 are preserved. `/arcades` is a separate summary contract and is unchanged.
 
 Passport stamps include the current public arcade `location` (lat/lon or null), allowing the passport map to render without per-arcade detail requests. Private arcades remain excluded.
+
+## Aime recovery notification
+
+Authenticated active users explicitly opt in through `/user/notifications/aime`.
+The account-scoped subscription is for one observed outage and is consumed after
+recovery; existing browser push consent never creates this subscription. Full
+probes `https://my-aime.net/` once every five minutes, following redirects with a
+bounded timeout. HTTP 403 starts this one-off incident; only three consecutive 2xx confirmations,
+separated by at least five minutes (15 minutes from the last failed observation),
+complete it. Confirmation count and timestamps survive restart. Rapid startup
+probes cannot advance the count. Any failed observation resets the count; an
+unobserved gap longer than ten minutes restarts the confirmation sequence.
+Completion is terminal: later outages do not reopen subscriptions.
+Timeouts, other 4xx and 5xx observations are unknown, reset confirmations and preserve pending opt-ins.
+Core owns persisted state, atomic opt-in, bounded resumable fan-out and canonical
+inbox/device delivery identities. Full owns the polling schedule and push sender.
+No login credentials are collected. Probe networking runs outside transactions.
+
+Aime status includes at most 288 persisted probe observations from the last 24
+hours in chronological order. Status and probe history are saved atomically.
+Older observations are removed in bounded batches; missing periods remain unknown
+in the UI. History never uses the absence of an error as evidence of uptime.
+
+`GET /aime/status` is a public, read-only projection of the shared probe and
+history. It always returns `subscribed=false`, does not consult the caller's
+account even when authenticated, and ignores user query parameters. Guests can
+read guidance/status/history; opting in or cancelling still requires an active
+account through the existing authenticated `/user/notifications/aime` routes.
