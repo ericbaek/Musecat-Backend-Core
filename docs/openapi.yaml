@@ -9655,8 +9655,8 @@ x-musecat-joint-connection:
                       properties:
                         checkedAt: {type: string}
                         status: {type: string, enum: [unknown, blocked, available]}
-                        httpStatus: {type: integer}
-                  httpStatus: {type: integer}
+                        httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
+                  httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
                   checkedAt: {type: string}
                   subscribed: {type: boolean}
                   completed: {type: boolean, description: Terminal completion of this one-off incident. Later outages never reopen it.}
@@ -9690,7 +9690,7 @@ x-musecat-joint-connection:
       security: []
       responses:
         '200':
-          description: Public latest probe and 24-hour history. Authentication and user query parameters are ignored; no subscription membership or account data is read.
+          description: Public game NET login-page availability and 24-hour history. Available requires recognised maimai DX NET and CHUNITHM-NET login pages; maintenance HTML can be blocked even with HTTP 200. A 403 alone is unknown. This does not verify in-game card authentication or saving. Authentication and user query parameters are ignored; no subscription membership or account data is read.
           content:
             application/json:
               schema:
@@ -9708,8 +9708,8 @@ x-musecat-joint-connection:
                       properties:
                         checkedAt: {type: string}
                         status: {type: string, enum: [unknown, blocked, available]}
-                        httpStatus: {type: integer}
-                  httpStatus: {type: integer}
+                        httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
+                  httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
                   checkedAt: {type: string}
                   subscribed: {type: boolean, enum: [false]}
                   completed: {type: boolean, description: Terminal completion of this one-off incident. Later outages never reopen it.}
