@@ -109,7 +109,14 @@ func TestAimeClassified200MaintenanceAndUnknownResetConfirmations(t *testing.T) 
 func TestAimeLegacyHTTPConfirmationsCannotCompleteNewProbe(t *testing.T) {
 	app := testutil.NewTestApp(t)
 	now := time.Now().UTC()
+	const subscriber = "legacyoptin0001"
+	if _, err := app.DB().NewQuery("INSERT INTO user(id,email,tokenKey) VALUES ('legacyoptin0001','legacy@example.com','legacyoptin0001')").Execute(); err != nil {
+		t.Fatal(err)
+	}
 	if err := n.RecordAimeProbe(app, n.AimeObservation{Status: "blocked", HTTPStatus: 200}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.SetAimeSubscription(app, subscriber, true); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := app.FindRecordsByFilter(n.AimeState, "", "", 1, 0)
@@ -131,17 +138,24 @@ func TestAimeLegacyHTTPConfirmationsCannotCompleteNewProbe(t *testing.T) {
 	if err := app.Save(probes[0]); err != nil {
 		t.Fatal(err)
 	}
-	before, err := n.GetAimeStatus(app, "")
-	if err != nil || before.Status != "unknown" || before.Confirmations != 0 || before.History[0].Status != "unknown" {
+	before, err := n.GetAimeStatus(app, subscriber)
+	if err != nil || before.Status != "unknown" || before.Confirmations != 0 || before.History[0].Status != "unknown" || !before.Subscribed {
 		t.Fatalf("legacy projection: %+v, %v", before, err)
 	}
 	for i := 0; i < 4; i++ {
 		if err := n.RecordAimeProbe(app, n.AimeObservation{Status: "available", HTTPStatus: 200}, now.Add(time.Duration(i+1)*5*time.Minute)); err != nil {
 			t.Fatal(err)
 		}
-		got, err := n.GetAimeStatus(app, "")
-		if err != nil || got.Completed != (i == 3) || got.Confirmations != i {
+		got, err := n.GetAimeStatus(app, subscriber)
+		if err != nil || got.Completed != (i == 3) || got.Confirmations != i || !got.Subscribed {
 			t.Fatalf("new observation %d: %+v, %v", i, got, err)
 		}
+	}
+	if err := n.DrainAimeRecoveries(app); err != nil {
+		t.Fatal(err)
+	}
+	items, err := app.FindRecordsByFilter(n.Inbox, "kind='aime_recovery' && user='legacyoptin0001'", "", 0, 0)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("existing opt-in delivery: %d items, %v", len(items), err)
 	}
 }
