@@ -27,14 +27,14 @@ func TestPublicReadPolicyCoversActualNearbyPageAndDetail(t *testing.T) {
 		}
 		return apis.NewTooManyRequestsError("test restriction", nil)
 	})
-	for _, path := range []string{"/arcade?id=" + id, "/arcades/nearby?lat=37.56&lon=126.97&expand=true", "/arcade/changelog?arcade=" + id} {
+	for _, path := range []string{"/arcade?id=" + id + "&expand=game", "/arcade?id=" + id + "&expand=all", "/arcades/nearby?lat=37.56&lon=126.97&expand=true", "/arcade/changelog?arcade=" + id} {
 		res := executeJSONRequest(t, app, http.MethodGet, path, "", map[string]string{"Authorization": "Bearer " + token})
 		res.Body.Close()
 		if res.StatusCode != 429 {
 			t.Fatalf("%s returned %d", path, res.StatusCode)
 		}
 	}
-	if calls != 3 {
+	if calls != 4 {
 		t.Fatal(calls)
 	}
 	// Non-expanded and guest nearby reads contain no game details and do not charge.
@@ -61,7 +61,25 @@ func TestPublicReadPolicyCoversActualNearbyPageAndDetail(t *testing.T) {
 			}
 		}
 	}
-	if calls != 3 {
+	if calls != 4 {
 		t.Fatal("guest nearby charged", calls)
+	}
+}
+
+func TestBasicArcadeReadsDoNotConsumeGameDetailQuota(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	id, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Passport location", Address: "Address", Location: location{Lat: 37.56, Lon: 126.97}})
+	setArcadeVisibility(t, app, id, true, false)
+	readpolicy.Register(app, func(re *core.RequestEvent, ids []string) error {
+		t.Fatal("non-game response consumed game quota")
+		return nil
+	})
+	for _, expand := range []string{"", "none", "basic", "basic,hour", "photo"} {
+		res := executeJSONRequest(t, app, http.MethodGet, "/arcade?id="+id+"&expand="+expand, "", map[string]string{"Authorization": "Bearer " + token})
+		res.Body.Close()
+		if res.StatusCode != 200 {
+			t.Fatalf("expand=%s: %d", expand, res.StatusCode)
+		}
 	}
 }

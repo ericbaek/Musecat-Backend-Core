@@ -814,6 +814,7 @@ accepted, and at most six latest distinct-arcade blocks are returned. If the six
 newest are all KR and a non-KR arcade has history, the newest non-KR block replaces
 the sixth entry. Results remain in descending activity order. Fewer are returned
 when fewer eligible arcades exist; no foreign entry is invented if none exists.
+Concurrent public summary reads share one bounded aggregate query, without a retained response cache. A canceled caller does not cancel other readers.
 
 `GET /arcades/updates/history` requires user authentication and returns `items`,
 `page`, `per_page`, `last_page`, `total` across chronological blocks, including
@@ -1267,13 +1268,16 @@ Private visits remain excluded regardless of this flag.
 ### Deployment public-read policy
 
 `service/readpolicy.Register` installs an optional, app-scoped check before public
-arcade detail, authenticated expanded nearby pages, and detailed arcade/user
+game-expanded arcade detail (`expand=game` or `expand=all`), authenticated expanded nearby pages, and detailed arcade/user
 history are written. It receives the actual exposed public arcade IDs; errors
 abort the entire response. Core has no quota, CAPTCHA provider, or policy state.
 Without registration the check is a no-op. Full owns deployment policy and routes.
+Basic/location-only, photo-only and relation-ID responses do not consume game-detail quota; request rate limits still apply.
 
 Anonymous `/arcades/nearby` responses omit `game_series` and `game`, including
 `expand=true`. Guest campaign summaries are empty because they contain game
 version/series bundles and machine counts. Series filtering remains available; cabinet filtering still
 requires authentication. Authenticated expansion/ranking and 15-row pagination
 are preserved. `/arcades` is a separate summary contract and is unchanged.
+
+Passport stamps include the current public arcade `location` (lat/lon or null), allowing the passport map to render without per-arcade detail requests. Private arcades remain excluded.
