@@ -9660,7 +9660,7 @@ x-musecat-joint-connection:
                   checkedAt: {type: string}
                   subscribed: {type: boolean}
                   completed: {type: boolean, description: Terminal completion of this one-off incident. Later outages never reopen it.}
-                  confirmations: {type: integer, minimum: 0, maximum: 3, description: Consecutive successful five-minute confirmations. Three confirms recovery.}
+                  confirmations: {type: integer, minimum: 0, maximum: 3, description: Additional successful five-minute confirmations after the first operational candidate notice. Three confirms recovery once Telegram and Discord delivery receipts are successful.}
         '401': {description: Authentication required.}
         '403': {description: Inactive account.}
     put:
@@ -9690,7 +9690,7 @@ x-musecat-joint-connection:
       security: []
       responses:
         '200':
-          description: Public game NET login-page availability and 24-hour history. Available requires recognised maimai DX NET and CHUNITHM-NET login pages; maintenance HTML can be blocked even with HTTP 200. A 403 alone is unknown. This does not verify in-game card authentication or saving. Authentication and user query parameters are ignored; no subscription membership or account data is read.
+          description: Public game NET web maintenance status and 24-hour history. Available requires both game pages to return HTTP 200 without a maintenance path or visible maintenance message. Login forms and password inputs are not required; maintenance HTML can be blocked even with HTTP 200. A 403 alone is unknown. This does not verify in-game card authentication or saving. Authentication and user query parameters are ignored; no subscription membership or account data is read.
           content:
             application/json:
               schema:
@@ -9713,4 +9713,4 @@ x-musecat-joint-connection:
                   checkedAt: {type: string}
                   subscribed: {type: boolean, enum: [false]}
                   completed: {type: boolean, description: Terminal completion of this one-off incident. Later outages never reopen it.}
-                  confirmations: {type: integer, minimum: 0, maximum: 3, description: Consecutive successful five-minute confirmations. Three confirms recovery.}
+                  confirmations: {type: integer, minimum: 0, maximum: 3, description: Additional successful five-minute confirmations after the first operational candidate notice. Three confirms recovery once Telegram and Discord delivery receipts are successful.}

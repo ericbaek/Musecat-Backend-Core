@@ -29,7 +29,7 @@ func EnsureAimeSchema(app core.App) error {
 			fields []core.Field
 		}{
 			{AimeProbes, []core.Field{&core.DateField{Name: "checked_at", Required: true}, &core.TextField{Name: "status", Required: true, Max: 20}, &core.NumberField{Name: "http_status", OnlyInt: true}}},
-			{AimeState, []core.Field{&core.TextField{Name: "status", Max: 20}, &core.NumberField{Name: "http_status", OnlyInt: true}, &core.DateField{Name: "checked_at"}, &core.TextField{Name: "incident", Max: 40}, &core.BoolField{Name: "recovered"}, &core.NumberField{Name: "confirmations", OnlyInt: true}, &core.DateField{Name: "confirmation_at"}}},
+			{AimeState, []core.Field{&core.TextField{Name: "status", Max: 20}, &core.NumberField{Name: "http_status", OnlyInt: true}, &core.DateField{Name: "checked_at"}, &core.TextField{Name: "incident", Max: 40}, &core.BoolField{Name: "recovered"}, &core.NumberField{Name: "confirmations", OnlyInt: true}, &core.DateField{Name: "confirmation_at"}, &core.DateField{Name: "ops_candidate_at"}, &core.BoolField{Name: "ops_telegram_sent"}, &core.BoolField{Name: "ops_discord_sent"}}},
 			{AimeSubscriptions, []core.Field{&core.RelationField{Name: "user", CollectionId: user.Id, Required: true, MaxSelect: 1, CascadeDelete: true}, &core.TextField{Name: "incident", Required: true, Max: 40}}},
 		}
 		for _, d := range definitions {
@@ -164,8 +164,8 @@ func SetAimeSubscription(app core.App, userID string, enabled bool) error {
 }
 
 // RecordAimeProbe persists observations before queuing bounded, resumable fan-out.
-// This one-off incident completes after three verified login-page confirmations,
-// separated by at least five minutes. Any failed observation resets the run.
+// The first candidate alerts operations; three further five-minute confirmations
+// complete this incident after both operational channels have been notified.
 func RecordAimeProbe(app core.App, observation AimeObservation, now time.Time) error {
 	if observation.Status != "available" && observation.Status != "blocked" && observation.Status != "unknown" {
 		return errors.New("invalid Aime observation status")
@@ -198,18 +198,19 @@ func RecordAimeProbe(app core.App, observation AimeObservation, now time.Time) e
 				row.Set("confirmation_at", now.UTC())
 			} else if row.GetString("incident") != "" {
 				last := row.GetDateTime("confirmation_at").Time()
-				// A restarted process cannot turn rapid startup probes into
-				// three confirmations. Each confirmation covers five minutes.
-				if !last.IsZero() && !now.Before(last.Add(5*time.Minute)) {
-					count := row.GetInt("confirmations")
-					// An unobserved gap does not establish continuous recovery.
-					if now.Sub(last) > 10*time.Minute {
-						count = 0
-					}
-					count++
+				firstCandidate := row.GetDateTime("ops_candidate_at").IsZero()
+				if firstCandidate {
+					row.Set("ops_candidate_at", now.UTC())
+				}
+				// The first candidate starts a fresh 15-minute observation window.
+				if firstCandidate || row.GetString("status") != "web_available" || last.IsZero() || now.Sub(last) > 10*time.Minute {
+					row.Set("confirmations", 0)
+					row.Set("confirmation_at", now.UTC())
+				} else if !now.Before(last.Add(5 * time.Minute)) {
+					count := min(row.GetInt("confirmations")+1, 3)
 					row.Set("confirmations", count)
 					row.Set("confirmation_at", now.UTC())
-					if count >= 3 {
+					if count >= 3 && row.GetBool("ops_telegram_sent") && row.GetBool("ops_discord_sent") {
 						row.Set("recovered", true)
 					}
 				}
@@ -312,11 +313,11 @@ func DrainAimeRecoveries(app core.App) error {
 }
 
 func AimeItem(row *core.Record, locale string) map[string]any {
-	title, body := "게임 NET 웹 접속이 복구되었습니다", "마이넷과 츄니넷의 로그인 화면에 다시 접속할 수 있습니다."
+	title, body := "게임 NET 웹 접속이 복구되었습니다", "마이넷과 츄니넷에서 웹 점검 안내가 더 이상 감지되지 않습니다."
 	if locale == "en" {
-		title, body = "Game NET web access is restored", "The maimai DX NET and CHUNITHM-NET login pages are available again."
+		title, body = "Game NET web access is restored", "Web maintenance is no longer detected on maimai DX NET or CHUNITHM-NET."
 	} else if locale == "ja" {
-		title, body = "ゲームNETへのWeb接続が復旧しました", "maimai DX NETとCHUNITHM-NETのログイン画面に再びアクセスできます。"
+		title, body = "ゲームNETへのWeb接続が復旧しました", "maimai DX NETとCHUNITHM-NETでWebメンテナンス案内が検出されなくなりました。"
 	}
 	return map[string]any{"id": row.Id, "kind": AimeKind, "read": row.GetBool("read"), "created": row.GetString("created"), "title": title, "message": body, "arcadeName": "", "gameName": "", "reaction": "", "url": "/"}
 }

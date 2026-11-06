@@ -18,11 +18,10 @@ type aimeTransport func(*http.Request) (*http.Response, error)
 
 func (f aimeTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// The positive fixture represents the required login structure, not a claim
-// that a live login is currently available. No credentials are submitted.
-const aimeLoginFixture = `<html><h2>Login with SEGA ID</h2><form method="post"><input name="sid"><input type="password" name="password"><button>Login</button></form></html>`
+// A non-maintenance page without password inputs or form assumptions.
+const aimeLoginFixture = `<html><h2>Login</h2><button>LINE</button></html>`
 
-func TestAimeProbeRequiresBothRecognisedGameLogins(t *testing.T) {
+func TestAimeProbeRequiresBothGamesWithoutMaintenance(t *testing.T) {
 	for _, tc := range []struct {
 		name, target, body, want, contentType string
 		code                                  int
@@ -31,10 +30,12 @@ func TestAimeProbeRequiresBothRecognisedGameLogins(t *testing.T) {
 		{name: "both logins despite Aime geo block", code: 200, body: aimeLoginFixture, want: "available"},
 		{name: "200 maintenance redirect", target: "/common_auth/maintenance.html", code: 200, body: `<title>メンテナンス</title>`, want: "blocked"},
 		{name: "200 maintenance body at login URL", code: 200, body: aimeLoginFixture + `<p>Under maintenance</p>`, want: "blocked"},
+		{name: "plain maintenance title", code: 200, body: `<title>Maintenance</title>`, want: "blocked"},
+		{name: "non-login final path without maintenance", target: "/common_auth/start", code: 200, body: aimeLoginFixture, want: "available"},
 		{name: "Japanese maintenance body", code: 200, body: `<p>現在メンテナンスを行っております。</p>`, want: "blocked"},
 		{name: "503 maintenance body", code: 503, body: `<h2>Under maintenance</h2>`, want: "blocked"},
-		{name: "unknown 200 page", code: 200, body: `<h1>Welcome</h1>`, want: "unknown"},
-		{name: "password outside form", code: 200, body: `<h2>SEGA ID</h2><input type="password">`, want: "unknown"},
+		{name: "200 without maintenance needs no login structure", code: 200, body: `<h1>Welcome</h1>`, want: "available"},
+		{name: "no password field or form", code: 200, body: `<button>LINE</button>`, want: "available"},
 		{name: "game geo block", code: 403, body: `<title>403 Forbidden</title>`, want: "unknown"},
 		{name: "login error response", code: 500, body: aimeLoginFixture, want: "unknown"},
 		{name: "timeout", transportError: true, want: "unknown"},
@@ -92,15 +93,15 @@ func TestAimeProbeRequiresBothRecognisedGameLogins(t *testing.T) {
 func TestAimeClassified200MaintenanceAndUnknownResetConfirmations(t *testing.T) {
 	app := testutil.NewTestApp(t)
 	now := time.Now().UTC()
-	for i, status := range []string{"blocked", "available", "available", "blocked", "available", "unknown", "available", "available", "available"} {
-		if err := n.RecordAimeProbe(app, n.AimeObservation{Status: status, HTTPStatus: 200}, now.Add(time.Duration(i)*5*time.Minute)); err != nil {
+	for i, status := range []string{"blocked", "available", "available", "blocked", "available", "unknown", "available", "available", "available", "available"} {
+		if err := recordAimeWithOperations(t, app, n.AimeObservation{Status: status, HTTPStatus: 200}, now.Add(time.Duration(i)*5*time.Minute)); err != nil {
 			t.Fatal(err)
 		}
 		got, err := n.GetAimeStatus(app, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Completed != (i == 8) {
+		if got.Completed != (i == 9) {
 			t.Fatalf("observation %d: %+v", i, got)
 		}
 	}
@@ -113,7 +114,7 @@ func TestAimeLegacyHTTPConfirmationsCannotCompleteNewProbe(t *testing.T) {
 	if _, err := app.DB().NewQuery("INSERT INTO user(id,email,tokenKey) VALUES ('legacyoptin0001','legacy@example.com','legacyoptin0001')").Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if err := n.RecordAimeProbe(app, n.AimeObservation{Status: "blocked", HTTPStatus: 200}, now); err != nil {
+	if err := recordAimeWithOperations(t, app, n.AimeObservation{Status: "blocked", HTTPStatus: 200}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := n.SetAimeSubscription(app, subscriber, true); err != nil {
@@ -143,7 +144,7 @@ func TestAimeLegacyHTTPConfirmationsCannotCompleteNewProbe(t *testing.T) {
 		t.Fatalf("legacy projection: %+v, %v", before, err)
 	}
 	for i := 0; i < 4; i++ {
-		if err := n.RecordAimeProbe(app, n.AimeObservation{Status: "available", HTTPStatus: 200}, now.Add(time.Duration(i+1)*5*time.Minute)); err != nil {
+		if err := recordAimeWithOperations(t, app, n.AimeObservation{Status: "available", HTTPStatus: 200}, now.Add(time.Duration(i+1)*5*time.Minute)); err != nil {
 			t.Fatal(err)
 		}
 		got, err := n.GetAimeStatus(app, subscriber)
@@ -157,5 +158,49 @@ func TestAimeLegacyHTTPConfirmationsCannotCompleteNewProbe(t *testing.T) {
 	items, err := app.FindRecordsByFilter(n.Inbox, "kind='aime_recovery' && user='legacyoptin0001'", "", 0, 0)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("existing opt-in delivery: %d items, %v", len(items), err)
+	}
+}
+
+func TestAimeUsersWaitForBothOperationalReceipts(t *testing.T) {
+	app := testutil.NewTestApp(t)
+	now := time.Now().UTC()
+	observe := func(status string, minute int) n.AimeStatus {
+		t.Helper()
+		if err := n.RecordAimeProbe(app, n.AimeObservation{Status: status, HTTPStatus: 200}, now.Add(time.Duration(minute)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		got, err := n.GetAimeStatus(app, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	observe("blocked", 0)
+	for _, minute := range []int{5, 10, 15, 20} {
+		if observe("available", minute).Completed {
+			t.Fatal("users notified before operational channels")
+		}
+	}
+	rows, err := app.FindRecordsByFilter(n.AimeState, "", "", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows[0].Set("ops_telegram_sent", true)
+	if err := app.Save(rows[0]); err != nil {
+		t.Fatal(err)
+	}
+	if observe("available", 25).Completed {
+		t.Fatal("one channel is not sufficient")
+	}
+	rows[0], err = app.FindRecordById(n.AimeState, rows[0].Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows[0].Set("ops_discord_sent", true)
+	if err := app.Save(rows[0]); err != nil {
+		t.Fatal(err)
+	}
+	if !observe("available", 30).Completed {
+		t.Fatal("confirmed recovery did not complete")
 	}
 }

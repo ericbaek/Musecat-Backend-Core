@@ -33,8 +33,8 @@ var aimeProbeURLs = []string{
 	"https://chunithm-net-eng.com/mobile/",
 }
 
-// ProbeAime checks public pages only. Both game entry points must reach a
-// recognised Aime login form; my-aime.net is diagnostic because of geo-blocking.
+// ProbeAime checks public pages only. Both game entry points must return 200
+// without a maintenance path or message. my-aime.net is diagnostic only.
 func ProbeAime(ctx context.Context, client *http.Client) (AimeObservation, error) {
 	result := AimeObservation{Status: "unknown", Sources: make([]AimeSourceObservation, len(aimeProbeURLs))}
 	errs := make([]error, len(aimeProbeURLs))
@@ -109,46 +109,31 @@ func probeAimeSource(ctx context.Context, client *http.Client, source string) (A
 		return result, err
 	}
 	var visible strings.Builder
-	loginForm := false
-	var visit func(*html.Node, bool)
-	visit = func(node *html.Node, inForm bool) {
-		if node.Type == html.ElementNode {
-			if node.Data == "script" || node.Data == "style" {
-				return
-			}
-			inForm = inForm || node.Data == "form"
-			if inForm && node.Data == "input" {
-				for _, attr := range node.Attr {
-					if attr.Key == "type" && strings.EqualFold(attr.Val, "password") {
-						loginForm = true
-					}
-				}
-			}
+	var visit func(*html.Node)
+	visit = func(node *html.Node) {
+		if node.Type == html.ElementNode && (node.Data == "script" || node.Data == "style") {
+			return
 		}
 		if node.Type == html.TextNode {
 			visible.WriteString(node.Data)
 			visible.WriteByte(' ')
 		}
 		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			visit(child, inForm)
+			visit(child)
 		}
 	}
-	visit(root, false)
+	visit(root)
 	text := strings.ToLower(strings.Join(strings.Fields(visible.String()), " "))
 	final := response.Request.URL
 	maintenance := strings.Contains(strings.ToLower(final.Path), "maintenance")
-	for _, marker := range []string{"under maintenance", "unavailable due to maintenance", "メンテナンス中", "現在メンテナンス", "점검 중"} {
+	for _, marker := range []string{"maintenance", "メンテナンス", "점검"} {
 		maintenance = maintenance || strings.Contains(text, marker)
 	}
 	if maintenance {
 		result.Status = "blocked"
 		return result, nil
 	}
-	redirect, err := url.Parse(final.Query().Get("redirect_url"))
-	if err == nil && response.StatusCode == http.StatusOK && final.Hostname() == "lng-tgk-aime-gw.am-all.net" &&
-		final.Path == "/common_auth/login" && final.Query().Get("site_id") != "" &&
-		redirect.Scheme == "https" && redirect.Host == entry.Host && redirect.Path == entry.Path &&
-		loginForm && strings.Contains(text, "sega id") {
+	if response.StatusCode == http.StatusOK {
 		result.Status = "available"
 	}
 	return result, nil

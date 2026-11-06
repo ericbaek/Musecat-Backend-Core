@@ -1289,27 +1289,32 @@ The account-scoped subscription is for one observed outage and is consumed after
 recovery; existing browser push consent never creates this subscription. Full
 checks public my-aime.net, maimai DX NET and CHUNITHM-NET entry pages in parallel
 once every five minutes with bounded HTTPS redirects and HTML bodies. Both game
-entry points must reach the allowlisted Aime login URL with their own redirect
-return target, a password input inside a form and SEGA ID text. HTTP 200 alone
-never establishes availability. Maintenance URLs or active maintenance text are
-blocked even with HTTP 200. Other responses, including 403, missing login
-structure, transport errors and disallowed redirects, are unknown. my-aime.net
+entry points must return HTTP 200 without a final maintenance path or visible
+English/Japanese/Korean maintenance text. No password field, form, SEGA ID text,
+login URL path or return-target query is required. HTTP 200 maintenance pages
+are blocked. Other HTTP responses, transport errors, non-HTML responses,
+oversized bodies and disallowed redirects are unknown. my-aime.net
 is diagnostic only: its geo-blocked 403 cannot prove or disprove game NET recovery.
 Any blocked game result makes the aggregate blocked; otherwise both games must
 be available or the aggregate is unknown. The recorded httpStatus is the actual
 response code from the game source deciding the aggregate; it can be 200 while
-status is blocked or unknown. No schema change is required.
+status is blocked or unknown. Full owns the additive migration for the candidate
+timestamp and separate Telegram/Discord delivery receipts on aime_status.
 New classifications use `web_`-prefixed internal status values. Legacy HTTP-only
 history projects as unknown, and the first new observation resets any unfinished
 legacy confirmation run. Existing subscriptions and terminal completion survive.
 
-Known maintenance starts this one-off incident. Only three consecutive verified
-login-page confirmations, separated by at least five minutes (15 minutes from
-the last failed observation), complete it. Counts and timestamps survive restart;
-rapid probes cannot advance the count. Failed observations reset the count and
-preserve opt-ins; gaps over ten minutes restart the sequence. Completion remains
-terminal. This verifies public game NET login access, not in-game card authentication
-or score saving. Notifications state that narrower scope.
+Known maintenance starts this one-off incident. The first non-maintenance HTTP 200
+candidate starts the 15-minute confirmation window and queues an operational
+notice to both Telegram and Discord. Three further successful observations at
+least five minutes apart complete recovery only after both operational channels
+have successful persisted receipts. Counts and timestamps survive restart;
+rapid probes cannot advance the count. Failed observations reset the run;
+gaps over ten minutes restart it. Operational receipts and the first candidate
+timestamp survive resets, so a successful channel is not sent again. A failed
+channel retries independently. Pending account opt-ins are preserved throughout.
+Completion remains terminal. This checks public game NET web maintenance status,
+not in-game card authentication or score saving. Notifications state that scope.
 Core owns persisted state, atomic opt-in, bounded resumable fan-out and canonical
 inbox/device delivery identities. Full owns the polling schedule and push sender.
 No login credentials are collected. Probe networking runs outside transactions.
