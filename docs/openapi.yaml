@@ -1554,8 +1554,13 @@ components:
         visit_count: {type: integer}
     PassportStamp:
       type: object
-      required: [arcade, name, country, city_id, city_name, closed, visit_count, total_visit_count]
+      required: [arcade, name, country, city_id, city_name, closed, location, visit_count, total_visit_count]
       properties:
+        location:
+          description: Current public arcade coordinates for passport maps; null when unavailable.
+          oneOf:
+            - {$ref: '#/components/schemas/Location'}
+            - {type: 'null'}
         arcade: {type: string}
         name: {type: string}
         country: {type: string}
@@ -3637,6 +3642,7 @@ paths:
       description: |
         Returns only a public arcade (open or closed) and relation ids by default.
         Private arcades always return `404`; use authenticated `GET /arcade/draft` for a creator or developer/moderator draft read.
+        Only game-expanded responses (`expand=game` or `expand=all`) invoke the deployment game-detail quota; basic/location-only and relation-ID reads retain request-rate limits without consuming that quota.
         When `expand=game`, each `game.items[]` entry includes `version`, `series`, `updated`, and the editable game fields.
         Unauthenticated callers receive redacted sensitive data: `tag` is null, `location` and `updated` are empty strings, `price` retains only representative items with `hasHiddenPrices=true` and `accept=null`, and `expand=hour` returns only today's schedule for the arcade timezone.
       parameters:
@@ -4173,7 +4179,7 @@ paths:
     get:
       tags: [Arcades]
       summary: Fixed public dashboard summary
-      description: Returns at most six latest blocks from distinct public open arcades. If a non-KR arcade has history, at least one is included, replacing the sixth KR entry when necessary. Results remain newest first. Query parameters, including page and limit, are rejected.
+      description: Returns at most six latest blocks from distinct public open arcades. If a non-KR arcade has history, at least one is included, replacing the sixth KR entry when necessary. Results remain newest first. Concurrent reads share only the in-flight aggregate query; results are not cached across loads. Query parameters, including page and limit, are rejected.
       responses:
         '200':
           description: Fixed summary array.
