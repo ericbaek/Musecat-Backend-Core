@@ -1,11 +1,10 @@
 package usernotification
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pocketbase/dbx"
@@ -30,7 +29,7 @@ func EnsureAimeSchema(app core.App) error {
 			fields []core.Field
 		}{
 			{AimeProbes, []core.Field{&core.DateField{Name: "checked_at", Required: true}, &core.TextField{Name: "status", Required: true, Max: 20}, &core.NumberField{Name: "http_status", OnlyInt: true}}},
-			{AimeState, []core.Field{&core.TextField{Name: "status", Max: 20}, &core.NumberField{Name: "http_status", OnlyInt: true}, &core.DateField{Name: "checked_at"}, &core.TextField{Name: "incident", Max: 40}, &core.BoolField{Name: "recovered"}, &core.NumberField{Name: "confirmations", OnlyInt: true}, &core.DateField{Name: "confirmation_at"}}},
+			{AimeState, []core.Field{&core.TextField{Name: "status", Max: 20}, &core.NumberField{Name: "http_status", OnlyInt: true}, &core.DateField{Name: "checked_at"}, &core.TextField{Name: "incident", Max: 40}, &core.BoolField{Name: "recovered"}, &core.NumberField{Name: "confirmations", OnlyInt: true}, &core.DateField{Name: "confirmation_at"}, &core.DateField{Name: "ops_candidate_at"}, &core.BoolField{Name: "ops_telegram_sent"}, &core.BoolField{Name: "ops_discord_sent"}}},
 			{AimeSubscriptions, []core.Field{&core.RelationField{Name: "user", CollectionId: user.Id, Required: true, MaxSelect: 1, CascadeDelete: true}, &core.TextField{Name: "incident", Required: true, Max: 40}}},
 		}
 		for _, d := range definitions {
@@ -100,18 +99,20 @@ func GetAimeStatus(app core.App, userID string) (AimeStatus, error) {
 	if err != nil {
 		return result, err
 	}
-	result.Status = row.GetString("status")
+	result.Status = aimeWebStatus(row.GetString("status"))
 	result.HTTPStatus = row.GetInt("http_status")
 	result.CheckedAt = row.GetString("checked_at")
 	result.Completed = row.GetBool("recovered")
-	result.Confirmations = row.GetInt("confirmations")
+	if strings.HasPrefix(row.GetString("status"), "web_") {
+		result.Confirmations = row.GetInt("confirmations")
+	}
 	probes, err := app.FindRecordsByFilter(AimeProbes, "checked_at>={:cutoff}", "-checked_at,-id", 288, 0, dbx.Params{"cutoff": time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02 15:04:05.000Z")})
 	if err != nil {
 		return result, err
 	}
 	for i := len(probes) - 1; i >= 0; i-- {
 		probe := probes[i]
-		result.History = append(result.History, AimeProbe{CheckedAt: probe.GetString("checked_at"), Status: probe.GetString("status"), HTTPStatus: probe.GetInt("http_status")})
+		result.History = append(result.History, AimeProbe{CheckedAt: probe.GetString("checked_at"), Status: aimeWebStatus(probe.GetString("status")), HTTPStatus: probe.GetInt("http_status")})
 	}
 	if userID != "" {
 		rows, err := app.FindRecordsByFilter(AimeSubscriptions, "user={:user} && incident={:incident}", "", 1, 0, dbx.Params{"user": userID, "incident": row.GetString("incident")})
@@ -162,24 +163,14 @@ func SetAimeSubscription(app core.App, userID string, enabled bool) error {
 	})
 }
 
-// ProbeAime makes a single shared, unauthenticated GET; no user credentials are used.
-func ProbeAime(ctx context.Context, client *http.Client) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://my-aime.net/", nil)
-	if err != nil {
-		return 0, err
-	}
-	response, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer response.Body.Close()
-	return response.StatusCode, nil
-}
-
 // RecordAimeProbe persists observations before queuing bounded, resumable fan-out.
-// This one-off incident completes after three consecutive 2xx confirmations,
-// separated by at least five minutes. Any failed observation resets the run.
-func RecordAimeProbe(app core.App, status int, now time.Time) error {
+// The first candidate alerts operations; three further five-minute confirmations
+// complete this incident after both operational channels have been notified.
+func RecordAimeProbe(app core.App, observation AimeObservation, now time.Time) error {
+	if observation.Status != "available" && observation.Status != "blocked" && observation.Status != "unknown" {
+		return errors.New("invalid Aime observation status")
+	}
+	status := observation.HTTPStatus
 	return app.RunInTransaction(func(tx core.App) error {
 		row, err := tx.FindRecordById(AimeState, aimeStateID)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -192,14 +183,14 @@ func RecordAimeProbe(app core.App, status int, now time.Time) error {
 		} else if err != nil {
 			return err
 		}
-		observed := "unknown"
-		if status == 403 {
-			observed = "blocked"
-		} else if status >= 200 && status < 300 {
-			observed = "available"
-		}
+		observed := observation.Status
 		if !row.GetBool("recovered") {
-			if status == 403 && row.GetString("incident") == "" {
+			// Do not combine old HTTP-only confirmations with verified pages.
+			if !strings.HasPrefix(row.GetString("status"), "web_") {
+				row.Set("confirmations", 0)
+				row.Set("confirmation_at", now.UTC())
+			}
+			if observed == "blocked" && row.GetString("incident") == "" {
 				row.Set("incident", now.UTC().Format("20060102T150405.000000000"))
 			}
 			if observed != "available" {
@@ -207,24 +198,25 @@ func RecordAimeProbe(app core.App, status int, now time.Time) error {
 				row.Set("confirmation_at", now.UTC())
 			} else if row.GetString("incident") != "" {
 				last := row.GetDateTime("confirmation_at").Time()
-				// A restarted process cannot turn rapid startup probes into
-				// three confirmations. Each confirmation covers five minutes.
-				if !last.IsZero() && !now.Before(last.Add(5*time.Minute)) {
-					count := row.GetInt("confirmations")
-					// An unobserved gap does not establish continuous recovery.
-					if now.Sub(last) > 10*time.Minute {
-						count = 0
-					}
-					count++
+				firstCandidate := row.GetDateTime("ops_candidate_at").IsZero()
+				if firstCandidate {
+					row.Set("ops_candidate_at", now.UTC())
+				}
+				// The first candidate starts a fresh 15-minute observation window.
+				if firstCandidate || row.GetString("status") != "web_available" || last.IsZero() || now.Sub(last) > 10*time.Minute {
+					row.Set("confirmations", 0)
+					row.Set("confirmation_at", now.UTC())
+				} else if !now.Before(last.Add(5 * time.Minute)) {
+					count := min(row.GetInt("confirmations")+1, 3)
 					row.Set("confirmations", count)
 					row.Set("confirmation_at", now.UTC())
-					if count >= 3 {
+					if count >= 3 && row.GetBool("ops_telegram_sent") && row.GetBool("ops_discord_sent") {
 						row.Set("recovered", true)
 					}
 				}
 			}
 		}
-		row.Set("status", observed)
+		row.Set("status", "web_"+observed)
 		row.Set("http_status", status)
 		row.Set("checked_at", now.UTC())
 		if err := tx.Save(row); err != nil {
@@ -236,7 +228,7 @@ func RecordAimeProbe(app core.App, status int, now time.Time) error {
 		}
 		probe := core.NewRecord(col)
 		probe.Set("checked_at", now.UTC())
-		probe.Set("status", observed)
+		probe.Set("status", "web_"+observed)
 		probe.Set("http_status", status)
 		if err := tx.Save(probe); err != nil {
 			return err
@@ -252,6 +244,18 @@ func RecordAimeProbe(app core.App, status int, now time.Time) error {
 		}
 		return nil
 	})
+}
+
+// Old HTTP-only history is inconclusive under the new page-content contract.
+func aimeWebStatus(stored string) string {
+	switch stored {
+	case "web_available":
+		return "available"
+	case "web_blocked":
+		return "blocked"
+	default:
+		return "unknown"
+	}
 }
 
 // DrainAimeRecoveries is resumable after this incident completes. Later outages
@@ -309,11 +313,11 @@ func DrainAimeRecoveries(app core.App) error {
 }
 
 func AimeItem(row *core.Record, locale string) map[string]any {
-	title, body := "Aime 접속이 복구되었습니다", "my-aime.net에 다시 접속할 수 있습니다."
+	title, body := "게임 NET 웹 접속이 복구되었습니다", "마이넷과 츄니넷에서 웹 점검 안내가 더 이상 감지되지 않습니다."
 	if locale == "en" {
-		title, body = "Aime access is restored", "my-aime.net is available again."
+		title, body = "Game NET web access is restored", "Web maintenance is no longer detected on maimai DX NET or CHUNITHM-NET."
 	} else if locale == "ja" {
-		title, body = "Aimeへの接続が復旧しました", "my-aime.netに再びアクセスできます。"
+		title, body = "ゲームNETへのWeb接続が復旧しました", "maimai DX NETとCHUNITHM-NETでWebメンテナンス案内が検出されなくなりました。"
 	}
 	return map[string]any{"id": row.Id, "kind": AimeKind, "read": row.GetBool("read"), "created": row.GetString("created"), "title": title, "message": body, "arcadeName": "", "gameName": "", "reaction": "", "url": "/"}
 }

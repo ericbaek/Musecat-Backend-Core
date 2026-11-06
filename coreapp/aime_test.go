@@ -22,7 +22,7 @@ func TestAimeRoutesRequireExplicitActiveAccountConsent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(n.RecordAimeProbe(app, 403, time.Now()))
+	must(n.RecordAimeProbe(app, n.AimeObservation{Status: "blocked", HTTPStatus: 403}, time.Now()))
 	for _, id := range []string{"aimeactive00001", "aimewithdrawn01"} {
 		_, err := app.DB().NewQuery("INSERT INTO user (id,email,tokenKey,withdrawn) VALUES ({:id},{:email},{:id},{:withdrawn})").Bind(dbx.Params{"id": id, "email": id + "@example.com", "withdrawn": id == "aimewithdrawn01"}).Execute()
 		must(err)
@@ -76,7 +76,7 @@ func TestAimePublicStatusNeverExposesAccountMembership(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(n.RecordAimeProbe(app, 403, time.Now()))
+	must(n.RecordAimeProbe(app, n.AimeObservation{Status: "blocked", HTTPStatus: 403}, time.Now()))
 	_, err := app.DB().NewQuery("INSERT INTO user(id,email,tokenKey) VALUES('aimepublicuser1','aimepublic@example.com','aimepublicuser1')").Execute()
 	must(err)
 	user, err := app.FindRecordById("user", "aimepublicuser1")

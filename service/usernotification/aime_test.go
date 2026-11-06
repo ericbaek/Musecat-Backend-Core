@@ -38,17 +38,17 @@ func TestAimeExplicitOneShotRecovery(t *testing.T) {
 	if state.Status != "unknown" {
 		t.Fatal(state)
 	}
-	must(n.RecordAimeProbe(app, 200, now))
+	must(recordAimeWithOperations(t, app, aimeObservation(200), now))
 	if err := n.SetAimeSubscription(app, "aimesubscriber1", true); !errors.Is(err, n.ErrAimeNotBlocked) {
 		t.Fatalf("healthy opt-in: %v", err)
 	}
-	must(n.RecordAimeProbe(app, 403, now.Add(time.Minute)))
+	must(recordAimeWithOperations(t, app, aimeObservation(403), now.Add(time.Minute)))
 	must(n.SetAimeSubscription(app, "aimesubscriber1", true))
 	must(n.SetAimeSubscription(app, "aimesubscriber1", true))
 	must(n.SetAimeSubscription(app, "aimecancelled01", true))
 	must(n.SetAimeSubscription(app, "aimecancelled01", false))
 	for _, code := range []int{0, 500, 404, 429, 302, 403} {
-		must(n.RecordAimeProbe(app, code, now.Add(2*time.Minute)))
+		must(recordAimeWithOperations(t, app, aimeObservation(code), now.Add(2*time.Minute)))
 		must(n.DrainAimeRecoveries(app))
 		rows, err := app.FindRecordsByFilter(n.Inbox, "kind={:kind}", "", 0, 0, dbx.Params{"kind": n.AimeKind})
 		must(err)
@@ -61,8 +61,8 @@ func TestAimeExplicitOneShotRecovery(t *testing.T) {
 			t.Fatal("lost pending opt-in")
 		}
 	}
-	for _, minute := range []int{7, 12, 17} {
-		must(n.RecordAimeProbe(app, 200, now.Add(time.Duration(minute)*time.Minute)))
+	for _, minute := range []int{7, 12, 17, 22} {
+		must(recordAimeWithOperations(t, app, aimeObservation(200), now.Add(time.Duration(minute)*time.Minute)))
 	}
 	must(n.DrainAimeRecoveries(app))
 	must(n.DrainAimeRecoveries(app))
@@ -87,8 +87,8 @@ func TestAimeExplicitOneShotRecovery(t *testing.T) {
 			t.Fatal(item)
 		}
 	}
-	must(n.RecordAimeProbe(app, 403, now.Add(20*time.Minute)))
-	must(n.RecordAimeProbe(app, 200, now.Add(25*time.Minute)))
+	must(recordAimeWithOperations(t, app, aimeObservation(403), now.Add(20*time.Minute)))
+	must(recordAimeWithOperations(t, app, aimeObservation(200), now.Add(25*time.Minute)))
 	must(n.DrainAimeRecoveries(app))
 	rows, err = app.FindRecordsByFilter(n.Inbox, "kind={:kind}", "", 0, 0, dbx.Params{"kind": n.AimeKind})
 	must(err)
@@ -106,15 +106,15 @@ func TestAimeFanoutSurvivesLaterFailureAndBatchBoundary(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
-	must(n.RecordAimeProbe(app, 403, now))
+	must(recordAimeWithOperations(t, app, aimeObservation(403), now))
 	for i := 0; i < 102; i++ {
 		id := fmt.Sprintf("aimeuser%07d", i)
 		_, err := app.DB().NewQuery("INSERT INTO user(id,email,tokenKey) VALUES ({:id},{:email},{:id})").Bind(dbx.Params{"id": id, "email": id + "@example.com"}).Execute()
 		must(err)
 		must(n.SetAimeSubscription(app, id, true))
 	}
-	for _, minute := range []int{5, 10, 15} {
-		must(n.RecordAimeProbe(app, 200, now.Add(time.Duration(minute)*time.Minute)))
+	for _, minute := range []int{5, 10, 15, 20} {
+		must(recordAimeWithOperations(t, app, aimeObservation(200), now.Add(time.Duration(minute)*time.Minute)))
 	}
 	must(n.DrainAimeRecoveries(app))
 	rows, err := app.FindRecordsByFilter(n.Inbox, "kind={:kind}", "", 0, 0, dbx.Params{"kind": n.AimeKind})
@@ -122,7 +122,7 @@ func TestAimeFanoutSurvivesLaterFailureAndBatchBoundary(t *testing.T) {
 	if len(rows) != 100 {
 		t.Fatalf("first batch=%d", len(rows))
 	}
-	must(n.RecordAimeProbe(app, 403, now.Add(20*time.Minute)))
+	must(recordAimeWithOperations(t, app, aimeObservation(403), now.Add(20*time.Minute)))
 	must(n.DrainAimeRecoveries(app))
 	must(n.DrainAimeRecoveries(app))
 	rows, err = app.FindRecordsByFilter(n.Inbox, "kind={:kind}", "", 0, 0, dbx.Params{"kind": n.AimeKind})
@@ -152,7 +152,7 @@ func TestAimeConsecutiveConfirmationsAreDurableSpacedAndTerminal(t *testing.T) {
 	must(err)
 	observe := func(code, minute, want int, complete bool) {
 		t.Helper()
-		must(n.RecordAimeProbe(app, code, now.Add(time.Duration(minute)*time.Minute)))
+		must(recordAimeWithOperations(t, app, aimeObservation(code), now.Add(time.Duration(minute)*time.Minute)))
 		result, err := n.GetAimeStatus(app, "confirmuser0001")
 		must(err)
 		if result.Confirmations != want || result.Completed != complete {
@@ -160,24 +160,26 @@ func TestAimeConsecutiveConfirmationsAreDurableSpacedAndTerminal(t *testing.T) {
 		}
 	}
 	observe(403, 0, 0, false)
-	observe(200, 1, 0, false) // restart/rapid checks cannot shorten the 15-minute window
-	observe(200, 5, 1, false)
-	must(n.SetAimeSubscription(app, "confirmuser0001", true)) // opt-in stays open during confirmation
+	observe(200, 1, 0, false) // first candidate alerts operations, no user confirmation yet
+	observe(200, 2, 0, false) // rapid restart cannot advance the run
 	observe(200, 6, 1, false)
-	observe(200, 10, 2, false)
+	must(n.SetAimeSubscription(app, "confirmuser0001", true))
+	observe(200, 7, 1, false)
+	observe(200, 11, 2, false)
 	for i, failure := range []int{403, 0, 500, 429} {
-		minute := 15 + i*15
+		minute := 16 + i*20
 		observe(failure, minute, 0, false)
-		observe(200, minute+5, 1, false)
-		observe(200, minute+10, 2, false)
+		observe(200, minute+5, 0, false)
+		observe(200, minute+10, 1, false)
+		observe(200, minute+15, 2, false)
 	}
-	observe(200, 75, 3, true)
+	observe(200, 96, 3, true)
 	must(n.DrainAimeRecoveries(app))
-	observe(403, 80, 3, true)
+	observe(403, 101, 3, true)
 	if err := n.SetAimeSubscription(app, "confirmuser0001", true); !errors.Is(err, n.ErrAimeNotBlocked) {
 		t.Fatalf("completed campaign reopened: %v", err)
 	}
-	observe(200, 85, 3, true)
+	observe(200, 106, 3, true)
 	must(n.DrainAimeRecoveries(app))
 	rows, err := app.FindRecordsByFilter(n.Inbox, "kind={:kind}", "", 0, 0, dbx.Params{"kind": n.AimeKind})
 	must(err)
@@ -190,7 +192,7 @@ func TestAimeUnobservedGapRestartsConfirmationRun(t *testing.T) {
 	app := testutil.NewTestApp(t)
 	now := time.Now().UTC()
 	for _, sample := range []struct{ minute, status int }{{0, 403}, {5, 200}, {10, 200}, {30, 200}} {
-		if err := n.RecordAimeProbe(app, sample.status, now.Add(time.Duration(sample.minute)*time.Minute)); err != nil {
+		if err := recordAimeWithOperations(t, app, aimeObservation(sample.status), now.Add(time.Duration(sample.minute)*time.Minute)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -198,7 +200,7 @@ func TestAimeUnobservedGapRestartsConfirmationRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Completed || state.Confirmations != 1 {
+	if state.Completed || state.Confirmations != 0 {
 		t.Fatal(state)
 	}
 }
@@ -211,7 +213,7 @@ func TestAimeHistoryContainsOnlyRealRecentObservations(t *testing.T) {
 		if i%3 == 0 {
 			code = 0
 		}
-		if err := n.RecordAimeProbe(app, code, now.Add(time.Duration(i-299)*5*time.Minute)); err != nil {
+		if err := recordAimeWithOperations(t, app, aimeObservation(code), now.Add(time.Duration(i-299)*5*time.Minute)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -237,4 +239,33 @@ func TestAimeHistoryContainsOnlyRealRecentObservations(t *testing.T) {
 	if len(rows) != 0 {
 		t.Fatalf("expired probes retained=%d", len(rows))
 	}
+}
+
+// Classified fixture observations; HTTP status alone is not a real probe.
+func aimeObservation(code int) n.AimeObservation {
+	status := "unknown"
+	if code == 403 {
+		status = "blocked"
+	} else if code >= 200 && code < 300 {
+		status = "available"
+	}
+	return n.AimeObservation{Status: status, HTTPStatus: code}
+}
+
+// Simulate successful operational channels after the first candidate is saved.
+func recordAimeWithOperations(t *testing.T, app core.App, observation n.AimeObservation, at time.Time) error {
+	t.Helper()
+	if err := n.RecordAimeProbe(app, observation, at); err != nil {
+		return err
+	}
+	rows, err := app.FindRecordsByFilter(n.AimeState, "ops_candidate_at!=''", "", 1, 0)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 1 {
+		rows[0].Set("ops_telegram_sent", true)
+		rows[0].Set("ops_discord_sent", true)
+		return app.Save(rows[0])
+	}
+	return nil
 }
