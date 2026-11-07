@@ -82,13 +82,13 @@ SELECT
 		Date  string `db:"date"`
 		Count int64  `db:"count"`
 	}
-	// This is a global aggregate: scan events once rather than probing the
-	// per-arcade index and fetching event timestamps for every venue.
+	// The partial covering date/group index avoids scanning unrelated events
+	// and a temporary GROUP BY table for this global aggregate.
 	if err := app.DB().NewQuery(`
 SELECT substr(e.created, 1, 10) AS date, COUNT(DISTINCT e.event_group) AS count
-FROM arcade_analytics_event e NOT INDEXED
+FROM arcade_analytics_event e
 WHERE e.arcade IN (SELECT id FROM arcade WHERE public=1)
-  AND e.event_type='page_view' AND e.created >= '2026-09-30'
+  AND e.event_type='page_view' AND substr(e.created, 1, 10) >= '2026-09-30'
 GROUP BY substr(e.created, 1, 10) ORDER BY date
 `).WithContext(ctx).All(&daily); err != nil {
 		return nil, fmt.Errorf("load view stats: %w", err)

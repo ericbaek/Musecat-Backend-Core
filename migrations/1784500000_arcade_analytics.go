@@ -54,6 +54,7 @@ func ensureArcadeAnalyticsEventCollection(app core.App) error {
 		collection.AddIndex("idx_arcade_analytics_event_arcade_type_group", false, "arcade, event_type, event_group", "")
 		collection.AddIndex("idx_arcade_analytics_event_arcade_type_series", false, "arcade, event_type, series", "")
 		collection.AddIndex("idx_arcade_analytics_event_arcade_subject", false, "arcade, subject_id", "")
+		collection.AddIndex("idx_arcade_analytics_page_view_day", false, "substr(created, 1, 10), event_group, arcade, created", "event_type = 'page_view'")
 		if err := app.Save(collection); err != nil {
 			return fmt.Errorf("create %s: %w", arcadeAnalyticsEventCollection, err)
 		}
