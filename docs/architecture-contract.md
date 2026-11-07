@@ -1072,6 +1072,33 @@ not the base price. Base `value` may remain null for a PASELI-only price. Existi
 prices and immutable history are not migrated. Representative guest rows retain
 the PASELI amount alongside the base amount.
 
+## Members-only plaza
+
+`POST /user/plaza` opens the single `musecatplaza001` conversation (`kind=plaza`).
+Every current active account can read and send immediately; no join operation,
+per-member parties, unread counts, read receipts or notification fanout are created.
+Guest inquiry credentials, withdrawn and banned accounts cannot access the room or
+its protected attachments. Only the authenticated personal identity can send.
+Private DM membership, preferences and blocking keep their existing scope.
+
+The endpoint returns only conversation metadata via primary-key lookup. It does
+not load message history, participant profiles, private inbox summaries or count
+historical rows. History uses the existing `(conversation, sequence)` index and
+bounded cursor pages (50 by default); before/after pagination never uses offsets.
+Authenticated send quotas and photo budgets use the existing sender/time index;
+idempotent retries match all columns of the existing partial retry index.
+
+The shared SSE connection opts into plaza invalidations with `plaza=true` only
+while the plaza Page is active. Subscribers outside the plaza receive no public
+room invalidations and incur no per-message plaza ACL checks. Delivery still
+rechecks the active account and room access. Events carry sequence metadata only;
+clients fetch bounded new-message deltas. Plaza changes do not invalidate private
+inbox lists. There is no blanket member enumeration or persisted push delivery.
+
+Existing messaging fields already support this contract, so Core adds no schema
+bootstrap or production migration. Full must release a Core revision containing
+this API; production migration execution remains owned solely by Full.
+
 ## Private messaging and shared inquiries
 
 `service/messaging` owns conversation/party/message/read storage and the authenticated

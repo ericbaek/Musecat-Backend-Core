@@ -44,6 +44,10 @@ func RegisterRoutes(se *core.ServeEvent) {
 	guest.PATCH("/conversations/{id}/inquiry", Status).Bind(apis.BodyLimit(4096))
 	guest.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo)
 	api := se.Router.Group("/user").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	api.POST("/plaza", func(re *core.RequestEvent) error {
+		out, err := messaging.OpenPlaza(re.App, re.Auth.Id)
+		return reply(re, 200, out, err)
+	}).Bind(apis.BodyLimit(4096))
 	api.GET("/inquiry-preview", InquiryPreview)
 	api.GET("/conversations", List)
 	api.POST("/conversations", Create).Bind(apis.BodyLimit(MaxBodyBytes))
@@ -287,7 +291,12 @@ func Photo(re *core.RequestEvent) error {
 }
 func Events(re *core.RequestEvent) error {
 	hub := messaging.Events(re.App)
-	sub := hub.Subscribe(re.Auth.Id)
+	var sub *messaging.Subscription
+	if re.Request.URL.Query().Get("plaza") == "true" {
+		sub = hub.SubscribePlaza(re.Auth.Id)
+	} else {
+		sub = hub.Subscribe(re.Auth.Id)
+	}
 	if sub == nil {
 		re.Response.Header().Set("Retry-After", "15")
 		return router.NewApiError(429, "Too many streams.", nil)
@@ -348,7 +357,9 @@ func Events(re *core.RequestEvent) error {
 				_ = write(messaging.Event{Name: "session.expired"})
 				return nil
 			}
-			if event.ID != "" {
+			// Plaza membership is exactly the current active account already
+			// checked by valid(); do not repeat per-conversation ACL queries.
+			if event.ID != "" && !(event.Plaza && event.ID == messaging.PlazaID) {
 				if _, _, err := messaging.Access(re.App, re.Auth.Id, event.ID); err != nil {
 					continue
 				}

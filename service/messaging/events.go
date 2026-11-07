@@ -7,6 +7,7 @@ import (
 )
 
 type Event struct {
+	Plaza            bool     `json:"-"`
 	Audience         []string `json:"-"`
 	Name             string   `json:"-"`
 	ID               string   `json:"id,omitempty"`
@@ -17,6 +18,7 @@ type Event struct {
 }
 type Subscription struct {
 	User     string
+	Plaza    bool
 	Events   chan Event
 	Overflow chan struct{}
 }
@@ -38,6 +40,12 @@ func Events(app core.App) *Hub {
 	return h
 }
 func (h *Hub) Subscribe(user string) *Subscription {
+	return h.subscribe(user, false)
+}
+func (h *Hub) SubscribePlaza(user string) *Subscription {
+	return h.subscribe(user, true)
+}
+func (h *Hub) subscribe(user string, plaza bool) *Subscription {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	n := 0
@@ -49,7 +57,7 @@ func (h *Hub) Subscribe(user string) *Subscription {
 	if n >= 4 || len(h.clients) >= 1024 {
 		return nil
 	}
-	s := &Subscription{User: user, Events: make(chan Event, 32), Overflow: make(chan struct{}, 1)}
+	s := &Subscription{User: user, Plaza: plaza, Events: make(chan Event, 32), Overflow: make(chan struct{}, 1)}
 	h.clients[s] = true
 	return s
 }
@@ -58,7 +66,10 @@ func (h *Hub) Publish(event Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for s := range h.clients {
-		if event.ID != "" && event.UserID == "" && !slices.Contains(event.Audience, s.User) {
+		if event.Plaza && !s.Plaza {
+			continue
+		}
+		if event.ID != "" && event.UserID == "" && !event.Plaza && !slices.Contains(event.Audience, s.User) {
 			continue
 		}
 		if event.UserID != "" && event.UserID != s.User {
