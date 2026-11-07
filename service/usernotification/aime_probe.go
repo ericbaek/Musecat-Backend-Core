@@ -86,6 +86,9 @@ func probeAimeSource(ctx context.Context, client *http.Client, source string) (A
 	if err != nil {
 		return result, err
 	}
+	// Game NET closes connections for Go's default User-Agent. This value was
+	// verified against the live service from the production network namespace.
+	req.Header.Set("User-Agent", "Mozilla/5.0")
 	response, err := bounded.Do(req)
 	if err != nil {
 		return result, err

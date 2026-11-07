@@ -1289,6 +1289,8 @@ The account-scoped subscription is for one observed outage and is consumed after
 recovery; existing browser push consent never creates this subscription. Full
 checks public my-aime.net, maimai DX NET and CHUNITHM-NET entry pages in parallel
 once every five minutes with bounded HTTPS redirects and HTML bodies. Both game
+requests send `User-Agent: Mozilla/5.0`: the live upstream closes connections
+for Go's default User-Agent before returning a maintenance response. Both game
 entry points must return HTTP 200 without a final maintenance path or visible
 English/Japanese/Korean maintenance text. No password field, form, SEGA ID text,
 login URL path or return-target query is required. HTTP 200 maintenance pages
