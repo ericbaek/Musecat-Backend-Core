@@ -86,7 +86,7 @@ SELECT
 	// and a temporary GROUP BY table for this global aggregate.
 	if err := app.DB().NewQuery(`
 SELECT substr(e.created, 1, 10) AS date, COUNT(DISTINCT e.event_group) AS count
-FROM arcade_analytics_event e
+FROM arcade_analytics_event e INDEXED BY idx_arcade_analytics_page_view_day
 WHERE e.arcade IN (SELECT id FROM arcade WHERE public=1)
   AND e.event_type='page_view' AND substr(e.created, 1, 10) >= '2026-09-30'
 GROUP BY substr(e.created, 1, 10) ORDER BY date
