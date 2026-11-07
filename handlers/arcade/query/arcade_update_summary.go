@@ -15,6 +15,9 @@ var arcadeUpdateSummaryLoads singleflight.Group
 // Share only an in-flight public summary query. Nothing is cached across loads,
 // so visibility changes and visit timeline opt-outs remain immediately visible.
 func loadSharedArcadeUpdateSummary(ctx context.Context, app core.App, sql string) ([]arcadeUpdateBlockRow, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	result := arcadeUpdateSummaryLoads.DoChan(appCacheKey(app), func() (any, error) {
 		// One disconnected caller must not cancel the query for other waiting callers.
 		queryContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 12*time.Second)

@@ -5392,7 +5392,7 @@ paths:
     get:
       tags: [Meta]
       summary: /stats
-      description: Public aggregate counts are cached for 30 minutes per application process. Concurrent refresh requests share one aggregation; failed refreshes are not cached.
+      description: Public aggregate counts are cached for 30 minutes per application process. An expired successful snapshot is served during one shared background refresh for at most another 30 minutes. Failed background refreshes retry after 30 seconds; cold or older snapshots wait for a bounded refresh.
       responses:
         '200':
           description: Current counts for arcade, changelog, and flag data.

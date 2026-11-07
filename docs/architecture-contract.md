@@ -743,10 +743,13 @@ not change arcade visibility, author/reviewer permissions, XP or history semanti
 ## Public aggregate execution
 
 `GET /stats` caches successful public aggregate snapshots for 30 minutes per
-application process. Concurrent cache misses share one refresh; errors are not
-cached. A refresh has a 12-second database deadline and survives an individual
-viewer's disconnect, while that viewer stops waiting immediately. Counts may
-therefore lag underlying mutations by up to 30 minutes.
+application process. Expired successful snapshots remain available during a shared
+background refresh for at most another 30 minutes. Failed background refreshes
+retry after 30 seconds, without extending snapshot lifetime. Cold or more than
+one-hour-old snapshots wait for a refresh and return an error if it fails. A
+refresh has a 12-second database deadline and survives an individual viewer's
+disconnect, while that viewer stops waiting immediately. The daily page-view
+aggregate uses a partial covering date/group index and preserves public-only counts.
 
 Both arcade-update aggregates remain uncached, propagate request cancellation
 to SQLite, and cap database work at 12 seconds, below the web transport's
