@@ -47,6 +47,9 @@ func TestAimeProbeRequiresBothGamesWithoutMaintenance(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &http.Client{Transport: aimeTransport(func(req *http.Request) (*http.Response, error) {
+				if req.UserAgent() != "Mozilla/5.0" {
+					t.Errorf("upstream requires a browser User-Agent, got %q", req.UserAgent())
+				}
 				code, body := 200, aimeLoginFixture
 				headers := http.Header{"Content-Type": {"text/html; charset=utf-8"}}
 				host := req.URL.Hostname()
