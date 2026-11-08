@@ -5,9 +5,15 @@ on:
   push:
     branches: [main, dev]
 
+concurrency:
+  group: core-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
     steps:
       - uses: actions/checkout@v4
         with:

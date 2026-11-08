@@ -630,3 +630,79 @@ func TestListArcadeUpdates_ProtectsHistory(t *testing.T) {
 		}
 	}
 }
+
+// Bot events must be removed before block grouping and pagination, while later
+// human edits to an arcade created by a bot remain visible.
+func TestListArcadeUpdates_ExcludesBotEvents(t *testing.T) {
+	app := newArcadeTestApp(t)
+	token, user := createAuthUser(t, app)
+	base := time.Date(2030, 3, 24, 20, 0, 0, 0, time.UTC)
+	a, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Human activity", Address: "A", Location: location{Lat: 37, Lon: 127}, Country: "KR"})
+	b, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Bot only", Address: "B", Location: location{Lat: 37, Lon: 127}, Country: "KR"})
+	for _, id := range []string{a, b} {
+		setArcadeVisibilityAndUpdated(t, app, id, true, false, base)
+		arcade, err := app.FindRecordById("arcade", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		arcade.Set("contribution_source", map[string]any{"kind": "bot", "id": "test-bot", "name": "Importer"})
+		if err := app.Save(arcade); err != nil {
+			t.Fatal(err)
+		}
+		rowID := seedArcadeChangelog(t, app, id, "basic", user.Id, base)
+		row, err := app.FindRecordById("arcade_changelog", rowID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		row.Set("contribution_source", map[string]any{"kind": "bot", "id": "test-bot", "name": "Importer"})
+		if err := app.Save(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedArcadeChangelog(t, app, a, "hour", user.Id, base.Add(-time.Minute))
+	for _, endpoint := range []string{"/arcades/updates", "/arcades/updates/history?page=1&limit=1", "/arcades/updates/history?page=2&limit=1"} {
+		res := executeJSONRequest(t, app, http.MethodGet, endpoint, "", map[string]string{"Authorization": "Bearer " + token})
+		raw, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("%s: %d %s", endpoint, res.StatusCode, raw)
+		}
+		type item struct {
+			ID      string `json:"id"`
+			Changes []struct {
+				Part string `json:"part"`
+			} `json:"changes"`
+		}
+		var items []item
+		if endpoint == "/arcades/updates" {
+			if err := json.Unmarshal(raw, &items); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			var page struct {
+				Items    []item `json:"items"`
+				Total    int    `json:"total"`
+				LastPage int    `json:"last_page"`
+			}
+			if err := json.Unmarshal(raw, &page); err != nil {
+				t.Fatal(err)
+			}
+			if page.Total != 1 || page.LastPage != 1 {
+				t.Fatalf("bot event affected pagination: %s", raw)
+			}
+			items = page.Items
+			if endpoint == "/arcades/updates/history?page=2&limit=1" {
+				if len(items) != 0 {
+					t.Fatalf("unexpected second page: %s", raw)
+				}
+				continue
+			}
+		}
+		if len(items) != 1 || items[0].ID != a || len(items[0].Changes) != 1 || items[0].Changes[0].Part != "hour" {
+			t.Fatalf("unexpected human activity: %s", raw)
+		}
+	}
+}

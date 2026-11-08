@@ -3,6 +3,9 @@ package user
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/botaccess"
+	"github.com/ericbaek/musecat-backend-core/service/contribution"
+	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"net/http"
 	"strconv"
 	"strings"
@@ -48,6 +51,22 @@ func GetUserChangelog(re *core.RequestEvent) error {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "user is required"})
 	}
 
+	bot := strings.TrimSpace(q.Get("bot"))
+	if bot != "" {
+		if !includeDetails {
+			return re.UnauthorizedError("Authentication is required for bot history.", nil)
+		}
+		if re.Auth.Id != userID {
+			return re.ForbiddenError("Only the account owner may inspect its bot console.", nil)
+		}
+		if bot != "all" {
+			key, err := re.App.FindRecordById(botaccess.Keys, bot)
+			if err != nil || key.GetString("owner") != re.Auth.Id {
+				return re.NotFoundError("Bot key not found.", nil)
+			}
+		}
+	}
+
 	changed, err := parseUserChangelogCategory(q.Get("changed"))
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -66,6 +85,13 @@ func GetUserChangelog(re *core.RequestEvent) error {
 		return re.JSON(http.StatusOK, userChangelogPage(page, perPage, 0, 0, []map[string]any{}))
 	}
 	where, params := userChangelogVisibility(re, userID, changed)
+	if bot != "" {
+		where += " AND json_extract(c.contribution_source, '$.kind') = 'bot'"
+		if bot != "all" {
+			where += " AND json_extract(c.contribution_source, '$.id') = {:bot}"
+			params["bot"] = bot
+		}
+	}
 	var total int64
 	if err := re.App.DB().NewQuery(fmt.Sprintf(`
 SELECT COUNT(*)
@@ -82,14 +108,14 @@ WHERE %s
 	columns := ""
 	if includeDetails {
 		columns = `,
-	c."from", c."to", c."by", c.log, c.created`
+	c."from", c."to", c."by", c.log, c.created, c.contribution_source`
 	}
 	rows, err := re.App.DB().NewQuery(fmt.Sprintf(`
 SELECT
 	c.id,
-	c.arcade,
+	c.arcade, a.public AS arcade_public,
 	COALESCE(ab.name, '') AS arcade_name,
-	c.changed%s
+ c.changed%s
 FROM arcade_changelog c
 INNER JOIN arcade a ON a.id = c.arcade
 LEFT JOIN arcade_basic ab ON ab.id = a.basic
@@ -106,6 +132,7 @@ LIMIT {:limit} OFFSET {:offset}
 	defer rows.Close()
 
 	items := make([]map[string]any, 0, perPage)
+	publicDetailIDs := []string{}
 	for rows.Next() {
 		raw := dbx.NullStringMap{}
 		if err := rows.ScanMap(raw); err != nil {
@@ -114,6 +141,12 @@ LIMIT {:limit} OFFSET {:offset}
 				"details": err.Error(),
 			})
 		}
+		var source *contribution.Source
+		if value := userChangelogString(raw, "contribution_source"); value != "" {
+			if err := json.Unmarshal([]byte(value), &source); err != nil {
+				return re.InternalServerError("Invalid contribution source.", err)
+			}
+		}
 		item := map[string]any{
 			"id":          userChangelogString(raw, "id"),
 			"arcade":      userChangelogString(raw, "arcade"),
@@ -121,6 +154,10 @@ LIMIT {:limit} OFFSET {:offset}
 			"changed":     userChangelogString(raw, "changed"),
 		}
 		if includeDetails {
+			item["contribution_source"] = contribution.ForViewer(source, userChangelogString(raw, "by"), re.Auth.Id)
+			if userChangelogString(raw, "arcade_public") == "1" {
+				publicDetailIDs = append(publicDetailIDs, userChangelogString(raw, "arcade"))
+			}
 			var log any
 			if value := userChangelogString(raw, "log"); value != "" {
 				if err := json.Unmarshal([]byte(value), &log); err != nil {
@@ -150,6 +187,12 @@ LIMIT {:limit} OFFSET {:offset}
 		}
 	}
 
+	if err := rows.Close(); err != nil {
+		return re.InternalServerError("Failed to release history query.", nil)
+	}
+	if err := readpolicy.Check(re, publicDetailIDs...); err != nil {
+		return err
+	}
 	lastPage := int64(0)
 	if total > 0 {
 		lastPage = (total + int64(perPage) - 1) / int64(perPage)

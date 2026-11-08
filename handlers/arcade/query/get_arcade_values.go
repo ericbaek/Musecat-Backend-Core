@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"net/http"
 	"net/url"
 	"slices"
@@ -69,7 +70,28 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 			"error": "arcade not found",
 		})
 	}
+	// expand can be: "none" (default), "all", or a comma list like "basic,hour"
+	expandParam := strings.TrimSpace(strings.ToLower(q.Get("expand")))
+
+	// determine which sections to expand
+	want := map[string]bool{}
+	if expandParam == "all" {
+		want["basic"], want["hour"], want["sns"], want["gtk"], want["game"], want["photo"] = true, true, true, true, true, true
+	} else {
+		for _, part := range strings.Split(expandParam, ",") {
+			p := strings.TrimSpace(part)
+			if p != "" {
+				want[p] = true
+			}
+		}
+	}
+
 	if !allowDraft {
+		if want["game"] {
+			if err := readpolicy.Check(re, rec.Id); err != nil {
+				return err
+			}
+		}
 		// Analytics is deliberately best effort and never changes the public
 		// detail response if event persistence is temporarily unavailable.
 		_ = arcadeanalytics.RecordPageView(re.App, rec.Id, q.Get("source"), q["game_series"])
@@ -109,9 +131,6 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 		"updated":            rec.Get("updated"),
 	}
 
-	// expand can be: "none" (default), "all", or a comma list like "basic,hour"
-	expandParam := strings.TrimSpace(strings.ToLower(q.Get("expand")))
-
 	// id-only base response
 	out := map[string]any{
 		"admin": admin,
@@ -125,19 +144,6 @@ func getArcadeValues(re *core.RequestEvent, allowDraft bool) error {
 
 	if expandParam == "" || expandParam == "none" {
 		return re.JSON(http.StatusOK, out)
-	}
-
-	// determine which sections to expand
-	want := map[string]bool{}
-	if expandParam == "all" {
-		want["basic"], want["hour"], want["sns"], want["gtk"], want["game"], want["photo"] = true, true, true, true, true, true
-	} else {
-		for _, part := range strings.Split(expandParam, ",") {
-			p := strings.TrimSpace(part)
-			if p != "" {
-				want[p] = true
-			}
-		}
 	}
 
 	if want["basic"] && basicId != "" {

@@ -43,7 +43,7 @@ func listInbox(app core.App, user *core.Record, before string, locales ...string
 				return false
 			}
 			source = row.GetString("announcement")
-		} else if kind != "report_created" && kind != usernotification.ArcadeSetupKind {
+		} else if kind != "report_created" && kind != usernotification.ArcadeSetupKind && kind != usernotification.AimeKind {
 			kind = "report_reaction"
 		}
 		key := kind + ":" + source

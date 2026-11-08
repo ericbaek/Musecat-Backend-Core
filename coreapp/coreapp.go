@@ -81,6 +81,8 @@ func configureDefaultRateLimits(app core.App) {
 	settings := app.Settings()
 	settings.RateLimits.Enabled = true
 	defaults := []core.RateLimitRule{
+		{Label: "/bot/v1/", MaxRequests: 120, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /user/bot-keys", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /reverse_geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geo", MaxRequests: 60, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
@@ -107,6 +109,7 @@ func configureDefaultRateLimits(app core.App) {
 // It is exported so test applications and integration suites can wire the exact
 // same routing table without duplicating it.
 func RegisterAPIRoutes(se *core.ServeEvent) {
+	registerBotRoutes(se)
 	announcementhandler.RegisterRoutes(se)
 	messaginghandler.RegisterRoutes(se)
 	se.Router.GET("/guest/feedback", arcadeadmin.ListGuestSupportFeedback).Bind(arcadeadmin.RequireGuestFeedback())
@@ -114,6 +117,7 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	se.Router.GET("/guest/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(arcadeadmin.RequireGuestFeedback())
 	se.Router.POST("/guest/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
 	se.Router.PATCH("/guest/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(4096))
+	se.Router.GET("/aime/status", usernotifications.AimePublicStatus)
 	se.Router.GET("/hello", handlers.HelloHandler)
 	se.Router.GET("/geo", handlers.GeoLookupHandler)
 	se.Router.GET("/geocode", handlers.GeocodeHandler)
@@ -290,6 +294,8 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))
 
 	authNotifications := se.Router.Group("/user/notifications").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	authNotifications.GET("/aime", usernotifications.AimeStatus)
+	authNotifications.PUT("/aime", usernotifications.AimeSubscribe).Bind(apis.BodyLimit(4096))
 	authNotifications.GET("", usernotifications.List)
 	authNotifications.POST("/read", usernotifications.Read).Bind(apis.BodyLimit(4096))
 	authNotifications.POST("/device", usernotifications.DeviceStatus).Bind(apis.BodyLimit(4096))
