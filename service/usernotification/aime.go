@@ -313,6 +313,9 @@ func DrainAimeRecoveries(app core.App) error {
 }
 
 func AimeItem(row *core.Record, locale string) map[string]any {
+	if row.GetString("event_key") == AimeStatusUpdateEvent {
+		return aimeStatusUpdateItem(row, locale)
+	}
 	title, body := "게임 NET 웹 접속이 복구되었습니다", "마이넷과 츄니넷에서 웹 점검 안내가 더 이상 감지되지 않습니다."
 	if locale == "en" {
 		title, body = "Game NET web access is restored", "Web maintenance is no longer detected on maimai DX NET or CHUNITHM-NET."
