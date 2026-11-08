@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -95,24 +96,8 @@ func listArcadeUpdates(re *core.RequestEvent, history bool) error {
 	ORDER BY block_started_at DESC, block_id ASC
 	LIMIT {:limit} OFFSET {:offset}
 )`
-	if !history {
-		selection = `summary_candidates AS (
-	SELECT l.*, a.country,
-		ROW_NUMBER() OVER (ORDER BY block_started_at DESC, block_id ASC) AS summary_rank
-	FROM latest_block_per_arcade l JOIN arcade a ON a.id = l.arcade
-	WHERE arcade_rank = 1
-),
-selected_blocks AS (
-	SELECT block_id, arcade, block_started_at, block_ended_at, 0 AS total_blocks
-	FROM summary_candidates
-	WHERE summary_rank <= 6 OR (
-		country <> 'KR' AND summary_rank = (
-			SELECT MIN(summary_rank) FROM summary_candidates WHERE country <> 'KR'
-		)
-	)
-)`
-	}
-	sql := fmt.Sprintf(`
+
+	filteredSQL := fmt.Sprintf(`
 WITH filtered AS (
 	SELECT
 		c.arcade,
@@ -159,7 +144,8 @@ WITH filtered AS (
 	INNER JOIN arcade a ON a.id = v.arcade
 	INNER JOIN user_info ui ON ui.id = v.user
 	WHERE %s
-),
+)`, strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), visitFilter)
+	sql := filteredSQL + fmt.Sprintf(`,
 ordered AS (
 	SELECT
 		arcade,
@@ -222,50 +208,30 @@ SELECT
 FROM blocks b
 INNER JOIN selected_blocks s ON s.block_id = b.block_id
 ORDER BY s.block_started_at DESC, s.block_id ASC, b.created DESC, b.id DESC
-	`, strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), visitFilter, selection)
-
-	var total int64
-	rows, err := re.App.DB().NewQuery(sql).Bind(params).WithContext(ctx).Rows()
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to load arcade updates",
-			"details": err.Error(),
-		})
+	`, selection)
+	if !history {
+		sql = arcadeUpdateSummarySQL(filteredSQL)
 	}
-	defer rows.Close()
 
 	var blockRows []arcadeUpdateBlockRow
-	for rows.Next() {
-		raw := dbx.NullStringMap{}
-		if err := rows.ScanMap(raw); err != nil {
-			return re.JSON(http.StatusBadGateway, map[string]any{
-				"error":   "failed to decode arcade updates",
-				"details": err.Error(),
-			})
-		}
-		if page > 0 {
-			total, err = strconv.ParseInt(nullStringMapValue(raw, "total_blocks"), 10, 64)
-			if err != nil {
-				return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count arcade updates"})
-			}
-		}
-
-		blockRows = append(blockRows, arcadeUpdateBlockRow{
-			BlockID:        nullStringMapValue(raw, "block_id"),
-			ArcadeID:       nullStringMapValue(raw, "arcade"),
-			Changed:        nullStringMapValue(raw, "changed"),
-			ChangedBy:      nullStringMapValue(raw, "changed_by"),
-			Created:        nullStringMapValue(raw, "created"),
-			BulkID:         nullStringMapValue(raw, "bulk_id"),
-			BlockStartedAt: nullStringMapValue(raw, "block_started_at"),
-			BlockEndedAt:   nullStringMapValue(raw, "block_ended_at"),
-		})
+	var total int64
+	var err error
+	if history {
+		blockRows, total, err = loadArcadeUpdateRows(ctx, re.App, sql, params)
+	} else {
+		blockRows, err = loadSharedArcadeUpdateSummary(ctx, re.App, sql)
 	}
-	if err := rows.Err(); err != nil {
+	if err != nil {
+		reason := "query"
+		if errors.Is(err, context.DeadlineExceeded) {
+			reason = "deadline"
+		}
+		if errors.Is(err, context.Canceled) {
+			reason = "canceled"
+		}
+		re.App.Logger().Error("arcade updates aggregation failed", "history", history, "reason", reason)
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load arcade updates"})
 	}
-	// Release the aggregate connection before enrichment borrows DB connections.
-	rows.Close()
 	// An out-of-range page has no row from which to read the window count.
 	if page > 0 && total == 0 {
 		countSQL := sql[:strings.Index(sql, ",\nselected_blocks AS (")] + " SELECT COUNT(*) FROM block_ranges"

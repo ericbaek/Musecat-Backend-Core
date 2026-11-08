@@ -3,6 +3,7 @@ package query
 import (
 	"encoding/json"
 	"errors"
+	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"net/http"
 	"sort"
 	"strconv"
@@ -100,6 +101,8 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 			"error": "expand must be a boolean value",
 		})
 	}
+	// Guests receive venue summaries only, including when expand=true is requested.
+	expandGame = expandGame && re.Auth != nil
 	distanceLimitKm, hasDistanceLimit, err := parseDistanceLimit(q.Get("distance_limit"))
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{
@@ -160,7 +163,10 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 		if candidate.Name == "" && candidate.Address == "" {
 			continue
 		}
-		item := candidate.Summary(true, true)
+		item := candidate.Summary(true, re.Auth != nil)
+		if re.Auth == nil {
+			delete(item, "game")
+		}
 		country, _ := item["country"].(string)
 		country = strings.TrimSpace(country)
 		if countryFilter != "" && !strings.EqualFold(country, countryFilter) {
@@ -254,19 +260,23 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 			CabinetID: filter.CabinetID,
 		})
 	}
-	nearbyCampaigns, err := arcadeinternal.BuildNearbyCampaigns(re.App, campaignFilters)
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to load nearby campaign targets",
-			"details": err.Error(),
-		})
-	}
-	campaignSummaries, err := decorateNearbyCampaigns(re.App, results[start:end], nearbyCampaigns)
-	if err != nil {
-		return re.JSON(http.StatusBadGateway, map[string]any{
-			"error":   "failed to build nearby campaigns",
-			"details": err.Error(),
-		})
+	campaignSummaries := []map[string]any{}
+	if re.Auth != nil {
+		nearbyCampaigns, err := arcadeinternal.BuildNearbyCampaigns(re.App, campaignFilters)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{
+				"error":   "failed to load nearby campaign targets",
+				"details": err.Error(),
+			})
+		}
+		campaignSummaries, err = decorateNearbyCampaigns(re.App, results[start:end], nearbyCampaigns)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{
+				"error":   "failed to build nearby campaigns",
+				"details": err.Error(),
+			})
+		}
+
 	}
 	countryTotals := summarizeCountryTotals(results)
 	response := map[string]any{
@@ -279,6 +289,19 @@ func ListArcadesBySeriesAndLocation(re *core.RequestEvent) error {
 		"campaigns":      campaignSummaries,
 	}
 
+	if expandGame {
+		ids := make([]string, 0, len(items))
+		for _, item := range items {
+			if _, ok := item["game"].(map[string]any); ok {
+				if id, ok := item["id"].(string); ok {
+					ids = append(ids, id)
+				}
+			}
+		}
+		if err := readpolicy.Check(re, ids...); err != nil {
+			return err
+		}
+	}
 	// 8. 페이지 정보와 함께 응답한다.
 	return re.JSON(http.StatusOK, response)
 }

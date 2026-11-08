@@ -3,6 +3,7 @@ package query
 import (
 	"fmt"
 	"github.com/ericbaek/musecat-backend-core/service/contribution"
+	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"net/http"
 	"strconv"
 	"strings"
@@ -96,6 +97,11 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 	}
 	if err := photo.ExpandChangelogAssets(re, items); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load changelog photos"})
+	}
+	if arcade.GetBool("public") {
+		if err := readpolicy.Check(re, arcadeID); err != nil {
+			return err
+		}
 	}
 	lastPage := 0
 	if total > 0 {

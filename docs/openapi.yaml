@@ -521,7 +521,9 @@ components:
         primary_country:
           type: string
           description: Primary profile country as an ISO 3166-1 alpha-2 code, or an empty string when unset.
-        level: {type: integer}
+        level:
+          type: integer
+          description: Uncapped XP-derived profile level, including in level rankings.
         tags:
           type: array
           items: {type: string}
@@ -531,9 +533,15 @@ components:
           required: [rank, score, profile]
           properties:
             rank: {type: integer}
-            score: {type: integer, format: int64}
+            score:
+              type: integer
+              format: int64
+              description: For metric=level, the smaller of profile.level and the account-age cap, interpolated through completed days 0=10, 30=50, 45=75 and 365=100 (fractions discarded); after day 365, add floor((days-365)*90/365). Equal scores share a rank. Other metrics retain their activity counts or XP.
             profile: {$ref: '#/components/schemas/RankingProfile'}
-            stats: {$ref: '#/components/schemas/RankingStats'}
+            stats:
+              oneOf:
+                - $ref: '#/components/schemas/RankingStats'
+                - $ref: '#/components/schemas/RankingXpStats'
         - type: object
           required: [rank, score, arcade]
           properties:
@@ -546,6 +554,14 @@ components:
       required: [travel_distance_km]
       properties:
         travel_distance_km: {type: integer, format: int64}
+    RankingXpStats:
+      type: object
+      required: [level_change]
+      properties:
+        level_change:
+          type: integer
+          minimum: 0
+          description: Actual levels gained from the period's net XP, computed as profile.level minus the XP-derived level at max(0, current XP - score). Present for metric=xp, including viewer entries.
     RankingArcade:
       type: object
       required: [id, name, country]
@@ -664,6 +680,29 @@ components:
         location:
           $ref: '#/components/schemas/Location'
         game_series:
+          type: array
+          items:
+            type: string
+    NearbyArcadeSummary:
+      type: object
+      required: [id, country, updated]
+      properties:
+        updated:
+          type: string
+          format: date-time
+          description: Persisted arcade aggregate update time; cache rebuilds do not change it.
+        id:
+          type: string
+        country:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        location:
+          $ref: '#/components/schemas/Location'
+        game_series:
+          description: Omitted for anonymous nearby requests, including expand=true.
           type: array
           items:
             type: string
@@ -1312,7 +1351,7 @@ components:
           type: array
           items:
             allOf:
-              - $ref: '#/components/schemas/ArcadeSummary'
+              - $ref: '#/components/schemas/NearbyArcadeSummary'
               - type: object
                 required: [distance_km]
                 properties:
@@ -1320,7 +1359,9 @@ components:
                     type: number
                     format: double
                   game:
-                    $ref: '#/components/schemas/ArcadeGameValue'
+                    allOf:
+                      - $ref: '#/components/schemas/ArcadeGameValue'
+                    description: Authenticated expanded requests only; omitted for guests.
                   campaigns:
                     type: array
                     description: Campaigns with at least one pending target in this arcade.
@@ -1535,8 +1576,13 @@ components:
         visit_count: {type: integer}
     PassportStamp:
       type: object
-      required: [arcade, name, country, city_id, city_name, closed, visit_count, total_visit_count]
+      required: [arcade, name, country, city_id, city_name, closed, location, visit_count, total_visit_count]
       properties:
+        location:
+          description: Current public arcade coordinates for passport maps; null when unavailable.
+          oneOf:
+            - {$ref: '#/components/schemas/Location'}
+            - {type: 'null'}
         arcade: {type: string}
         name: {type: string}
         country: {type: string}
@@ -3620,6 +3666,7 @@ paths:
       description: |
         Returns only a public arcade (open or closed) and relation ids by default.
         Private arcades always return `404`; use authenticated `GET /arcade/draft` for a creator or developer/moderator draft read.
+        Only game-expanded responses (`expand=game` or `expand=all`) invoke the deployment game-detail quota; basic/location-only and relation-ID reads retain request-rate limits without consuming that quota.
         When `expand=game`, each `game.items[]` entry includes `version`, `series`, `updated`, and the editable game fields.
         Unauthenticated callers receive redacted sensitive data: `tag` is null, `location` and `updated` are empty strings, `price` retains only representative items with `hasHiddenPrices=true` and `accept=null`, and `expand=hour` returns only today's schedule for the arcade timezone.
       parameters:
@@ -4156,7 +4203,7 @@ paths:
     get:
       tags: [Arcades]
       summary: Fixed public dashboard summary
-      description: Returns at most six latest blocks from distinct public open arcades. If a non-KR arcade has history, at least one is included, replacing the sixth KR entry when necessary. Results remain newest first. Query parameters, including page and limit, are rejected.
+      description: Returns at most six latest blocks from distinct public open arcades. If a non-KR arcade has history, at least one is included, replacing the sixth KR entry when necessary. Results remain newest first. Concurrent reads share only the in-flight aggregate query; results are not cached across loads. Query parameters, including page and limit, are rejected.
       responses:
         '200':
           description: Fixed summary array.
@@ -4215,6 +4262,11 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcades/nearby
+      description: |
+        Guests receive venue summaries without game_series or game fields.
+        expand=true exposes game details only to authenticated users.
+        Guest campaign summaries are empty because they contain game version bundles.
+        Deployment read policies may reject an entire expanded page with 429.
       parameters:
         - name: game_filter
           in: query
@@ -5373,7 +5425,7 @@ paths:
     get:
       tags: [Meta]
       summary: /stats
-      description: Public aggregate counts are cached for 30 minutes per application process. Concurrent refresh requests share one aggregation; failed refreshes are not cached.
+      description: Public aggregate counts are cached for 30 minutes per application process. An expired successful snapshot is served during one shared background refresh for at most another 30 minutes. Failed background refreshes retry after 30 seconds; cold or older snapshots wait for a bounded refresh.
       responses:
         '200':
           description: Current counts for arcade, changelog, and flag data.
@@ -7705,8 +7757,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: PUT /arcade/report-subscription
-      description: Compatibility entry that upserts one canonical device and enables its per-arcade preference. Credentials are not duplicated per arcade.
-      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      description: "Compatibility entry that upserts one canonical device and enables its per-arcade preference. Credentials are not duplicated per arcade. Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE)."
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -7737,8 +7788,7 @@ paths:
     delete:
       tags: [Arcade Mutations]
       summary: DELETE /arcade/report-subscription
-      description: Stores an explicit per-arcade opt-out and cancels pending report pushes for this arcade and device. The canonical device remains enabled for personal activity and other arcades.
-      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      description: "Stores an explicit per-arcade opt-out and cancels pending report pushes for this arcade and device. The canonical device remains enabled for personal activity and other arcades. Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE)."
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -9520,10 +9570,9 @@ x-musecat-joint-connection:
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}, {"name": "requesterOnly", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Public contact entry: restrict results to inquiries created by this caller. Arcade admin dashboards omit this flag."}]
     post:
-      description: Creates inquiries only. Guest credentials cannot create DMs or borrow account permissions.
       tags: ["Messaging"]
       summary: "Create or find an unordered user pair, or create an independent inquiry"
-      description: "DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries are managed in the arcade admin dashboard by current official responders and platform staff. Explicit musecat mentions notify active platform staff; they are not required to list authorized inquiries. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
+      description: "Creates inquiries only. Guest credentials cannot create DMs or borrow account permissions. DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries are managed in the arcade admin dashboard by current official responders and platform staff. Explicit musecat mentions notify active platform staff; they are not required to list authorized inquiries. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
       security: [{"guestFeedbackKey": []}]
       responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Existing or new DM, or idempotent inquiry replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}}
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingCreate"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "kind": {"type": "string", "enum": ["inquiry"]}, "inboxType": {"type": "string"}, "inboxId": {"type": "string"}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
@@ -11011,3 +11060,88 @@ x-musecat-joint-connection:
         '401': {description: Web session required.}
         '403': {description: Inactive account.}
         '404': {description: Key missing or owned by another account.}
+
+  /user/notifications/aime:
+    get:
+      tags: [Notifications]
+      summary: Read shared Aime availability and the current user's opt-in
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Latest shared probe; no external request is made by this endpoint.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, httpStatus, checkedAt, subscribed, history, completed, confirmations]
+                properties:
+                  status: {type: string, enum: [unknown, blocked, available]}
+                  history:
+                    type: array
+                    maxItems: 288
+                    description: Real probes from the last 24 hours, oldest first. Missing periods have no fabricated observations.
+                    items:
+                      type: object
+                      required: [checkedAt, status, httpStatus]
+                      properties:
+                        checkedAt: {type: string}
+                        status: {type: string, enum: [unknown, blocked, available]}
+                        httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
+                  httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
+                  checkedAt: {type: string}
+                  subscribed: {type: boolean}
+                  completed: {type: boolean, description: Terminal completion of this one-off incident. Later outages never reopen it.}
+                  confirmations: {type: integer, minimum: 0, maximum: 3, description: Additional successful five-minute confirmations after the first operational candidate notice. Three confirms recovery once Telegram and Discord delivery receipts are successful.}
+        '401': {description: Authentication required.}
+        '403': {description: Inactive account.}
+    put:
+      tags: [Notifications]
+      summary: Explicitly opt in or cancel the current Aime recovery notification
+      description: Account scoped and idempotent. Allowed during the outage and its confirmation period until three consecutive five-minute successes complete this one-off campaign. Existing device permission alone never opts a user in.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: {type: boolean}
+      responses:
+        '200': {description: Updated status and subscription, as in GET.}
+        '400': {description: Invalid input or no observed outage awaiting recovery.}
+        '401': {description: Authentication required.}
+        '403': {description: Inactive account.}
+
+  /aime/status:
+    get:
+      tags: [Notifications]
+      summary: Read shared Aime availability without signing in
+      security: []
+      responses:
+        '200':
+          description: Public game NET web maintenance status and 24-hour history. Available requires both game pages to return HTTP 200 without a maintenance path or visible maintenance message. Login forms and password inputs are not required; maintenance HTML can be blocked even with HTTP 200. A 403 alone is unknown. This does not verify in-game card authentication or saving. Authentication and user query parameters are ignored; no subscription membership or account data is read.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, httpStatus, checkedAt, subscribed, history, completed, confirmations]
+                properties:
+                  status: {type: string, enum: [unknown, blocked, available]}
+                  history:
+                    type: array
+                    maxItems: 288
+                    description: Real probes from the last 24 hours, oldest first. Missing periods have no fabricated observations.
+                    items:
+                      type: object
+                      required: [checkedAt, status, httpStatus]
+                      properties:
+                        checkedAt: {type: string}
+                        status: {type: string, enum: [unknown, blocked, available]}
+                        httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
+                  httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
+                  checkedAt: {type: string}
+                  subscribed: {type: boolean, enum: [false]}
+                  completed: {type: boolean, description: Terminal completion of this one-off incident. Later outages never reopen it.}
+                  confirmations: {type: integer, minimum: 0, maximum: 3, description: Additional successful five-minute confirmations after the first operational candidate notice. Three confirms recovery once Telegram and Discord delivery receipts are successful.}

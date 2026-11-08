@@ -29,4 +29,22 @@ Required rules:
 - Keep external network calls outside transactions. Keep aggregate mutation, changelog, XP, and required cache invalidation atomic.
 - Any API or policy change updates handler tests, OpenAPI, this architecture contract when relevant, and changelog documentation when mutation history changes.
 
-Run the focused tests while editing, then `go test ./...` before handoff. Do not modify unrelated files in a dirty worktree.
+## Validation scope
+
+- Before handoff or push, run the tests for the changed owner packages and their
+  importing consumers, including the relevant handler, permission and wire-contract
+  regressions. Record the selected scope and results. Unknown ownership or unclear
+  impact requires broader checks rather than silently omitting consumers.
+- Documentation-only changes use the applicable reference and OpenAPI checks.
+  Workflow-only changes use actionlint and an initial successful remote run; do not
+  repeat unrelated application suites locally for these changes.
+- Shared authentication, XP/transaction policy, schema or migration infrastructure,
+  dependencies, module/toolchain and build changes require `GOWORK=off go vet ./...`
+  and `GOWORK=off go test ./...`. Published-module/release validation also requires
+  those complete checks. Core migration verification always uses new Core databases,
+  never Full, production or backup databases.
+- CI retains the complete Go vet/test gate for every PR and for pushes to `main`
+  and `dev`; feature branches use PR runs, and superseded runs are cancelled.
+  Scoped local success and remote CI status are separate: resolve known failures
+  and never report pending checks as passed.
+- Do not modify unrelated files in a dirty worktree.

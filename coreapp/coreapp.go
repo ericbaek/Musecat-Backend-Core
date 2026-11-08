@@ -117,6 +117,7 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	se.Router.GET("/guest/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(arcadeadmin.RequireGuestFeedback())
 	se.Router.POST("/guest/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
 	se.Router.PATCH("/guest/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(4096))
+	se.Router.GET("/aime/status", usernotifications.AimePublicStatus)
 	se.Router.GET("/hello", handlers.HelloHandler)
 	se.Router.GET("/geo", handlers.GeoLookupHandler)
 	se.Router.GET("/geocode", handlers.GeocodeHandler)
@@ -293,6 +294,8 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))
 
 	authNotifications := se.Router.Group("/user/notifications").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	authNotifications.GET("/aime", usernotifications.AimeStatus)
+	authNotifications.PUT("/aime", usernotifications.AimeSubscribe).Bind(apis.BodyLimit(4096))
 	authNotifications.GET("", usernotifications.List)
 	authNotifications.POST("/read", usernotifications.Read).Bind(apis.BodyLimit(4096))
 	authNotifications.POST("/device", usernotifications.DeviceStatus).Bind(apis.BodyLimit(4096))
