@@ -117,3 +117,5 @@ by its migration contract. Do not run Core migrations against Full or production
 Deploy the backend contract before the frontend key-management UI.
 
 The Bots tab filters account-owned change history by all bots or a specific key, including revoked keys. `GET /user/changelog?user=<owner>&bot=all|<key-id>` requires the authenticated owner; filtering precedes counting and pagination. Home dashboard summary and recent update feeds exclude bot changelog events before grouping and pagination. Human edits to bot-created arcades remain eligible for these feeds.
+
+Developers may read another account's bot console through `GET /user/bot-keys?user=<id>` and `/user/changelog?user=<id>&bot=all|<key-id>`. Bot names remain owner-only; foreign key metadata omits the name and never includes secrets. Other roles cannot inspect foreign consoles. Issuance and revocation remain scoped to the authenticated owner. Public user-history summaries retain redacted bot attribution for activity badges without exposing edit details.

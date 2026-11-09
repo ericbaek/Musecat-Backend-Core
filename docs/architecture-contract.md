@@ -1364,3 +1364,5 @@ history. It always returns `subscribed=false`, does not consult the caller's
 account even when authenticated, and ignores user query parameters. Guests can
 read guidance/status/history; opting in or cancelling still requires an active
 account through the existing authenticated `/user/notifications/aime` routes.
+
+Developers may read another account's bot console through `GET /user/bot-keys?user=<id>` and `/user/changelog?user=<id>&bot=all|<key-id>`. Bot names remain owner-only; foreign key metadata omits the name and never includes secrets. Other roles cannot inspect foreign consoles. Issuance and revocation remain scoped to the authenticated owner. Public user-history summaries retain redacted bot attribution for activity badges without exposing edit details.

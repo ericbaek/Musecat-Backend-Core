@@ -366,3 +366,68 @@ func TestBotKeyListRetainsOldBotsAndEnforcesActiveLimit(t *testing.T) {
 	botRequest(t, app, session, "DELETE", "/user/bot-keys/"+activeID, "", 204)
 	issueBotKey(t, app, session, "Replacement")
 }
+
+func TestDeveloperCanInspectForeignBotConsoleWithoutNamesOrManagement(t *testing.T) {
+	app := newArcadeTestApp(t)
+	stubGeoLookup(t)
+	session, owner := createAuthUserWithTags(t, app, []string{"founding_supporter"})
+	developer, _ := createAuthUserWithTags(t, app, []string{"developer"})
+	moderator, _ := createAuthUserWithTags(t, app, []string{"moderator"})
+	visitor, _ := createAuthUserWithTags(t, app, nil)
+	key, keyID := issueBotKey(t, app, session, "Private importer")
+	created := botRequest(t, app, key, "POST", "/bot/v1/arcade/new", `{"name":"Bot inspection","address":"Seoul","location":{"lat":37.5665,"lon":126.978}}`, 200)
+	arcade, err := app.FindRecordById("arcade", created["id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	arcade.Set("public", true)
+	if err := app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+	listed := botRequest(t, app, developer, "GET", "/user/bot-keys?user="+owner.Id, "", 200)
+	items := listed["items"].([]any)
+	if len(items) != 1 {
+		t.Fatal(listed)
+	}
+	metadata := items[0].(map[string]any)
+	if metadata["id"] != keyID || metadata["prefix"] == nil {
+		t.Fatal(metadata)
+	}
+	raw, _ := json.Marshal(listed)
+	for _, forbidden := range []string{"Private importer", key, "key_hash", "owner_key_hash", `"name"`} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("foreign metadata leaked %s", forbidden)
+		}
+	}
+	for _, filter := range []string{"all", keyID} {
+		history := botRequest(t, app, developer, "GET", "/user/changelog?user="+owner.Id+"&bot="+filter, "", 200)
+		if history["total"] != float64(1) {
+			t.Fatal(history)
+		}
+		source := history["items"].([]any)[0].(map[string]any)["contribution_source"].(map[string]any)
+		if source["kind"] != "bot" || source["name"] != nil {
+			t.Fatal(source)
+		}
+	}
+	for _, denied := range []string{moderator, visitor} {
+		botRequest(t, app, denied, "GET", "/user/bot-keys?user="+owner.Id, "", 403)
+		botRequest(t, app, denied, "GET", "/user/changelog?user="+owner.Id+"&bot=all", "", 403)
+	}
+	botRequest(t, app, developer, "DELETE", "/user/bot-keys/"+keyID, "", 404)
+	_, other := createAuthUserWithTags(t, app, nil)
+	botRequest(t, app, developer, "GET", "/user/changelog?user="+other.Id+"&bot="+keyID, "", 404)
+	response := executeJSONRequest(t, app, "GET", "/user/changelog?user="+owner.Id, "", nil)
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		t.Fatal(response.StatusCode)
+	}
+	var guest map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&guest); err != nil {
+		t.Fatal(err)
+	}
+	item := guest["items"].([]any)[0].(map[string]any)
+	source := item["contribution_source"].(map[string]any)
+	if source["kind"] != "bot" || source["name"] != nil || item["log"] != nil || item["by"] != nil {
+		t.Fatal(item)
+	}
+}

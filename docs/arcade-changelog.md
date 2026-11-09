@@ -497,3 +497,5 @@ Bot contribution names are private to the issuing account. Arcade and user histo
 responses retain the verified bot kind and identifier but omit its name for every
 other viewer, including reviewers. Owner-only history retains immutable names even
 after key revocation. Raw photo metadata does not expose stored contribution data.
+
+Developers may read another account's bot console through `GET /user/bot-keys?user=<id>` and `/user/changelog?user=<id>&bot=all|<key-id>`. Bot names remain owner-only; foreign key metadata omits the name and never includes secrets. Other roles cannot inspect foreign consoles. Issuance and revocation remain scoped to the authenticated owner. Public user-history summaries retain redacted bot attribution for activity badges without exposing edit details.
