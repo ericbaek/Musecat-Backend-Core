@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/contribution"
 	"math"
 	"sort"
 	"strconv"
@@ -257,6 +258,9 @@ func LoadCurrentExp(app core.App, userID string) (int, error) {
 }
 
 func IsExpEligible(app core.App, userID string) (bool, error) {
+	if contribution.IsExternal(app) {
+		return false, nil
+	}
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return false, fmt.Errorf("user id is required")
@@ -583,6 +587,13 @@ ORDER BY created ASC, id ASC
 	}
 	granted := false
 	for _, atomID := range atomIDs {
+		atom, err := txApp.FindRecordById("arcade_photo_atoms", atomID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return 0, false, err
+		}
+		if err == nil && contribution.FromRecord(atom) != nil {
+			continue
+		}
 		if remaining <= 0 {
 			break
 		}
@@ -609,6 +620,7 @@ type arcadePublicBackfillGrant struct {
 }
 
 func PreviewArcadePublicExp(app core.App, userID, arcadeID string) (ArcadePublicExpPreview, error) {
+	app = contribution.WithoutSource(app)
 	userID = strings.TrimSpace(userID)
 	arcadeID = strings.TrimSpace(arcadeID)
 	if userID == "" {
@@ -638,7 +650,7 @@ func PreviewArcadePublicExp(app core.App, userID, arcadeID string) (ArcadePublic
 	publicExp := 0
 	if awarded, err := HasLevelLogKind(app, userID, ArcadePublicKind(arcadeID)); err != nil {
 		return ArcadePublicExpPreview{}, err
-	} else if !awarded {
+	} else if !awarded && !arcadeCreatedExternally(app, arcadeID) {
 		publicExp = 5
 		currentExp += publicExp
 	}
@@ -671,6 +683,7 @@ func PreviewArcadePublicExp(app core.App, userID, arcadeID string) (ArcadePublic
 }
 
 func GrantArcadePublicBackfillTx(txApp core.App, userID, arcadeID string, baseExp int) (int, error) {
+	txApp = contribution.WithoutSource(txApp)
 	userID = strings.TrimSpace(userID)
 	arcadeID = strings.TrimSpace(arcadeID)
 	if userID == "" {
@@ -719,6 +732,7 @@ INNER JOIN arcade a ON a.id = c.arcade
 WHERE c."by" = {:user}
   AND c.arcade = {:arcade}
   AND c.changed IN ('basic', 'game', 'hour', 'sns', 'gtk', 'photo')
+ AND COALESCE(json_extract(c.contribution_source, '$.kind'), '') = ''
 ` + publicFilter + `
 ORDER BY c.created ASC, c.id ASC
 `).Bind(dbx.Params{"user": userID, "arcade": arcadeID}).Rows()
@@ -918,4 +932,20 @@ func loadAttendanceExp(app core.App, userID string) (int, error) {
 		total += rec.GetInt("diff_exp")
 	}
 	return total, nil
+}
+
+// ArcadePublicExp retains the creation origin even when a web user publishes a bot draft.
+func ArcadePublicExp(app core.App, arcadeID string) (int, error) {
+	record, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		return 0, err
+	}
+	if contribution.FromRecord(record) != nil {
+		return 0, nil
+	}
+	return 5, nil
+}
+func arcadeCreatedExternally(app core.App, arcadeID string) bool {
+	record, err := app.FindRecordById("arcade", arcadeID)
+	return err == nil && contribution.FromRecord(record) != nil
 }

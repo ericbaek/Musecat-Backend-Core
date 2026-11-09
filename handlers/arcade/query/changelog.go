@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/contribution"
 	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"net/http"
 	"strconv"
@@ -33,6 +34,7 @@ var changelogCategorySet = map[string]struct{}{
 // ListArcadeChangelog is the only supported wire API for arcade history.
 // Changelog rows are immutable and are never edited or deleted by clients.
 func ListArcadeChangelog(re *core.RequestEvent) error {
+	re.Response.Header().Set("Cache-Control", "private, no-store")
 	if re.Auth == nil || re.Auth.Collection().Name != "user" {
 		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
 	}
@@ -77,15 +79,16 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
 		item := map[string]any{
-			"id":      record.Id,
-			"arcade":  record.GetString("arcade"),
-			"changed": record.GetString("changed"),
-			"from":    record.Get("from"),
-			"to":      record.Get("to"),
-			"by":      record.GetString("by"),
-			"log":     record.Get("log"),
-			"created": record.Get("created"),
-			"updated": record.Get("updated"),
+			"id":                  record.Id,
+			"contribution_source": contribution.ForViewer(contribution.FromRecord(record), record.GetString("by"), re.Auth.Id),
+			"arcade":              record.GetString("arcade"),
+			"changed":             record.GetString("changed"),
+			"from":                record.Get("from"),
+			"to":                  record.Get("to"),
+			"by":                  record.GetString("by"),
+			"log":                 record.Get("log"),
+			"created":             record.Get("created"),
+			"updated":             record.Get("updated"),
 		}
 		if record.GetString("changed") == "memo" {
 			item["memo"] = memoDiff.Build(re.App, arcadeID, record.GetString("from"), record.GetString("to"))

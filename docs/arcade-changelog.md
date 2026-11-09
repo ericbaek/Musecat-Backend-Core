@@ -474,3 +474,28 @@ the PASELI amount alongside the base amount.
 ### Notice presentation and inquiry configuration
 
 Notice titles and required/pinned display modes preserve the existing standalone notice history, timestamps and XP behavior. Current official accounts may manage legacy notices for their owned arcade. Active required/pinned caps are enforced atomically. Inquiry bot configuration is operational inbox policy and creates no arcade changelog entries or XP; existing conversation flow snapshots remain unchanged.
+
+## Bot contribution attribution
+
+A bot key authenticates as its issuing account only under `/bot/v1`. The normal
+changelog `by` relation remains that account; a separate immutable
+`contribution_source` snapshot stores `kind=bot`, the key record ID and bot name.
+Both arcade and user timeline responses include the source, including after key
+revocation. The frontend shows the account and bot name. Creation's initial basic
+changelog uses the same attribution. No secret, hash, authorization header or
+owner token fingerprint is exposed.
+
+Bot edits grant no XP, bot creation receives no public-conversion reward, bot
+changelog rows are excluded from draft reward backfill, and bot photo atoms
+remain ineligible after web application. Real web edits keep existing reward
+rules; unchanged saves do not convert prior bot work into rewarded contributions.
+Source snapshots and existing changelog rows are not rewritten on revocation.
+
+## Bot name privacy
+
+Bot contribution names are private to the issuing account. Arcade and user history
+responses retain the verified bot kind and identifier but omit its name for every
+other viewer, including reviewers. Owner-only history retains immutable names even
+after key revocation. Raw photo metadata does not expose stored contribution data.
+
+Developers may read another account's bot console through `GET /user/bot-keys?user=<id>` and `/user/changelog?user=<id>&bot=all|<key-id>`. Bot names remain owner-only; foreign key metadata omits the name and never includes secrets. Other roles cannot inspect foreign consoles. Issuance and revocation remain scoped to the authenticated owner. Public user-history summaries retain redacted bot attribution for activity badges without exposing edit details.
