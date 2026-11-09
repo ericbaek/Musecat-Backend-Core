@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,21 @@ func TestOpenAPIDocumentsBotAndKeyManagementRoutes(t *testing.T) {
 	for operation := range operations {
 		if !documented[operation] {
 			t.Errorf("OpenAPI is missing %s", operation)
+		}
+	}
+}
+
+func TestBotOpenAPIRoutesRemainInPublicPaths(t *testing.T) {
+	raw, err := os.ReadFile("../docs/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := string(raw)
+	extension := strings.Index(spec, "\nx-musecat-joint-connection:")
+	for _, path := range []string{"/bot/v1/arcade/new", "/bot/v1/arcade/game", "/user/bot-keys", "/user/bot-keys/{id}"} {
+		at := strings.Index(spec, "\n  "+path+":")
+		if at < 0 || (extension >= 0 && at > extension) {
+			t.Fatalf("%s is outside public OpenAPI paths", path)
 		}
 	}
 }

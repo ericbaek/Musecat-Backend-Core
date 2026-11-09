@@ -56,12 +56,12 @@ func GetUserChangelog(re *core.RequestEvent) error {
 		if !includeDetails {
 			return re.UnauthorizedError("Authentication is required for bot history.", nil)
 		}
-		if re.Auth.Id != userID {
-			return re.ForbiddenError("Only the account owner may inspect its bot console.", nil)
+		if !botaccess.CanInspectOwner(re.Auth, userID) {
+			return re.ForbiddenError("Only the owner or a developer may inspect its bot console.", nil)
 		}
 		if bot != "all" {
 			key, err := re.App.FindRecordById(botaccess.Keys, bot)
-			if err != nil || key.GetString("owner") != re.Auth.Id {
+			if err != nil || key.GetString("owner") != userID {
 				return re.NotFoundError("Bot key not found.", nil)
 			}
 		}
@@ -105,10 +105,10 @@ WHERE %s
 		})
 	}
 
-	columns := ""
+	columns := ", c.contribution_source"
 	if includeDetails {
-		columns = `,
-	c."from", c."to", c."by", c.log, c.created, c.contribution_source`
+		columns += `,
+	c."from", c."to", c."by", c.log, c.created`
 	}
 	rows, err := re.App.DB().NewQuery(fmt.Sprintf(`
 SELECT
@@ -153,8 +153,14 @@ LIMIT {:limit} OFFSET {:offset}
 			"arcade_name": userChangelogString(raw, "arcade_name"),
 			"changed":     userChangelogString(raw, "changed"),
 		}
+		if includeDetails || source != nil {
+			viewerID := ""
+			if re.Auth != nil {
+				viewerID = re.Auth.Id
+			}
+			item["contribution_source"] = contribution.ForViewer(source, userID, viewerID)
+		}
 		if includeDetails {
-			item["contribution_source"] = contribution.ForViewer(source, userChangelogString(raw, "by"), re.Auth.Id)
 			if userChangelogString(raw, "arcade_public") == "1" {
 				publicDetailIDs = append(publicDetailIDs, userChangelogString(raw, "arcade"))
 			}

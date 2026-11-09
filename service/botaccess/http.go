@@ -42,13 +42,24 @@ func projection(record *core.Record) map[string]any {
 
 func List(re *core.RequestEvent) error {
 	noStore(re)
-	items, err := re.App.FindRecordsByFilter(Keys, "owner={:owner}", "revoked,-created", 0, 0, dbx.Params{"owner": re.Auth.Id})
+	ownerID := strings.TrimSpace(re.Request.URL.Query().Get("user"))
+	if ownerID == "" {
+		ownerID = re.Auth.Id
+	}
+	if !CanInspectOwner(re.Auth, ownerID) {
+		return re.ForbiddenError("Only the owner or a developer may inspect bot keys.", nil)
+	}
+	items, err := re.App.FindRecordsByFilter(Keys, "owner={:owner}", "revoked,-created", 0, 0, dbx.Params{"owner": ownerID})
 	if err != nil {
 		return re.InternalServerError("Failed to list bot keys.", err)
 	}
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		result = append(result, projection(item))
+		metadata := projection(item)
+		if ownerID != re.Auth.Id {
+			delete(metadata, "name")
+		}
+		result = append(result, metadata)
 	}
 	return re.JSON(http.StatusOK, map[string]any{"items": result})
 }
@@ -200,6 +211,24 @@ func CanIssueKey(owner *core.Record) bool {
 		for _, tag := range tags {
 			switch strings.ToLower(strings.TrimSpace(tag)) {
 			case "founding_supporter", "supporter", "designer", "moderator", "developer":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// CanInspectOwner permits read-only developer inspection without revealing names.
+func CanInspectOwner(viewer *core.Record, ownerID string) bool {
+	if viewer == nil {
+		return false
+	}
+	if viewer.Id == ownerID {
+		return true
+	}
+	for _, tags := range [][]string{viewer.GetStringSlice("tag"), viewer.GetStringSlice("tags")} {
+		for _, tag := range tags {
+			if strings.ToLower(strings.TrimSpace(tag)) == "developer" {
 				return true
 			}
 		}
