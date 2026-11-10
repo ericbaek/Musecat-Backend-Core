@@ -83,6 +83,14 @@ func runDueCollectionTranslations(ctx context.Context, app core.App, translator 
 			continue
 		}
 
+		if strings.TrimSpace(source.Title) == "" && strings.TrimSpace(source.Body) == "" {
+			if err := completeTranslation(app, collection, candidate.Id, sourceHash, attempt, TranslationResult{}, now); err != nil {
+				runErrors = append(runErrors, err)
+			} else {
+				processed++
+			}
+			continue
+		}
 		callCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
 		result, callErr := translator.Translate(callCtx, source)
 		cancel()

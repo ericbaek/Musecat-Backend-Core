@@ -146,9 +146,16 @@ Its raw PocketBase REST rules are locked; clients use only `GET /community/posts
   game, cabinet, version, product, username, URL, price, and mention values and
   may include an operator-maintained Musecat glossary.
 
-Community achievement posts require at least one attached photo. Creation rejects
-text-only achievements with 400. Updates count retained and newly attached photos
-inside the author mutation transaction and reject a photo-less conversion with 400.
+Community achievement posts require a valid game series and at least one attached
+photo; their body is optional. Other flairs still require a nonblank body. Updates
+validate the final retained/uploaded photo set inside the author transaction.
+Optional `photo_order` selects retained filenames or upload indices in final order;
+omission retains the legacy append behavior. Invalid, duplicate, foreign, omitted
+upload references or a photo-less achievement return 400 without changing the post.
+The five-minute deadline never extends. Empty title/body content is ready without
+calling a translation provider; adding text queues the usual translation flow.
+`sort=newest|popular` applies before pagination; popular uses all-time like count,
+created time and ID descending. Responses remain private/no-store with viewer state.
 
 ### Community conversations and likes
 

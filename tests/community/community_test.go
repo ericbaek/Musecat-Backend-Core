@@ -553,6 +553,8 @@ func communityPhotoRequest(t *testing.T, app *tests.TestApp, token, flair string
 	writer := multipart.NewWriter(&body)
 	writer.WriteField("body", "이미지 업적 테스트")
 	writer.WriteField("flair", flair)
+	series := achievementSeries(t, app)
+	writer.WriteField("game_series", series.Id)
 	for i, data := range files {
 		part, err := writer.CreateFormFile("photos", fmt.Sprintf("photo%d.png", i))
 		if err != nil {
@@ -624,7 +626,7 @@ func TestCommunityPost_MultiplePhotosAndAchievementGallery(t *testing.T) {
 	if response.StatusCode != 200 || payload["total"] != float64(1) || payload["items"].([]any)[0].(map[string]any)["id"] != id {
 		t.Fatalf("gallery: %d %#v", response.StatusCode, payload)
 	}
-	response = communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"body":"사진은 그대로 유지","flair":"achievement"}`, token)
+	response = communityRequest(t, app, http.MethodPut, "/community/post?id="+id, fmt.Sprintf(`{"body":"사진은 그대로 유지","flair":"achievement","game_series":%q}`, achievementSeries(t, app).Id), token)
 	payload = decodeBody(t, response)
 	if response.StatusCode != 200 || len(payload["photos"].([]any)) != 8 {
 		t.Fatalf("edit: %d %#v", response.StatusCode, payload)

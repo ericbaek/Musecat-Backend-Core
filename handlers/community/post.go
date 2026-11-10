@@ -45,11 +45,65 @@ var allowedFlairs = map[string]struct{}{
 }
 
 type postInput struct {
-	Title      string             `json:"title"`
-	Body       string             `json:"body"`
-	Flair      string             `json:"flair"`
-	GameSeries string             `json:"game_series"`
-	Photos     []*filesystem.File `json:"-"`
+	Title      string               `json:"title"`
+	Body       string               `json:"body"`
+	Flair      string               `json:"flair"`
+	GameSeries string               `json:"game_series"`
+	Photos     []*filesystem.File   `json:"-"`
+	PhotoOrder []postPhotoReference `json:"photo_order,omitempty"`
+}
+
+// A reference selects exactly one retained filename or zero-based upload index.
+type postPhotoReference struct {
+	Name   string `json:"name,omitempty"`
+	Upload *int   `json:"upload,omitempty"`
+}
+
+func finalPostPhotos(existing []string, input postInput) ([]any, error) {
+	result := make([]any, 0, MaxPostPhotos)
+	if input.PhotoOrder == nil {
+		for _, name := range existing {
+			result = append(result, name)
+		}
+		for _, file := range input.Photos {
+			result = append(result, file)
+		}
+	} else {
+		retained := map[string]bool{}
+		for _, name := range existing {
+			retained[name] = true
+		}
+		usedNames, usedUploads := map[string]bool{}, map[int]bool{}
+		for _, ref := range input.PhotoOrder {
+			if (ref.Name != "") == (ref.Upload != nil) {
+				return nil, fmt.Errorf("invalid_photo_order")
+			}
+			if ref.Upload != nil {
+				index := *ref.Upload
+				if index < 0 || index >= len(input.Photos) || usedUploads[index] {
+					return nil, fmt.Errorf("invalid_photo_order")
+				}
+				usedUploads[index] = true
+				result = append(result, input.Photos[index])
+			} else {
+				if !retained[ref.Name] || usedNames[ref.Name] {
+					return nil, fmt.Errorf("invalid_photo_order")
+				}
+				usedNames[ref.Name] = true
+				result = append(result, ref.Name)
+			}
+		}
+		if len(usedUploads) != len(input.Photos) {
+			return nil, fmt.Errorf("invalid_photo_order")
+		}
+	}
+	if len(result) > MaxPostPhotos {
+		return nil, fmt.Errorf("too_many_photos")
+	}
+	if input.Flair == "achievement" && len(result) == 0 {
+		return nil, fmt.Errorf("achievement_photo_required")
+	}
+	return result, nil
 }
 
 func RegisterRoutes(se *core.ServeEvent) { RegisterAccountRoutes(se.Router.RouterGroup) }
@@ -117,6 +171,10 @@ func CreatePost(re *core.RequestEvent) error {
 	record.Set("translations", map[string]any{})
 	record.Set("photos", input.Photos)
 
+	if input.Title == "" && input.Body == "" {
+		record.Set("translation_status", "ready")
+		record.Set("translated_at", now)
+	}
 	if err := re.App.Save(record); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to create community post", "details": err.Error()})
 	}
@@ -155,20 +213,16 @@ func UpdatePost(re *core.RequestEvent) error {
 			return fmt.Errorf("edit_window_closed")
 		}
 
-		if input.Flair == "achievement" && len(record.GetStringSlice("photos"))+len(input.Photos) == 0 {
-			return fmt.Errorf("achievement_photo_required")
+		photos, err := finalPostPhotos(record.GetStringSlice("photos"), input)
+		if err != nil {
+			return err
 		}
-
 		record.Set("game_series", input.GameSeries)
 		record.Set("title", input.Title)
 		record.Set("body", input.Body)
 		record.Set("flair", input.Flair)
-		if len(input.Photos) > 0 {
-			record.Set("photos+", input.Photos)
-		}
-		if len(record.Original().GetStringSlice("photos"))+len(input.Photos) > MaxPostPhotos {
-			return fmt.Errorf("too_many_photos")
-		}
+		record.Set("photos", photos)
+
 		record.Set("translation_status", "pending")
 		record.Set("translation_attempts", 0)
 		record.Set("translation_started_at", "")
@@ -176,6 +230,10 @@ func UpdatePost(re *core.RequestEvent) error {
 		record.Set("translation_error", "")
 		record.Set("translations", map[string]any{})
 		record.Set("original_hash", contentHash(input.Title, input.Body))
+		if input.Title == "" && input.Body == "" {
+			record.Set("translation_status", "ready")
+			record.Set("translated_at", now)
+		}
 		if err := tx.Save(record); err != nil {
 			return err
 		}
@@ -188,6 +246,8 @@ func UpdatePost(re *core.RequestEvent) error {
 			return re.JSON(http.StatusNotFound, map[string]any{"error": "community post not found"})
 		case "forbidden":
 			return re.JSON(http.StatusForbidden, map[string]any{"error": "only the author can edit this post"})
+		case "invalid_photo_order":
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid photo_order"})
 		case "achievement_photo_required":
 			return re.JSON(http.StatusBadRequest, map[string]any{"error": "achievement posts require at least one photo"})
 		case "too_many_photos":
@@ -327,14 +387,18 @@ func ListPosts(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count community posts", "details": err.Error()})
 	}
-	records, err := re.App.FindRecordsByFilter(
-		CollectionPost,
-		filter,
-		"-created,-id",
-		perPage,
-		(page-1)*perPage,
-		params,
-	)
+	sort := re.Request.URL.Query().Get("sort")
+	if sort != "" && sort != "newest" && sort != "popular" {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid sort"})
+	}
+	var records []*core.Record
+	if sort == "popular" {
+		err = re.App.RecordQuery(CollectionPost).AndWhere(countFilter).
+			OrderBy("(SELECT COUNT(*) FROM community_post_like WHERE post = community_post.id) DESC", "created DESC", "id DESC").
+			Limit(int64(perPage)).Offset(int64((page - 1) * perPage)).All(&records)
+	} else {
+		records, err = re.App.FindRecordsByFilter(CollectionPost, filter, "-created,-id", perPage, (page-1)*perPage, params)
+	}
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to list community posts", "details": err.Error()})
 	}
@@ -367,6 +431,16 @@ func decodePostInput(re *core.RequestEvent) (postInput, error) {
 			return input, err
 		}
 		input.Photos = files
+		if values, exists := re.Request.MultipartForm.Value["photo_order"]; exists {
+			if len(values) != 1 {
+				return input, fmt.Errorf("invalid photo_order")
+			}
+			decoder := json.NewDecoder(strings.NewReader(values[0]))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&input.PhotoOrder); err != nil || input.PhotoOrder == nil {
+				return input, fmt.Errorf("invalid photo_order")
+			}
+		}
 	} else if err := json.NewDecoder(io.LimitReader(re.Request.Body, 1<<20)).Decode(&input); err != nil {
 		return input, err
 	}
@@ -384,7 +458,7 @@ func validatePostInput(app core.App, input postInput) error {
 	if err := validatePhotos(input.Photos, MaxPostPhotos); err != nil {
 		return err
 	}
-	if input.Body == "" {
+	if input.Body == "" && input.Flair != "achievement" {
 		return fmt.Errorf("body is required")
 	}
 	if len([]rune(input.Body)) > 10000 {
@@ -395,6 +469,9 @@ func validatePostInput(app core.App, input postInput) error {
 	}
 	if _, ok := allowedFlairs[input.Flair]; !ok {
 		return fmt.Errorf("flair is invalid")
+	}
+	if input.Flair == "achievement" && input.GameSeries == "" {
+		return fmt.Errorf("game_series is required for achievements")
 	}
 	if input.GameSeries != "" {
 		if _, err := app.FindRecordById("game_series", input.GameSeries); err != nil {

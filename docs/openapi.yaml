@@ -213,15 +213,14 @@ components:
           type: boolean
     CommunityPostInput:
       type: object
-      required: [body]
       properties:
         title:
           type: string
           maxLength: 200
         body:
           type: string
-          minLength: 1
           maxLength: 10000
+          description: Optional for achievements; other flairs require nonblank text. Omitted achievement bodies are stored as an empty string.
         flair:
           type: string
           enum: [achievement, question, tip, news, event, art, chitchat]
@@ -231,9 +230,25 @@ components:
           maxItems: 8
           items: {type: string, format: binary}
           description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes. Achievement posts require at least one photo; updates count retained photos.
+        photo_order:
+          type: array
+          maxItems: 8
+          description: Update only. Ordered final photos; each entry selects a retained filename or a zero-based photos upload index. Multipart encodes this array as JSON. Omit to retain existing photos and append uploads. Every upload must be referenced exactly once; retained names must belong to the post and cannot repeat. Achievements retain at least one photo.
+          items:
+            oneOf:
+              - type: object
+                additionalProperties: false
+                required: [name]
+                properties:
+                  name: {type: string, minLength: 1}
+              - type: object
+                additionalProperties: false
+                required: [upload]
+                properties:
+                  upload: {type: integer, minimum: 0}
         game_series:
           type: string
-          description: Optional canonical game_series id.
+          description: Canonical game_series id; required for achievements.
     CommunityPost:
       type: object
       required: [id, photos, author, game_series, title, body, flair, locale, requested_locale, source_locale, translated, translation_status, editable_until, created, updated]
@@ -4417,6 +4432,10 @@ paths:
       tags: [Community]
       summary: List immediately public community posts
       parameters:
+        - name: sort
+          in: query
+          schema: {type: string, enum: [newest, popular], default: newest}
+          description: Popular sorts all filtered records by total likes descending, then created descending and ID descending, before pagination. Newest sorts created descending then ID descending.
         - name: game_series
           in: query
           style: form
