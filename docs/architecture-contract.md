@@ -154,6 +154,8 @@ omission retains the legacy append behavior. Invalid, duplicate, foreign, omitte
 upload references or a photo-less achievement return 400 without changing the post.
 The five-minute deadline never extends. Empty title/body content is ready without
 calling a translation provider; adding text queues the usual translation flow.
+`game_series_ids` lists distinct games across the author/flair/image scope before
+game filtering and pagination, so profile pills include games beyond page one.
 `sort=newest|popular` applies before pagination; popular uses all-time like count,
 created time and ID descending. Responses remain private/no-store with viewer state.
 

@@ -340,6 +340,7 @@ func ListPosts(re *core.RequestEvent) error {
 	filter := "status = 'active'"
 	params := dbx.Params{}
 	countFilter := dbx.And(dbx.HashExp{"status": "active"})
+	gameFacetFilter := dbx.And(dbx.HashExp{"status": "active"})
 	series := re.Request.URL.Query()["game_series"]
 	if len(series) > 50 {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "at most 50 game series are allowed"})
@@ -374,6 +375,7 @@ func ListPosts(re *core.RequestEvent) error {
 		filter += " && " + name + " = {:" + name + "}"
 		params[name] = value
 		countFilter = dbx.And(countFilter, dbx.HashExp{name: value})
+		gameFacetFilter = dbx.And(gameFacetFilter, dbx.HashExp{name: value})
 	}
 	if raw := re.Request.URL.Query().Get("has_images"); raw != "" {
 		if raw != "true" {
@@ -381,6 +383,7 @@ func ListPosts(re *core.RequestEvent) error {
 		}
 		filter += " && photos:length > 0"
 		countFilter = dbx.And(countFilter, dbx.NewExp("json_array_length(photos) > 0"))
+		gameFacetFilter = dbx.And(gameFacetFilter, dbx.NewExp("json_array_length(photos) > 0"))
 	}
 
 	total, err := re.App.CountRecords(CollectionPost, countFilter)
@@ -406,13 +409,24 @@ func ListPosts(re *core.RequestEvent) error {
 	if err != nil {
 		return err
 	}
+	var gameRows []struct {
+		ID string `db:"game_series"`
+	}
+	if err := re.App.DB().Select("game_series").Distinct(true).From(CollectionPost).Where(gameFacetFilter).AndWhere(dbx.NewExp("game_series != ''")).OrderBy("game_series").All(&gameRows); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to list community games"})
+	}
+	gameIDs := make([]string, 0, len(gameRows))
+	for _, row := range gameRows {
+		gameIDs = append(gameIDs, row.ID)
+	}
+
 	privateSocialResponse(re)
 	lastPage := 0
 	if total > 0 {
 		lastPage = int((total + int64(perPage) - 1) / int64(perPage))
 	}
 	return re.JSON(http.StatusOK, map[string]any{
-		"page": page, "per_page": perPage, "last_page": lastPage, "total": total, "items": items,
+		"page": page, "per_page": perPage, "last_page": lastPage, "total": total, "items": items, "game_series_ids": gameIDs,
 	})
 }
 

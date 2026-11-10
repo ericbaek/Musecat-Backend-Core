@@ -328,6 +328,11 @@ components:
       type: object
       required: [page, per_page, last_page, total, items]
       properties:
+        game_series_ids:
+          type: array
+          items: {type: string}
+          description: Distinct games across all active posts matching author, flair and has_images, before game filtering and pagination. Used for profile game pills.
+
         page: {type: integer}
         per_page: {type: integer}
         last_page: {type: integer}

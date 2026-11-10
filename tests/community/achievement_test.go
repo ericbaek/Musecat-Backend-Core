@@ -193,3 +193,35 @@ func TestAchievementPopularBeforePagination(t *testing.T) {
 		t.Fatal("invalid sort accepted")
 	}
 }
+
+func TestAchievementGameFacetsIgnorePaginationAndGameFilter(t *testing.T) {
+	app := newCommunityTestApp(t)
+	defer app.Cleanup()
+	token, author := createCommunityUser(t, app)
+	other, _ := createCommunityUser(t, app)
+	first := achievementSeries(t, app)
+	collection, _ := app.FindCollectionByNameOrId("game_series")
+	second := core.NewRecord(collection)
+	second.Set("en", "Second game")
+	if err := app.Save(second); err != nil {
+		t.Fatal(err)
+	}
+	for _, game := range []string{first.Id, second.Id} {
+		res := achievementRequest(t, app, "POST", "", token, map[string]string{"game_series": game, "flair": "achievement"}, 1)
+		data := decodeBody(t, res)
+		if res.StatusCode != 201 {
+			t.Fatal(data)
+		}
+	}
+	res := achievementRequest(t, app, "POST", "", other, map[string]string{"game_series": first.Id, "flair": "achievement"}, 1)
+	res.Body.Close()
+	res = communityRequest(t, app, "GET", "/community/posts?author="+author.Id+"&flair=achievement&has_images=true&per_page=1&game_series="+first.Id, "", "")
+	data := decodeBody(t, res)
+	if res.StatusCode != 200 {
+		t.Fatal(data)
+	}
+	games := data["game_series_ids"].([]any)
+	if len(games) != 2 || data["total"] != float64(1) || len(data["items"].([]any)) != 1 {
+		t.Fatal("facets were paginated or game-filtered", data)
+	}
+}
