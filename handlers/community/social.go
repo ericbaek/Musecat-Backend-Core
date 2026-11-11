@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"io"
 	"net/http"
 	"net/url"
@@ -158,7 +159,14 @@ func CreateComment(re *core.RequestEvent) error {
 			saved.Set("translation_status", "ready")
 		}
 		saved.Set("original_hash", contentHash("", input.Body))
-		return tx.Save(saved)
+		if err := tx.Save(saved); err != nil {
+			return err
+		}
+		post, err := tx.FindRecordById(CollectionPost, input.Post)
+		if err != nil {
+			return err
+		}
+		return usernotification.NotifyCommunityTx(tx, post, saved, re.Auth.Id)
 	})
 	if err != nil {
 		return err
@@ -374,6 +382,15 @@ func setLike(re *core.RequestEvent, targetCollection, likeCollection, key string
 			record.Set(key, id)
 			record.Set("author", re.Auth.Id)
 			if err = tx.Save(record); err != nil {
+				return err
+			}
+		}
+		if re.Request.Method != http.MethodDelete && len(existing) == 0 && targetCollection == CollectionPost {
+			post, err := tx.FindRecordById(CollectionPost, id)
+			if err != nil {
+				return err
+			}
+			if err := usernotification.NotifyCommunityTx(tx, post, nil, re.Auth.Id); err != nil {
 				return err
 			}
 		}

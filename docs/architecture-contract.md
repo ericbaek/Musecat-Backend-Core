@@ -1349,3 +1349,34 @@ history. It always returns `subscribed=false`, does not consult the caller's
 account even when authenticated, and ignores user query parameters. Guests can
 read guidance/status/history; opting in or cancelling still requires an active
 account through the existing authenticated `/user/notifications/aime` routes.
+
+
+## Achievement notifications
+
+Community mutations reuse `user_notification` and its device outbox atomically.
+`community_like` events are unique per recipient/post/actor, never enqueue device
+push, and survive unlike/re-like without resetting read state. Only active likes
+appear. Top-level comments notify the achievement author; replies notify the
+specific `reply_to` comment author. Self events and withdrawn recipients are excluded.
+`community_comment` groups by recipient/post; `community_reply` additionally groups
+by the replied-to comment. Latest live event selection happens before pagination
+and unread counting. Read acknowledges only that group's events through the
+selected event, preserving newer arrivals. `groupKey` is stable across new events.
+Retracted posts/comments disappear from inbox and queued delivery eligibility.
+
+Full reuses its existing retry/expiry/device pipeline: the first unseen comment
+push is immediate, then each recipient/post/device has a ten-minute cooldown
+started only by a successful send. Queued bursts retain only the latest live
+unread event. Each device is independent. No push is generated for likes.
+`PUT/DELETE /community/post/view?id=...` accepts a caller-owned random `session`
+(up to 64 alphanumeric/hyphen characters, body at most 1 KiB). Active account
+required. PUT leases a visible detail for 45 seconds; clients renew every 20
+seconds only while visible. DELETE releases just that session. Concurrent tabs
+remain independent; expired leases are cleaned in bounded batches. Reading a
+detail marks that account's post notifications read. Creation and delivery both
+suppress pushes while any lease is live; inbox history remains available.
+
+Notification links use `/community/{post}` or
+`/community/{post}?comment={comment}#comment-{comment}`. Public original comment
+reads allow the Web detail to fetch a linked older comment/thread outside the
+first list page, reject cross-post targets, and focus the exact comment.

@@ -118,6 +118,8 @@ func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
+	auth.PUT("/post/view", ViewPost).Bind(apis.BodyLimit(1024))
+	auth.DELETE("/post/view", ViewPost).Bind(apis.BodyLimit(1024))
 	auth.POST("/post", CreatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
 	auth.PUT("/post", UpdatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
 	auth.DELETE("/post", DeletePost)

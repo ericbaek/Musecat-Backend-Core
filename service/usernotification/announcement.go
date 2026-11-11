@@ -93,6 +93,9 @@ func announcementItem(row *core.Record, locale string) map[string]any {
 }
 
 func ItemLocalized(app core.App, row *core.Record, locale string) map[string]any {
+	if IsCommunity(row.GetString("kind")) {
+		return communityItem(app, row, locale)
+	}
 	if row.GetString("kind") == AimeKind {
 		return AimeItem(row, locale)
 	}

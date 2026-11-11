@@ -3446,6 +3446,50 @@ components:
     InquiryBotConfig: {"type":"object","properties":{"enabled":{"type":"boolean"},"start":{"type":"string"},"nodes":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/InquiryBotNode"}}},"required":["enabled","start","nodes"]}
     InquiryBotPreview: {"type": "object", "required": ["text", "choices", "revision", "createdAt"], "properties": {"text": {"type": "string"}, "choices": {"type": "array", "items": {"$ref": "#/components/schemas/InquiryBotChoice"}}, "revision": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"}}}
 paths:
+  /community/post/view:
+    put:
+      summary: Lease the signed-in account's currently visible achievement detail
+      description: Private no-store. Body limit 1 KiB. The 45-second session lease suppresses push and marks this account's post events read. Renew every 20 seconds only while visible. No other account's presence is exposed.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session]
+              properties:
+                session: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9-]+$'}
+      responses:
+        '200': {description: Caller-owned view lease renewed; no credentials or other views returned}
+        '400': {description: Invalid session}
+        '401': {description: Authentication required}
+        '403': {description: Active account required}
+        '404': {description: Post not active}
+        '413': {description: Body exceeds 1 KiB}
+    delete:
+      summary: Release only the caller's specified achievement view session
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session]
+              properties:
+                session: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9-]+$'}
+      responses:
+        '200': {description: Lease released idempotently; other tabs unaffected}
+        '400': {description: Invalid session}
+        '401': {description: Authentication required}
+        '403': {description: Active account required}
+        '404': {description: Post not active}
+        '413': {description: Body exceeds 1 KiB}
   /community/comments:
     get:
       tags: [Community]
@@ -7525,7 +7569,7 @@ paths:
   /user/notifications:
     get:
       summary: List the authenticated user's notifications
-      description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. The durable arcade_setup notice remains visible to current active exact arcade_owner accounts regardless of saved inquiry/report modes; reading it never changes settings. Does not expose endpoints or subscription credentials.
+      description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. Community events group before pagination and unread counting; likes never push, and comments/replies use a ten-minute per-post/device push cooldown. The durable arcade_setup notice remains visible to current active exact arcade_owner accounts regardless of saved inquiry/report modes; reading it never changes settings. Does not expose endpoints or subscription credentials.
       security: [{bearerAuth: []}]
       parameters:
         - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}, description: Announcement title/summary language and audience filter; message team names and photo-only previews also use this locale.}
@@ -7546,7 +7590,8 @@ paths:
                       required: [id, kind, read, created, arcadeName, gameName, message, reaction, url]
                       properties:
                         id: {type: string}
-                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement]}
+                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement, community_like, community_comment, community_reply]}
+                        groupKey: {type: string, description: Stable community grouping identity across new event IDs.}
                         read: {type: boolean}
                         created: {type: string}
                         arcadeName: {type: string}
@@ -7554,7 +7599,7 @@ paths:
                         title: {type: string, description: Localized announcement title or message sender identity.}
                         message: {type: string}
                         reaction: {type: string}
-                        url: {type: string, description: "Server-generated relative deep link. Announcements open /community/updates?announcement=id, feedback opens /updates/feedback?thread=id, and arcade_setup resolves current ownership to /arcade/id?setup=dashboard (legacy redirect fallback)."}
+                        url: {type: string, description: "Server-generated relative deep link. Announcements open /community/updates?announcement=id, feedback opens /updates/feedback?thread=id, and arcade_setup resolves current ownership to /arcade/id?setup=dashboard (legacy redirect fallback). Community events open /community/postId or /community/postId?comment=commentId#comment-commentId."}
                   unread: {type: integer, minimum: 0}
                   next: {type: string, description: Empty at the end of the inbox.}
         '401': {description: Authentication required.}
@@ -7573,7 +7618,7 @@ paths:
                 id: {type: string}
                 all: {type: boolean}
       responses:
-        '200': {description: 'Own notifications marked read. A message notification acknowledges earlier events in that conversation through its message sequence only; newer arrivals remain unread. A foreign id cannot modify another account.'}
+        '200': {description: 'Own notifications marked read. A message notification acknowledges earlier events in that conversation through its message sequence only; newer arrivals remain unread. Community group reads acknowledge only events through the selected event; newer arrivals remain unread. A foreign id cannot modify another account.'}
         '400': {description: Notification id or all=true required.}
         '401': {description: Authentication required.}
         '403': {description: Active account required.}
