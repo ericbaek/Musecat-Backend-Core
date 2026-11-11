@@ -533,7 +533,7 @@ func validatePostInput(app core.App, input *postInput) error {
 	if err := validatePhotos(input.Photos, MaxPostPhotos); err != nil {
 		return err
 	}
-	if input.Body == "" && input.Flair != "achievement" {
+	if strings.TrimSpace(input.Body) == "" && input.Flair != "achievement" {
 		return fmt.Errorf("body is required")
 	}
 	if len([]rune(input.Body)) > 10000 {

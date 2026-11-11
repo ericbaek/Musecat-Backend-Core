@@ -146,3 +146,13 @@ func TestTiptapDocumentIsCanonicalAndLegacyUpdatesPreserveFormatting(t *testing.
 		t.Fatal("legacy read failed", got)
 	}
 }
+
+func TestRichDocumentCannotBypassRequiredBody(t *testing.T) {
+	app := newCommunityTestApp(t)
+	defer app.Cleanup()
+	token, _ := createCommunityUser(t, app)
+	response := communityRequest(t, app, "POST", "/community/post", `{"flair":"tip","body":"spoofed","body_document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"   "}]}]}}`, token)
+	if response.StatusCode != 400 {
+		t.Fatal("blank rich body accepted", response.StatusCode)
+	}
+}
