@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 type Mark struct {
@@ -96,8 +97,13 @@ func ParseDocument(raw []byte) (Node, string, []Mention, error) {
 				}
 				write("\n")
 			case "mention":
-				if n.Text != "" || len(n.Marks) > 0 || len(n.Attrs) != 3 || strings.ContainsAny(n.Attrs["label"], "\r\n") {
+				if n.Text != "" || len(n.Marks) > 0 || len(n.Attrs) != 3 || n.Attrs["label"] == "" || strings.ContainsAny(n.Attrs["label"], "\r\n") || (n.Attrs["kind"] != "user" && n.Attrs["kind"] != "arcade") || len(n.Attrs["id"]) != 15 {
 					return fail()
+				}
+				for _, c := range n.Attrs["id"] {
+					if !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9') {
+						return fail()
+					}
 				}
 				start := position
 				write("@" + n.Attrs["label"])
@@ -106,6 +112,9 @@ func ParseDocument(raw []byte) (Node, string, []Mention, error) {
 				return fail()
 			}
 		}
+	}
+	if utf8.RuneCountInString(body.String()) > 10000 || len(mentions) > 10 {
+		return fail()
 	}
 	return doc, body.String(), mentions, nil
 }
