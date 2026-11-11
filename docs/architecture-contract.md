@@ -134,14 +134,20 @@ Its raw PocketBase REST rules are locked; clients use only `GET /community/posts
   validated result or retry state. Source hashes prevent stale results from
   overwriting a concurrently changed post.
 - Translation retries are bounded to five attempts. Provider failures remain
-  visible only as translation status while the Korean original stays readable.
-- `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC` defaults off. Until explicitly
-  enabled, `locale=en-US|ja-JP` falls back to the Korean original even when
+  represented only in API translation metadata while the original stays readable;
+  the launch UI does not display translation state.
+- `MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED` defaults off for launch. Executables
+  skip translator setup and cron registration while disabled, independently of
+  a shared `OPENAI_API_KEY`. Explicitly injected prototype workers remain callable.
+- `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC` also defaults off and requires runtime
+  enablement. Until both flags are explicitly enabled, `locale=en-US|ja-JP`
+  falls back to the Korean original even when
   translations are ready. This allows translation quality to be verified
   before the non-Korean experience is launched.
 - Translation providers are selected by the executable and injected into the
   worker. The reference runner reads server environment variables; reusable
-  OpenAI is the only translation adapter; `OPENAI_API_KEY` selects availability.
+  OpenAI is the only translation adapter; explicit runtime enablement and
+  `OPENAI_API_KEY` together select availability.
   The default model is `gpt-6-luna` with reasoning effort `none` (`low` is optional). Prompts preserve official arcade,
   game, cabinet, version, product, username, URL, price, and mention values and
   may include an operator-maintained Musecat glossary.

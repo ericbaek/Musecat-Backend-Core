@@ -26,7 +26,7 @@ tags:
   - name: Users
     description: Public and authenticated user profile endpoints.
   - name: Community
-    description: Community posts and delayed cached translations.
+    description: Community achievement posts. Automatic translation and translated output are disabled for launch; prototype use requires MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED and publication also requires MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC.
   - name: Arcade Mutations
     description: Authenticated arcade editing endpoints.
 components:
@@ -4464,7 +4464,7 @@ paths:
         - name: locale
           in: query
           schema: {type: string, enum: [ko-KR, en-US, ja-JP], default: ko-KR}
-          description: Requested display locale. Non-Korean variants fall back to ko-KR until translation publication is enabled.
+          description: Requested display locale. Launch reads return the original; cached variants require both MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED and MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC.
         - name: page
           in: query
           schema: {type: integer, minimum: 1, default: 1}
@@ -4501,7 +4501,7 @@ paths:
           schema: {type: string, enum: [ko-KR, en-US, ja-JP], default: ko-KR}
       responses:
         '200':
-          description: Active post, localized only when translation publication is enabled and ready.
+          description: Active post. Launch reads serve the original; cached localization requires both translation runtime and publication flags and a ready result.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/CommunityPost'}
@@ -4529,7 +4529,7 @@ paths:
             schema: {$ref: '#/components/schemas/CommunityPostInput'}
       responses:
         '201':
-          description: Korean original is public immediately; translation is scheduled five minutes later.
+          description: Original is public immediately. Translation is disabled for launch; an explicitly enabled prototype worker may translate after five minutes.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/CommunityPost'}

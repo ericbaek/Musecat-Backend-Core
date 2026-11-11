@@ -564,7 +564,17 @@ func requestedLocale(raw string) (string, error) {
 	}
 }
 
+// TranslationsEnabled reports whether the optional community translation runtime
+// is explicitly enabled. It defaults off independently of provider credentials.
+func TranslationsEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED")))
+	return value == "1" || value == "true" || value == "yes"
+}
+
 func translationsPublic() bool {
+	if !TranslationsEnabled() {
+		return false
+	}
 	value := strings.ToLower(strings.TrimSpace(os.Getenv("MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC")))
 	return value == "1" || value == "true" || value == "yes"
 }

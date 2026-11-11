@@ -16,3 +16,15 @@ func TestConfiguredTranslatorDefaultsWithoutEnvironment(t *testing.T) {
 		t.Fatal("invalid reasoning effort accepted")
 	}
 }
+
+func TestTranslationPublicationRequiresRuntimeEnablement(t *testing.T) {
+	t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC", "true")
+	for _, enabled := range []string{"", "false", "true", "1", "yes"} {
+		t.Run(enabled, func(t *testing.T) {
+			t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED", enabled)
+			if translationsPublic() != (enabled == "true" || enabled == "1" || enabled == "yes") {
+				t.Fatal("publication must require explicit runtime enablement")
+			}
+		})
+	}
+}

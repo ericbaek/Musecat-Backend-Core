@@ -198,6 +198,12 @@ func TestCommunityPost_OriginalIsImmediateAndTranslationPublishesLater(t *testin
 	}
 
 	t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC", "true")
+	t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED", "false")
+	disabled := decodeBody(t, communityRequest(t, app, http.MethodGet, "/community/post?id="+id+"&locale=ja-JP", "", ""))
+	if disabled["locale"] != "ko-KR" || disabled["translated"] != false {
+		t.Fatalf("runtime-disabled translations must remain original even with publication enabled: %#v", disabled)
+	}
+	t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED", "true")
 	after := communityRequest(t, app, http.MethodGet, "/community/post?id="+id+"&locale=ja-JP", "", "")
 	afterPayload := decodeBody(t, after)
 	if afterPayload["locale"] != "ja-JP" || afterPayload["translated"] != true {
