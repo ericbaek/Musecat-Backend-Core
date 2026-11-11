@@ -118,3 +118,24 @@ func mustCommunityNotices(t *testing.T, app core.App, user string) []*core.Recor
 	}
 	return rows
 }
+
+func TestCanceledUnreadAchievementLikeNeverRealerts(t *testing.T) {
+	app := newCommunityTestApp(t)
+	defer app.Cleanup()
+	ownerToken, owner := createCommunityUser(t, app)
+	actorToken, _ := createCommunityUser(t, app)
+	series := achievementSeries(t, app)
+	res := achievementRequest(t, app, "POST", "", ownerToken, map[string]string{"flair": "achievement", "game_series": series.Id}, 1)
+	post := decodeBody(t, res)["id"].(string)
+	expectSocialStatus(t, app, "PUT", "/community/post/like?id="+post, "", actorToken, 200)
+	notice := mustCommunityNotices(t, app, owner.Id)[0]
+	if notice.GetBool("read") {
+		t.Fatal("new like not unread")
+	}
+	expectSocialStatus(t, app, "DELETE", "/community/post/like?id="+post, "", actorToken, 200)
+	expectSocialStatus(t, app, "PUT", "/community/post/like?id="+post, "", actorToken, 200)
+	rows := mustCommunityNotices(t, app, owner.Id)
+	if len(rows) != 1 || rows[0].Id != notice.Id || !rows[0].GetBool("read") {
+		t.Fatal("canceled like resurrected an alert")
+	}
+}

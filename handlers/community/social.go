@@ -373,6 +373,11 @@ func setLike(re *core.RequestEvent, targetCollection, likeCollection, key string
 					return err
 				}
 			}
+			if targetCollection == CollectionPost {
+				if err := usernotification.RetractCommunityLikeTx(tx, id, re.Auth.Id); err != nil {
+					return err
+				}
+			}
 		} else if len(existing) == 0 {
 			col, err := tx.FindCollectionByNameOrId(likeCollection)
 			if err != nil {

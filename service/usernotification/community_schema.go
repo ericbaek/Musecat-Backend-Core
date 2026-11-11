@@ -90,6 +90,7 @@ func EnsureCommunitySchema(app core.App) error {
 		views.DeleteRule = nil
 		views.AddIndex("idx_community_view_session", true, "user,post,session", "")
 		views.AddIndex("idx_community_view_active", false, "user,post,expires", "")
+		views.AddIndex("idx_community_view_expiry", false, "expires", "")
 		return tx.Save(views)
 	})
 }

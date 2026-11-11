@@ -179,3 +179,19 @@ func communityItem(app core.App, row *core.Record, locale string) map[string]any
 	}
 	return map[string]any{"groupKey": kind + ":" + row.GetString("community_post") + ":" + row.GetString("community_thread"), "id": row.Id, "kind": kind, "read": row.GetBool("read"), "created": row.GetString("created"), "title": title, "message": strings.TrimSpace(message), "arcadeName": "", "gameName": "", "reaction": "", "url": link}
 }
+
+// RetractCommunityLikeTx retires the original alert without removing its durable
+// identity. Re-adding an unread-then-canceled like cannot resurrect an unread badge.
+func RetractCommunityLikeTx(app core.App, postID, actor string) error {
+	rows, err := app.FindRecordsByFilter(Inbox, "kind='community_like' && community_post={:post} && actor={:actor} && read=false", "", 1, 0, dbx.Params{"post": postID, "actor": actor})
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		row.Set("read", true)
+		if err := app.Save(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
