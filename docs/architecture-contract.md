@@ -1380,3 +1380,9 @@ Notification links use `/community/{post}` or
 `/community/{post}?comment={comment}#comment-{comment}`. Public original comment
 reads allow the Web detail to fetch a linked older comment/thread outside the
 first list page, reject cross-post targets, and focus the exact comment.
+
+### Achievement caption mentions
+
+`community_post.mentions` stores up to ten ordered UTF-16 ranges over the plain-text body, with kind, stable target ID and canonical label. Existing posts return an empty array. The server verifies @label text, active users and public arcades; no HTML is accepted. User mentions create one durable `community_mention` inbox/outbox event per post and recipient in the post transaction. Self-mentions do not notify; edits and removal/readdition do not duplicate events. Removed mentions and inactive posts invalidate visibility and queued pushes. Arcade mentions create links without notifying owners. Future rich-text migration can convert these typed ranges to mention nodes without guessing targets from text.
+
+`body_document` is canonical Tiptap JSON from launch. Legacy body/mention writes are adapted to paragraphs and mention nodes. Rich document writes derive `body` and UTF-16 mention ranges on the server. The launch schema accepts only paragraphs, text, hardBreak, stable-ID mention nodes, bold, and textStyle fontSize 14px/16px/20px; documents are limited to 64 KiB, 500 paragraphs and 2000 inline nodes. HTML, embeds, links and arbitrary CSS are rejected. Existing rows without a document are adapted on read. A legacy update that changes only game/photos preserves the existing document when body/mentions are unchanged. The author/edit deadline is unaffected. Public translation remains disabled; future translated documents require their own matching mention ranges.

@@ -2,29 +2,32 @@ package usernotification
 
 import (
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/communitymention"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"strings"
 	"time"
 )
 
+const CommunityMention = "community_mention"
+
 const CommunityLike = "community_like"
 const CommunityComment = "community_comment"
 const CommunityReply = "community_reply"
 
 func IsCommunity(kind string) bool {
-	return kind == CommunityLike || kind == CommunityComment || kind == CommunityReply
+	return kind == CommunityMention || kind == CommunityLike || kind == CommunityComment || kind == CommunityReply
 }
 
 // CommunityLiveSQL excludes retracted events before grouping and pagination.
 func communityLiveSQL(alias string) string {
-	return fmt.Sprintf(`EXISTS (SELECT 1 FROM community_post p WHERE p.id=%[1]s.community_post AND p.status='active' AND p.flair='achievement') AND ((%[1]s.kind='community_like' AND EXISTS (SELECT 1 FROM community_post_like l WHERE l.post=%[1]s.community_post AND l.author=%[1]s.actor)) OR (%[1]s.kind IN ('community_comment','community_reply') AND EXISTS (SELECT 1 FROM community_comment c WHERE c.id=%[1]s.community_comment AND c.post=%[1]s.community_post AND c.status='active')))`, alias)
+	return fmt.Sprintf(`EXISTS (SELECT 1 FROM community_post p WHERE p.id=%[1]s.community_post AND p.status='active' AND p.flair='achievement') AND ((%[1]s.kind='community_mention' AND EXISTS (SELECT 1 FROM community_post mp,json_each(mp.mentions) m WHERE mp.id=%[1]s.community_post AND json_extract(m.value,'$.kind')='user' AND json_extract(m.value,'$.id')=%[1]s.user)) OR (%[1]s.kind='community_like' AND EXISTS (SELECT 1 FROM community_post_like l WHERE l.post=%[1]s.community_post AND l.author=%[1]s.actor)) OR (%[1]s.kind IN ('community_comment','community_reply') AND EXISTS (SELECT 1 FROM community_comment c WHERE c.id=%[1]s.community_comment AND c.post=%[1]s.community_post AND c.status='active' AND (%[1]s.kind!='community_reply' OR EXISTS(SELECT 1 FROM community_comment target WHERE target.id=%[1]s.community_thread AND target.status='active' AND target.author=%[1]s.user)))))`, alias)
 }
 
 // CommunityInboxFilter keeps only the latest live event in each logical inbox item.
 // Event identities remain durable, so unlike/re-like never creates a new alert.
 func CommunityInboxFilter() string {
-	return `(user_notification.kind NOT IN ('community_like','community_comment','community_reply') OR (` + communityLiveSQL("user_notification") + ` AND NOT EXISTS (SELECT 1 FROM user_notification newer WHERE newer.user=user_notification.user AND newer.kind=user_notification.kind AND newer.community_post=user_notification.community_post AND newer.community_thread=user_notification.community_thread AND (newer.created>user_notification.created OR (newer.created=user_notification.created AND newer.id>user_notification.id)) AND ` + communityLiveSQL("newer") + `)))`
+	return `(user_notification.kind NOT IN ('community_like','community_comment','community_reply','community_mention') OR (` + communityLiveSQL("user_notification") + ` AND NOT EXISTS (SELECT 1 FROM user_notification newer WHERE newer.community_post!='' AND newer.user=user_notification.user AND newer.kind=user_notification.kind AND newer.community_post=user_notification.community_post AND newer.community_thread=user_notification.community_thread AND (newer.created>user_notification.created OR (newer.created=user_notification.created AND newer.id>user_notification.id)) AND ` + communityLiveSQL("newer") + `)))`
 }
 
 func CommunityViewing(app core.App, userID, postID string, now time.Time) (bool, error) {
@@ -103,7 +106,7 @@ func communityVisible(app core.App, user, row *core.Record) bool {
 		if err != nil || target.GetString("author") != user.Id || target.GetString("status") != "active" {
 			return false
 		}
-	} else if post.GetString("author") != user.Id {
+	} else if row.GetString("kind") != CommunityMention && post.GetString("author") != user.Id {
 		return false
 	}
 	rows := []*core.Record{}
@@ -173,6 +176,16 @@ func communityItem(app core.App, row *core.Record, locale string) map[string]any
 			message += fmt.Sprintf(" (%d개)", count.Total)
 		}
 	}
+	if kind == CommunityMention {
+		switch locale {
+		case "en":
+			message = name + " mentioned you in an achievement."
+		case "ja":
+			message = name + "さんが実績であなたをメンションしました。"
+		default:
+			message = name + "님이 성과에서 나를 멘션했습니다."
+		}
+	}
 	link := "/community/" + row.GetString("community_post")
 	if comment := row.GetString("community_comment"); comment != "" {
 		link += "?comment=" + comment + "#comment-" + comment
@@ -191,6 +204,56 @@ func RetractCommunityLikeTx(app core.App, postID, actor string) error {
 		row.Set("read", true)
 		if err := app.Save(row); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// NotifyMentionsTx shares the source transaction and keeps one durable event per post/user.
+func NotifyMentionsTx(app core.App, post *core.Record, actor string) error {
+	if post.GetString("status") != "active" || post.GetString("flair") != "achievement" {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, mention := range communitymention.Read(post) {
+		if mention.Kind != "user" || mention.ID == actor || seen[mention.ID] {
+			continue
+		}
+		seen[mention.ID] = true
+		user, err := app.FindRecordById("user", mention.ID)
+		if err != nil || user.GetBool("withdrawn") {
+			continue
+		}
+		event := "community-mention:" + post.Id + ":" + mention.ID
+		old, err := app.FindRecordsByFilter(Inbox, "user={:u} && event_key={:e}", "", 1, 0, dbx.Params{"u": mention.ID, "e": event})
+		if err != nil {
+			return err
+		}
+		if len(old) > 0 {
+			continue
+		}
+		col, err := app.FindCollectionByNameOrId(Inbox)
+		if err != nil {
+			return err
+		}
+		row := core.NewRecord(col)
+		row.Set("user", mention.ID)
+		row.Set("actor", actor)
+		row.Set("kind", CommunityMention)
+		row.Set("event_key", event)
+		row.Set("community_post", post.Id)
+		viewing, err := CommunityViewing(app, mention.ID, post.Id, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		row.Set("read", viewing)
+		if err := app.Save(row); err != nil {
+			return err
+		}
+		if !viewing {
+			if err := enqueueDevicesTx(app, row, mention.ID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

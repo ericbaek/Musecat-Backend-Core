@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/communitymention"
+	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"io"
 	"net/http"
 	"os"
@@ -45,12 +47,15 @@ var allowedFlairs = map[string]struct{}{
 }
 
 type postInput struct {
-	Title      string               `json:"title"`
-	Body       string               `json:"body"`
-	Flair      string               `json:"flair"`
-	GameSeries string               `json:"game_series"`
-	Photos     []*filesystem.File   `json:"-"`
-	PhotoOrder []postPhotoReference `json:"photo_order,omitempty"`
+	BodyDocument json.RawMessage `json:"body_document"`
+	document     communitymention.Node
+	Mentions     []communitymention.Mention `json:"mentions"`
+	Title        string                     `json:"title"`
+	Body         string                     `json:"body"`
+	Flair        string                     `json:"flair"`
+	GameSeries   string                     `json:"game_series"`
+	Photos       []*filesystem.File         `json:"-"`
+	PhotoOrder   []postPhotoReference       `json:"photo_order,omitempty"`
 }
 
 // A reference selects exactly one retained filename or zero-based upload index.
@@ -142,7 +147,7 @@ func CreatePost(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
 	}
-	if err := validatePostInput(re.App, input); err != nil {
+	if err := validatePostInput(re.App, &input); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "validation failed", "details": err.Error()})
 	}
 
@@ -162,6 +167,8 @@ func CreatePost(re *core.RequestEvent) error {
 	record.Set("game_series", input.GameSeries)
 	record.Set("title", input.Title)
 	record.Set("body", input.Body)
+	record.Set("mentions", input.Mentions)
+	record.Set("body_document", input.document)
 	record.Set("original_locale", OriginalLocale)
 	record.Set("flair", input.Flair)
 	record.Set("status", "active")
@@ -177,7 +184,12 @@ func CreatePost(re *core.RequestEvent) error {
 		record.Set("translation_status", "ready")
 		record.Set("translated_at", now)
 	}
-	if err := re.App.Save(record); err != nil {
+	if err := re.App.RunInTransaction(func(tx core.App) error {
+		if err := tx.Save(record); err != nil {
+			return err
+		}
+		return usernotification.NotifyMentionsTx(tx, record, re.Auth.Id)
+	}); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to create community post", "details": err.Error()})
 	}
 	return servePost(re, record, OriginalLocale, http.StatusCreated)
@@ -197,7 +209,7 @@ func UpdatePost(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
 	}
-	if err := validatePostInput(re.App, input); err != nil {
+	if err := validatePostInput(re.App, &input); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "validation failed", "details": err.Error()})
 	}
 
@@ -219,9 +231,21 @@ func UpdatePost(re *core.RequestEvent) error {
 		if err != nil {
 			return err
 		}
+		document := any(input.document)
+		beforeMentions, _ := json.Marshal(communitymention.Read(record))
+		nextMentions := input.Mentions
+		if nextMentions == nil {
+			nextMentions = []communitymention.Mention{}
+		}
+		afterMentions, _ := json.Marshal(nextMentions)
+		if len(input.BodyDocument) == 0 && record.GetString("body") == input.Body && string(beforeMentions) == string(afterMentions) {
+			document = postDocument(record)
+		}
+		record.Set("body_document", document)
 		record.Set("game_series", input.GameSeries)
 		record.Set("title", input.Title)
 		record.Set("body", input.Body)
+		record.Set("mentions", input.Mentions)
 		record.Set("flair", input.Flair)
 		record.Set("photos", photos)
 
@@ -237,6 +261,9 @@ func UpdatePost(re *core.RequestEvent) error {
 			record.Set("translated_at", now)
 		}
 		if err := tx.Save(record); err != nil {
+			return err
+		}
+		if err := usernotification.NotifyMentionsTx(tx, record, re.Auth.Id); err != nil {
 			return err
 		}
 		updated = record
@@ -440,6 +467,17 @@ func decodePostInput(re *core.RequestEvent) (postInput, error) {
 		}
 		input.Title = re.Request.FormValue("title")
 		input.Body = re.Request.FormValue("body")
+		if values, ok := re.Request.MultipartForm.Value["body_document"]; ok {
+			if len(values) != 1 {
+				return input, fmt.Errorf("invalid body_document")
+			}
+			input.BodyDocument = json.RawMessage(values[0])
+		}
+		if values, ok := re.Request.MultipartForm.Value["mentions"]; ok {
+			if len(values) != 1 || json.Unmarshal([]byte(values[0]), &input.Mentions) != nil {
+				return input, fmt.Errorf("invalid mentions")
+			}
+		}
 		input.Flair = re.Request.FormValue("flair")
 		input.GameSeries = re.Request.FormValue("game_series")
 		files, err := re.FindUploadedFiles("photos")
@@ -460,8 +498,19 @@ func decodePostInput(re *core.RequestEvent) (postInput, error) {
 	} else if err := json.NewDecoder(io.LimitReader(re.Request.Body, 1<<20)).Decode(&input); err != nil {
 		return input, err
 	}
+	if len(input.BodyDocument) > 0 {
+		doc, body, mentions, err := communitymention.ParseDocument(input.BodyDocument)
+		if err != nil {
+			return input, err
+		}
+		input.document = doc
+		input.Body = body
+		input.Mentions = mentions
+	}
 	input.Title = strings.TrimSpace(input.Title)
-	input.Body = strings.TrimSpace(input.Body)
+	if len(input.Mentions) == 0 && len(input.BodyDocument) == 0 {
+		input.Body = strings.TrimSpace(input.Body)
+	}
 	input.Flair = strings.ToLower(strings.TrimSpace(input.Flair))
 	input.GameSeries = strings.TrimSpace(input.GameSeries)
 	if input.Flair == "" {
@@ -470,7 +519,17 @@ func decodePostInput(re *core.RequestEvent) (postInput, error) {
 	return input, nil
 }
 
-func validatePostInput(app core.App, input postInput) error {
+func validatePostInput(app core.App, input *postInput) error {
+	if err := communitymention.Validate(app, input.Body, input.Mentions); err != nil {
+		return err
+	}
+	if len(input.BodyDocument) == 0 {
+		input.document = communitymention.DocumentFromText(input.Body, input.Mentions)
+		raw, _ := json.Marshal(input.document)
+		if _, _, _, err := communitymention.ParseDocument(raw); err != nil {
+			return err
+		}
+	}
 	if err := validatePhotos(input.Photos, MaxPostPhotos); err != nil {
 		return err
 	}
@@ -518,6 +577,8 @@ func buildPostResponse(app core.App, record *core.Record, requested string) map[
 		"game_series":        record.GetString("game_series"),
 		"title":              title,
 		"body":               body,
+		"mentions":           communitymention.Read(record),
+		"body_document":      postDocument(record),
 		"flair":              record.GetString("flair"),
 		"photos":             append([]string{}, record.GetStringSlice("photos")...),
 		"locale":             servedLocale,
@@ -604,4 +665,14 @@ func parsePagination(rawPage, rawPerPage string) (int, int, error) {
 func contentHash(title, body string) string {
 	sum := sha256.Sum256([]byte(title + "\x00" + body))
 	return hex.EncodeToString(sum[:])
+}
+
+func postDocument(record *core.Record) any {
+	if value := record.GetRaw("body_document"); value != nil {
+		raw, _ := json.Marshal(value)
+		if string(raw) != "null" && string(raw) != "{}" {
+			return value
+		}
+	}
+	return communitymention.DocumentFromText(record.GetString("body"), communitymention.Read(record))
 }

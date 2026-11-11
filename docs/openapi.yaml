@@ -211,6 +211,15 @@ components:
           description: Empty for a permanent restriction; otherwise a UTC date-time.
         permanent:
           type: boolean
+    CommunityPostMention:
+      type: object
+      required: [kind, id, label, start, end]
+      properties:
+        kind: {type: string, enum: [arcade, user]}
+        id: {type: string, description: Stable public arcade or user record ID.}
+        label: {type: string, description: Canonical arcade name or username.}
+        start: {type: integer, minimum: 0, description: Inclusive UTF-16 offset in body.}
+        end: {type: integer, minimum: 1, description: Exclusive UTF-16 offset in body.}
     CommunityPostInput:
       type: object
       properties:
@@ -230,6 +239,14 @@ components:
           maxItems: 8
           items: {type: string, format: binary}
           description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes. Achievement posts require at least one photo; updates count retained photos.
+        body_document:
+          type: object
+          description: Tiptap JSON launch schema (doc/paragraph/text/hardBreak/mention; bold and textStyle fontSize 14px,16px,20px). At most 65536 bytes and 2000 inline nodes. When provided, body and mentions are derived on the server. Legacy plain-text writes are converted before storage.
+        mentions:
+          type: array
+          maxItems: 10
+          items: {$ref: '#/components/schemas/CommunityPostMention'}
+          description: Ordered, non-overlapping ranges matching @label. Multipart encodes JSON. Omission clears mentions on edit. Server validates active users and public arcades. Body whitespace is preserved when mentions exist.
         photo_order:
           type: array
           maxItems: 8
@@ -263,7 +280,9 @@ components:
         game_series: {type: string}
         photos: {type: array, items: {type: string}, maxItems: 8, description: Ordered stored filenames.}
         title: {type: string}
-        body: {type: string}
+        body: {type: string, description: Server-derived plain text for preview/search compatibility.}
+        body_document: {type: object, description: Canonical Tiptap JSON; legacy rows are adapted on read.}
+        mentions: {type: array, items: {$ref: '#/components/schemas/CommunityPostMention'}}
         flair: {type: string, enum: [achievement, question, tip, news, event, art, chitchat]}
         locale: {type: string, enum: [ko-KR, en-US, ja-JP]}
         requested_locale: {type: string, enum: [ko-KR, en-US, ja-JP]}

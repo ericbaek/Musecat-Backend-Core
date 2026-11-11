@@ -53,16 +53,9 @@ func ViewPost(re *core.RequestEvent) error {
 		if err := tx.Save(row); err != nil {
 			return err
 		}
-		// Reading a detail also retires queued alerts for this post, without losing history.
-		notices, err := tx.FindRecordsByFilter(usernotification.Inbox, "user={:user} && community_post={:post} && read=false", "", 100, 0, dbx.Params{"user": re.Auth.Id, "post": id})
-		if err != nil {
+		// Acknowledge the complete history present at entry, including groups over 100 events.
+		if _, err := tx.DB().NewQuery("UPDATE user_notification SET read=true WHERE user={:user} AND community_post={:post} AND read=false AND created<={:now}").Bind(dbx.Params{"user": re.Auth.Id, "post": id, "now": now.Format("2006-01-02 15:04:05.000Z")}).Execute(); err != nil {
 			return err
-		}
-		for _, n := range notices {
-			n.Set("read", true)
-			if err := tx.Save(n); err != nil {
-				return err
-			}
 		}
 		expired, err := tx.FindRecordsByFilter(usernotification.CommunityViews, "expires<={:now}", "expires", 100, 0, dbx.Params{"now": now})
 		if err != nil {
