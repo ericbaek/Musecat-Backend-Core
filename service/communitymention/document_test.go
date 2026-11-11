@@ -20,12 +20,12 @@ func TestLaunchDocumentRoundTrip(t *testing.T) {
 	}
 }
 func TestRestrictedRichTextSchema(t *testing.T) {
-	raw := []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Bold","marks":[{"type":"bold"},{"type":"textStyle","attrs":{"fontSize":"20px"}}]}]}]}`)
+	raw := []byte(`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Bold"}]}]}`)
 	_, text, _, err := ParseDocument(raw)
 	if err != nil || text != "Bold" {
 		t.Fatal(text, err)
 	}
-	for _, bad := range []string{`{"type":"doc","content":[{"type":"iframe"}]}`, `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"link","attrs":{"href":"javascript:alert(1)"}}]}]}]}`, string(raw) + ` {}`} {
+	for _, bad := range []string{`{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"bold"}]}]}]}`, `{"type":"doc","content":[{"type":"iframe"}]}`, `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"link","attrs":{"href":"javascript:alert(1)"}}]}]}]}`, string(raw) + ` {}`} {
 		if _, _, _, err := ParseDocument([]byte(bad)); err == nil {
 			t.Fatal("invalid document accepted", bad)
 		}

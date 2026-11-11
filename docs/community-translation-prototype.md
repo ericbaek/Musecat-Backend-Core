@@ -90,3 +90,19 @@ five-minute restriction and returns 204, including retries. It sets `status=dele
 clears photos and translations and prevents further public reads and worker claims.
 Deletion does not physically erase the internal post tombstone or original text.
 The web asks for confirmation and refreshes the feed or returns from detail to the feed.
+
+## Canonical launch descriptions and XP
+
+`community_post.body_document` is the required canonical Tiptap JSON source. The
+legacy database `body` field is removed only after guarded atomic conversion of
+all posts. API `body` remains a derived plain-text response and legacy plain-text
+request adapter. Launch accepts paragraphs, text, hard breaks and typed user/arcade
+mentions; formatting marks, links, HTML and embedded media are rejected. Translation
+remains disabled at launch. Existing mention references are derived and retained
+for notification liveness queries.
+
+Achievement creation awards its author 2 XP, capped at 10 XP per KST calendar day.
+Comments and likes award the actor 1 XP, sharing a 5 XP daily cap. Own-post comments
+and self likes are excluded. Existing level eligibility applies. Rewards and the
+source mutation commit together; edits and deletes do not refund caps. Stable like
+identities prevent unlike/re-like rewards, including across days.

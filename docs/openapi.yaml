@@ -241,7 +241,7 @@ components:
           description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes. Achievement posts require at least one photo; updates count retained photos.
         body_document:
           type: object
-          description: Tiptap JSON launch schema (doc/paragraph/text/hardBreak/mention; bold and textStyle fontSize 14px,16px,20px). At most 65536 bytes and 2000 inline nodes. When provided, body and mentions are derived on the server. Legacy plain-text writes are converted before storage.
+          description: Tiptap JSON launch schema (doc/paragraph/text/hardBreak/mention; no formatting marks at launch). At most 65536 bytes and 2000 inline nodes. When provided, body and mentions are derived on the server. Legacy plain-text writes are converted before storage.
         mentions:
           type: array
           maxItems: 10

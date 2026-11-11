@@ -110,7 +110,7 @@ func TestArcadeMentionRequiresPublicCanonicalTarget(t *testing.T) {
 	}
 }
 
-func TestTiptapDocumentIsCanonicalAndLegacyUpdatesPreserveFormatting(t *testing.T) {
+func TestTiptapDocumentIsCanonicalAndLegacyUpdatesPreserveDocument(t *testing.T) {
 	app := newCommunityTestApp(t)
 	defer app.Cleanup()
 	token, _ := createCommunityUser(t, app)
@@ -121,7 +121,7 @@ func TestTiptapDocumentIsCanonicalAndLegacyUpdatesPreserveFormatting(t *testing.
 		t.Fatal(data)
 	}
 	id := data["id"].(string)
-	document := `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Rich caption","marks":[{"type":"bold"},{"type":"textStyle","attrs":{"fontSize":"20px"}}]}]}]}`
+	document := `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Rich caption"}]}]}`
 	payload := fmt.Sprintf(`{"flair":"achievement","game_series":%q,"body":"spoofed preview","body_document":%s}`, series.Id, document)
 	response := communityRequest(t, app, "PUT", "/community/post?id="+id, payload, token)
 	got := decodeBody(t, response)
@@ -135,16 +135,10 @@ func TestTiptapDocumentIsCanonicalAndLegacyUpdatesPreserveFormatting(t *testing.
 	if response.StatusCode != 200 || string(saved) != string(original) {
 		t.Fatal("legacy metadata edit lost marks", got)
 	}
-	record, _ := app.FindRecordById("community_post", id)
-	record.Set("body_document", nil)
-	if err := app.Save(record); err != nil {
-		t.Fatal(err)
+	if col, _ := app.FindCollectionByNameOrId("community_post"); col.Fields.GetByName("body") != nil {
+		t.Fatal("redundant caption column remains")
 	}
-	response = communityRequest(t, app, "GET", "/community/post?id="+id, "", "")
-	got = decodeBody(t, response)
-	if response.StatusCode != 200 || got["body_document"] == nil || got["body"] != "Rich caption" {
-		t.Fatal("legacy read failed", got)
-	}
+
 }
 
 func TestRichDocumentCannotBypassRequiredBody(t *testing.T) {

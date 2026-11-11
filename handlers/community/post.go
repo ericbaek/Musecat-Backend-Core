@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/ericbaek/musecat-backend-core/service/communitymention"
 	"github.com/ericbaek/musecat-backend-core/service/usernotification"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 	"io"
 	"net/http"
 	"os"
@@ -166,7 +167,6 @@ func CreatePost(re *core.RequestEvent) error {
 	record.Set("author", re.Auth.Id)
 	record.Set("game_series", input.GameSeries)
 	record.Set("title", input.Title)
-	record.Set("body", input.Body)
 	record.Set("mentions", input.Mentions)
 	record.Set("body_document", input.document)
 	record.Set("original_locale", OriginalLocale)
@@ -187,6 +187,11 @@ func CreatePost(re *core.RequestEvent) error {
 	if err := re.App.RunInTransaction(func(tx core.App) error {
 		if err := tx.Save(record); err != nil {
 			return err
+		}
+		if record.GetString("flair") == "achievement" {
+			if err := xp.AwardCommunityTx(tx, re.Auth.Id, "post", record.Id, now); err != nil {
+				return err
+			}
 		}
 		return usernotification.NotifyMentionsTx(tx, record, re.Auth.Id)
 	}); err != nil {
@@ -238,13 +243,12 @@ func UpdatePost(re *core.RequestEvent) error {
 			nextMentions = []communitymention.Mention{}
 		}
 		afterMentions, _ := json.Marshal(nextMentions)
-		if len(input.BodyDocument) == 0 && record.GetString("body") == input.Body && string(beforeMentions) == string(afterMentions) {
+		if len(input.BodyDocument) == 0 && communitymention.Body(record) == input.Body && string(beforeMentions) == string(afterMentions) {
 			document = postDocument(record)
 		}
 		record.Set("body_document", document)
 		record.Set("game_series", input.GameSeries)
 		record.Set("title", input.Title)
-		record.Set("body", input.Body)
 		record.Set("mentions", input.Mentions)
 		record.Set("flair", input.Flair)
 		record.Set("photos", photos)
@@ -559,7 +563,7 @@ func validatePostInput(app core.App, input *postInput) error {
 func buildPostResponse(app core.App, record *core.Record, requested string) map[string]any {
 	authorName := record.GetString("author")
 	title := record.GetString("title")
-	body := record.GetString("body")
+	body := communitymention.Body(record)
 	servedLocale := OriginalLocale
 	translated := false
 	if translationsPublic() && requested != OriginalLocale && record.GetString("translation_status") == "ready" {
@@ -667,12 +671,4 @@ func contentHash(title, body string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func postDocument(record *core.Record) any {
-	if value := record.GetRaw("body_document"); value != nil {
-		raw, _ := json.Marshal(value)
-		if string(raw) != "null" && string(raw) != "{}" {
-			return value
-		}
-	}
-	return communitymention.DocumentFromText(record.GetString("body"), communitymention.Read(record))
-}
+func postDocument(record *core.Record) any { return communitymention.BodyDocument(record) }

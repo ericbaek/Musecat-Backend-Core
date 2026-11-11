@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ericbaek/musecat-backend-core/service/usernotification"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 	"io"
 	"net/http"
 	"net/url"
@@ -165,6 +166,11 @@ func CreateComment(re *core.RequestEvent) error {
 		post, err := tx.FindRecordById(CollectionPost, input.Post)
 		if err != nil {
 			return err
+		}
+		if post.GetString("flair") == "achievement" && post.GetString("author") != re.Auth.Id {
+			if err := xp.AwardCommunityTx(tx, re.Auth.Id, "reaction", "comment:"+saved.Id, now); err != nil {
+				return err
+			}
 		}
 		return usernotification.NotifyCommunityTx(tx, post, saved, re.Auth.Id)
 	})
@@ -388,6 +394,22 @@ func setLike(re *core.RequestEvent, targetCollection, likeCollection, key string
 			record.Set("author", re.Auth.Id)
 			if err = tx.Save(record); err != nil {
 				return err
+			}
+			target, err := tx.FindRecordById(targetCollection, id)
+			if err != nil {
+				return err
+			}
+			post := target
+			if targetCollection == CollectionComment {
+				post, err = tx.FindRecordById(CollectionPost, target.GetString("post"))
+				if err != nil {
+					return err
+				}
+			}
+			if post.GetString("flair") == "achievement" && target.GetString("author") != re.Auth.Id {
+				if err := xp.AwardCommunityTx(tx, re.Auth.Id, "reaction", "like-"+key+":"+id, time.Now().UTC()); err != nil {
+					return err
+				}
 			}
 		}
 		if re.Request.Method != http.MethodDelete && len(existing) == 0 && targetCollection == CollectionPost {

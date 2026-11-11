@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/communitymention"
 	"image"
 	"image/png"
 	"io"
@@ -405,7 +406,7 @@ func TestCommunityPost_AuthorMutationsAndDeletion(t *testing.T) {
 	}
 	res.Body.Close()
 	record, _ = app.FindRecordById(community.CollectionPost, id)
-	if record.GetString("editable_until") != deadline || record.GetString("body") != "수정된 본문" {
+	if record.GetString("editable_until") != deadline || communitymention.Body(record) != "수정된 본문" {
 		t.Fatal("update must preserve fixed edit deadline")
 	}
 	record.Set("editable_until", time.Now().Add(-time.Hour))
@@ -677,7 +678,7 @@ func TestCommunityPost_RejectTextOnlyAchievementUpdate(t *testing.T) {
 		t.Fatalf("text-only achievement update accepted: %d", response.StatusCode)
 	}
 	record, err := app.FindRecordById(community.CollectionPost, id)
-	if err != nil || record.GetString("flair") != "chitchat" || record.GetString("body") != "사진 없는 잡담" {
+	if err != nil || record.GetString("flair") != "chitchat" || communitymention.Body(record) != "사진 없는 잡담" {
 		t.Fatalf("rejected update changed post: %v", err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/communitymention"
 	"log/slog"
 	"strings"
 	"time"
@@ -127,7 +128,11 @@ func claimTranslation(app core.App, collection, id string, now time.Time) (bool,
 		if !translationClaimable(record, now) {
 			return nil
 		}
-		source = SourceContent{Title: record.GetString("title"), Body: record.GetString("body")}
+		body := record.GetString("body")
+		if collection == CollectionPost {
+			body = communitymention.Body(record)
+		}
+		source = SourceContent{Title: record.GetString("title"), Body: body}
 		sourceHash = contentHash(source.Title, source.Body)
 		attempt = record.GetInt("translation_attempts") + 1
 		record.Set("translation_status", "processing")
@@ -174,7 +179,11 @@ func completeTranslation(app core.App, collection, id, sourceHash string, attemp
 		if record.GetString("status") != "active" || record.GetString("translation_status") != "processing" || record.GetInt("translation_attempts") != attempt {
 			return nil
 		}
-		currentHash := contentHash(record.GetString("title"), record.GetString("body"))
+		body := record.GetString("body")
+		if collection == CollectionPost {
+			body = communitymention.Body(record)
+		}
+		currentHash := contentHash(record.GetString("title"), body)
 		if currentHash != sourceHash || record.GetString("original_hash") != sourceHash {
 			record.Set("translation_status", "pending")
 			record.Set("translation_attempts", 0)

@@ -49,7 +49,7 @@ func DocumentFromText(body string, mentions []Mention) Node {
 }
 
 // ParseDocument is the server-owned launch schema: paragraphs, breaks, mentions,
-// bold and three font sizes. Plain text/ranges are derived, never trusted in parallel.
+// and plain text. Formatting marks are rejected. Text/ranges are derived on read.
 func ParseDocument(raw []byte) (Node, string, []Mention, error) {
 	var doc Node
 	fail := func() (Node, string, []Mention, error) { return Node{}, "", nil, fmt.Errorf("invalid body_document") }
@@ -86,27 +86,8 @@ func ParseDocument(raw []byte) (Node, string, []Mention, error) {
 			}
 			switch n.Type {
 			case "text":
-				if n.Text == "" || len(n.Attrs) > 0 || len(n.Marks) > 2 {
+				if n.Text == "" || len(n.Attrs) > 0 || len(n.Marks) > 0 {
 					return fail()
-				}
-				seen := map[string]bool{}
-				for _, m := range n.Marks {
-					if seen[m.Type] {
-						return fail()
-					}
-					seen[m.Type] = true
-					switch m.Type {
-					case "bold":
-						if len(m.Attrs) > 0 {
-							return fail()
-						}
-					case "textStyle":
-						if len(m.Attrs) != 1 || (m.Attrs["fontSize"] != "14px" && m.Attrs["fontSize"] != "16px" && m.Attrs["fontSize"] != "20px") {
-							return fail()
-						}
-					default:
-						return fail()
-					}
 				}
 				write(n.Text)
 			case "hardBreak":

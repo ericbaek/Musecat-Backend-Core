@@ -32,13 +32,10 @@ func Validate(app core.App, body string, mentions []Mention) error {
 	if len(mentions) > 10 {
 		return fmt.Errorf("at most ten mentions are allowed")
 	}
-	units := utf16.Encode([]rune(body))
-	previous := 0
+	if err := ValidateRanges(body, mentions); err != nil {
+		return err
+	}
 	for _, mention := range mentions {
-		if mention.Start < previous || mention.End <= mention.Start || mention.End > len(units) || mention.ID == "" || mention.Label == "" || strings.ContainsAny(mention.Label, "\r\n") || string(utf16.Decode(units[mention.Start:mention.End])) != "@"+mention.Label {
-			return fmt.Errorf("invalid mention range")
-		}
-		previous = mention.End
 		switch mention.Kind {
 		case "user":
 			user, err := app.FindRecordById("user", mention.ID)
@@ -75,7 +72,7 @@ func EnsureSchema(app core.App) error {
 	}{{"mentions", 8192}, {"body_document", 65536}} {
 		if old := col.Fields.GetByName(spec.name); old != nil {
 			field, ok := old.(*core.JSONField)
-			if !ok || field.Required || field.MaxSize != spec.size {
+			if !ok || (field.Required && spec.name != "body_document") || field.MaxSize != spec.size {
 				return fmt.Errorf("incompatible %s field", spec.name)
 			}
 		} else {
@@ -83,4 +80,16 @@ func EnsureSchema(app core.App) error {
 		}
 	}
 	return app.Save(col)
+}
+
+func ValidateRanges(body string, mentions []Mention) error {
+	units := utf16.Encode([]rune(body))
+	previous := 0
+	for _, mention := range mentions {
+		if mention.Start < previous || mention.End <= mention.Start || mention.End > len(units) || mention.ID == "" || mention.Label == "" || strings.ContainsAny(mention.Label, "\r\n") || string(utf16.Decode(units[mention.Start:mention.End])) != "@"+mention.Label {
+			return fmt.Errorf("invalid mention range")
+		}
+		previous = mention.End
+	}
+	return nil
 }
