@@ -9946,7 +9946,6 @@ paths:
       tags: [Arcade Mutations]
       summary: GET /arcade/report-settings
       description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
-      security: [{bearerAuth: []}]
       parameters:
         - in: query
           name: arcade
@@ -9970,7 +9969,6 @@ paths:
       tags: [Arcade Mutations]
       summary: PUT /arcade/report-settings
       description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
-      security: [{bearerAuth: []}]
       requestBody:
         required: true
         content:
@@ -10134,7 +10132,6 @@ paths:
         - botKeyAuth: []
       tags: ["Messaging"]
       summary: "Read an arcade's automatic-reply configuration"
-      security: [{"bearerAuth":[]}]
       description: "Current arcade owner or authorized staff only. No raw collection access. Existing inquiries retain their private configuration snapshot."
       responses: {"200":{"description":"Configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/InquiryBotConfig"}}}},"401":{"description":"Authentication required"},"403":{"description":"Management required"},"404":{"description":"Arcade not found"}}
     put:
@@ -10142,7 +10139,6 @@ paths:
         - botKeyAuth: []
       tags: ["Messaging"]
       summary: "Configure an arcade's greeting, replies and choices"
-      security: [{"bearerAuth":[]}]
       description: "Owner-controlled bounded reply graph, at most 60000 encoded bytes. Node and choice IDs are unique, every target must exist. Terminal nodes and free text hand off to human chat. Does not change existing conversation snapshots."
       requestBody: {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/InquiryBotConfig"}}}}
       responses: {"200":{"description":"Saved configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/InquiryBotConfig"}}}},"400":{"description":"Invalid configuration"},"401":{"description":"Authentication required"},"403":{"description":"Management required"},"404":{"description":"Arcade not found"}}
@@ -10154,7 +10150,6 @@ paths:
       tags: ["Messaging"]
       summary: "List bounded authorized conversation summaries"
       description: "Active user only. Direct-message conversations appear only after their first message; opening an empty DM does not add it to either participant's list. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
-      security: [{"bearerAuth": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}, {"name": "requesterOnly", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Public contact entry: restrict results to inquiries created by this caller. Arcade admin dashboards omit this flag."}]
 
@@ -10165,7 +10160,6 @@ paths:
       tags: ["Messaging"]
       summary: "Get a conversation summary"
       description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
-      security: [{"bearerAuth": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
 
@@ -10176,7 +10170,6 @@ paths:
       tags: ["Messaging"]
       summary: "Read chronological history or sequence delta"
       description: "Exactly one cursor direction. Without a cursor returns latest messages. before pages allow up to 100; after pages up to 200. Explicit afterSequence=0 starts from sequence one. Follow non-null nextBeforeSequence/nextAfterSequence until null. No durable SSE replay is implied."
-      security: [{"bearerAuth": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagePage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "beforeSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "afterSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}]
     post:
@@ -10185,7 +10178,6 @@ paths:
       tags: ["Messaging"]
       summary: "Append an idempotent message"
       description: "Same clientMessageId and normalized text, ordered photo byte hashes, canonical mentions and acting identity returns original message with 200; changed content returns 409. Inquiry requester who also manages the inbox must explicitly choose actingAs. DM staff has no bypass. Multipart has text,clientMessageId,actingAs(JSON string),mentions(JSON array string),photos. Nonempty mentions are only supported for arcade inquiries. Ordinary arcade notifications target current official responders; musecat additionally targets platform staff. Inbox replies notify the requester as usual. Team notifications are unchanged. 3 photos at 15,000,000 bytes each. Sender limit 60 messages/minute, 30/conversation/minute, 12 photos/minute; replay does not consume a limit."
-      security: [{"bearerAuth": []}]
       responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Idempotent replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingSend"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "actingAs": {"type": "string", "description": "JSON encoded MessagingIdentity."}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
@@ -10197,7 +10189,6 @@ paths:
       tags: ["Messaging"]
       summary: "Advance this user's read cursor"
       description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
-      security: [{"bearerAuth": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"conversationId": {"type": "string"}, "lastReadSequence": {"type": "integer", "minimum": 0}, "unreadCount": {"type": "integer", "minimum": 0}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
       requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"throughSequence": {"type": "integer", "minimum": 0}}, "required": ["throughSequence"]}}}}
@@ -10209,7 +10200,6 @@ paths:
       tags: ["Messaging"]
       summary: "Change inquiry workflow status"
       description: "Requester may set waiting/solved; current inbox responders may also set recognised. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
-      security: [{"bearerAuth": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
       requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"status": {"type": "string", "enum": ["waiting", "recognised", "solved"]}}, "required": ["status"]}}}}
@@ -10221,7 +10211,6 @@ paths:
       tags: ["Messaging"]
       summary: "Read a protected conversation photo"
       description: "Current conversation ACL and exact file/message ownership required. Existing legacy files are served from their unchanged storage reference only after verifying legacy inquiry mapping. No public file token or redirect."
-      security: [{"bearerAuth": []}]
       responses: {"200": {"description": "Protected image; Cache-Control private, no-store.", "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "messageId", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "file", "in": "path", "required": true, "schema": {"type": "string"}}]
 
