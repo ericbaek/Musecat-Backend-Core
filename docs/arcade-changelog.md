@@ -470,14 +470,8 @@ not the base price. Base `value` may remain null for a PASELI-only price. Existi
 prices and immutable history are not migrated. Representative guest rows retain
 the PASELI amount alongside the base amount.
 
-### Notice presentation policy
 
-Notice title and display-mode mutations retain the existing standalone notice
-history semantics; they do not rewrite arcade changelog history or award XP.
-Creation/update enforce the active required/pinned caps in their write transaction,
-and rejected capacity or permission checks leave the record unchanged. Official
-accounts may manage authorless legacy notices only in their owned arcade; no author
-is fabricated. Full's migration preserves original notice content and timestamps.
+### Notice presentation and inquiry configuration
 
 Notice titles and required/pinned display modes preserve the existing standalone notice history, timestamps and XP behavior. Current official accounts may manage legacy notices for their owned arcade. Active required/pinned caps are enforced atomically. Inquiry bot configuration is operational inbox policy and creates no arcade changelog entries or XP; existing conversation flow snapshots remain unchanged.
 
@@ -497,7 +491,31 @@ remain ineligible after web application. Real web edits keep existing reward
 rules; unchanged saves do not convert prior bot work into rewarded contributions.
 Source snapshots and existing changelog rows are not rewritten on revocation.
 
-Shared check request creation, completion and removal are activity records in `arcade_check_note`; they do not change arcade information and create no `arcade_changelog` or XP entries. Information edits continue through the existing mutation endpoints.
+## Bot name privacy
+
+Bot contribution names are private to the issuing account. Arcade and user history
+responses retain the verified bot kind and identifier but omit its name for every
+other viewer, including reviewers. Owner-only history retains immutable names even
+after key revocation. Raw photo metadata does not expose stored contribution data.
+
+Developers may read another account's bot console through `GET /user/bot-keys?user=<id>` and `/user/changelog?user=<id>&bot=all|<key-id>`. Bot names remain owner-only; foreign key metadata omits the name and never includes secrets. Other roles cannot inspect foreign consoles. Issuance and revocation remain scoped to the authenticated owner. Public user-history summaries retain redacted bot attribution for activity badges without exposing edit details.
+
+API keys issued by official arcade accounts use the same notice, report/inquiry
+settings, automatic-reply and conversation handlers as interactive accounts.
+Notice changes retain their standalone notice records; operational settings and
+messages create no arcade changelog rows. Existing automation requests retain the
+verified issuing account and contribution source and earn no XP.
+
+### Notice presentation policy
+
+Notice title and display-mode mutations retain the existing standalone notice
+history semantics; they do not rewrite arcade changelog history or award XP.
+Creation/update enforce the active required/pinned caps in their write transaction,
+and rejected capacity or permission checks leave the record unchanged. Official
+accounts may manage authorless legacy notices only in their owned arcade; no author
+is fabricated. Full's migration preserves original notice content and timestamps.
+
+Notice titles and required/pinned display modes preserve the existing standalone notice history, timestamps and XP behavior. Current official accounts may manage legacy notices for their owned arcade. Active required/pinned caps are enforced atomically. Inquiry bot configuration is operational inbox policy and creates no arcade changelog entries or XP; existing conversation flow snapshots remain unchanged.
 
 ## Inquiry bot configuration
 

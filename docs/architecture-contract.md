@@ -134,21 +134,36 @@ Its raw PocketBase REST rules are locked; clients use only `GET /community/posts
   validated result or retry state. Source hashes prevent stale results from
   overwriting a concurrently changed post.
 - Translation retries are bounded to five attempts. Provider failures remain
-  visible only as translation status while the Korean original stays readable.
-- `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC` defaults off. Until explicitly
-  enabled, `locale=en-US|ja-JP` falls back to the Korean original even when
+  represented only in API translation metadata while the original stays readable;
+  the launch UI does not display translation state.
+- `MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED` defaults off for launch. Executables
+  skip translator setup and cron registration while disabled, independently of
+  a shared `OPENAI_API_KEY`. Explicitly injected prototype workers remain callable.
+- `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC` also defaults off and requires runtime
+  enablement. Until both flags are explicitly enabled, `locale=en-US|ja-JP`
+  falls back to the Korean original even when
   translations are ready. This allows translation quality to be verified
   before the non-Korean experience is launched.
 - Translation providers are selected by the executable and injected into the
   worker. The reference runner reads server environment variables; reusable
-  OpenAI is the only translation adapter; `OPENAI_API_KEY` selects availability.
+  OpenAI is the only translation adapter; explicit runtime enablement and
+  `OPENAI_API_KEY` together select availability.
   The default model is `gpt-6-luna` with reasoning effort `none` (`low` is optional). Prompts preserve official arcade,
   game, cabinet, version, product, username, URL, price, and mention values and
   may include an operator-maintained Musecat glossary.
 
-Community achievement posts require at least one attached photo. Creation rejects
-text-only achievements with 400. Updates count retained and newly attached photos
-inside the author mutation transaction and reject a photo-less conversion with 400.
+Community achievement posts require a valid game series and at least one attached
+photo; their body is optional. Other flairs still require a nonblank body. Updates
+validate the final retained/uploaded photo set inside the author transaction.
+Optional `photo_order` selects retained filenames or upload indices in final order;
+omission retains the legacy append behavior. Invalid, duplicate, foreign, omitted
+upload references or a photo-less achievement return 400 without changing the post.
+The five-minute deadline never extends. Empty title/body content is ready without
+calling a translation provider; adding text queues the usual translation flow.
+`game_series_ids` lists distinct games across the author/flair/image scope before
+game filtering and pagination, so profile pills include games beyond page one.
+`sort=newest|popular` applies before pagination; popular uses all-time like count,
+created time and ID descending. Responses remain private/no-store with viewer state.
 
 ### Community conversations and likes
 
@@ -212,7 +227,7 @@ Definitions:
 | Immediate wiki edits on public arcade | deny | allow | allow | allow |
 | Arcade memo create/update/rollback | deny | authenticated users with arcade write access | authenticated users with arcade write access | authenticated users with arcade write access |
 | Arcade notice create | deny | deny; level-30+ supporters may create unless another official account manages the arcade through `owns` | official account may create only in own `owns` arcade | allow |
-| Arcade notice update/delete | deny | own authored notice only for level-30+ supporters | own authored notice or authorless legacy notice in an owned arcade | allow |
+| Arcade notice update/delete | deny | own authored notice only for level-30+ supporters | own authored notice only | allow |
 | Edit-report create | deny | allow for accessible changelog | allow | allow |
 | Review queue and review decision | deny | deny | deny unless tagged | allow |
 | Own feedback (`GET /user/feedback`) | deny | own records only | own records only | own records only |
@@ -345,7 +360,20 @@ Existing Full installations require their own guarded forward migration to
 lock the existing `user_info` update rule before this API cutover.
 
 `GET /rankings` always returns the public top 100. User metrics include explorer,
-visits, XP, level, and photographer. The `arcade_visits` metric returns public
+visits, XP, level, and photographer. For `metric=level` (all time only), `score`
+is the smaller of the XP-derived level and an account-age cap. The cap is linearly
+interpolated through day 0 = 10, day 30 = 50, day 45 = 75 and day 365 = 100,
+with the fractional level discarded within each segment. After day 365, it is
+`100 + floor((days - 365) * 90 / 365)`. Elapsed days are complete 24-hour periods
+since `user.created` at the request's UTC time, clamped at zero.
+Ranking and the top-100 cutoff use this capped level; equal levels share a rank,
+with nickname and user ID providing stable display order. `profile.level` always
+retains the uncapped XP-derived level. XP metrics, stored XP, profile levels and
+feature permissions are unaffected. For `metric=xp`, `score` remains the period's net
+XP and `stats.level_change` is `LevelFromExp(current XP) -
+LevelFromExp(max(0, current XP - score))`. It describes actual level gain from the
+period's starting XP, rather than converting the period XP from zero or showing
+the current profile level. The same calculation applies to `viewer`. The `arcade_visits` metric returns public
 arcades ranked by the total XP awarded by their completed visit-verification
 records; the response displays the verification count separately and includes
 the first publicly readable photo from the current photo molecule when one is
@@ -526,34 +554,6 @@ single-record operations do not write arcade changelog or XP rows.
 
 New frontend code MUST NOT reintroduce collection names, PocketBase record rules, collection filters, raw REST pagination, or PocketBase file URL construction as a compatibility layer. Sitemap, changelog timeline, draft list/delete, and photo atom management migrate to these custom routes.
 
-## Arcade notice presentation policy
-
-`arcade_notice.title` is separate from the existing topic `type`. Creation requires
-an explicit nonempty trimmed title; updates preserve it when omitted and reject an
-explicit empty value. The storage limit is 5000 Unicode characters. Existing topic
-categories, documents, photos, author identities and priorities are preserved.
-
-`display_mode` is `required`, `pinned`, or `normal` (the creation default). Per arcade,
-at most one active required notice and three active pinned notices are allowed.
-Active means not soft-deleted and without an expiry or with a future `until`.
-Creation and update recheck authorization, current arcade visibility and available
-capacity inside the same serialized write transaction as persistence. Updates
-exclude their own record from capacity counts; expiry changes also check capacity.
-Overflow returns 409 with code `notice_display_limit_exceeded`, the mode and its
-limit, without persisting any fields. Normal notices have no additional count cap.
-
-Public reads order required, pinned, then normal. Pinned notices use ascending
-priority; equal pinned priority and normal notices use newest-first ordering with
-id as the deterministic tie breaker. The client always expands the required notice
-and opens other notice bodies on demand.
-
-Developers/moderators retain management access to all notices. An official arcade
-account may additionally update/delete authorless legacy notices in its own `owns`
-arcades, without assigning itself as their author. Other authors' notices retain
-the existing author-only rule. Private arcade write restrictions remain unchanged.
-Full alone backfills existing database titles and presentation modes; Core's schema
-helper and bootstrap migration never migrate a deployed database.
-
 ## Rich-text validation and denied notice mutations
 
 Notice authorization denials terminate the handler before any save; the existing
@@ -699,28 +699,6 @@ summary/full settings take the new scope immediately; there is no versioned opt-
 `visibility` in the response tells the web which projection was applied.
 `city_catalog_available=false` distinguishes missing reference data from zero cities.
 
-The direct owner `GET /user/visits` response additionally includes `timeline`,
-a complete array of verification events ordered by stored UTC `visited_at` and
-record ID ascending. Its safe event ID is `arcade:visit_day`; a revisit on a later
-local day remains a separate event. The unique `(user, arcade, visit_day)` rule
-still deduplicates a second verification at the same venue on that local day.
-Each event exposes only that identity, arcade ID/name, stored local `visit_day`
-and nullable current registered venue coordinates. No verification GPS, accuracy,
-XP, raw visit-record ID or precise timestamp is returned. A null coordinate event
-remains in order and interrupts adjacent route legs; do not reconnect around it.
-These are straight lines between verification venues, not a recorded travel path.
-
-The owner timeline ignores public Passport visibility and the independent home
-feed opt-out, but continues to exclude currently private venues. It is omitted
-from delegated account projections even when their Passport visibility is full,
-and from all public profile/Passport DTOs. Owner responses are private, no-store.
-The existing all-time loader remains complete and unpaginated: timeline adds no
-query or per-venue lookup, but response size grows with history. No silent cap or
-client reconstruction from per-venue summaries is permitted. Older binaries omit
-the additive field; clients must treat that as unavailable, distinct from `[]`.
-The existing Full visit schema/indexes already contain the ordered facts. This
-extension requires a Core pin and Full binary deployment, with no data migration.
-
 Periods use stored local `visit_day`; active days deduplicate those date strings even
 across countries. New discoveries use lifetime first chronological verification.
 Distances use current locations, with both consecutive endpoints inside the selected
@@ -780,10 +758,13 @@ not change arcade visibility, author/reviewer permissions, XP or history semanti
 ## Public aggregate execution
 
 `GET /stats` caches successful public aggregate snapshots for 30 minutes per
-application process. Concurrent cache misses share one refresh; errors are not
-cached. A refresh has a 12-second database deadline and survives an individual
-viewer's disconnect, while that viewer stops waiting immediately. Counts may
-therefore lag underlying mutations by up to 30 minutes.
+application process. Expired successful snapshots remain available during a shared
+background refresh for at most another 30 minutes. Failed background refreshes
+retry after 30 seconds, without extending snapshot lifetime. Cold or more than
+one-hour-old snapshots wait for a refresh and return an error if it fails. A
+refresh has a 12-second database deadline and survives an individual viewer's
+disconnect, while that viewer stops waiting immediately. The daily page-view
+aggregate uses a partial covering date/group index and preserves public-only counts.
 
 Both arcade-update aggregates remain uncached, propagate request cancellation
 to SQLite, and cap database work at 12 seconds, below the web transport's
@@ -851,6 +832,7 @@ accepted, and at most six latest distinct-arcade blocks are returned. If the six
 newest are all KR and a non-KR arcade has history, the newest non-KR block replaces
 the sixth entry. Results remain in descending activity order. Fewer are returned
 when fewer eligible arcades exist; no foreign entry is invented if none exists.
+Concurrent public summary reads share one bounded aggregate query, without a retained response cache. A canceled caller does not cancel other readers.
 
 `GET /arcades/updates/history` requires user authentication and returns `items`,
 `page`, `per_page`, `last_page`, `total` across chronological blocks, including
@@ -942,6 +924,534 @@ Arcade detail and authorized draft detail include `admin.officialAccountIds`, an
 ordered list of non-withdrawn `arcade_owner` users whose `owns` relation includes
 the arcade. Creation authorship alone does not establish official ownership.
 Profile details continue to use the public `/user` projection.
+
+## Custom game prices
+
+`custom_v1` uses the existing named numeric `PriceItem[]` contract, including
+currency, payment methods and representative flags. `custom_v2` uses literal
+`string[]`, one price or condition per line in order; `[]` means no information.
+Strings have no numeric interpretation or exchange-rate conversion. The UI shows
+both as Custom and chooses the input mode inside the price editor.
+Legacy `custom` accepts both shapes for unchanged round trips and historical
+rollback. No migration rewrites stored prices, revisions or changelog rows.
+Untouched revisions and rollback retain their original raw price JSON. New
+edits may have a legacy price in `before` and a versioned price in `after`.
+Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
+retains the existing representative-item policy.
+
+
+## Photo capture dates
+
+Photo atoms keep `created` as their actual upload timestamp and store optional
+`captured_at` separately. The web client extracts EXIF DateTimeOriginal and
+OffsetTimeOriginal before normalization and sends an index-aligned JSON array to
+the photo upload endpoint. Offsetless camera times use the venue timezone, or UTC
+if absent. Invalid and future capture dates are ignored. No file modification date
+is used as evidence of capture. This metadata is user supplied, not verified proof.
+Photo labels and automatic campaign freshness use captured_at then created;
+updated is never evidence of a new photo. Gallery membership/order, pending-photo
+list order, audit history, and XP event timestamps do not change. Full owns the
+existing-data field migration and explicit offline, fill-only EXIF backfill. It
+must not rewrite immutable changelogs or fabricate dates for stripped images.
+
+## Arcade report destination and device alerts
+
+`GET|PUT /arcade/report-settings` require an active `developer|moderator`, or `arcade_owner` with the target id in `owns`. Staff may manage private/closed arcades. Default mode is `internal`; `external` requires an HTTP(S) contact without URL credentials or a phone number. Settings are stored on the arcade aggregate in a short transaction. This operational configuration awards no XP and does not create a content revision/changelog.
+
+Detail admin metadata exposes `reportSettings` and `canManageReports`. Game expansions suppress all flags/history while external reporting is enabled, including orphan flags. Existing flags, reactions and resolution timers are preserved. POST flag and reaction reject external mode with 409/REPORT_EXTERNAL, rechecked inside the transaction. Returning to internal mode shows only reports eligible under their current resolution state; it never resurrects solved reports. Hidden reports keep normal stale-resolution schedules (currently 120 days to start stale resolution).
+
+`PUT|DELETE /arcade/report-subscription` store/remove a device per arcade and authenticated user. Repeated registration is idempotent; explicit registration transfers the browser endpoint away from other accounts on a shared device. DELETE may remove only the caller's subscription even after loss of ownership. Raw collection APIs remain locked. Browser subscription endpoints are restricted to HTTPS browser push providers, including Google FCM and the exact Chromium staging host `jmt17.google.com`; keys are validated before persistence. Endpoints and secrets are never public data.
+
+`POST /arcade/report-subscription/status` reads only the authenticated manager's subscription for one arcade and device. It returns a private, no-store enabled boolean, never endpoint credentials. Full registers `POST /arcade/report-subscription/test` to send directly to that same registered device using its VAPID sender, with current ownership and internal-mode checks. Provider acceptance is distinct from notification display; expired registrations are removed. Neither operation writes a report, changelog or XP.
+
+Report creation atomically inserts the account inbox event and one durable `user_notification_delivery` per eligible device with the flag and XP. `arcade_report_delivery` is a locked migration archive; no new writes or dispatch target it. External network delivery belongs to Full, outside transactions. Full rechecks current arcade ownership, withdrawn state, report mode and solved state, sends game/severity/message previews, records receipts, retries up to five times with exponential delays, and removes 404/410 endpoints. Delivery is at least once; notification tags collapse duplicate browser notifications. Revoked ownership and external mode cancel pending delivery. Configuration and VAPID keys are selected only by the executable.
+
+## Unified user notifications
+
+`user_notification` is a private, account-scoped inbox. `user_notification_device` stores one authenticated account per browser endpoint; `user_notification_delivery` is its durable per-device outbox. Raw collection access is locked. Core defines fresh-bootstrap schema; Full alone applies the guarded forward migration. Existing arcade report subscriptions are promoted idempotently without requesting browser permission again.
+
+New arcade reports create inbox events for current official owners and explicitly subscribed managers. Reactions create an event for the report author, excluding the reacting author themselves. Event insertion and delivery enqueue happen in the originating content transaction. A unique `(user,event_key)` prevents duplicate event creation. Deleting a source report/reaction cascades to its inbox event and queued deliveries. No extra XP or arcade changelog is awarded.
+
+The custom `/user/notifications` APIs require an active authenticated account. List/read/device operations never accept another user id. Lists are newest-first, use a before-id cursor (20 visible entries per response), expose an unread count, and recheck source visibility and management access. External-reporting arcades are suppressed. Read state is persistent; marking a foreign notification read is a no-op. Device endpoints stay in bounded request bodies, not URL queries or responses. Public VAPID configuration is supplied by the frontend server, never the private key.
+
+Push is an explicit per-device browser opt-in; the in-app inbox is always enabled. Enabling through either the arcade compatibility API or the unified device API stores credentials only in `user_notification_device` and transfers a shared endpoint away from any previous account. `arcade_report_subscription` is a device relation with an enabled flag, not a second credential store. Disabling removes only that account/device, including its legacy arcade subscriptions and queued deliveries. Full validates current account/ownership/source visibility before dispatch, uses the existing VAPID sender outside transactions, retries up to five times (including failed expired-endpoint cleanup), removes expired endpoints, and dispatches only the unified outbox. Full consolidation maps every legacy receipt into that outbox before removing duplicate subscription credentials. Existing retries and completed/read state are preserved; source receipts remain archived. Pending reports from before inbox migration remain deliverable. Full's `/user/notifications/test` sends only to the caller's registered device and confirms provider acceptance, not OS display. The frontend polls unread state and refreshes on opening; it never prompts for browser permissions during a read.
+
+## Private inquiry conversations
+
+`support_feedback` preserves the original inquiry and photos. `support_feedback_message` stores immutable, chronological replies. `/user/feedback/thread` GET/POST/PATCH is restricted to the authenticated active inquiry author, current official account of the scoped arcade, or strict support staff (developer/moderator). Inaccessible ids return 404. The staff label and author are always server-derived. Replies contain up to 4000 characters and/or up to three images (15,000,000 bytes each; content-sniffed image validation matching initial inquiry uploads), and paged reads return the newest 50 in chronological order, with a private cursor for older messages.
+
+Reply, inquiry status and `feedback_reply` notification/queue writes share one transaction. Staff replies notify the inquiry author; ordinary MUSECAT inquiry replies notify current strict staff. Arcade inquiry requester messages notify current official responders, with canonical explicit mentions additionally notifying staff; legacy/guest messages have no mention metadata. Senders and restricted accounts do not receive notifications. User follow-up returns status to waiting; staff reply changes it to recognised. Original guest submissions remain supported, but guests have no authenticated conversation or inbox. Existing status review remains available. Feedback notifications recheck ownership/strict staff permissions when listed or delivered; revoking staff access hides them. Arcade/flag notification relations are optional so private inquiries do not fabricate arcade references. Push uses generic copy without private inquiry text. Raw reply collection API rules remain locked.
+
+### Arcade-scoped inquiries and push locale
+
+`/support_feedback` submissions may set `arcade`; public arcade inquiries accept guests unless the current official account has enabled `loginRequired`. The arcade must be public or accessible to the submitting user. A nullable, non-cascading parent relation preserves inquiry history when the arcade is removed. Current official owners may access only inquiries for arcades they manage; ordinary MUSECAT inquiries remain author/staff only. Exact current `owns` plus official management policy is rechecked for every thread read, append, inbox list and push delivery. Current strict staff retain access. `/user/feedback?arcade=<id>` lists the user's authored and officially assigned inquiries; staff may read the arcade-scoped queue. Other owners see none. Original moderator/edit-report and closure history is retained in its existing queue; new contact submissions use conversations without exposing historical moderator submissions to newly added recipients.
+
+New arcade inquiries create `feedback_created` notifications for current official accounts and strict staff. Replies by the requester notify current responders; official/staff replies notify the requester. The snapshot distinguishes staff and official replies; current authorization governs visibility independently of historical role labels. Each message can generate independent per-device deliveries. Devices sync locale through authenticated PATCH `/user/notifications/device`, which may update only an already registered endpoint for that account. It never opts a user in, transfers ownership or prompts for permission. Real and test pushes use the stored device locale.
+
+- A `fixed` flag reaction from a current developer/moderator or the official owner assigned to that arcade resolves immediately regardless of level. The reaction attribution and notification/XP transaction are preserved; other users retain the existing resolution-voting delay.
+
+Inquiry participants can PATCH `/user/feedback/thread` with `status: solved` to resolve or `waiting` to reopen without posting a reply. Current access is rechecked inside the status transaction; foreign and revoked participants receive 404. This operational status change does not award XP or alter message history. Replies retain the existing waiting/recognised transitions.
+
+### Arcade inquiry destination
+
+`arcade.inquiry_settings` is independent from `report_settings`. `PUT /arcade/inquiry-settings`
+accepts internal, external, or disabled mode and the validated HTTP(S)-URL/phone contact shape (guide up to
+2000 characters). Only current assigned official owners and strict developer/moderator users
+can configure it. Arcade detail returns `admin.inquirySettings` alongside current exact official
+account IDs. Missing, empty, or invalid persisted inquiry mode defaults to disabled with
+`configured: false`; saved internal/external/disabled modes return `configured: true`. This flag is
+derived from persisted mode and is never stored or trusted from clients. Explicit OFF requires no
+external contact. New arcade-scoped support submissions return 409 `INQUIRY_DISABLED` for disabled
+mode or `INQUIRY_EXTERNAL` for external mode while an official account exists, checked in the creation transaction.
+Existing conversations, replies, attachments, notifications and their access policy are retained.
+Without a current official account, new inquiries target MUSECAT moderators and ignore a retained
+external or disabled setting. Explicit moderator contact from the external destination opens a general private
+MUSECAT inquiry, which is not shared with arcade owners. No historical private inquiries migrate.
+Core defines fresh bootstrap only; Full owns the guarded forward schema migration.
+
+Both destination settings accept a guide of up to 2000 Unicode code points and a contact
+value of up to 2048. Their JSON fields allow 32768 bytes, including UTF-8 and JSON
+escaping overhead. Full widens only the known 8192-byte predecessor or accepts the
+already upgraded 32768-byte schema; unexpected field types or capacities fail closed.
+Existing settings values are preserved. Both Core settings endpoints and their web BFF
+routes accept at most 65536 request-body bytes, covering the settings plus JSON envelope.
+
+### Private inquiry reply attachments
+
+Reply POST retains JSON text compatibility and accepts bounded multipart `feedbackId`,
+`message` and repeated `photos` fields. Empty text is allowed only with an image; blank
+replies are rejected. Uploaded files use the existing image validation plus a private,
+protected `support_feedback_message.photos` field. GET/POST reply DTOs include filename
+arrays. `GET /user/feedback/thread/photo?id=<replyId>&file=<filename>` and
+`GET /user/feedback/thread/photo?feedbackId=<inquiryId>&file=<filename>` recheck current
+parent inquiry access and exact file membership before serving private, no-store bytes.
+Exactly one record selector is required; ambiguous selectors return 400.
+Raw PocketBase file delivery is denied; leaked filenames never grant access. Original
+inquiry photos are protected by the same policy; filenames and stored files are unchanged.
+Guest submission receipts grant no attachment read capability. Message persistence, status transitions and inbox/push
+queue insertion remain one transaction, including image-only replies. Core defines fresh
+bootstrap; Full's guarded forward migration preserves existing messages and locked rules.
+
+Arcade inquiry settings include `loginRequired` (boolean, default false) in the existing
+JSON configuration and public detail `admin.inquirySettings` capability. Only current
+assigned official owners and strict staff may save it. New anonymous internal inquiries
+return 401 `LOGIN_REQUIRED` when enabled, rechecked in the creation transaction. External
+mode still returns 409 first; without a current official account, retained owner routing
+and login preferences do not block moderator contact. Guests cannot create inquiries for
+private arcades. Guest inquiries keep an empty `createdBy`, appear in the official/staff
+queues, and notify current responders through the existing atomic inbox/push flow. Guest
+receipt does not issue a conversation token, expose private reads, or introduce guest chat
+or reply delivery. Existing historical access/status behavior is unchanged. No schema or
+production data migration is needed for this optional JSON key.
+
+
+Notification storage consolidation uses a guarded Full-only data migration. Core
+bootstrap defines only the empty canonical schema. Endpoint owner conflicts, orphan
+references, incompatible fields and unaccounted source deliveries abort the entire
+transaction. Existing canonical credentials win over older same-owner key rotations;
+conflicting legacy-only credentials fail closed. Historical events synthesized during
+cutover start read, while existing inbox read state is unchanged. Explicit per-arcade
+opt-outs affect report pushes only, leaving personal notifications and other arcades
+on the same device enabled. Completed transport receipts are retained 90 days;
+cleanup records archive completion proofs before deletion, and inbox event identity
+continues to prevent duplicate enqueue. Unread inbox events and pending/exhausted
+receipts are never retention-deleted. Inbox reads use indexed keyset batches plus
+unread-only visibility scans, not a full read-history load.
+
+
+`GET /user/arcade-inquiry-onboarding` requires an active authenticated user and reloads their current
+role and ownership. Only exact `arcade_owner` accounts receive their currently owned
+arcades, including already configured arcades as `{items: [{arcadeId, arcadeName, settings, reportSettings}]}`. Staff-only accounts receive an empty list.
+Private names are available only within this ownership scope; missing arcades are skipped and missing
+basic relations produce an empty name. The response is private/no-store. Existing explicitly configured internal/external/disabled choices are preserved without data rewrites.
+The independent `reportSettings` is the current report routing settings read from each owned arcade.
+This setup endpoint supports the notification-initiated dashboard funnel; login does not open a dialog.
+
+
+The account-scoped `arcade_setup` notification invites every active exact `arcade_owner` account to
+set up the new admin dashboard, independently of saved reporting/inquiry modes. Its generic message
+is `새 관리자 대시보드를 설정해주세요` and destination is `/account/arcade-dashboard/setup`.
+`usernotification.EnsureArcadeSetupNoticeTx` rechecks the current user, withdrawal, exact role, and
+active bans, then inserts at most one `arcade_dashboard_setup:v1` event per user with no actor or
+arcade relation. Existing notices and their read state are untouched on reruns. Canonical registered
+devices receive deliveries in the same transaction. Notification visibility rechecks the current
+active owner role and is independent of OFF settings. Future official account provisioning inserts
+this notice atomically. Core only defines fresh bootstrap schema; Full owns the existing-account
+backfill migration. No inquiry/report settings are rewritten.
+
+## Optional PASELI numeric prices
+
+`price.accept` accepts `PASELI`. A numeric row (`gamemode`, `credit`, `song`, `time`, `custom_v1`, or legacy object-form `custom`) may include optional
+`paseli_value` (> 0), in JPY and with PASELI acceptance. Omission means unknown,
+not the base price. Base `value` may remain null for a PASELI-only price. Existing
+prices and immutable history are not migrated. Representative guest rows retain
+the PASELI amount alongside the base amount.
+
+## Private messaging and shared inquiries
+
+`service/messaging` owns conversation/party/message/read storage and the authenticated
+`/user/conversations`, `/user/messaging/*`, `/user/messages/*/report`, and `/user/events`
+contracts. These routes are deliberately excluded from delegated account APIs.
+Raw collection rules remain locked. Core creates fresh schema only; Full invokes
+`messaging.EnsureSchema` from its independently guarded migration and imports legacy
+inquiry data there. Schema helpers reject incompatible existing definitions.
+
+DM is one unique unordered user pair. Only those two active users can read its
+messages/files/events; staff has no DM override. Inquiries are separate cases with
+requester plus arcade or `team:musecat` inbox. Strict developer/moderator staff and
+current official owners may access shared inquiries. Historical responders are not
+permanent participants. Unscoped conversation lists retain every inquiry authorized
+by current staff, requester or official-owner access, including unmentioned arcade
+inquiries and earlier replies. The optional inbox scope narrows the list;
+requesterOnly restricts public contact surfaces to the caller's own inquiries.
+Mention metadata affects alerts, not conversation-list membership. Actual sender user and acting party are separately stored;
+when a requester is also a responder they explicitly choose their sending identity.
+Summaries expose `allowedSenderIdentities` and `allowedStatusTransitions` from the
+same inquiry policy used by writes. Requesters can choose waiting/solved; current
+responders can choose waiting/recognised/solved. `canManageStatus` remains a
+compatibility field derived from the nonempty transition list. DM sender identities
+are empty when current receive/block/account policy prevents sending.
+
+Missing DM receive preference means everyone. Explicit opt-out remains nobody. Each new DM/send checks receiver preference,
+both directed blocks, active account and current roles/ownership. Block/opt-out do
+not delete old history. Conversation creation is limited to 10/minute for its
+recorded `created_by` initiator; incoming conversations never consume that quota.
+Reports require current message access and preserve a private
+evidence snapshot without granting staff blanket DM access. Strict current staff can
+review a bounded report list and each reported snapshot/its own photos through
+`/moderation/messages/reports`; these routes never expose other thread messages.
+Report submissions are limited to 20/minute; repeated reports return the same record. Receipt of an existing
+idempotent response remains allowed after opt-out; it creates no new message.
+
+Short transactions allocate a per-conversation sequence and persist the message,
+latest pointer, inquiry status and recipient notification outbox together. Read cursors
+are individual, monotonic and bounded by the latest committed sequence. Unread counts
+exclude the reader's actual sender user and their party, including other staff acting for the same inbox. Status
+changes do not reorder conversations. Latest summaries batch load parties/profiles,
+messages, preferences, blocks and reads; no conversation-by-conversation HTTP or SQL
+fanout is needed. Message text is stored once, on messaging_message.
+
+Idempotency is unique per conversation/sender/clientMessageId. Payload comparison
+uses normalized text, ordered photo byte digests, canonical mentions and the resolved acting identity;
+a different payload returns 409. Messages without mentions retain the original payload
+hash encoding, including imported/replayed messages. `mentions` is a bounded JSON
+field (128 bytes); API inputs accept at most 16 entries, only `musecat`, canonicalized
+to `[]` or `["musecat"]`. Nonempty mentions are rejected for DMs and team inquiries.
+JSON and multipart initial/reply messages share validation; multipart `mentions` is a
+JSON array string. Plain text never creates mention metadata. Accepted photo formats are JPEG/PNG/WebP/GIF with
+three files of at most 15,000,000 bytes each. Photos are protected, and custom reads
+revalidate conversation ownership and exact message/file membership. Existing legacy
+storage remains in place and is read only through the authorized mapping adapter.
+
+Existing authenticated support create/reply/status routes delegate to canonical
+messaging and project their previous response shape. New authenticated inquiries do
+not create another independent support_feedback message store. Guest receipt intake
+and its staff queue stay on the legacy store. Full maps each historical authenticated
+feedback independently, preserves the first message and replies in created/id order,
+and records source collection/record/file references. It never converts guests into
+synthetic users, never manufactures notifications, and initializes requester read to
+the imported last sequence while preserving existing notification unread flags.
+Message authors reference the current user through an optional, non-cascading
+`sender_user` relation. Messages store no copied name, avatar, or role attributes.
+Retry uniqueness applies only while a user or guest author reference exists, so
+clearing multiple deleted authors cannot collide. Deleting an account preserves message content; a missing author displays as a
+deleted user. Acting user, arcade, team, and guest identities remain separate.
+
+Arcade requester messages notify current official responders by default. Platform
+staff receive arcade notifications only with an explicit `musecat` mention; a staff
+account that also qualifies as the current official owner retains ordinary owner
+notifications. Inbox replies still notify the requester; an explicit mention also
+adds active staff, excluding the sender. Team inquiries retain their existing staff
+notification policy. Recipient accounts and bans are batch loaded, and at most 20
+devices per recipient are selected in one bounded query. Notification/delivery rows
+remain atomic with the message and use the existing durable delivery worker.
+Queued messages recheck the same policy through `NotificationDeliverable`; existing
+inbox rows retain access-only visibility. Legacy arcade/guest feedback has no mention
+metadata and likewise notifies official responders, with
+`FeedbackNotificationDeliverable` suppressing old queued staff-only pushes.
+Notification policy does not narrow conversation access or SSE audiences.
+
+The single-process SSE hub publishes invalidations after commit only. Conversation
+audiences are resolved once per change and only their connected users are enqueued;
+each recipient still receives a final current-ACL check before delivery. Each stream
+has a 32-event queue; enqueue never waits on socket I/O. Overflow requests resync and
+closes. At most four streams/user and 1024/process are accepted. Authorization and
+current account state are rechecked before event delivery and every 15-second
+heartbeat; streams expire after 25 minutes. No transaction/SQL rows are retained by
+a stream. Reconnection catches up from persisted sequences, not Last-Event-ID. All
+user_notification changes also invalidate the shared notification inbox. An external
+multi-replica broker is deliberately outside the current single-container deployment.
+
+## Announcement stories
+
+`announcement` stores one locale-independent publication with separately authored
+Korean, English and Japanese image stories. Staff (`developer|moderator`) use only
+custom `/moderation/announcements` APIs. Drafts may be incomplete; publication
+accepts an explicit nonempty subset of `ko|en|ja` and requires a title, 1–12 valid
+PNG/JPEG/WebP images only in those selected locales. Image alt text is optional. Each slide may include a localized `link` with a 1–80-character label and an internal path or credential-free HTTPS URL (up to 2048 bytes). Links reject protocol-relative URLs, whitespace, controls and backslashes; omitted links preserve image-only behavior. Links are stored in the existing localization JSON and survive reorder and published edits. The selected
+locale set becomes immutable after publication. Unselected variants
+remain private to staff and never appear in public metadata or image reads.
+Image text is never assumed to translate automatically. JSON metadata preserves
+ordered image references; multipart replacements can combine retained file names
+and per-locale `upload:N` indices. Omitted references remove old files. Files are
+protected at the raw PocketBase boundary; custom image reads recheck publication
+visibility. Staff may edit published content while preserving the selected locales,
+publication timestamp, fan-out cursor, inbox snapshots and read/view identities.
+Edits must retain complete content for every published locale and do not resend
+notifications. Archived content cannot be edited. Archive is terminal and hides public
+content and its inbox entries, without erasing deduplication or view identities.
+
+Publication accepts optional `sendPush` (boolean, default true), persisted as
+`suppress_device_push` for the fan-out worker. With `sendPush=false`, inbox
+events are still created but no device deliveries are enqueued. Retrying publication
+does not change its original push policy.
+Publication captures a timestamp. Full registers the bounded fan-out worker even
+when VAPID is disabled. Each transaction processes at most 100 non-withdrawn users
+created no later than publication; the durable user-id cursor, one inbox identity
+`announcement:<id>` per user, and matching-device outbox receipts commit together.
+Restart, repeated publish or replayed batches cannot reset read/view state or
+requeue existing events. Accounts created later see the public story but do not
+receive historical broadcasts. Device delivery uses the existing bounded retry
+worker and stable tag; OS delivery is at-least-once, not exactly-once. Each inbox
+event snapshots only selected title/summary pairs. Inbox `locale=ko|en|ja` filters
+announcement entries and unread counts without affecting other notification kinds.
+Push queues only devices whose saved locale is selected, and rechecks that locale
+before delivery; no foreign-language fallback is used. Deep links use the matching
+route prefix.
+No permission prompt or new device registration is triggered by publication.
+
+`announcement_view` has a unique account/publication key, independent of locale,
+device and inbox read status. `/announcements/unseen` considers only the latest
+published story targeting the requested locale, rather than opening a backlog.
+`/view` is idempotent. Public list/detail accept `locale=ko|en|ja` (default `ko`) and allow replay only of matching
+publications; a mismatched detail request returns 404. The canonical deep link is
+`/community/updates?announcement=<id>` and opens the same story dialog.
+
+Retained legacy feedback notification links now directly target `/updates/feedback?thread=<id>`.
+Setup links resolve the recipient's current owned arcade using the onboarding
+endpoint's ownership rules and target `/arcade/<id>?setup=dashboard`; the legacy
+redirect remains a fallback when no current owned arcade exists. Retained legacy
+links remain valid frontend inputs. Neither kind needs an intermediate launcher.
+
+Message notification inboxes project the latest received event per user/conversation,
+including existing history, before keyset pagination and unread counting. Source
+message/event/delivery identities remain immutable. The title is the sending user
+current profile or acting arcade/team; previews normalize whitespace and truncate at 160
+Unicode characters, with localized photo-only fallback. Access checks still precede
+projection. Acknowledging one message notification clears events only through that
+message sequence. Conversation read cursors also acknowledge corresponding inbox
+events, without advancing beyond the displayed sequence.
+
+Full message pushes wait at least five seconds from event creation, collapse older
+queued events, and use a user/conversation tag. A successful delivery persists
+`sent_at`; subsequent pushes to the same conversation/device wait at least two
+minutes, retaining the newest pending message. Deferral does not consume retries.
+Skipped receipts never start the cooldown. Delivery rechecks read cursors and
+notification acknowledgement in addition to the existing recipient/access policy.
+Push title/body use the same sender and preview as the authenticated inbox.
+
+
+### Inquiry status history
+
+Only current strict staff or the current official arcade responder may mark an
+inquiry status. Status values and history are internal to these responders. This is enforced by the shared summary/mutation policy, including
+legacy and guest adapters. Requesters cannot read or change the internal state. Solved is not a
+sending restriction: a requester follow-up reopens to waiting and a responder
+follow-up changes to recognised.
+
+Every new status transition persists server-authored `statusChange: {from, to}`
+in the same transaction as the inquiry state. An explicit status action appends a
+textless message with the actual sender, acting identity, timestamp and next
+sequence. An automatic transition attaches the same metadata to its triggering
+message. A same-status action is a no-op; message retries retain the original
+transition without duplication. History, delta and realtime invalidation use the
+existing conversation permissions and sequence. Status-only entries do not
+create push notifications or requester SSE events, unread increments, sidebar preview changes or sorting changes. Requester history filters textless status entries before pagination, strips transition metadata from ordinary messages and send/retry responses, and returns null status and empty transitions. Legacy adapters follow the same projection. Prior history is preserved without inventing past
+transitions. Full owns the guarded additive `status_change` JSON-field migration;
+Core only bootstraps it for fresh databases.
+
+Guest inquiries use the canonical messaging store and browser-scoped credentials, never synthetic user accounts. Current guest access survives intake-policy changes. Reply bots snapshot their owner configuration per inquiry; requester choices are validated and sequenced atomically. DM read cursors belong to each actual account and expose the counterpart cursor only for direct messages.
+
+Direct-message conversations enter conversation lists only after the first message
+is sent. Opening a peer DM may reuse an empty conversation without listing it for
+either participant. Inquiry visibility is unchanged.
+
+The optional boolean `visit_timeline_hidden` on `PUT /user/visit-visibility`
+is independent of `visit_visibility`. It defaults to false, and omission
+preserves the saved value. Profile responses return the saved flag. When true,
+`GET /arcades/updates` excludes that account's existing and future visit entries;
+profile Passport statistics, maps and stamps retain their existing visibility rules.
+Private visits remain excluded regardless of this flag.
+
+## Account-owned bot credentials
+
+Personal bot keys are a distinct non-session credential for `/bot/v1` arcade
+creation, information editing, notices, report/inquiry settings, automatic replies,
+memo edits, analytics and conversation reads/replies/status. Issuance and use require
+arcade_owner, founding supporter, supporter, designer, moderator or developer.
+The live role is checked on each call. Owners retain list/revoke
+access after losing eligibility. See [`bot-api.md`](bot-api.md) and the bot
+operations in OpenAPI. A live key resolves the issuing account, rechecks
+revocation, account token-key fingerprint and active-account policy, and uses the
+existing handlers. Keys never authenticate web/session/raw collection APIs and
+cannot issue credentials or reach moderation/account-management routes.
+Official operations reuse current ownership and conversation ACL checks; removing
+ownership immediately removes management access even while the key remains valid.
+Public and ordinary-user reads/edits retain their existing visibility policy. Each key permits 60 calls
+per minute; its quota and last use are stored atomically. Secrets are returned
+once, hashed at rest, and excluded from history and list responses. Bot keys have
+no automatic expiry; existing expiry timestamps are ignored. Every unrevoked key
+counts toward the five-key account limit.
+
+`service/contribution` wraps the request app and its nested transaction apps with
+a verified source. Saves of new arcade, changelog and photo-atom records retain
+an immutable `contribution_source` snapshot. `by`/`createdBy` remain the owner's
+user ID. Bot names are private to the issuing account: custom history responses
+omit the name for every other viewer, including staff. Raw record responses never
+expose the stored attribution snapshot. Public UI uses an API badge without the name.
+Normal records have a null source. Bot edits earn no XP; creation origins,
+per-change backfill and photo eligibility preserve that policy across web/API
+handoffs. Deferred rewards for actual web changes use their persisted origin,
+including when a bot later publishes them. Legacy rewards are not reclassified.
+
+Bot API rollout is independent of the excluded external integration release.
+Future OAuth adapters may share attribution and domain policy; this release does
+not register Developer Center or broaden existing OAuth scopes.
+### Deployment public-read policy
+
+`service/readpolicy.Register` installs an optional, app-scoped check before public
+game-expanded arcade detail (`expand=game` or `expand=all`), authenticated expanded nearby pages, and detailed arcade/user
+history are written. It receives the actual exposed public arcade IDs; errors
+abort the entire response. Core has no quota, CAPTCHA provider, or policy state.
+Without registration the check is a no-op. Full owns deployment policy and routes.
+Basic/location-only, photo-only and relation-ID responses do not consume game-detail quota; request rate limits still apply.
+
+Anonymous `/arcades/nearby` responses omit `game_series` and `game`, including
+`expand=true`. Guest campaign summaries are empty because they contain game
+version/series bundles and machine counts. Series filtering remains available; cabinet filtering still
+requires authentication. Authenticated expansion/ranking and 15-row pagination
+are preserved. `/arcades` is a separate summary contract and is unchanged.
+
+Passport stamps include the current public arcade `location` (lat/lon or null), allowing the passport map to render without per-arcade detail requests. Private arcades remain excluded.
+
+## Aime recovery notification
+
+Authenticated active users explicitly opt in through `/user/notifications/aime`.
+The account-scoped subscription is for one observed outage and is consumed after
+recovery; existing browser push consent never creates this subscription. Full
+checks public my-aime.net, maimai DX NET and CHUNITHM-NET entry pages in parallel
+once every five minutes with bounded HTTPS redirects and HTML bodies. Both game
+requests send `User-Agent: Mozilla/5.0`: the live upstream closes connections
+for Go's default User-Agent before returning a maintenance response. Both game
+entry points must return HTTP 200 without a final maintenance path or visible
+English/Japanese/Korean maintenance text. No password field, form, SEGA ID text,
+login URL path or return-target query is required. HTTP 200 maintenance pages
+are blocked. Other HTTP responses, transport errors, non-HTML responses,
+oversized bodies and disallowed redirects are unknown. my-aime.net
+is diagnostic only: its geo-blocked 403 cannot prove or disprove game NET recovery.
+Any blocked game result makes the aggregate blocked; otherwise both games must
+be available or the aggregate is unknown. The recorded httpStatus is the actual
+response code from the game source deciding the aggregate; it can be 200 while
+status is blocked or unknown. Full owns the additive migration for the candidate
+timestamp and separate Telegram/Discord delivery receipts on aime_status.
+New classifications use `web_`-prefixed internal status values. Legacy HTTP-only
+history projects as unknown, and the first new observation resets any unfinished
+legacy confirmation run. Existing subscriptions and terminal completion survive.
+
+Known maintenance starts this one-off incident. The first non-maintenance HTTP 200
+candidate starts the 15-minute confirmation window and queues an operational
+notice to both Telegram and Discord. Three further successful observations at
+least five minutes apart complete recovery only after both operational channels
+have successful persisted receipts. Counts and timestamps survive restart;
+rapid probes cannot advance the count. Failed observations reset the run;
+gaps over ten minutes restart it. Operational receipts and the first candidate
+timestamp survive resets, so a successful channel is not sent again. A failed
+channel retries independently. Pending account opt-ins are preserved throughout.
+Completion remains terminal. This checks public game NET web maintenance status,
+not in-game card authentication or score saving. Notifications state that scope.
+Core owns persisted state, atomic opt-in, bounded resumable fan-out and canonical
+inbox/device delivery identities. Full owns the polling schedule and push sender.
+No login credentials are collected. Probe networking runs outside transactions.
+
+Aime status includes at most 288 persisted probe observations from the last 24
+hours in chronological order. Status and probe history are saved atomically.
+Older observations are removed in bounded batches; missing periods remain unknown
+in the UI. History never uses the absence of an error as evidence of uptime.
+
+`GET /aime/status` is a public, read-only projection of the shared probe and
+history. It always returns `subscribed=false`, does not consult the caller's
+account even when authenticated, and ignores user query parameters. Guests can
+read guidance/status/history; opting in or cancelling still requires an active
+account through the existing authenticated `/user/notifications/aime` routes.
+
+
+## Achievement notifications
+
+Community mutations reuse `user_notification` and its device outbox atomically.
+`community_like` events are unique per recipient/post/actor, never enqueue device
+push, and survive unlike/re-like without resetting read state. Only active likes
+appear. Top-level comments notify the achievement author; replies notify the
+specific `reply_to` comment author. Self events and withdrawn recipients are excluded.
+`community_comment` groups by recipient/post; `community_reply` additionally groups
+by the replied-to comment. Latest live event selection happens before pagination
+and unread counting. Read acknowledges only that group's events through the
+selected event, preserving newer arrivals. `groupKey` is stable across new events.
+Retracted posts/comments disappear from inbox and queued delivery eligibility.
+
+Full reuses its existing retry/expiry/device pipeline: the first unseen comment
+push is immediate, then each recipient/post/device has a ten-minute cooldown
+started only by a successful send. Queued bursts retain only the latest live
+unread event. Each device is independent. No push is generated for likes.
+`PUT/DELETE /community/post/view?id=...` accepts a caller-owned random `session`
+(up to 64 alphanumeric/hyphen characters, body at most 1 KiB). Active account
+required. PUT leases a visible detail for 45 seconds; clients renew every 20
+seconds only while visible. DELETE releases just that session. Concurrent tabs
+remain independent; expired leases are cleaned in bounded batches. Reading a
+detail marks that account's post notifications read. Creation and delivery both
+suppress pushes while any lease is live; inbox history remains available.
+
+Notification links use `/community/{post}` or
+`/community/{post}?comment={comment}#comment-{comment}`. Public original comment
+reads allow the Web detail to fetch a linked older comment/thread outside the
+first list page, reject cross-post targets, and focus the exact comment.
+
+### Achievement caption mentions
+
+`community_post.mentions` stores up to ten ordered UTF-16 ranges over the plain-text body, with kind, stable target ID and canonical label. The server verifies @label text, active users and public arcades; no HTML is accepted. User mentions create one durable `community_mention` inbox/outbox event per post and recipient in the post transaction. Self-mentions do not notify; edits and removal/readdition do not duplicate events. Removed mentions and inactive posts invalidate visibility and queued pushes. Arcade mentions create links without notifying owners. The ranges are a server-derived projection of canonical mention nodes for notification visibility checks.
+
+`body_document` is the only stored caption source from launch. Its schema accepts paragraphs, text, hardBreak and stable-ID mention nodes, with limits of 64 KiB, 500 paragraphs, 2,000 inline nodes, 10,000 text characters and ten mentions. Formatting marks, HTML, embeds, links and arbitrary CSS are rejected. The response-only `body` and UTF-16 mention ranges are derived on the server. Legacy body/mention writes remain an input adapter; game/photo-only legacy edits preserve the existing document. The guarded Full forward migration converts and validates every row atomically before requiring the document and removing the legacy body column, preserving text, photos, timestamps, edit deadlines and event identities. Recovery uses the complete database/files snapshot. Author deadlines are unchanged and public translation remains disabled.
+
+Developers may read another account's bot console through `GET /user/bot-keys?user=<id>` and `/user/changelog?user=<id>&bot=all|<key-id>`. Bot names remain owner-only; foreign key metadata omits the name and never includes secrets. Other roles cannot inspect foreign consoles. Issuance and revocation remain scoped to the authenticated owner. Public user-history summaries retain redacted bot attribution for activity badges without exposing edit details.
+
+Community post and comment uploads validate JPEG/PNG/WebP/GIF metadata before saving. Each photo is limited to 10 MiB and 64,000,000 pixels. Header-only dimension validation avoids allocating the decoded image; ordinary 48MP photos remain supported. The pixel bound complements optimized thumbnails and does not re-encode the original.
+
+## Arcade notice presentation policy
+
+`arcade_notice.title` is separate from the existing topic `type`. Creation requires
+an explicit nonempty trimmed title; updates preserve it when omitted and reject an
+explicit empty value. The storage limit is 5000 Unicode characters. Existing topic
+categories, documents, photos, author identities and priorities are preserved.
+
+`display_mode` is `required`, `pinned`, or `normal` (the creation default). Per arcade,
+at most one active required notice and three active pinned notices are allowed.
+Active means not soft-deleted and without an expiry or with a future `until`.
+Creation and update recheck authorization, current arcade visibility and available
+capacity inside the same serialized write transaction as persistence. Updates
+exclude their own record from capacity counts; expiry changes also check capacity.
+Overflow returns 409 with code `notice_display_limit_exceeded`, the mode and its
+limit, without persisting any fields. Normal notices have no additional count cap.
+
+Public reads order required, pinned, then normal. Pinned notices use ascending
+priority; equal pinned priority and normal notices use newest-first ordering with
+id as the deterministic tie breaker. The client always expands the required notice
+and opens other notice bodies on demand.
+
+Developers/moderators retain management access to all notices. An official arcade
+account may additionally update/delete authorless legacy notices in its own `owns`
+arcades, without assigning itself as their author. Other authors' notices retain
+the existing author-only rule. Private arcade write restrictions remain unchanged.
+Full alone backfills existing database titles and presentation modes; Core's schema
+helper and bootstrap migration never migrate a deployed database.
 
 ## External account connections
 
@@ -1147,7 +1657,6 @@ trip must be evidenced by the owner's normal joint connection and both
 live grant generations under the approved configuration. Operator approval remains a separate
 review action; checks do not silently change existing approval policy or active registrations.
 
-
 ## Integration release preparation
 
 Owner withdrawal suspends all owned partner applications, disables the persistent OAuth
@@ -1165,7 +1674,6 @@ credentials and service existence, preventing stale fetches from recreating disc
 The conformance runner and OAuth/record/joint adapters share the same default public-address-pinned,
 proxy-free HTTPS client. Full owns the independent guarded retry-column migration.
 See [release readiness](partner-release-readiness.md) for deployment and partner-dependent evidence.
-
 
 ## Sign in with Musecat
 
@@ -1240,331 +1748,6 @@ The fixed CHUNITHM Info origin, authorize, token and `@me` endpoints select a na
 
 Native CHUNITHM Info OAuth consent publishes the granted `chunithm` service immediately. Other providers retain private-by-default publication. Disconnect removes the profile records; upstream privacy and development audience restrictions remain enforced.
 
-## Custom game prices
-
-`custom_v1` uses the existing named numeric `PriceItem[]` contract, including
-currency, payment methods and representative flags. `custom_v2` uses literal
-`string[]`, one price or condition per line in order; `[]` means no information.
-Strings have no numeric interpretation or exchange-rate conversion. The UI shows
-both as Custom and chooses the input mode inside the price editor.
-Legacy `custom` accepts both shapes for unchanged round trips and historical
-rollback. No migration rewrites stored prices, revisions or changelog rows.
-Untouched revisions and rollback retain their original raw price JSON. New
-edits may have a legacy price in `before` and a versioned price in `after`.
-Guest custom_v2 uses the first-item fallback with `hasHiddenPrices`; custom_v1
-retains the existing representative-item policy.
-
-
-## Photo capture dates
-
-Photo atoms keep `created` as their actual upload timestamp and store optional
-`captured_at` separately. The web client extracts EXIF DateTimeOriginal and
-OffsetTimeOriginal before normalization and sends an index-aligned JSON array to
-the photo upload endpoint. Offsetless camera times use the venue timezone, or UTC
-if absent. Invalid and future capture dates are ignored. No file modification date
-is used as evidence of capture. This metadata is user supplied, not verified proof.
-Photo labels and automatic campaign freshness use captured_at then created;
-updated is never evidence of a new photo. Gallery membership/order, pending-photo
-list order, audit history, and XP event timestamps do not change. Full owns the
-existing-data field migration and explicit offline, fill-only EXIF backfill. It
-must not rewrite immutable changelogs or fabricate dates for stripped images.
-
-## Arcade report destination and device alerts
-
-`GET|PUT /arcade/report-settings` require an active `developer|moderator`, or `arcade_owner` with the target id in `owns`. Staff may manage private/closed arcades. Default mode is `internal`; `external` requires an HTTP(S) contact without URL credentials or a phone number. Settings are stored on the arcade aggregate in a short transaction. This operational configuration awards no XP and does not create a content revision/changelog.
-
-Detail admin metadata exposes `reportSettings` and `canManageReports`. Game expansions suppress all flags/history while external reporting is enabled, including orphan flags. Existing flags, reactions and resolution timers are preserved. POST flag and reaction reject external mode with 409/REPORT_EXTERNAL, rechecked inside the transaction. Returning to internal mode shows only reports eligible under their current resolution state; it never resurrects solved reports. Hidden reports keep normal stale-resolution schedules (currently 120 days to start stale resolution).
-
-`PUT|DELETE /arcade/report-subscription` store/remove a device per arcade and authenticated user. Repeated registration is idempotent; explicit registration transfers the browser endpoint away from other accounts on a shared device. DELETE may remove only the caller's subscription even after loss of ownership. Raw collection APIs remain locked. Browser subscription endpoints are restricted to HTTPS browser push providers, including Google FCM and the exact Chromium staging host `jmt17.google.com`; keys are validated before persistence. Endpoints and secrets are never public data.
-
-`POST /arcade/report-subscription/status` reads only the authenticated manager's subscription for one arcade and device. It returns a private, no-store enabled boolean, never endpoint credentials. Full registers `POST /arcade/report-subscription/test` to send directly to that same registered device using its VAPID sender, with current ownership and internal-mode checks. Provider acceptance is distinct from notification display; expired registrations are removed. Neither operation writes a report, changelog or XP.
-
-Report creation atomically inserts the account inbox event and one durable `user_notification_delivery` per eligible device with the flag and XP. `arcade_report_delivery` is a locked migration archive; no new writes or dispatch target it. External network delivery belongs to Full, outside transactions. Full rechecks current arcade ownership, withdrawn state, report mode and solved state, sends game/severity/message previews, records receipts, retries up to five times with exponential delays, and removes 404/410 endpoints. Delivery is at least once; notification tags collapse duplicate browser notifications. Revoked ownership and external mode cancel pending delivery. Configuration and VAPID keys are selected only by the executable.
-
-## Unified user notifications
-
-`user_notification` is a private, account-scoped inbox. `user_notification_device` stores one authenticated account per browser endpoint; `user_notification_delivery` is its durable per-device outbox. Raw collection access is locked. Core defines fresh-bootstrap schema; Full alone applies the guarded forward migration. Existing arcade report subscriptions are promoted idempotently without requesting browser permission again.
-
-New arcade reports create inbox events for current official owners and explicitly subscribed managers. Reactions create an event for the report author, excluding the reacting author themselves. Event insertion and delivery enqueue happen in the originating content transaction. A unique `(user,event_key)` prevents duplicate event creation. Deleting a source report/reaction cascades to its inbox event and queued deliveries. No extra XP or arcade changelog is awarded.
-
-The custom `/user/notifications` APIs require an active authenticated account. List/read/device operations never accept another user id. Lists are newest-first, use a before-id cursor (20 visible entries per response), expose an unread count, and recheck source visibility and management access. External-reporting arcades are suppressed. Read state is persistent; marking a foreign notification read is a no-op. Device endpoints stay in bounded request bodies, not URL queries or responses. Public VAPID configuration is supplied by the frontend server, never the private key.
-
-Push is an explicit per-device browser opt-in; the in-app inbox is always enabled. Enabling through either the arcade compatibility API or the unified device API stores credentials only in `user_notification_device` and transfers a shared endpoint away from any previous account. `arcade_report_subscription` is a device relation with an enabled flag, not a second credential store. Disabling removes only that account/device, including its legacy arcade subscriptions and queued deliveries. Full validates current account/ownership/source visibility before dispatch, uses the existing VAPID sender outside transactions, retries up to five times (including failed expired-endpoint cleanup), removes expired endpoints, and dispatches only the unified outbox. Full consolidation maps every legacy receipt into that outbox before removing duplicate subscription credentials. Existing retries and completed/read state are preserved; source receipts remain archived. Pending reports from before inbox migration remain deliverable. Full's `/user/notifications/test` sends only to the caller's registered device and confirms provider acceptance, not OS display. The frontend polls unread state and refreshes on opening; it never prompts for browser permissions during a read.
-
-## Private inquiry conversations
-
-`messaging_conversation`, `messaging_party`, `messaging_inquiry`, `messaging_message` and `messaging_read` are the only active inquiry storage. The first submission and every reply are messages in one conversation, including guest inquiries. `/support_feedback`, `/user/feedback/*` and `/guest/feedback/*` are compatibility projections of that service and never read or write a second message store. Core fresh bootstrap removes the empty legacy collections; Full alone migrates populated history and retires them after file/data postflight. Exact current author, staff and arcade-owner access remains server-authorized. Guest credentials authorize only their own inquiries and never DMs.
-
-Reply, inquiry status and `feedback_reply` notification/queue writes share one transaction. Staff replies notify the inquiry author; ordinary MUSECAT inquiry replies notify current strict staff. Arcade inquiry requester messages notify current official responders, with canonical explicit mentions additionally notifying staff; legacy/guest messages have no mention metadata. Senders and restricted accounts do not receive notifications. User follow-up returns status to waiting; staff reply changes it to recognised. Guest submissions with a valid `X-Feedback-Guest-Key` use canonical messaging. Only its SHA-256 digest is stored in the hidden inquiry `guest_key_hash`; `requester_type=guest` and an opaque, domain-separated requester ID identify the browser without a synthetic user account. The stored digest and raw credential never appear in DTOs or audit reports. `sender_user` stays empty for guest messages and `sender_guest` identifies their real guest participant. `/guest/conversations` supports the same inquiry list/create/history/send/read/status/attachment contracts as account conversations, with the same validation, sequencing, retry and notification policy. Guests cannot create DMs or impersonate another acting identity. Existing cookies survive migration; clearing them loses access. Historical unkeyed receipts remain staff-readable but cannot be claimed. Intake settings affect new inquiries, not existing access. The legacy guest endpoints are adapters to that same service. Existing status review remains available. Feedback notifications recheck ownership/strict staff permissions when listed or delivered; revoking staff access hides them. Arcade/flag notification relations are optional so private inquiries do not fabricate arcade references. Push uses generic copy without private inquiry text. Raw reply collection API rules remain locked.
-
-
-### Arcade-scoped inquiries and push locale
-
-`/support_feedback` submissions may set `arcade`; public arcade inquiries accept guests unless the current official account has enabled `loginRequired`. The arcade must be public or accessible to the submitting user. A nullable, non-cascading parent relation preserves inquiry history when the arcade is removed. Current official owners may access only inquiries for arcades they manage; ordinary MUSECAT inquiries remain author/staff only. Exact current `owns` plus official management policy is rechecked for every thread read, append, inbox list and push delivery. Current strict staff retain access. `/user/feedback?arcade=<id>` lists the user's authored and officially assigned inquiries; staff may read the arcade-scoped queue. Other owners see none. Original moderator/edit-report and closure history is retained in its existing queue; new contact submissions use conversations without exposing historical moderator submissions to newly added recipients.
-
-New arcade inquiries create `feedback_created` notifications for current official accounts and strict staff. Replies by the requester notify current responders; official/staff replies notify the requester. The snapshot distinguishes staff and official replies; current authorization governs visibility independently of historical role labels. Each message can generate independent per-device deliveries. Devices sync locale through authenticated PATCH `/user/notifications/device`, which may update only an already registered endpoint for that account. It never opts a user in, transfers ownership or prompts for permission. Real and test pushes use the stored device locale.
-
-- A `fixed` flag reaction from a current developer/moderator or the official owner assigned to that arcade resolves immediately regardless of level. The reaction attribution and notification/XP transaction are preserved; other users retain the existing resolution-voting delay.
-
-Inquiry participants can PATCH `/user/feedback/thread` with `status: solved` to resolve or `waiting` to reopen without posting a reply. Current access is rechecked inside the status transaction; foreign and revoked participants receive 404. This operational status change does not award XP or alter message history. Replies retain the existing waiting/recognised transitions.
-
-### Arcade inquiry destination
-
-`arcade.inquiry_settings` is independent from `report_settings`. `PUT /arcade/inquiry-settings`
-accepts internal, external, or disabled mode and the validated HTTP(S)-URL/phone contact shape (guide up to
-2000 characters). Only current assigned official owners and strict developer/moderator users
-can configure it. Arcade detail returns `admin.inquirySettings` alongside current exact official
-account IDs. Missing, empty, or invalid persisted inquiry mode defaults to disabled with
-`configured: false`; saved internal/external/disabled modes return `configured: true`. This flag is
-derived from persisted mode and is never stored or trusted from clients. Explicit OFF requires no
-external contact. New arcade-scoped support submissions return 409 `INQUIRY_DISABLED` for disabled
-mode or `INQUIRY_EXTERNAL` for external mode while an official account exists, checked in the creation transaction.
-Existing conversations, replies, attachments, notifications and their access policy are retained.
-Without a current official account, new inquiries target MUSECAT moderators and ignore a retained
-external or disabled setting. Explicit moderator contact from the external destination opens a general private
-MUSECAT inquiry, which is not shared with arcade owners. No historical private inquiries migrate.
-Core defines fresh bootstrap only; Full owns the guarded forward schema migration.
-
-Both destination settings accept a guide of up to 2000 Unicode code points and a contact
-value of up to 2048. Their JSON fields allow 32768 bytes, including UTF-8 and JSON
-escaping overhead. Full widens only the known 8192-byte predecessor or accepts the
-already upgraded 32768-byte schema; unexpected field types or capacities fail closed.
-Existing settings values are preserved. Both Core settings endpoints and their web BFF
-routes accept at most 65536 request-body bytes, covering the settings plus JSON envelope.
-
-### Private inquiry reply attachments
-
-Reply POST retains JSON text compatibility and accepts bounded multipart `feedbackId`,
-`message` and repeated `photos` fields. Empty text is allowed only with an image; blank
-replies are rejected. Uploaded files use the existing image validation plus a private,
-protected `support_feedback_message.photos` field. GET/POST reply DTOs include filename
-arrays. `GET /user/feedback/thread/photo?id=<replyId>&file=<filename>` and
-`GET /user/feedback/thread/photo?feedbackId=<inquiryId>&file=<filename>` recheck current
-parent inquiry access and exact file membership before serving private, no-store bytes.
-Exactly one record selector is required; ambiguous selectors return 400.
-Raw PocketBase file delivery is denied; leaked filenames never grant access. Original
-inquiry photos are protected by the same policy; filenames and stored files are unchanged.
-Guest submission receipts grant no attachment read capability. Message persistence, status transitions and inbox/push
-queue insertion remain one transaction, including image-only replies. Core defines fresh
-bootstrap; Full's guarded forward migration preserves existing messages and locked rules.
-
-Arcade inquiry settings include `loginRequired` (boolean, default false) in the existing
-JSON configuration and public detail `admin.inquirySettings` capability. Only current
-assigned official owners and strict staff may save it. New anonymous internal inquiries
-return 401 `LOGIN_REQUIRED` when enabled, rechecked in the creation transaction. External
-mode still returns 409 first; without a current official account, retained owner routing
-and login preferences do not block moderator contact. Guests cannot create inquiries for
-private arcades. Guest inquiries keep an empty `createdBy`, appear in the official/staff
-queues, and notify current responders through the existing atomic inbox/push flow. Guest
-receipt without a browser credential does not grant private reads; keyed guest submissions use the shared inquiry conversation
-or reply delivery. Existing historical access/status behavior is unchanged. No schema or
-production data migration is needed for this optional JSON key.
-
-
-Notification storage consolidation uses a guarded Full-only data migration. Core
-bootstrap defines only the empty canonical schema. Endpoint owner conflicts, orphan
-references, incompatible fields and unaccounted source deliveries abort the entire
-transaction. Existing canonical credentials win over older same-owner key rotations;
-conflicting legacy-only credentials fail closed. Historical events synthesized during
-cutover start read, while existing inbox read state is unchanged. Explicit per-arcade
-opt-outs affect report pushes only, leaving personal notifications and other arcades
-on the same device enabled. Completed transport receipts are retained 90 days;
-cleanup records archive completion proofs before deletion, and inbox event identity
-continues to prevent duplicate enqueue. Unread inbox events and pending/exhausted
-receipts are never retention-deleted. Inbox reads use indexed keyset batches plus
-unread-only visibility scans, not a full read-history load.
-
-
-`GET /user/arcade-inquiry-onboarding` requires an active authenticated user and reloads their current
-role and ownership. Only exact `arcade_owner` accounts receive their currently owned
-arcades, including already configured arcades as `{items: [{arcadeId, arcadeName, settings, reportSettings}]}`. Staff-only accounts receive an empty list.
-Private names are available only within this ownership scope; missing arcades are skipped and missing
-basic relations produce an empty name. The response is private/no-store. Existing explicitly configured internal/external/disabled choices are preserved without data rewrites.
-The independent `reportSettings` is the current report routing settings read from each owned arcade.
-This setup endpoint supports the notification-initiated dashboard funnel; login does not open a dialog.
-
-
-The account-scoped `arcade_setup` notification invites every active exact `arcade_owner` account to
-set up the new admin dashboard, independently of saved reporting/inquiry modes. Its generic message
-is `새 관리자 대시보드를 설정해주세요` and destination is `/account/arcade-dashboard/setup`.
-`usernotification.EnsureArcadeSetupNoticeTx` rechecks the current user, withdrawal, exact role, and
-active bans, then inserts at most one `arcade_dashboard_setup:v1` event per user with no actor or
-arcade relation. Existing notices and their read state are untouched on reruns. Canonical registered
-devices receive deliveries in the same transaction. Notification visibility rechecks the current
-active owner role and is independent of OFF settings. Future official account provisioning inserts
-this notice atomically. Core only defines fresh bootstrap schema; Full owns the existing-account
-backfill migration. No inquiry/report settings are rewritten.
-
-## Optional PASELI numeric prices
-
-`price.accept` accepts `PASELI`. A numeric row (`gamemode`, `credit`, `song`, `time`, `custom_v1`, or legacy object-form `custom`) may include optional
-`paseli_value` (> 0), in JPY and with PASELI acceptance. Omission means unknown,
-not the base price. Base `value` may remain null for a PASELI-only price. Existing
-prices and immutable history are not migrated. Representative guest rows retain
-the PASELI amount alongside the base amount.
-
-## Private messaging and shared inquiries
-
-`service/messaging` owns conversation/party/message/read storage and the authenticated
-`/user/conversations`, `/user/messaging/*`, `/user/messages/*/report`, and `/user/events`
-contracts. These routes are deliberately excluded from delegated account APIs.
-Raw collection rules remain locked. Core creates fresh schema only; Full invokes
-`messaging.EnsureSchema` from its independently guarded migration and imports legacy
-inquiry data there. Schema helpers reject incompatible existing definitions.
-
-DM is one unique unordered user pair. Only those two active users can read its
-messages/files/events; staff has no DM override. Inquiries are separate cases with
-requester plus arcade or `team:musecat` inbox. Strict developer/moderator staff and
-current official owners may access shared inquiries. Historical responders are not
-permanent participants. Unscoped conversation lists retain every inquiry authorized
-by current staff, requester or official-owner access, including unmentioned arcade
-inquiries and earlier replies. The optional inbox scope narrows the list;
-requesterOnly restricts public contact surfaces to the caller's own inquiries.
-Mention metadata affects alerts, not conversation-list membership. Actual sender user and acting party are separately stored;
-when a requester is also a responder they explicitly choose their sending identity.
-Summaries expose `allowedSenderIdentities` and `allowedStatusTransitions` from the
-same inquiry policy used by writes. Ordinary requesters (including guests) receive no status or transitions; current
-responders can choose waiting/recognised/solved. `canManageStatus` remains a
-compatibility field derived from the nonempty transition list. DM sender identities
-are empty when current receive/block/account policy prevents sending.
-
-Missing DM receive preference means everyone. Explicit opt-out remains nobody. Each new DM/send checks receiver preference,
-both directed blocks, active account and current roles/ownership. Block/opt-out do
-not delete old history. Conversation creation is limited to 10/minute for its
-recorded `created_by` initiator; incoming conversations never consume that quota.
-Reports require current message access and preserve a private
-evidence snapshot without granting staff blanket DM access. Strict current staff can
-review a bounded report list and each reported snapshot/its own photos through
-`/moderation/messages/reports`; these routes never expose other thread messages.
-Report submissions are limited to 20/minute; repeated reports return the same record. Receipt of an existing
-idempotent response remains allowed after opt-out; it creates no new message.
-
-Short transactions allocate a per-conversation sequence and persist the message,
-latest pointer, inquiry status and recipient notification outbox together. Read cursors
-are individual, monotonic and bounded by the latest committed sequence. DM summaries additionally expose `counterpartReadSequence` (zero before the peer reads); inquiries return null and never expose another reader's cursor. Advancing a DM cursor sends the peer a `conversation.changed` invalidation with reason `read` after commit; duplicate or older cursors do not notify the peer. The existing `conversation.read` event remains scoped to the reader's own account. Unread counts
-exclude the reader's actual sender user and their party, including other staff acting for the same inbox. Status
-changes do not reorder conversations. Latest summaries batch load parties/profiles,
-messages, preferences, blocks and reads; no conversation-by-conversation HTTP or SQL
-fanout is needed. Message text is stored once, on messaging_message. Inquiry rooms always expose each incoming actual sender in the timeline, even before a second responder speaks. Public message DTOs batch resolve the actual account’s current public nickname/avatar/roles; messages store no copied public profile fields; report evidence remains historical. `actingAs` expresses the represented inbox independently of that public sender. Guest read cursors use the opaque guest identity and never generate account notifications.
-
-Idempotency is unique per conversation/sender/clientMessageId. Payload comparison
-uses normalized text, ordered photo byte digests, canonical mentions and the resolved acting identity;
-a different payload returns 409. Messages without mentions retain the original payload
-hash encoding, including imported/replayed messages. `mentions` is a bounded JSON
-field (128 bytes); API inputs accept at most 16 entries, only `musecat`, canonicalized
-to `[]` or `["musecat"]`. Nonempty mentions are rejected for DMs and team inquiries.
-JSON and multipart initial/reply messages share validation; multipart `mentions` is a
-JSON array string. Plain text never creates mention metadata. Accepted photo formats are JPEG/PNG/WebP/GIF with
-three files of at most 15,000,000 bytes each. Photos are protected, and custom reads
-revalidate conversation ownership and exact message/file membership. Existing legacy
-storage remains in place and is read only through the authorized mapping adapter.
-
-Existing authenticated support create/reply/status routes delegate to canonical
-messaging and project their previous response shape. New authenticated inquiries do
-not create another independent support_feedback message store. Guest intake and staff review use that same canonical store. Full maps each historical authenticated
-feedback independently, preserves the first message and replies in created/id order,
-and records source collection/record/file references. It never converts guests into
-synthetic users, never manufactures notifications, and initializes requester read to
-the imported last sequence while preserving existing notification unread flags.
-Message authors reference the current user through an optional, non-cascading
-`sender_user` relation. Messages store no copied name, avatar, or role attributes.
-Retry uniqueness applies only while a user or guest author reference exists, so
-clearing multiple deleted authors cannot collide. Deleting an account preserves message content; a missing author displays as a
-deleted user. Acting user, arcade, team, and guest identities remain separate.
-
-Arcade requester messages notify current official responders by default. Platform
-staff receive arcade notifications only with an explicit `musecat` mention; a staff
-account that also qualifies as the current official owner retains ordinary owner
-notifications. Inbox replies still notify the requester; an explicit mention also
-adds active staff, excluding the sender. Team inquiries retain their existing staff
-notification policy. Recipient accounts and bans are batch loaded, and at most 20
-devices per recipient are selected in one bounded query. Notification/delivery rows
-remain atomic with the message and use the existing durable delivery worker.
-Queued messages recheck the same policy through `NotificationDeliverable`; existing
-inbox rows retain access-only visibility. Legacy arcade/guest feedback has no mention
-metadata and likewise notifies official responders, with
-`FeedbackNotificationDeliverable` suppressing old queued staff-only pushes.
-Notification policy does not narrow conversation access or SSE audiences.
-
-The single-process SSE hub publishes invalidations after commit only. Conversation
-audiences are resolved once per change and only their connected users are enqueued;
-each recipient still receives a final current-ACL check before delivery. Each stream
-has a 32-event queue; enqueue never waits on socket I/O. Overflow requests resync and
-closes. At most four streams/user and 1024/process are accepted. Authorization and
-current account state are rechecked before event delivery and every 15-second
-heartbeat; streams expire after 25 minutes. No transaction/SQL rows are retained by
-a stream. Reconnection catches up from persisted sequences, not Last-Event-ID. All
-user_notification changes also invalidate the shared notification inbox. An external
-multi-replica broker is deliberately outside the current single-container deployment.
-
-## Announcement stories
-
-`announcement` stores one locale-independent publication with separately authored
-Korean, English and Japanese image stories. Staff (`developer|moderator`) use only
-custom `/moderation/announcements` APIs. Drafts may be incomplete; publication
-accepts an explicit nonempty subset of `ko|en|ja` and requires a title, 1–12 valid
-PNG/JPEG/WebP images only in those selected locales. Image alt text is optional. Each slide may include a localized `link` with a 1–80-character label and an internal path or credential-free HTTPS URL (up to 2048 bytes). Links reject protocol-relative URLs, whitespace, controls and backslashes; omitted links preserve image-only behavior. Links are stored in the existing localization JSON and survive reorder and published edits. The selected
-locale set becomes immutable after publication. Unselected variants
-remain private to staff and never appear in public metadata or image reads.
-Image text is never assumed to translate automatically. JSON metadata preserves
-ordered image references; multipart replacements can combine retained file names
-and per-locale `upload:N` indices. Omitted references remove old files. Files are
-protected at the raw PocketBase boundary; custom image reads recheck publication
-visibility. Staff may edit published content while preserving the selected locales,
-publication timestamp, fan-out cursor, inbox snapshots and read/view identities.
-Edits must retain complete content for every published locale and do not resend
-notifications. Archived content cannot be edited. Archive is terminal and hides public
-content and its inbox entries, without erasing deduplication or view identities.
-
-Publication accepts optional `sendPush` (boolean, default true), persisted as
-`suppress_device_push` for the fan-out worker. With `sendPush=false`, inbox
-events are still created but no device deliveries are enqueued. Retrying publication
-does not change its original push policy.
-Publication captures a timestamp. Full registers the bounded fan-out worker even
-when VAPID is disabled. Each transaction processes at most 100 non-withdrawn users
-created no later than publication; the durable user-id cursor, one inbox identity
-`announcement:<id>` per user, and matching-device outbox receipts commit together.
-Restart, repeated publish or replayed batches cannot reset read/view state or
-requeue existing events. Accounts created later see the public story but do not
-receive historical broadcasts. Device delivery uses the existing bounded retry
-worker and stable tag; OS delivery is at-least-once, not exactly-once. Each inbox
-event snapshots only selected title/summary pairs. Inbox `locale=ko|en|ja` filters
-announcement entries and unread counts without affecting other notification kinds.
-Push queues only devices whose saved locale is selected, and rechecks that locale
-before delivery; no foreign-language fallback is used. Deep links use the matching
-route prefix.
-No permission prompt or new device registration is triggered by publication.
-
-`announcement_view` has a unique account/publication key, independent of locale,
-device and inbox read status. `/announcements/unseen` considers only the latest
-published story targeting the requested locale, rather than opening a backlog.
-`/view` is idempotent. Public list/detail accept `locale=ko|en|ja` (default `ko`) and allow replay only of matching
-publications; a mismatched detail request returns 404. The canonical deep link is
-`/community/updates?announcement=<id>` and opens the same story dialog.
-
-Retained legacy feedback notification links now directly target `/updates/feedback?thread=<id>`.
-Setup links resolve the recipient's current owned arcade using the onboarding
-endpoint's ownership rules and target `/arcade/<id>?setup=dashboard`; the legacy
-redirect remains a fallback when no current owned arcade exists. Retained legacy
-links remain valid frontend inputs. Neither kind needs an intermediate launcher.
-
-Message notification inboxes project the latest received event per user/conversation,
-including existing history, before keyset pagination and unread counting. Source
-message/event/delivery identities remain immutable. The title is the sending user
-current profile or acting arcade/team; previews normalize whitespace and truncate at 160
-Unicode characters, with localized photo-only fallback. Access checks still precede
-projection. Acknowledging one message notification clears events only through that
-message sequence. Conversation read cursors also acknowledge corresponding inbox
-events, without advancing beyond the displayed sequence.
-
-Full message pushes wait at least five seconds from event creation, collapse older
-queued events, and use a user/conversation tag. A successful delivery persists
-`sent_at`; subsequent pushes to the same conversation/device wait at least two
-minutes, retaining the newest pending message. Deferral does not consume retries.
-Skipped receipts never start the cooldown. Delivery rechecks read cursors and
-notification acknowledgement in addition to the existing recipient/access policy.
-Push title/body use the same sender and preview as the authenticated inbox.
-
 ## Arcade check request notes
 
 `/arcade/check-notes` is the only read/write contract for the locked
@@ -1615,27 +1798,6 @@ JSON fields and automated flag; Full adds them in its independent guarded migrat
 Neither migration rewrites conversation history or broadens raw collection rules.
 
 A current automated follow-up exposes `botCanRestart` while no later human message has been sent. The reserved `__restart` selection appends the requester action and the original starting node in the same transaction. It preserves every previous message, rejects stale/foreign actions, shares normal idempotency and rate limits, and cannot be used as an owner-defined choice ID.
-
-
-### Inquiry status history
-
-Only current strict staff or the current official arcade responder may mark an
-inquiry status. Status values and history are internal to these responders. This is enforced by the shared summary/mutation policy, including
-legacy and guest adapters. Requesters cannot read or change the internal state. Solved is not a
-sending restriction: a requester follow-up reopens to waiting and a responder
-follow-up changes to recognised.
-
-Every new status transition persists server-authored `statusChange: {from, to}`
-in the same transaction as the inquiry state. An explicit status action appends a
-textless message with the actual sender, acting identity, timestamp and next
-sequence. An automatic transition attaches the same metadata to its triggering
-message. A same-status action is a no-op; message retries retain the original
-transition without duplication. History, delta and realtime invalidation use the
-existing conversation permissions and sequence. Status-only entries do not
-create push notifications or requester SSE events, unread increments, sidebar preview changes or sorting changes. Requester history filters textless status entries before pagination, strips transition metadata from ordinary messages and send/retry responses, and returns null status and empty transitions. Legacy adapters follow the same projection. Prior history is preserved without inventing past
-transitions. Full owns the guarded additive `status_change` JSON-field migration;
-Core only bootstraps it for fresh databases.
-
 
 ## First-party native login sessions
 
@@ -1697,34 +1859,6 @@ preserves the saved value. Profile responses return the saved flag. When true,
 `GET /arcades/updates` excludes that account's existing and future visit entries;
 profile Passport statistics, maps and stamps retain their existing visibility rules.
 Private visits remain excluded regardless of this flag.
-
-## Account-owned bot credentials
-
-Personal bot keys are a distinct non-session credential for `/bot/v1` arcade
-creation and information editing. Issuance and use require founding supporter,
-supporter, designer, moderator or developer; official arcade ownership alone is
-insufficient. The live role is checked on each call. Owners retain list/revoke
-access after losing eligibility. See [`bot-api.md`](bot-api.md) and the bot
-operations in OpenAPI. A live key resolves the issuing account, rechecks expiry,
-revocation, account token-key fingerprint and active-account policy, and uses the
-existing handlers. Keys never authenticate web/session/raw collection APIs and
-cannot issue credentials or reach management routes. Each key permits 60 calls
-per minute; its quota and last use are stored atomically. Secrets are returned
-once, hashed at rest, and excluded from history and list responses.
-
-`service/contribution` wraps the request app and its nested transaction apps with
-a verified source. Saves of new arcade, changelog and photo-atom records retain
-an immutable `contribution_source` snapshot. `by`/`createdBy` remain the owner's
-user ID. Normal records have a null source. Bot edits earn no XP; creation origins,
-per-change backfill and photo eligibility preserve that policy across web/API
-handoffs. Deferred rewards for actual web changes use their persisted origin,
-including when a bot later publishes them. Legacy rewards are not reclassified.
-
-Bot API rollout is independent of the excluded external integration release.
-Future OAuth adapters may share attribution and domain policy; this release does
-not register Developer Center or broaden existing OAuth scopes.
-
-
 
 ### Explicit native-to-web owner session handoff
 

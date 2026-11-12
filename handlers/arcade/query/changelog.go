@@ -3,6 +3,7 @@ package query
 import (
 	"fmt"
 	"github.com/ericbaek/musecat-backend-core/service/contribution"
+	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"net/http"
 	"strconv"
 	"strings"
@@ -33,6 +34,7 @@ var changelogCategorySet = map[string]struct{}{
 // ListArcadeChangelog is the only supported wire API for arcade history.
 // Changelog rows are immutable and are never edited or deleted by clients.
 func ListArcadeChangelog(re *core.RequestEvent) error {
+	re.Response.Header().Set("Cache-Control", "private, no-store")
 	if re.Auth == nil || re.Auth.Collection().Name != "user" {
 		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
 	}
@@ -78,7 +80,7 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 	for _, record := range records {
 		item := map[string]any{
 			"id":                  record.Id,
-			"contribution_source": contribution.FromRecord(record),
+			"contribution_source": contribution.ForViewer(contribution.FromRecord(record), record.GetString("by"), re.Auth.Id),
 			"arcade":              record.GetString("arcade"),
 			"changed":             record.GetString("changed"),
 			"from":                record.Get("from"),
@@ -95,6 +97,11 @@ func ListArcadeChangelog(re *core.RequestEvent) error {
 	}
 	if err := photo.ExpandChangelogAssets(re, items); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to load changelog photos"})
+	}
+	if arcade.GetBool("public") {
+		if err := readpolicy.Check(re, arcadeID); err != nil {
+			return err
+		}
 	}
 	lastPage := 0
 	if total > 0 {

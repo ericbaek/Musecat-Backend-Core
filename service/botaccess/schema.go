@@ -33,7 +33,7 @@ func EnsureSchema(app core.App) error {
 			&core.TextField{Name: "key_hash", Required: true, Hidden: true, Min: 64, Max: 64},
 			&core.TextField{Name: "owner_key_hash", Required: true, Hidden: true, Min: 64, Max: 64},
 			&core.TextField{Name: "prefix", Required: true, Max: 24},
-			&core.DateField{Name: "expires", Required: true},
+			&core.DateField{Name: "expires"},
 			&core.DateField{Name: "revoked"},
 			&core.DateField{Name: "last_used"},
 			&core.DateField{Name: "window_start"},

@@ -37,18 +37,29 @@ func noStore(re *core.RequestEvent) {
 }
 
 func projection(record *core.Record) map[string]any {
-	return map[string]any{"id": record.Id, "name": record.GetString("name"), "prefix": record.GetString("prefix"), "created": record.GetString("created"), "expires": record.GetString("expires"), "revoked": record.GetString("revoked"), "last_used": record.GetString("last_used")}
+	return map[string]any{"id": record.Id, "name": record.GetString("name"), "prefix": record.GetString("prefix"), "created": record.GetString("created"), "revoked": record.GetString("revoked"), "last_used": record.GetString("last_used")}
 }
 
 func List(re *core.RequestEvent) error {
 	noStore(re)
-	items, err := re.App.FindRecordsByFilter(Keys, "owner={:owner}", "revoked,-created", 0, 0, dbx.Params{"owner": re.Auth.Id})
+	ownerID := strings.TrimSpace(re.Request.URL.Query().Get("user"))
+	if ownerID == "" {
+		ownerID = re.Auth.Id
+	}
+	if !CanInspectOwner(re.Auth, ownerID) {
+		return re.ForbiddenError("Only the owner or a developer may inspect bot keys.", nil)
+	}
+	items, err := re.App.FindRecordsByFilter(Keys, "owner={:owner}", "revoked,-created", 0, 0, dbx.Params{"owner": ownerID})
 	if err != nil {
 		return re.InternalServerError("Failed to list bot keys.", err)
 	}
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		result = append(result, projection(item))
+		metadata := projection(item)
+		if ownerID != re.Auth.Id {
+			delete(metadata, "name")
+		}
+		result = append(result, metadata)
 	}
 	return re.JSON(http.StatusOK, map[string]any{"items": result})
 }
@@ -56,7 +67,7 @@ func List(re *core.RequestEvent) error {
 func Create(re *core.RequestEvent) error {
 	noStore(re)
 	if !CanIssueKey(re.Auth) {
-		return re.ForbiddenError("Founding supporter or higher access is required.", nil)
+		return re.ForbiddenError("An eligible API account role is required.", nil)
 	}
 	if re.Auth.GetString("username") == "" {
 		return re.BadRequestError("Complete your profile before issuing a bot key.", nil)
@@ -84,7 +95,7 @@ func Create(re *core.RequestEvent) error {
 	token := tokenPrefix + base64.RawURLEncoding.EncodeToString(secret)
 	var record *core.Record
 	err = re.App.RunInTransaction(func(tx core.App) error {
-		active, err := tx.CountRecords(Keys, dbx.NewExp("owner={:owner} AND revoked='' AND expires>{:now}", dbx.Params{"owner": re.Auth.Id, "now": time.Now().UTC().Format("2006-01-02 15:04:05.000Z")}))
+		active, err := tx.CountRecords(Keys, dbx.NewExp("owner={:owner} AND revoked=''", dbx.Params{"owner": re.Auth.Id}))
 		if err != nil {
 			return err
 		}
@@ -101,7 +112,6 @@ func Create(re *core.RequestEvent) error {
 		record.Set("key_hash", digest(token))
 		record.Set("owner_key_hash", digest(re.Auth.TokenKey()))
 		record.Set("prefix", token[:len(tokenPrefix)+8])
-		record.Set("expires", time.Now().UTC().AddDate(0, 0, 90))
 		return tx.Save(record)
 	})
 	if err != nil {
@@ -148,7 +158,7 @@ func RequireKey() *hook.Handler[*core.RequestEvent] {
 		var source contribution.Source
 		err := re.App.RunInTransaction(func(tx core.App) error {
 			record, err := tx.FindFirstRecordByData(Keys, "key_hash", digest(parts[1]))
-			if err != nil || record.GetString("revoked") != "" || !record.GetDateTime("expires").Time().After(time.Now().UTC()) {
+			if err != nil || record.GetString("revoked") != "" {
 				return errInvalidKey
 			}
 			owner, err = tx.FindRecordById("user", record.GetString("owner"))
@@ -191,8 +201,7 @@ func RequireKey() *hook.Handler[*core.RequestEvent] {
 	}}
 }
 
-// CanIssueKey is a role entitlement, independent of XP level. Official arcade
-// ownership alone does not grant automation credentials.
+// CanIssueKey is a role entitlement, independent of XP level.
 func CanIssueKey(owner *core.Record) bool {
 	if owner == nil {
 		return false
@@ -200,7 +209,25 @@ func CanIssueKey(owner *core.Record) bool {
 	for _, tags := range [][]string{owner.GetStringSlice("tag"), owner.GetStringSlice("tags")} {
 		for _, tag := range tags {
 			switch strings.ToLower(strings.TrimSpace(tag)) {
-			case "founding_supporter", "supporter", "designer", "moderator", "developer":
+			case "arcade_owner", "founding_supporter", "supporter", "designer", "moderator", "developer":
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// CanInspectOwner permits read-only developer inspection without revealing names.
+func CanInspectOwner(viewer *core.Record, ownerID string) bool {
+	if viewer == nil {
+		return false
+	}
+	if viewer.Id == ownerID {
+		return true
+	}
+	for _, tags := range [][]string{viewer.GetStringSlice("tag"), viewer.GetStringSlice("tags")} {
+		for _, tag := range tags {
+			if strings.ToLower(strings.TrimSpace(tag)) == "developer" {
 				return true
 			}
 		}

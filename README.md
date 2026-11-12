@@ -55,11 +55,15 @@ PocketBase data is stored in `./pb_data` by default and is ignored by Git. A fre
 Deployment-injected environment variables take precedence over `.env`, including intentionally empty values. Docker build context excludes `.env`, `pb_data`, caches, and `.git` via `.dockerignore`.
 
 The community translation prototype publishes Korean originals immediately and
-queues English/Japanese translations five minutes later. Set
-`OPENAI_API_KEY` to enable the development worker. Translation uses OpenAI
+can queue English/Japanese translations five minutes later when explicitly
+enabled. Launch leaves translation disabled even if a shared `OPENAI_API_KEY`
+is configured. Prototype testing requires both the key and
+`MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED=true`. Translation uses OpenAI
 `gpt-6-luna` with `MUSECAT_TRANSLATION_REASONING_EFFORT=none` by default. Leave
-`MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC=false` while reviewing stored results;
-switch it to `true` when `locale=en-US|ja-JP` should serve them. The optional
+`MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED=false` and
+`MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC=false` for launch. Explicitly enable the
+runtime to review stored prototype results, then separately set publication
+to `true` when `locale=en-US|ja-JP` should serve them. The optional
 `MUSECAT_TRANSLATION_GLOSSARY` adds deployment-specific arcade terminology to
 the built-in preservation rules.
 

@@ -78,15 +78,25 @@ func TestBotKeysAreAccountBoundAndNotSessions(t *testing.T) {
 	botRequest(t, app, key, "GET", "/bot/v1/arcade/drafts", "", 401)
 }
 
-func TestBotKeyExpiryLimitAndAccountRestriction(t *testing.T) {
+func TestBotKeysDoNotExpireAndRetainRateAndAccountRestrictions(t *testing.T) {
 	app := newArcadeTestApp(t)
 	session, owner := createAuthUserWithTags(t, app, []string{"founding_supporter"})
 	key, id := issueBotKey(t, app, session, "Importer")
 	stored, _ := app.FindRecordById(botaccess.Keys, id)
+	if stored.GetString("expires") != "" {
+		t.Fatal("new bot keys must not have an expiry date")
+	}
+	listed := botRequest(t, app, session, "GET", "/user/bot-keys", "", 200)
+	if _, present := listed["items"].([]any)[0].(map[string]any)["expires"]; present {
+		t.Fatal("metadata must not expose a removed expiry policy")
+	}
+	botRequest(t, app, key, "GET", "/bot/v1/arcade/drafts", "", 200)
 	stored.Set("expires", time.Now().Add(-time.Hour))
 	if err := app.Save(stored); err != nil {
 		t.Fatal(err)
 	}
+	botRequest(t, app, key, "GET", "/bot/v1/arcade/drafts", "", 200)
+	botRequest(t, app, session, "DELETE", "/user/bot-keys/"+id, "", 204)
 	botRequest(t, app, key, "GET", "/bot/v1/arcade/drafts", "", 401)
 	key, id = issueBotKey(t, app, session, "Limited")
 	stored, _ = app.FindRecordById(botaccess.Keys, id)
@@ -167,6 +177,54 @@ func TestBotCreationAndEditsRetainAccountAndBotIdentity(t *testing.T) {
 	}
 }
 
+func TestBotNamesArePrivateToTheirIssuingAccount(t *testing.T) {
+	app := newArcadeTestApp(t)
+	stubGeoLookup(t)
+	ownerSession, owner := createAuthUserWithTags(t, app, []string{"founding_supporter"})
+	visitorSession, _ := createAuthUserWithTags(t, app, nil)
+	reviewerSession, _ := createAuthUserWithTags(t, app, []string{"developer"})
+	const privateName = "PRIVATE_BOT_NAME_SENTINEL"
+	key, keyID := issueBotKey(t, app, ownerSession, privateName)
+	created := botRequest(t, app, key, "POST", "/bot/v1/arcade/new", `{"name":"Privacy fixture","address":"Seoul","location":{"lat":37.5665,"lon":126.978}}`, 200)
+	arcadeID := created["id"].(string)
+	arcade, err := app.FindRecordById("arcade", arcadeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arcade.Set("public", true)
+	if err := app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range []string{visitorSession, reviewerSession} {
+		for _, path := range []string{"/arcade/changelog?arcade=" + arcadeID, "/user/changelog?user=" + owner.Id} {
+			response := botRequest(t, app, session, "GET", path, "", 200)
+			items := response["items"].([]any)
+			if len(items) != 1 {
+				t.Fatalf("expected one visible bot edit: %v", response)
+			}
+			source := items[0].(map[string]any)["contribution_source"].(map[string]any)
+			if source["kind"] != "bot" || source["id"] != keyID {
+				t.Fatal("public BOT marker must retain verified attribution")
+			}
+			if _, present := source["name"]; present {
+				t.Fatal("bot name must be omitted for visitors and reviewers")
+			}
+			raw, _ := json.Marshal(response)
+			if strings.Contains(string(raw), privateName) {
+				t.Fatal("private bot name leaked elsewhere in the response")
+			}
+		}
+	}
+	botRequest(t, app, ownerSession, "DELETE", "/user/bot-keys/"+keyID, "", 204)
+	for _, path := range []string{"/arcade/changelog?arcade=" + arcadeID, "/user/changelog?user=" + owner.Id + "&bot=" + keyID} {
+		response := botRequest(t, app, ownerSession, "GET", path, "", 200)
+		source := response["items"].([]any)[0].(map[string]any)["contribution_source"].(map[string]any)
+		if source["name"] != privateName {
+			t.Fatal("owner must retain immutable bot names after redaction and revocation")
+		}
+	}
+}
+
 func TestBotPublicEditsEarnNoXPButWebEditsStillDo(t *testing.T) {
 	app := newArcadeTestApp(t)
 	stubGeoLookup(t)
@@ -221,6 +279,10 @@ func TestBotGamePhotoAndPublicationFlow(t *testing.T) {
 		t.Fatalf("bot public preview awards XP: %v", xpPreview)
 	}
 	botRequest(t, app, key, "PUT", "/bot/v1/arcade/public", fmt.Sprintf(`{"arcade":%q}`, id), 200)
+	metadata := botRequest(t, app, "", "GET", "/api/collections/arcade_photo_atoms/records/"+atomID, "", 200)
+	if _, present := metadata["contribution_source"]; present {
+		t.Fatal("raw public photo metadata must not expose stored bot attribution")
+	}
 	after, _ := xp.LoadCurrentExp(app, owner.Id)
 	if after != before {
 		t.Fatalf("bot publication awarded XP: %d -> %d", before, after)
@@ -242,7 +304,7 @@ func TestBotKeyRoleEligibility(t *testing.T) {
 				tags = append(tags, role)
 			}
 			session, owner := createAuthUserWithTags(t, app, tags)
-			if role == "" || role == "arcade_owner" {
+			if role == "" {
 				botRequest(t, app, session, "POST", "/user/bot-keys", `{"name":"Denied"}`, 403)
 				count, err := app.CountRecords(botaccess.Keys)
 				if err != nil || count != 0 {
@@ -291,8 +353,81 @@ func TestBotKeyListRetainsOldBotsAndEnforcesActiveLimit(t *testing.T) {
 	var activeID string
 	for index := 0; index < 5; index++ {
 		_, activeID = issueBotKey(t, app, session, fmt.Sprintf("Active %d", index))
+		record, err := app.FindRecordById(botaccess.Keys, activeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.Set("expires", time.Now().Add(-time.Hour))
+		if err := app.Save(record); err != nil {
+			t.Fatal(err)
+		}
 	}
 	botRequest(t, app, session, "POST", "/user/bot-keys", `{"name":"Over limit"}`, 400)
 	botRequest(t, app, session, "DELETE", "/user/bot-keys/"+activeID, "", 204)
 	issueBotKey(t, app, session, "Replacement")
+}
+
+func TestDeveloperCanInspectForeignBotConsoleWithoutNamesOrManagement(t *testing.T) {
+	app := newArcadeTestApp(t)
+	stubGeoLookup(t)
+	session, owner := createAuthUserWithTags(t, app, []string{"founding_supporter"})
+	developer, _ := createAuthUserWithTags(t, app, []string{"developer"})
+	moderator, _ := createAuthUserWithTags(t, app, []string{"moderator"})
+	visitor, _ := createAuthUserWithTags(t, app, nil)
+	key, keyID := issueBotKey(t, app, session, "Private importer")
+	created := botRequest(t, app, key, "POST", "/bot/v1/arcade/new", `{"name":"Bot inspection","address":"Seoul","location":{"lat":37.5665,"lon":126.978}}`, 200)
+	arcade, err := app.FindRecordById("arcade", created["id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	arcade.Set("public", true)
+	if err := app.Save(arcade); err != nil {
+		t.Fatal(err)
+	}
+	listed := botRequest(t, app, developer, "GET", "/user/bot-keys?user="+owner.Id, "", 200)
+	items := listed["items"].([]any)
+	if len(items) != 1 {
+		t.Fatal(listed)
+	}
+	metadata := items[0].(map[string]any)
+	if metadata["id"] != keyID || metadata["prefix"] == nil {
+		t.Fatal(metadata)
+	}
+	raw, _ := json.Marshal(listed)
+	for _, forbidden := range []string{"Private importer", key, "key_hash", "owner_key_hash", `"name"`} {
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("foreign metadata leaked %s", forbidden)
+		}
+	}
+	for _, filter := range []string{"all", keyID} {
+		history := botRequest(t, app, developer, "GET", "/user/changelog?user="+owner.Id+"&bot="+filter, "", 200)
+		if history["total"] != float64(1) {
+			t.Fatal(history)
+		}
+		source := history["items"].([]any)[0].(map[string]any)["contribution_source"].(map[string]any)
+		if source["kind"] != "bot" || source["name"] != nil {
+			t.Fatal(source)
+		}
+	}
+	for _, denied := range []string{moderator, visitor} {
+		botRequest(t, app, denied, "GET", "/user/bot-keys?user="+owner.Id, "", 403)
+		botRequest(t, app, denied, "GET", "/user/changelog?user="+owner.Id+"&bot=all", "", 403)
+	}
+	botRequest(t, app, developer, "DELETE", "/user/bot-keys/"+keyID, "", 404)
+	_, other := createAuthUserWithTags(t, app, nil)
+	botRequest(t, app, developer, "GET", "/user/changelog?user="+other.Id+"&bot="+keyID, "", 404)
+	response := executeJSONRequest(t, app, "GET", "/user/changelog?user="+owner.Id, "", nil)
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		t.Fatal(response.StatusCode)
+	}
+	var guest map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&guest); err != nil {
+		t.Fatal(err)
+	}
+	item := guest["items"].([]any)[0].(map[string]any)
+	source := item["contribution_source"].(map[string]any)
+	if source["kind"] != "bot" || source["name"] != nil || item["log"] != nil || item["by"] != nil {
+		t.Fatal(item)
+	}
 }

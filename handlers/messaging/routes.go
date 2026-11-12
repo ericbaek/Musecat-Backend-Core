@@ -53,18 +53,8 @@ func RegisterRoutes(se *core.ServeEvent) {
 	api.PUT("/conversations/{id}/read", Read).Bind(apis.BodyLimit(4096))
 	api.PATCH("/conversations/{id}/inquiry", Status).Bind(apis.BodyLimit(4096))
 	api.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo)
-	api.GET("/inquiry-bots/arcade/{id}", func(re *core.RequestEvent) error {
-		out, err := messaging.GetArcadeBot(re.App, re.Auth.Id, re.Request.PathValue("id"))
-		return reply(re, 200, out, err)
-	})
-	api.PUT("/inquiry-bots/arcade/{id}", func(re *core.RequestEvent) error {
-		var in messaging.BotConfig
-		if err := re.BindBody(&in); err != nil {
-			return re.BadRequestError("Invalid automatic replies.", err)
-		}
-		out, err := messaging.SetArcadeBot(re.App, re.Auth.Id, re.Request.PathValue("id"), in)
-		return reply(re, 200, out, err)
-	}).Bind(apis.BodyLimit(65536))
+	api.GET("/inquiry-bots/arcade/{id}", GetArcadeBot)
+	api.PUT("/inquiry-bots/arcade/{id}", SetArcadeBot).Bind(apis.BodyLimit(65536))
 	api.GET("/messaging/preferences", Preferences)
 	api.PUT("/messaging/preferences", SetPreferences).Bind(apis.BodyLimit(4096))
 	api.GET("/messaging/blocks", Blocks)
@@ -364,5 +354,20 @@ func InquiryPreview(re *core.RequestEvent) error {
 	query := re.Request.URL.Query()
 	in := messaging.CreateInput{Kind: "inquiry", InquiryContext: query.Get("context"), Inbox: messaging.Identity{Type: query.Get("inboxType"), ID: query.Get("inboxId")}}
 	out, err := messaging.PreviewInquiry(re.App, requestPrincipal(re), in)
+	return reply(re, 200, out, err)
+}
+
+// GetArcadeBot and SetArcadeBot share the current ownership policy across transports.
+func GetArcadeBot(re *core.RequestEvent) error {
+	out, err := messaging.GetArcadeBot(re.App, re.Auth.Id, re.Request.PathValue("id"))
+	return reply(re, 200, out, err)
+}
+
+func SetArcadeBot(re *core.RequestEvent) error {
+	var in messaging.BotConfig
+	if err := re.BindBody(&in); err != nil {
+		return re.BadRequestError("Invalid automatic replies.", err)
+	}
+	out, err := messaging.SetArcadeBot(re.App, re.Auth.Id, re.Request.PathValue("id"), in)
 	return reply(re, 200, out, err)
 }

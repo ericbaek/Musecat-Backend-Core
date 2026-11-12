@@ -13,8 +13,10 @@ import (
 	"github.com/ericbaek/musecat-backend-core/coreapp"
 	"github.com/ericbaek/musecat-backend-core/delegation"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"github.com/ericbaek/musecat-backend-core/testutil"
 	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 )
@@ -234,5 +236,28 @@ func TestCanonicalOrdinaryNativeReadsKeepCredentialScope(t *testing.T) {
 		if response.StatusCode != 401 {
 			t.Fatalf("disabled native auth on %s", path)
 		}
+	}
+}
+
+func TestCanonicalNativeReadsKeepDeploymentPublicReadPolicy(t *testing.T) {
+	app := nativeReadApp(t, true)
+	web, owner := createAuthUser(t, app, true)
+	native := nativeLoginIssue(t, app, web).AccessToken
+	arcade := nativeEditorArcade(t, app, owner.Id)
+	calls := 0
+	readpolicy.Register(app, func(re *core.RequestEvent, ids []string) error {
+		calls++
+		if re.Auth == nil || re.Auth.Id != owner.Id || len(ids) != 1 || ids[0] != arcade.Id {
+			t.Fatal("read policy lost canonical account or arcade scope")
+		}
+		return apis.NewTooManyRequestsError("test restriction", nil)
+	})
+	for _, token := range []string{web, native} {
+		nativeReadRequest(t, app, "GET", "/arcade?id="+arcade.Id+"&expand=all", token, nil, 429)
+		nativeReadRequest(t, app, "GET", "/arcade/changelog?arcade="+arcade.Id, token, nil, 429)
+		nativeReadRequest(t, app, "GET", "/arcade?id="+arcade.Id+"&expand=basic", token, nil, 200)
+	}
+	if calls != 4 {
+		t.Fatal("public detail policy was bypassed or charged basic-only reads")
 	}
 }

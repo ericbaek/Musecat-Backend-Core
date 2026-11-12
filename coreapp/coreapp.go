@@ -190,6 +190,7 @@ func registerAPIRoutes(se *core.ServeEvent, nativeClients []nativeauth.Client, m
 	se.Router.GET("/guest/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(arcadeadmin.RequireGuestFeedback())
 	se.Router.POST("/guest/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
 	se.Router.PATCH("/guest/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(4096))
+	se.Router.GET("/aime/status", usernotifications.AimePublicStatus)
 	registerSessionRoutes(se.Router.RouterGroup)
 	registerAccountRoutes(se.Router.RouterGroup, nativeClients...)
 }
@@ -395,6 +396,8 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authUser := api.Group("/user").Bind(apis.RequireAuth("user"))
 
 	authNotifications := api.Group("/user/notifications").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	authNotifications.GET("/aime", usernotifications.AimeStatus)
+	authNotifications.PUT("/aime", usernotifications.AimeSubscribe).Bind(apis.BodyLimit(4096))
 	authNotifications.GET("", usernotifications.List).Bind(firstPartyAuth...)
 	authNotifications.POST("/read", usernotifications.Read).Bind(firstPartyAuth...).Bind(apis.BodyLimit(4096))
 	authNotifications.POST("/device", usernotifications.DeviceStatus).Bind(apis.BodyLimit(4096))

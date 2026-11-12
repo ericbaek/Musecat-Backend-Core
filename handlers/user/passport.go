@@ -49,6 +49,7 @@ type PassportStamp struct {
 	CityName        string   `json:"city_name"`
 	Closed          bool     `json:"closed"`
 	PhotoURL        string   `json:"photo_url,omitempty"`
+	Location        any      `json:"location"`
 	FirstVisitDay   string   `json:"first_visit_day,omitempty"`
 	LastVisitDay    string   `json:"last_visit_day,omitempty"`
 	VisitDates      []string `json:"visit_dates,omitempty"`
@@ -160,6 +161,9 @@ func loadPassport(app core.App, userID, year string, includeTimeline bool) (Pass
 		selected := year == "all" || strconv.Itoa(day.Year()) == year
 		lat, lon, valid := readVisitLocation(r.location.String)
 		valid = valid && r.location.Valid && validVisitCoords(lat, lon)
+		if valid {
+			stamp.Location = map[string]float64{"lat": lat, "lon": lon}
+		}
 		if selected && valid && prevValid {
 			out.TotalDistanceMeters += visitDistanceMeters(prevLat, prevLon, lat, lon)
 		}
