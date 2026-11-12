@@ -154,7 +154,7 @@ func TestCanonicalNativeNearbyMatchesWebAndPreservesGuestAndCabinetPolicy(t *tes
 	for _, route := range []struct {
 		method, path string
 		status       int
-	}{{"PUT", "/arcade/photo", 401}, {"GET", "/arcade/games", 401}, {"GET", "/native/arcades/nearby", 404}} {
+	}{{"PUT", "/arcade/report-settings", 401}, {"GET", "/arcade/games", 401}, {"GET", "/native/arcades/nearby", 404}} {
 		response := executeJSONRequest(t, app, route.method, route.path, "{}", map[string]string{"Authorization": "Bearer " + credentials.AccessToken})
 		response.Body.Close()
 		if response.StatusCode != route.status {

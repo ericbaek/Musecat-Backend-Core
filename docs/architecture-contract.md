@@ -2034,6 +2034,26 @@ state and published-draft deletion restrictions remain authoritative. Native
 responses are no-store. These bindings add no photo/raw-REST/delegated capability,
 schema or migration, and do not change existing immutable history semantics.
 
+### Shared first-party photo atom operations
+
+Configured Native sessions select existing `GET /arcade/photo/atoms`,
+`GET /arcade/photo/file`, `POST /arcade/photo/upload`, `DELETE /arcade/photo/atom`
+and `PUT /arcade/photo`. Handlers, DTOs, body/file limits and Web behavior are
+unchanged. The file route remains anonymous for published atoms of public arcades;
+no new Web active-account guard is added. Pending/public-contributor and private
+creator/strict-reviewer reads continue to use the same atom policy. Invalid enabled
+Native sessions fail before file delivery rather than falling back to guest/cookies.
+An empty Native client allowlist grants no Native identity; anonymous public files
+remain public. Native eligibility retains existing session active-account checks.
+
+Pending deletion remains uploader-or-strict-reviewer only; published atoms are
+immutable even after gallery removal. Uploading preserves indexed 207 partial and
+422 all-failed receipts and awards no XP. Ordered publication, atom promotion,
+immutable gallery history and configured XP/cooldowns remain atomic; reorder/removal/
+published-atom reuse award no new XP. Public files retain private five-minute caching;
+pending/draft bytes are no-store. No Native alias, raw file privilege, flag-photo
+route, schema or migration is introduced.
+
 ### Shared first-party favorite toggle
 
 Configured native sessions authenticate `PUT /arcade/favorite` through the same

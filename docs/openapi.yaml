@@ -4814,6 +4814,7 @@ paths:
       tags: [Arcades]
       summary: /arcade/photo/file
       description: Streams one photo through the custom API. A published photo of a public arcade is anonymous-readable and privately browser-cacheable for five minutes. Pending or draft photos require a bearer token with atom-list access and are never cached. Clients must use the returned `file_url`, not PocketBase `/api/files` URLs. Supported thumbnail queries return the configured derivative and never silently fall back to the original file.
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       parameters:
         - name: id
           in: query
@@ -5931,6 +5932,7 @@ paths:
       description: Lists photo atoms through the custom API. Use each `file_url` for file delivery. Public arcades are available to active contributors; private drafts require creator or developer/moderator access.
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: arcade
           in: query
@@ -5959,6 +5961,7 @@ paths:
       description: Deletes a pending photo atom only for its uploader or developer/moderator. Published atoms are immutable and return `409`.
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: id
           in: query
@@ -5997,6 +6000,7 @@ paths:
       description: Uploads pending photo atoms. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -6140,6 +6144,7 @@ paths:
       description: Pending atoms receive 4 XP each for campaign targets (double the normal 2 XP) when first published, up to 20 XP per campaign target or 10 XP per other public arcade in a rolling seven-day window. Uploading alone, reordering, removing, or reusing a previously published atom awards no XP. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:

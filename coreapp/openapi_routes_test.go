@@ -273,7 +273,7 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 			t.Fatalf("duplicate native domain URL remains: %s", path)
 		}
 	}
-	for _, sample := range []struct{ path, method string }{{"/arcade/new", "post"}, {"/arcade/public", "get"}, {"/arcade/public", "put"}, {"/arcade/location-verification", "post"}, {"/arcade/draft", "delete"}, {"/arcade/rollback", "post"}, {"/arcade/edit_report", "post"}, {"/arcade/request_admin", "post"}, {"/arcade/memo", "put"}, {"/arcade/notice", "post"}, {"/arcade/notice", "put"}, {"/arcade/notice", "delete"}, {"/arcade/flag", "post"}, {"/arcade/flag/reaction", "post"}, {"/arcade/flag/delete", "post"}} {
+	for _, sample := range []struct{ path, method string }{{"/arcade/photo/atoms", "get"}, {"/arcade/photo/file", "get"}, {"/arcade/photo/upload", "post"}, {"/arcade/photo/atom", "delete"}, {"/arcade/photo", "put"}, {"/arcade/new", "post"}, {"/arcade/public", "get"}, {"/arcade/public", "put"}, {"/arcade/location-verification", "post"}, {"/arcade/draft", "delete"}, {"/arcade/rollback", "post"}, {"/arcade/edit_report", "post"}, {"/arcade/request_admin", "post"}, {"/arcade/memo", "put"}, {"/arcade/notice", "post"}, {"/arcade/notice", "put"}, {"/arcade/notice", "delete"}, {"/arcade/flag", "post"}, {"/arcade/flag/reaction", "post"}, {"/arcade/flag/delete", "post"}} {
 		entry := contract.Paths[sample.path]
 		op := entry.Put
 		if sample.method == "get" {
@@ -292,6 +292,15 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 		for _, alternative := range op.Security {
 			for scheme := range alternative {
 				seen[scheme] = true
+			}
+		}
+		if sample.path == "/arcade/photo/file" {
+			guest := false
+			for _, alternative := range op.Security {
+				guest = guest || len(alternative) == 0
+			}
+			if !guest {
+				t.Fatal("public photo file lost anonymous security alternative")
 			}
 		}
 		if !seen["bearerAuth"] || !seen["nativeSession"] || len(seen) != 2 {
