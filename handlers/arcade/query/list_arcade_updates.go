@@ -13,7 +13,7 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-var arcadeUpdatePartOrder = []string{"basic", "hour", "sns", "gtk", "game", "photo", "flag", "flag_reaction", "visit"}
+var arcadeUpdatePartOrder = []string{"basic", "hour", "sns", "gtk", "game", "photo", "flag", "flag_reaction", "visit", "achievement"}
 
 type arcadeUpdateBlockRow struct {
 	BlockID        string
@@ -144,7 +144,20 @@ WITH filtered AS (
 	INNER JOIN arcade a ON a.id = v.arcade
 	INNER JOIN user_info ui ON ui.id = v.user
 	WHERE %s
-)`, strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), visitFilter)
+	UNION ALL
+	SELECT
+		a.id AS arcade,
+		'achievement' AS changed,
+		p.author AS changed_by,
+		p.created,
+		NULL AS bulk_id,
+		p.id
+	FROM community_post p
+	INNER JOIN json_each(p.arcades) linked
+	INNER JOIN arcade a ON a.id = linked.value
+	WHERE p.status = 'active' AND p.flair = 'achievement'
+		AND json_array_length(p.photos) > 0 AND %s
+)`, strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), strings.Join(filterParts, " AND "), visitFilter, strings.Join(filterParts, " AND "))
 	sql := filteredSQL + fmt.Sprintf(`,
 ordered AS (
 	SELECT

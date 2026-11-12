@@ -168,6 +168,7 @@ func CreatePost(re *core.RequestEvent) error {
 	record.Set("game_series", input.GameSeries)
 	record.Set("title", input.Title)
 	record.Set("mentions", input.Mentions)
+	record.Set("arcades", communitymention.ArcadeIDs(input.Mentions))
 	record.Set("body_document", input.document)
 	record.Set("original_locale", OriginalLocale)
 	record.Set("flair", input.Flair)
@@ -250,6 +251,7 @@ func UpdatePost(re *core.RequestEvent) error {
 		record.Set("game_series", input.GameSeries)
 		record.Set("title", input.Title)
 		record.Set("mentions", input.Mentions)
+		record.Set("arcades", communitymention.ArcadeIDs(input.Mentions))
 		record.Set("flair", input.Flair)
 		record.Set("photos", photos)
 
