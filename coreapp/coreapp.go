@@ -288,7 +288,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		arcadequery.RequireAdminAccess(),
 	)
 	// Public read endpoint: list arcades by game series near a location with pagination
-	api.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)
+	api.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation).Bind(firstPartyAuth...)
 	api.GET("/arcade/visits", userhandler.GetArcadeVisitStats)
 	// Public read endpoint: list machine rows filtered by country, game series, and version
 	api.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(

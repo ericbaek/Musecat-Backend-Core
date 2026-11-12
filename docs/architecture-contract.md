@@ -1933,3 +1933,14 @@ are idempotent and only public arcades may be favorited. Existing active-account
 revocation and client-allowlist guards apply; native responses remain no-store.
 `PUT /arcade/favorite/order` remains unsupported for native sessions. No native
 domain alias, schema, migration, arcade changelog or XP behavior is introduced.
+
+### Shared first-party nearby reads
+
+Configured native sessions authenticate only canonical `GET /arcades/nearby`
+through the existing selected-operation adapter. The web handler owns the same
+member `game_series`, optional expanded `game`, campaign and cabinet-filter
+projection for web JWTs and native access. Guest summaries still omit game
+metadata and campaigns; cabinet permissions and deployment read quotas are
+unchanged. Invalid, expired, revoked, removed-client and banned native sessions
+fail before the handler. Native responses remain no-store. This grants no
+credential support to other routes and adds no native domain alias or migration.

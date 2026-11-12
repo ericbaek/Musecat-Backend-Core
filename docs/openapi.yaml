@@ -4913,7 +4913,10 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcades/nearby
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       description: |
+        Configured first-party native sessions use the same member projection as web JWTs.
+        Invalid or revoked native access is rejected; native responses are no-store.
         Guests receive venue summaries without game_series or game fields.
         expand=true exposes game details only to authenticated users.
         Guest campaign summaries are empty because they contain game version bundles.
@@ -5081,6 +5084,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid, expired, revoked or unregistered native access.
+        '403':
+          description: The native account is inactive or restricted.
+        '429':
+          description: Deployment read policy rejects this response.
         '502':
           description: Failed to load arcades.
           content:
