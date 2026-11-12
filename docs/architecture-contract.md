@@ -134,21 +134,36 @@ Its raw PocketBase REST rules are locked; clients use only `GET /community/posts
   validated result or retry state. Source hashes prevent stale results from
   overwriting a concurrently changed post.
 - Translation retries are bounded to five attempts. Provider failures remain
-  visible only as translation status while the Korean original stays readable.
-- `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC` defaults off. Until explicitly
-  enabled, `locale=en-US|ja-JP` falls back to the Korean original even when
+  represented only in API translation metadata while the original stays readable;
+  the launch UI does not display translation state.
+- `MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED` defaults off for launch. Executables
+  skip translator setup and cron registration while disabled, independently of
+  a shared `OPENAI_API_KEY`. Explicitly injected prototype workers remain callable.
+- `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC` also defaults off and requires runtime
+  enablement. Until both flags are explicitly enabled, `locale=en-US|ja-JP`
+  falls back to the Korean original even when
   translations are ready. This allows translation quality to be verified
   before the non-Korean experience is launched.
 - Translation providers are selected by the executable and injected into the
   worker. The reference runner reads server environment variables; reusable
-  OpenAI is the only translation adapter; `OPENAI_API_KEY` selects availability.
+  OpenAI is the only translation adapter; explicit runtime enablement and
+  `OPENAI_API_KEY` together select availability.
   The default model is `gpt-6-luna` with reasoning effort `none` (`low` is optional). Prompts preserve official arcade,
   game, cabinet, version, product, username, URL, price, and mention values and
   may include an operator-maintained Musecat glossary.
 
-Community achievement posts require at least one attached photo. Creation rejects
-text-only achievements with 400. Updates count retained and newly attached photos
-inside the author mutation transaction and reject a photo-less conversion with 400.
+Community achievement posts require a valid game series and at least one attached
+photo; their body is optional. Other flairs still require a nonblank body. Updates
+validate the final retained/uploaded photo set inside the author transaction.
+Optional `photo_order` selects retained filenames or upload indices in final order;
+omission retains the legacy append behavior. Invalid, duplicate, foreign, omitted
+upload references or a photo-less achievement return 400 without changing the post.
+The five-minute deadline never extends. Empty title/body content is ready without
+calling a translation provider; adding text queues the usual translation flow.
+`game_series_ids` lists distinct games across the author/flair/image scope before
+game filtering and pagination, so profile pills include games beyond page one.
+`sort=newest|popular` applies before pagination; popular uses all-time like count,
+created time and ID descending. Responses remain private/no-store with viewer state.
 
 ### Community conversations and likes
 
@@ -345,7 +360,20 @@ Existing Full installations require their own guarded forward migration to
 lock the existing `user_info` update rule before this API cutover.
 
 `GET /rankings` always returns the public top 100. User metrics include explorer,
-visits, XP, level, and photographer. The `arcade_visits` metric returns public
+visits, XP, level, and photographer. For `metric=level` (all time only), `score`
+is the smaller of the XP-derived level and an account-age cap. The cap is linearly
+interpolated through day 0 = 10, day 30 = 50, day 45 = 75 and day 365 = 100,
+with the fractional level discarded within each segment. After day 365, it is
+`100 + floor((days - 365) * 90 / 365)`. Elapsed days are complete 24-hour periods
+since `user.created` at the request's UTC time, clamped at zero.
+Ranking and the top-100 cutoff use this capped level; equal levels share a rank,
+with nickname and user ID providing stable display order. `profile.level` always
+retains the uncapped XP-derived level. XP metrics, stored XP, profile levels and
+feature permissions are unaffected. For `metric=xp`, `score` remains the period's net
+XP and `stats.level_change` is `LevelFromExp(current XP) -
+LevelFromExp(max(0, current XP - score))`. It describes actual level gain from the
+period's starting XP, rather than converting the period XP from zero or showing
+the current profile level. The same calculation applies to `viewer`. The `arcade_visits` metric returns public
 arcades ranked by the total XP awarded by their completed visit-verification
 records; the response displays the verification count separately and includes
 the first publicly readable photo from the current photo molecule when one is
@@ -730,10 +758,13 @@ not change arcade visibility, author/reviewer permissions, XP or history semanti
 ## Public aggregate execution
 
 `GET /stats` caches successful public aggregate snapshots for 30 minutes per
-application process. Concurrent cache misses share one refresh; errors are not
-cached. A refresh has a 12-second database deadline and survives an individual
-viewer's disconnect, while that viewer stops waiting immediately. Counts may
-therefore lag underlying mutations by up to 30 minutes.
+application process. Expired successful snapshots remain available during a shared
+background refresh for at most another 30 minutes. Failed background refreshes
+retry after 30 seconds, without extending snapshot lifetime. Cold or more than
+one-hour-old snapshots wait for a refresh and return an error if it fails. A
+refresh has a 12-second database deadline and survives an individual viewer's
+disconnect, while that viewer stops waiting immediately. The daily page-view
+aggregate uses a partial covering date/group index and preserves public-only counts.
 
 Both arcade-update aggregates remain uncached, propagate request cancellation
 to SQLite, and cap database work at 12 seconds, below the web transport's
@@ -801,6 +832,7 @@ accepted, and at most six latest distinct-arcade blocks are returned. If the six
 newest are all KR and a non-KR arcade has history, the newest non-KR block replaces
 the sixth entry. Results remain in descending activity order. Fewer are returned
 when fewer eligible arcades exist; no foreign entry is invented if none exists.
+Concurrent public summary reads share one bounded aggregate query, without a retained response cache. A canceled caller does not cancel other readers.
 
 `GET /arcades/updates/history` requires user authentication and returns `items`,
 `page`, `per_page`, `last_page`, `total` across chronological blocks, including
@@ -1277,3 +1309,148 @@ preserves the saved value. Profile responses return the saved flag. When true,
 `GET /arcades/updates` excludes that account's existing and future visit entries;
 profile Passport statistics, maps and stamps retain their existing visibility rules.
 Private visits remain excluded regardless of this flag.
+
+## Account-owned bot credentials
+
+Personal bot keys are a distinct non-session credential for `/bot/v1` arcade
+creation, information editing, notices, report/inquiry settings, automatic replies,
+memo edits, analytics and conversation reads/replies/status. Issuance and use require
+arcade_owner, founding supporter, supporter, designer, moderator or developer.
+The live role is checked on each call. Owners retain list/revoke
+access after losing eligibility. See [`bot-api.md`](bot-api.md) and the bot
+operations in OpenAPI. A live key resolves the issuing account, rechecks
+revocation, account token-key fingerprint and active-account policy, and uses the
+existing handlers. Keys never authenticate web/session/raw collection APIs and
+cannot issue credentials or reach moderation/account-management routes.
+Official operations reuse current ownership and conversation ACL checks; removing
+ownership immediately removes management access even while the key remains valid.
+Public and ordinary-user reads/edits retain their existing visibility policy. Each key permits 60 calls
+per minute; its quota and last use are stored atomically. Secrets are returned
+once, hashed at rest, and excluded from history and list responses. Bot keys have
+no automatic expiry; existing expiry timestamps are ignored. Every unrevoked key
+counts toward the five-key account limit.
+
+`service/contribution` wraps the request app and its nested transaction apps with
+a verified source. Saves of new arcade, changelog and photo-atom records retain
+an immutable `contribution_source` snapshot. `by`/`createdBy` remain the owner's
+user ID. Bot names are private to the issuing account: custom history responses
+omit the name for every other viewer, including staff. Raw record responses never
+expose the stored attribution snapshot. Public UI uses an API badge without the name.
+Normal records have a null source. Bot edits earn no XP; creation origins,
+per-change backfill and photo eligibility preserve that policy across web/API
+handoffs. Deferred rewards for actual web changes use their persisted origin,
+including when a bot later publishes them. Legacy rewards are not reclassified.
+
+Bot API rollout is independent of the excluded external integration release.
+Future OAuth adapters may share attribution and domain policy; this release does
+not register Developer Center or broaden existing OAuth scopes.
+### Deployment public-read policy
+
+`service/readpolicy.Register` installs an optional, app-scoped check before public
+game-expanded arcade detail (`expand=game` or `expand=all`), authenticated expanded nearby pages, and detailed arcade/user
+history are written. It receives the actual exposed public arcade IDs; errors
+abort the entire response. Core has no quota, CAPTCHA provider, or policy state.
+Without registration the check is a no-op. Full owns deployment policy and routes.
+Basic/location-only, photo-only and relation-ID responses do not consume game-detail quota; request rate limits still apply.
+
+Anonymous `/arcades/nearby` responses omit `game_series` and `game`, including
+`expand=true`. Guest campaign summaries are empty because they contain game
+version/series bundles and machine counts. Series filtering remains available; cabinet filtering still
+requires authentication. Authenticated expansion/ranking and 15-row pagination
+are preserved. `/arcades` is a separate summary contract and is unchanged.
+
+Passport stamps include the current public arcade `location` (lat/lon or null), allowing the passport map to render without per-arcade detail requests. Private arcades remain excluded.
+
+## Aime recovery notification
+
+Authenticated active users explicitly opt in through `/user/notifications/aime`.
+The account-scoped subscription is for one observed outage and is consumed after
+recovery; existing browser push consent never creates this subscription. Full
+checks public my-aime.net, maimai DX NET and CHUNITHM-NET entry pages in parallel
+once every five minutes with bounded HTTPS redirects and HTML bodies. Both game
+requests send `User-Agent: Mozilla/5.0`: the live upstream closes connections
+for Go's default User-Agent before returning a maintenance response. Both game
+entry points must return HTTP 200 without a final maintenance path or visible
+English/Japanese/Korean maintenance text. No password field, form, SEGA ID text,
+login URL path or return-target query is required. HTTP 200 maintenance pages
+are blocked. Other HTTP responses, transport errors, non-HTML responses,
+oversized bodies and disallowed redirects are unknown. my-aime.net
+is diagnostic only: its geo-blocked 403 cannot prove or disprove game NET recovery.
+Any blocked game result makes the aggregate blocked; otherwise both games must
+be available or the aggregate is unknown. The recorded httpStatus is the actual
+response code from the game source deciding the aggregate; it can be 200 while
+status is blocked or unknown. Full owns the additive migration for the candidate
+timestamp and separate Telegram/Discord delivery receipts on aime_status.
+New classifications use `web_`-prefixed internal status values. Legacy HTTP-only
+history projects as unknown, and the first new observation resets any unfinished
+legacy confirmation run. Existing subscriptions and terminal completion survive.
+
+Known maintenance starts this one-off incident. The first non-maintenance HTTP 200
+candidate starts the 15-minute confirmation window and queues an operational
+notice to both Telegram and Discord. Three further successful observations at
+least five minutes apart complete recovery only after both operational channels
+have successful persisted receipts. Counts and timestamps survive restart;
+rapid probes cannot advance the count. Failed observations reset the run;
+gaps over ten minutes restart it. Operational receipts and the first candidate
+timestamp survive resets, so a successful channel is not sent again. A failed
+channel retries independently. Pending account opt-ins are preserved throughout.
+Completion remains terminal. This checks public game NET web maintenance status,
+not in-game card authentication or score saving. Notifications state that scope.
+Core owns persisted state, atomic opt-in, bounded resumable fan-out and canonical
+inbox/device delivery identities. Full owns the polling schedule and push sender.
+No login credentials are collected. Probe networking runs outside transactions.
+
+Aime status includes at most 288 persisted probe observations from the last 24
+hours in chronological order. Status and probe history are saved atomically.
+Older observations are removed in bounded batches; missing periods remain unknown
+in the UI. History never uses the absence of an error as evidence of uptime.
+
+`GET /aime/status` is a public, read-only projection of the shared probe and
+history. It always returns `subscribed=false`, does not consult the caller's
+account even when authenticated, and ignores user query parameters. Guests can
+read guidance/status/history; opting in or cancelling still requires an active
+account through the existing authenticated `/user/notifications/aime` routes.
+
+
+## Achievement notifications
+
+Community mutations reuse `user_notification` and its device outbox atomically.
+`community_like` events are unique per recipient/post/actor, never enqueue device
+push, and survive unlike/re-like without resetting read state. Only active likes
+appear. Top-level comments notify the achievement author; replies notify the
+specific `reply_to` comment author. Self events and withdrawn recipients are excluded.
+`community_comment` groups by recipient/post; `community_reply` additionally groups
+by the replied-to comment. Latest live event selection happens before pagination
+and unread counting. Read acknowledges only that group's events through the
+selected event, preserving newer arrivals. `groupKey` is stable across new events.
+Retracted posts/comments disappear from inbox and queued delivery eligibility.
+
+Full reuses its existing retry/expiry/device pipeline: the first unseen comment
+push is immediate, then each recipient/post/device has a ten-minute cooldown
+started only by a successful send. Queued bursts retain only the latest live
+unread event. Each device is independent. No push is generated for likes.
+`PUT/DELETE /community/post/view?id=...` accepts a caller-owned random `session`
+(up to 64 alphanumeric/hyphen characters, body at most 1 KiB). Active account
+required. PUT leases a visible detail for 45 seconds; clients renew every 20
+seconds only while visible. DELETE releases just that session. Concurrent tabs
+remain independent; expired leases are cleaned in bounded batches. Reading a
+detail marks that account's post notifications read. Creation and delivery both
+suppress pushes while any lease is live; inbox history remains available.
+
+Notification links use `/community/{post}` or
+`/community/{post}?comment={comment}#comment-{comment}`. Public original comment
+reads allow the Web detail to fetch a linked older comment/thread outside the
+first list page, reject cross-post targets, and focus the exact comment.
+
+### Achievement caption mentions
+
+Achievement captions also maintain `community_post.arcades`, a server-derived, deduplicated multi-relation (maximum ten targets) from validated arcade mention nodes. Create and edit save the relation atomically with the post. Dashboard summary/history reads include active achievement posts with photos as `achievement` events at their original creation time, joined only to public open arcades. This is activity, not an arcade mutation or XP award; no arcade changelog is written. Arcade-page presentation is not enabled.
+
+
+`community_post.mentions` stores up to ten ordered UTF-16 ranges over the plain-text body, with kind, stable target ID and canonical label. The server verifies @label text, active users and public arcades; no HTML is accepted. User mentions create one durable `community_mention` inbox/outbox event per post and recipient in the post transaction. Self-mentions do not notify; edits and removal/readdition do not duplicate events. Removed mentions and inactive posts invalidate visibility and queued pushes. Arcade mentions create links without notifying owners. The ranges are a server-derived projection of canonical mention nodes for notification visibility checks.
+
+`body_document` is the only stored caption source from launch. Its schema accepts paragraphs, text, hardBreak and stable-ID mention nodes, with limits of 64 KiB, 500 paragraphs, 2,000 inline nodes, 10,000 text characters and ten mentions. Formatting marks, HTML, embeds, links and arbitrary CSS are rejected. The response-only `body` and UTF-16 mention ranges are derived on the server. Legacy body/mention writes remain an input adapter; game/photo-only legacy edits preserve the existing document. The guarded Full forward migration converts and validates every row atomically before requiring the document and removing the legacy body column, preserving text, photos, timestamps, edit deadlines and event identities. Recovery uses the complete database/files snapshot. Author deadlines are unchanged and public translation remains disabled.
+
+Developers may read another account's bot console through `GET /user/bot-keys?user=<id>` and `/user/changelog?user=<id>&bot=all|<key-id>`. Bot names remain owner-only; foreign key metadata omits the name and never includes secrets. Other roles cannot inspect foreign consoles. Issuance and revocation remain scoped to the authenticated owner. Public user-history summaries retain redacted bot attribution for activity badges without exposing edit details.
+
+Community post and comment uploads validate JPEG/PNG/WebP/GIF metadata before saving. Each photo is limited to 10 MiB and 64,000,000 pixels. Header-only dimension validation avoids allocating the decoded image; ordinary 48MP photos remain supported. The pixel bound complements optimized thumbnails and does not re-encode the original.

@@ -203,6 +203,7 @@ func TestSocialCursorAndDeletedRootDisappearance(t *testing.T) {
 	}
 }
 func TestSocialCommentTranslation(t *testing.T) {
+	t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED", "true")
 	t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC", "true")
 	app := newCommunityTestApp(t)
 	defer app.Cleanup()

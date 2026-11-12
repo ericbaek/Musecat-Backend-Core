@@ -122,6 +122,12 @@ func ReactionCreatedTx(app core.App, flag *core.Record, actor, reactionID string
 	return CreateTx(app, flag.GetString("createdBy"), actor, "report_reaction", "reaction:"+reactionID, flag, reactionID)
 }
 func Visible(app core.App, user, row *core.Record) bool {
+	if IsCommunity(row.GetString("kind")) {
+		return communityVisible(app, user, row)
+	}
+	if row.GetString("kind") == AimeKind {
+		return user != nil && !user.GetBool("withdrawn") && row.GetString("user") == user.Id
+	}
 	if row.GetString("kind") == AnnouncementKind {
 		return announcementVisible(app, user, row)
 	}
@@ -155,6 +161,12 @@ func Visible(app core.App, user, row *core.Record) bool {
 	return arcade.GetBool("public") || arcadereport.CanManage(user, arcade)
 }
 func Item(app core.App, row *core.Record) map[string]any {
+	if IsCommunity(row.GetString("kind")) {
+		return communityItem(app, row, "ko")
+	}
+	if row.GetString("kind") == AimeKind {
+		return AimeItem(row, "ko")
+	}
 	if row.GetString("kind") == AnnouncementKind {
 		return announcementItem(row, "ko")
 	}

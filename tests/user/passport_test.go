@@ -65,6 +65,10 @@ func TestPassportPeriodsCitiesAndVisibility(t *testing.T) {
 	if page.Total != 2 || page.LastPage != 2 || len(page.Items) != 1 || page.Items[0].Arcade != b.Id {
 		t.Fatalf("pagination: %+v", page)
 	}
+	location, ok := page.Items[0].Location.(map[string]any)
+	if !ok || location["lat"] != 37.5665 || location["lon"] != 126.9780 {
+		t.Fatalf("stamp must provide public coordinates without detail reads: %#v", page.Items[0].Location)
+	}
 	for _, url := range []string{"/user/passport?year=oops", "/user/passport/stamps?sort=bad", "/user/passport/stamps?page=-1", "/user/passport/stamps?per_page=101"} {
 		r := doUserRequest(t, app, http.MethodGet, url, headers, "")
 		if r.StatusCode != 400 {

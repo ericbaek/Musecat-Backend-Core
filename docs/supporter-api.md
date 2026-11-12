@@ -8,6 +8,8 @@ This document covers the supporter verification flow:
 The score endpoint is ledger-based. It reads `user_level_log` and exposes the XP timeline directly instead of aggregating by arcade.
 
 ## XP Rules
+- Achievement creation: 2 XP, maximum 10 XP per KST day.
+- Achievement comments and likes: 1 XP to the actor, shared maximum 5 XP per KST day. Own-post comments and self likes are excluded. Unlike/re-like cannot reward the same target again; deletion does not refund the cap.
 - `public` arcade creation or conversion: `5` XP
 - Arcade edit bonus: basic/hour/sns/gtk edits grant `2` XP when eligible. Game edits use the rolling seven-day distinct-entry target `0 → 0`, `1 → 2`, `2 → 4`, `3 → 6`, `4 → 8`, and `5+ → 10` XP; each request receives only the incremental difference from that target already awarded in the window.
 - `photo_submission`: `5` XP

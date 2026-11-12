@@ -260,6 +260,7 @@ WHERE
 		}
 
 		profiles[id] = map[string]any{
+			"id":       id,
 			"username": username,
 			"nickname": nickname,
 			"avatar":   strings.TrimSpace(raw["avatar"].String),

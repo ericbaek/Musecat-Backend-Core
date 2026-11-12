@@ -34,7 +34,9 @@ func listInbox(app core.App, user *core.Record, before string, locales ...string
 	visibility := map[string]bool{}
 	visible := func(row *core.Record) bool {
 		kind, source := row.GetString("kind"), row.GetString("arcade")
-		if kind == "message" {
+		if usernotification.IsCommunity(kind) {
+			source = row.Id
+		} else if kind == "message" {
 			source = row.GetString("conversation")
 		} else if kind == "feedback_reply" || kind == "feedback_created" {
 			kind, source = "feedback", row.GetString("feedback")
@@ -43,7 +45,7 @@ func listInbox(app core.App, user *core.Record, before string, locales ...string
 				return false
 			}
 			source = row.GetString("announcement")
-		} else if kind != "report_created" && kind != usernotification.ArcadeSetupKind {
+		} else if kind != "report_created" && kind != usernotification.ArcadeSetupKind && kind != usernotification.AimeKind {
 			kind = "report_reaction"
 		}
 		key := kind + ":" + source
@@ -109,6 +111,7 @@ func scanInbox(app core.App, userID string, unreadOnly bool, cursor *core.Record
 			params["created"], params["id"] = cursor.GetString("created"), cursor.Id
 		}
 		// Apply grouping before the cursor so older events never reappear on later pages.
+		filter += " AND " + usernotification.CommunityInboxFilter()
 		filter += ` AND (user_notification.kind!='message' OR NOT EXISTS (SELECT 1 FROM user_notification newer WHERE newer.user=user_notification.user AND newer.kind='message' AND newer.conversation=user_notification.conversation AND ((SELECT sequence FROM messaging_message WHERE id=newer.message)>(SELECT sequence FROM messaging_message WHERE id=user_notification.message) OR (newer.message=user_notification.message AND newer.id>user_notification.id))))`
 		rows := []*core.Record{}
 		err := app.RecordQuery(usernotification.Inbox).AndWhere(dbx.NewExp(filter, params)).OrderBy("user_notification.created DESC", "user_notification.id DESC").Limit(inboxBatchSize).All(&rows)
@@ -146,7 +149,20 @@ func Read(re *core.RequestEvent) error {
 				return nil
 			}
 			row := selected[0]
-			if row.GetString("kind") == "message" {
+			if usernotification.IsCommunity(row.GetString("kind")) {
+				filter += " && kind={:kind} && community_post={:post} && (created<{:created} || (created={:created} && id<={:selected}))"
+				params["kind"] = row.GetString("kind")
+				params["post"] = row.GetString("community_post")
+				if row.GetString("community_thread") == "" {
+					// PocketBase bound empty relation values do not match the empty relation.
+					filter += " && community_thread=''"
+				} else {
+					filter += " && community_thread={:thread}"
+					params["thread"] = row.GetString("community_thread")
+				}
+				params["created"] = row.GetString("created")
+				params["selected"] = row.Id
+			} else if row.GetString("kind") == "message" {
 				message, err := tx.FindRecordById("messaging_message", row.GetString("message"))
 				if err != nil {
 					return err

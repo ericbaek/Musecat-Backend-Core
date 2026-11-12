@@ -24,24 +24,27 @@ func TestRuntimeOwnsJobSelection(t *testing.T) {
 	t.Setenv("MUSECAT_TRANSLATION_BASE_URL", "")
 	t.Setenv("MUSECAT_TRANSLATION_MODEL", "")
 	t.Setenv("OPENAI_API_KEY", "")
-	for _, key := range []string{"", "configured-test-key"} {
-		t.Run(map[bool]string{true: "enabled", false: "disabled"}[key != ""], func(t *testing.T) {
-			t.Setenv("OPENAI_API_KEY", key)
-			app := pocketbase.NewWithConfig(pocketbase.Config{DefaultDataDir: t.TempDir()})
-			if err := configureRuntime(app); err != nil {
-				t.Fatal(err)
-			}
-			jobs := map[string]bool{}
-			for _, job := range app.Cron().Jobs() {
-				jobs[job.Id()] = true
-			}
-			if jobs[community.TranslationCronJobID] != (key != "") {
-				t.Fatal("translation schedule does not match provider availability")
-			}
-			if !jobs[arcadeflag.AutoSolveCronJobID] || !jobs[arcadeflag.StaleResolutionCronJobID] {
-				t.Fatal("flag domain jobs must remain enabled")
-			}
-		})
+	for _, enabled := range []string{"", "false", "true"} {
+		for _, key := range []string{"", "configured-test-key"} {
+			t.Run(enabled+"/"+map[bool]string{true: "key", false: "no-key"}[key != ""], func(t *testing.T) {
+				t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED", enabled)
+				t.Setenv("OPENAI_API_KEY", key)
+				app := pocketbase.NewWithConfig(pocketbase.Config{DefaultDataDir: t.TempDir()})
+				if err := configureRuntime(app); err != nil {
+					t.Fatal(err)
+				}
+				jobs := map[string]bool{}
+				for _, job := range app.Cron().Jobs() {
+					jobs[job.Id()] = true
+				}
+				if jobs[community.TranslationCronJobID] != (enabled == "true" && key != "") {
+					t.Fatal("translation requires explicit enablement and a provider key")
+				}
+				if !jobs[arcadeflag.AutoSolveCronJobID] || !jobs[arcadeflag.StaleResolutionCronJobID] {
+					t.Fatal("flag domain jobs must remain enabled")
+				}
+			})
+		}
 	}
 }
 

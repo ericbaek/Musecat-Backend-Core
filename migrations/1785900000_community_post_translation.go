@@ -42,7 +42,7 @@ func applyCommunityPostSchema(app core.App) error {
 				&core.RelationField{Name: "author", CollectionId: users.Id, Required: true, MaxSelect: 1},
 				&core.RelationField{Name: "game_series", CollectionId: series.Id, MaxSelect: 1},
 				&core.TextField{Name: "title", Max: 200},
-				&core.TextField{Name: "body", Required: true, Max: 10000},
+				&core.TextField{Name: "body", Max: 10000},
 				&core.FileField{Name: "photos", MaxSelect: 8, MaxSize: 10 << 20, MimeTypes: []string{"image/jpeg", "image/png", "image/webp", "image/gif"}, Thumbs: []string{"600x600", "1200x0"}},
 				&core.SelectField{Name: "original_locale", Values: []string{"ko-KR"}, Required: true, MaxSelect: 1},
 				&core.SelectField{Name: "flair", Values: []string{"achievement", "question", "tip", "news", "event", "art", "chitchat"}, Required: true, MaxSelect: 1},
@@ -102,7 +102,7 @@ func validateCommunityPostCollection(collection, users, series *core.Collection)
 		max      int
 	}{
 		{name: "title", max: 200},
-		{name: "body", required: true, max: 10000},
+		{name: "body", max: 10000},
 		{name: "original_hash", max: 64},
 		{name: "translation_error", max: 2000},
 	} {

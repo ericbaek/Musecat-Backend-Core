@@ -28,7 +28,7 @@ func configureRuntime(app *pocketbase.PocketBase) error {
 	}
 	var translator community.Translator
 	translation := translationConfig()
-	if translation.APIKey != "" {
+	if community.TranslationsEnabled() && translation.APIKey != "" {
 		translator, err = community.NewConfiguredTranslator(translation, nil)
 		if err != nil {
 			return fmt.Errorf("configure community translation: %w", err)

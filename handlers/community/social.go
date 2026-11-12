@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/usernotification"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 	"io"
 	"net/http"
 	"net/url"
@@ -158,7 +160,19 @@ func CreateComment(re *core.RequestEvent) error {
 			saved.Set("translation_status", "ready")
 		}
 		saved.Set("original_hash", contentHash("", input.Body))
-		return tx.Save(saved)
+		if err := tx.Save(saved); err != nil {
+			return err
+		}
+		post, err := tx.FindRecordById(CollectionPost, input.Post)
+		if err != nil {
+			return err
+		}
+		if post.GetString("flair") == "achievement" && post.GetString("author") != re.Auth.Id {
+			if err := xp.AwardCommunityTx(tx, re.Auth.Id, "reaction", "comment:"+saved.Id, now); err != nil {
+				return err
+			}
+		}
+		return usernotification.NotifyCommunityTx(tx, post, saved, re.Auth.Id)
 	})
 	if err != nil {
 		return err
@@ -365,6 +379,11 @@ func setLike(re *core.RequestEvent, targetCollection, likeCollection, key string
 					return err
 				}
 			}
+			if targetCollection == CollectionPost {
+				if err := usernotification.RetractCommunityLikeTx(tx, id, re.Auth.Id); err != nil {
+					return err
+				}
+			}
 		} else if len(existing) == 0 {
 			col, err := tx.FindCollectionByNameOrId(likeCollection)
 			if err != nil {
@@ -374,6 +393,31 @@ func setLike(re *core.RequestEvent, targetCollection, likeCollection, key string
 			record.Set(key, id)
 			record.Set("author", re.Auth.Id)
 			if err = tx.Save(record); err != nil {
+				return err
+			}
+			target, err := tx.FindRecordById(targetCollection, id)
+			if err != nil {
+				return err
+			}
+			post := target
+			if targetCollection == CollectionComment {
+				post, err = tx.FindRecordById(CollectionPost, target.GetString("post"))
+				if err != nil {
+					return err
+				}
+			}
+			if post.GetString("flair") == "achievement" && target.GetString("author") != re.Auth.Id {
+				if err := xp.AwardCommunityTx(tx, re.Auth.Id, "reaction", "like-"+key+":"+id, time.Now().UTC()); err != nil {
+					return err
+				}
+			}
+		}
+		if re.Request.Method != http.MethodDelete && len(existing) == 0 && targetCollection == CollectionPost {
+			post, err := tx.FindRecordById(CollectionPost, id)
+			if err != nil {
+				return err
+			}
+			if err := usernotification.NotifyCommunityTx(tx, post, nil, re.Auth.Id); err != nil {
 				return err
 			}
 		}

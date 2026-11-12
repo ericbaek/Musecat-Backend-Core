@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/contribution"
 	"net/http"
 	"strings"
 	"time"
@@ -224,7 +225,11 @@ func RequestPublicArcade(re *core.RequestEvent) error {
 			return err
 		}
 
-		if nextExp, _, err := xp.AwardExpTx(txApp, re.Auth.Id, xp.ArcadePublicKind(body.Arcade), 5, currentExp); err != nil {
+		publicExp, err := xp.ArcadePublicExp(txApp, body.Arcade)
+		if err != nil {
+			return err
+		}
+		if nextExp, _, err := xp.AwardExpTx(contribution.WithoutSource(txApp), re.Auth.Id, xp.ArcadePublicKind(body.Arcade), publicExp, currentExp); err != nil {
 			return err
 		} else {
 			currentExp = nextExp
