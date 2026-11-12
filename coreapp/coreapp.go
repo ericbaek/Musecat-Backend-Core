@@ -184,7 +184,7 @@ func registerAPIRoutes(se *core.ServeEvent, nativeClients []nativeauth.Client, m
 	connectionhandler.RegisterRoutes(se, manager)
 	registerBotRoutes(se)
 	announcementhandler.RegisterRoutes(se)
-	messaginghandler.RegisterRoutes(se)
+	messaginghandler.RegisterRoutes(se, nativeClients...)
 	se.Router.GET("/guest/feedback", arcadeadmin.ListGuestSupportFeedback).Bind(arcadeadmin.RequireGuestFeedback())
 	se.Router.GET("/guest/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(arcadeadmin.RequireGuestFeedback())
 	se.Router.GET("/guest/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(arcadeadmin.RequireGuestFeedback())
@@ -330,7 +330,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		userhandler.RequireActiveUser(),
 	)
 	api.GET("/user/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	api.GET("/user/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	api.GET("/user/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
 	api.POST("/user/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
 	api.PATCH("/user/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(4096))
 	api.GET("/support_feedback", arcadeadmin.ListSupportFeedback).Bind(

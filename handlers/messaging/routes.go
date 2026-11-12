@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/nativeauth"
 	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
 	"net/http"
 	"strconv"
@@ -18,7 +20,11 @@ import (
 
 const MaxBodyBytes = 3*15_000_000 + (1 << 20)
 
-func RegisterRoutes(se *core.ServeEvent) {
+func RegisterRoutes(se *core.ServeEvent, nativeClients ...nativeauth.Client) {
+	var firstPartyAuth []*hook.Handler[*core.RequestEvent]
+	if len(nativeClients) > 0 {
+		firstPartyAuth = append(firstPartyAuth, nativeauth.FirstPartyAuthentication(nativeClients))
+	}
 	review := se.Router.Group("/moderation/messages/reports").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
 	review.GET("", ReviewReports)
 	review.GET("/{id}", ReviewReport)
@@ -44,15 +50,15 @@ func RegisterRoutes(se *core.ServeEvent) {
 	guest.PATCH("/conversations/{id}/inquiry", Status).Bind(apis.BodyLimit(4096))
 	guest.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo)
 	api := se.Router.Group("/user").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	api.GET("/inquiry-preview", InquiryPreview)
-	api.GET("/conversations", List)
+	api.GET("/inquiry-preview", InquiryPreview).Bind(firstPartyAuth...)
+	api.GET("/conversations", List).Bind(firstPartyAuth...)
 	api.POST("/conversations", Create).Bind(apis.BodyLimit(MaxBodyBytes))
-	api.GET("/conversations/{id}", Get)
-	api.GET("/conversations/{id}/messages", History)
+	api.GET("/conversations/{id}", Get).Bind(firstPartyAuth...)
+	api.GET("/conversations/{id}/messages", History).Bind(firstPartyAuth...)
 	api.POST("/conversations/{id}/messages", Send).Bind(apis.BodyLimit(MaxBodyBytes))
 	api.PUT("/conversations/{id}/read", Read).Bind(apis.BodyLimit(4096))
 	api.PATCH("/conversations/{id}/inquiry", Status).Bind(apis.BodyLimit(4096))
-	api.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo)
+	api.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo).Bind(firstPartyAuth...)
 	api.GET("/inquiry-bots/arcade/{id}", GetArcadeBot)
 	api.PUT("/inquiry-bots/arcade/{id}", SetArcadeBot).Bind(apis.BodyLimit(65536))
 	api.GET("/messaging/preferences", Preferences)

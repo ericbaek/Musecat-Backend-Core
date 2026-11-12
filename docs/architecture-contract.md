@@ -2146,3 +2146,22 @@ is returned. Settings write no content revision, arcade changelog or XP. Native
 responses are no-store; invalid enabled Native bearers do not fall back to cookies.
 An empty client allowlist grants no Native identity. No APNs/device capability,
 subscription, withdrawal, raw REST, schema or migration is added.
+
+### Shared first-party messaging reads
+
+Configured Native sessions select only canonical conversation list, detail, message
+history, protected attachment and inquiry-preview GET operations. They use the
+same Messaging handlers, DTOs, current participant/inbox ACL and pagination as
+Web JWTs. DM has no staff override. Preview and reads do not create conversations,
+advance read cursors or infer sender/status capabilities. Attachment bytes remain
+private/no-store with exact conversation/message/file membership checks. Guest
+credentials and routes stay separate. Invalid enabled Native credentials fail
+closed; disabled allowlists grant no identity. No messaging write, SSE, preference,
+block, report, raw collection access, Native alias or schema change is introduced.
+
+Existing canonical `GET /user/feedback/thread` is also selected solely for the
+Web-compatible legacy-inquiry ID resolver. Clients read its authorized
+`conversationId`, then consume canonical Summary/MessagePage for capabilities and
+history. They do not infer sending/status rights from the compatibility DTO or
+scan every conversation to resolve an ID. Guest access is unchanged; no legacy
+Native alias or independent support store is restored.

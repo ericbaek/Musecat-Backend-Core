@@ -8348,6 +8348,7 @@ paths:
       summary: Read a private inquiry conversation (author, current scoped official, or strict staff)
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - in: query
           name: id
@@ -17061,7 +17062,7 @@ paths:
       tags: [Messaging]
       summary: Read an inquiry start reply without creating a room
       description: Explicit context only. Checks inbox availability and returns the current configuration revision. No conversations or messages are written.
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       parameters: [{"name": "context", "in": "query", "required": true, "schema": {"type": "string"}}, {"name": "inboxType", "in": "query", "required": true, "schema": {"type": "string", "enum": ["arcade", "team"]}}, {"name": "inboxId", "in": "query", "required": true, "schema": {"type": "string"}}]
       responses: {"200": {"description": "Read-only start reply", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InquiryBotPreview"}}}}, "400": {"description": "Invalid context or unavailable automation"}, "401": {"description": "Authentication required"}, "404": {"description": "Inbox unavailable"}}
   /guest/inquiry-preview:
@@ -17093,7 +17094,7 @@ paths:
       tags: ["Messaging"]
       summary: "List bounded authorized conversation summaries"
       description: "Active user only. Direct-message conversations appear only after their first message; opening an empty DM does not add it to either participant's list. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}, {"name": "requesterOnly", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Public contact entry: restrict results to inquiries created by this caller. Arcade admin dashboards omit this flag."}]
     post:
@@ -17109,7 +17110,7 @@ paths:
       tags: ["Messaging"]
       summary: "Get a conversation summary"
       description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
 
@@ -17118,7 +17119,7 @@ paths:
       tags: ["Messaging"]
       summary: "Read chronological history or sequence delta"
       description: "Exactly one cursor direction. Without a cursor returns latest messages. before pages allow up to 100; after pages up to 200. Explicit afterSequence=0 starts from sequence one. Follow non-null nextBeforeSequence/nextAfterSequence until null. No durable SSE replay is implied."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagePage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "beforeSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "afterSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}]
     post:
@@ -17155,7 +17156,7 @@ paths:
       tags: ["Messaging"]
       summary: "Read a protected conversation photo"
       description: "Current conversation ACL and exact file/message ownership required. Existing legacy files are served from their unchanged storage reference only after verifying legacy inquiry mapping. No public file token or redirect."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Protected image; Cache-Control private, no-store.", "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "messageId", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "file", "in": "path", "required": true, "schema": {"type": "string"}}]
 
@@ -19871,7 +19872,7 @@ x-musecat-joint-connection:
       tags: [Messaging]
       summary: Read an inquiry start reply without creating a room
       description: Explicit context only. Checks inbox availability and returns the current configuration revision. No conversations or messages are written.
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       parameters: [{"name": "context", "in": "query", "required": true, "schema": {"type": "string"}}, {"name": "inboxType", "in": "query", "required": true, "schema": {"type": "string", "enum": ["arcade", "team"]}}, {"name": "inboxId", "in": "query", "required": true, "schema": {"type": "string"}}]
       responses: {"200": {"description": "Read-only start reply", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/InquiryBotPreview"}}}}, "400": {"description": "Invalid context or unavailable automation"}, "401": {"description": "Authentication required"}, "404": {"description": "Inbox unavailable"}}
   /guest/inquiry-preview:
