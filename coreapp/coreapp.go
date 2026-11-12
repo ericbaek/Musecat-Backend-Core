@@ -230,24 +230,24 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	api.GET("/arcade/ranking", rankinghandler.ArcadeVisitRanking)
 	api.GET("/subway/map", subwayhandler.GetMap)
 	api.GET("/subway/map/file", subwayhandler.DownloadMapFile)
-	api.POST("/subway/map", subwayhandler.CreateMap).Bind(
+	api.POST("/subway/map", subwayhandler.CreateMap).Bind(firstPartyAuth...).Bind(
 		apis.BodyLimit(24<<20),
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	api.PUT("/subway/map", subwayhandler.UpdateMap).Bind(
+	api.PUT("/subway/map", subwayhandler.UpdateMap).Bind(firstPartyAuth...).Bind(
 		apis.BodyLimit(24<<20),
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	api.DELETE("/subway/map", subwayhandler.DeleteMap).Bind(
+	api.DELETE("/subway/map", subwayhandler.DeleteMap).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	api.GET("/subway/map/history", subwayhandler.ListMapHistory).Bind(
+	api.GET("/subway/map/history", subwayhandler.ListMapHistory).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),

@@ -9292,7 +9292,7 @@ paths:
     post:
       tags: [Moderator]
       summary: Create a subway map version
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9316,7 +9316,7 @@ paths:
     put:
       tags: [Moderator]
       summary: Update a subway map version
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9342,7 +9342,7 @@ paths:
     delete:
       tags: [Moderator]
       summary: Delete a subway map version
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - name: id
           in: query
@@ -9363,7 +9363,7 @@ paths:
     get:
       tags: [Moderator]
       summary: Get subway map version history
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - name: region
           in: query

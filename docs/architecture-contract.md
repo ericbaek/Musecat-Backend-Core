@@ -2230,3 +2230,16 @@ The same committed invalidation DTOs, private/no-store headers, 15-second heartb
 cancellation cleanup apply to both clients. No event history, Last-Event-ID replay,
 message content, new guest/delegated capability, Native alias, schema, migration or
 global bearer support is added. Preference/block/report routes remain unselected.
+
+### Canonical first-party subway version management
+
+Configured first-party native sessions authenticate only `GET /subway/map/history`
+and `POST|PUT|DELETE /subway/map` through the operation-scoped adapter. They use
+the same DTOs, handlers, active-account and developer/moderator guard as web JWTs.
+POST/PUT retain the 24 MiB request limit, each file's 5 MiB limit, MIME inspection,
+required display asset, and changelog validation. Omitted update fields and assets
+remain unchanged; hard-delete reveals the previous regional version. Public
+latest-map/file delivery, delegated account routes and other moderation operations
+are unchanged. Invalid/revoked native bearers fail closed, an empty client allowlist
+grants no native identity, and native responses remain no-store. No schema,
+migration, XP or arcade history change is introduced.
