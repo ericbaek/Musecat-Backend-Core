@@ -824,8 +824,11 @@ publication workflow, not this administrative correction.
 open/resolved report counts, verified visits respecting
 deployment aggregate policy, and cumulative page views. All totals exclude private
 arcades and include public closed venues. Page views deduplicate `event_group`
-across game-series rows and provide a daily UTC cumulative series from September
-30, 2026 through today, carrying the previous total through inactive days.
+across game-series rows. `page_view_count` retains the cumulative total since
+September 30, 2026. `page_views` contains exactly 30 daily UTC counts, from midnight
+29 days before today through today, with zero for inactive days. Dates before that
+window are never returned. `page_views_mode: "daily"` distinguishes this series from
+the former cumulative response, so clients can support the transition.
 
 `GET /arcades/updates` is the public Summary API: no query parameters are
 accepted, and at most six latest distinct-arcade blocks are returned. If the six
@@ -1384,6 +1387,32 @@ account even when authenticated, and ignores user query parameters. Guests can
 read guidance/status/history; opting in or cancelling still requires an active
 account through the existing authenticated `/user/notifications/aime` routes.
 
+
+## Achievement activity and XP feedback
+
+`GET /user/activity` includes `achievement_count` in each day and its totals.
+Only the requested author's active `achievement` posts with at least one photo
+count, grouped by their original `created` timestamp in the requested IANA timezone.
+Existing posts contribute without a backfill. Deleted posts, other flairs and empty
+media are excluded; edits do not move a post to another day. `total_count`, intensity
+and `max_daily_count` include this source. Activity counts actual qualifying rows,
+including posts beyond the XP cap; it never derives counts from the XP ledger.
+The existing author/flair/created index bounds the query; no schema migration is required.
+
+Achievement creation grants its actor 2 XP up to 10 XP per KST calendar day.
+Comments/replies and likes on other users' achievement content share a separate
+1 XP grant and 5 XP KST-day cap. Existing eligibility and stable event identities
+are unchanged. Self interactions, unlike/re-like and repeated likes cannot grant
+extra XP. Deleting content does not refund/reset those daily or durable identities.
+
+Successful POST post/comment and PUT like responses retain their existing top-level
+fields and optionally add `xp_feedback` using the common XP feedback contract.
+It is present only for a positive grant actually committed to the actor's ledger,
+with previous/new balances read inside the mutation transaction, never from the
+request's stale auth record. Caps, ineligible actors, self interactions, no-ops and
+duplicates omit the field. Reads, edits and deletes never include feedback. Content,
+XP, notification records and required state commit or roll back together; no external
+notification delivery occurs in that transaction.
 
 ## Achievement notifications
 

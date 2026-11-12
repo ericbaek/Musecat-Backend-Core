@@ -285,14 +285,14 @@ func boolField(fields map[string]any, key string) bool {
 	return value
 }
 
-func TestGetStats_CumulativeViewsAndReportStatus(t *testing.T) {
+func TestGetStats_DailyViewsAndReportStatus(t *testing.T) {
 	app := newArcadeTestApp(t)
 	_, user := createAuthUser(t, app)
 	public, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Public stats", Address: "A", Location: location{Lat: 37, Lon: 127}})
 	private, _ := seedArcade(t, app, user.Id, arcadeSeed{Name: "Private stats", Address: "B", Location: location{Lat: 37, Lon: 127}})
 	setArcadeVisibility(t, app, public, true, true)
 	setArcadeVisibility(t, app, private, false, false)
-	start := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	start := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -29)
 	for _, event := range []struct {
 		Arcade, Group, Type string
 		At                  time.Time
@@ -301,7 +301,10 @@ func TestGetStats_CumulativeViewsAndReportStatus(t *testing.T) {
 		{public, "samegroup", "page_view", start},
 		{public, "latergroup", "page_view", start.AddDate(0, 0, 2)},
 		{private, "privategroup", "page_view", start},
-		{public, "oldgroup", "page_view", start.AddDate(0, 0, -1)},
+		{public, "oldgroup", "page_view", time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)},
+		{public, "beforewindow", "page_view", start.Add(-time.Millisecond)},
+		{public, "today", "page_view", start.AddDate(0, 0, 29)},
+		{public, "future", "page_view", start.AddDate(0, 0, 30)},
 		{public, "directiongroup", "direction_click", start},
 	} {
 		insertStatsRecord(t, app, "arcade_analytics_event", map[string]any{"arcade": event.Arcade, "event_group": event.Group, "event_type": event.Type, "source": "direct"}, event.At)
@@ -318,9 +321,10 @@ func TestGetStats_CumulativeViewsAndReportStatus(t *testing.T) {
 		t.Fatalf("status %d", res.StatusCode)
 	}
 	var payload struct {
-		Views   int64 `json:"page_view_count"`
-		Ongoing int64 `json:"ongoing_flag_count"`
-		Solved  int64 `json:"solved_flag_count"`
+		Views   int64  `json:"page_view_count"`
+		Mode    string `json:"page_views_mode"`
+		Ongoing int64  `json:"ongoing_flag_count"`
+		Solved  int64  `json:"solved_flag_count"`
 		Days    []struct {
 			Date  string `json:"date"`
 			Count int64  `json:"count"`
@@ -329,10 +333,20 @@ func TestGetStats_CumulativeViewsAndReportStatus(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Views != 2 || payload.Ongoing != 1 || payload.Solved != 1 {
+	if payload.Views != 4 || payload.Mode != "daily" || payload.Ongoing != 1 || payload.Solved != 1 {
 		t.Fatalf("unexpected stats: %+v", payload)
 	}
-	if len(payload.Days) < 3 || payload.Days[0].Date != "2026-09-30" || payload.Days[0].Count != 1 || payload.Days[1].Count != 1 || payload.Days[2].Count != 2 {
-		t.Fatalf("unexpected cumulative series: %+v", payload.Days)
+	if len(payload.Days) != 30 {
+		t.Fatalf("expected exactly 30 dates, got %+v", payload.Days)
+	}
+	for index, day := range payload.Days {
+		wantDate := start.AddDate(0, 0, index).Format("2006-01-02")
+		var wantCount int64
+		if index == 0 || index == 2 || index == 29 {
+			wantCount = 1
+		}
+		if day.Date != wantDate || day.Count != wantCount {
+			t.Fatalf("day %d: got %+v, want date %s count %d", index, day, wantDate, wantCount)
+		}
 	}
 }

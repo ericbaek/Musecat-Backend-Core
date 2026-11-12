@@ -394,6 +394,33 @@ components:
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/CommunityComment'}}
         next_cursor: {type: string, description: Opaque older-page cursor; empty when exhausted.}
+    CommunityPostMutation:
+      allOf:
+        - {$ref: '#/components/schemas/CommunityPost'}
+        - type: object
+          properties:
+            xp_feedback:
+              allOf:
+                - {$ref: '#/components/schemas/XpFeedback'}
+              description: Present only when this committed mutation actually granted the actor XP; absent for caps, self interactions, duplicates and no-ops. Existing result fields stay at the top level.
+    CommunityCommentMutation:
+      allOf:
+        - {$ref: '#/components/schemas/CommunityComment'}
+        - type: object
+          properties:
+            xp_feedback:
+              allOf:
+                - {$ref: '#/components/schemas/XpFeedback'}
+              description: Present only when this committed mutation actually granted the actor XP; absent for caps, self interactions, duplicates and no-ops. Existing result fields stay at the top level.
+    CommunityLikeMutation:
+      allOf:
+        - {$ref: '#/components/schemas/CommunityLike'}
+        - type: object
+          properties:
+            xp_feedback:
+              allOf:
+                - {$ref: '#/components/schemas/XpFeedback'}
+              description: Present only when this committed mutation actually granted the actor XP; absent for caps, self interactions, duplicates and no-ops. Existing result fields stay at the top level.
     CommunityPostList:
       type: object
       required: [page, per_page, last_page, total, items]
@@ -553,7 +580,7 @@ components:
           type: string
     StatsResponse:
       type: object
-      required: [arcade_count, changelog_count, flag_count, flag_reaction_count, ongoing_flag_count, solved_flag_count, visit_count, page_view_count, page_views]
+      required: [arcade_count, changelog_count, flag_count, flag_reaction_count, ongoing_flag_count, solved_flag_count, visit_count, page_view_count, page_views, page_views_mode]
       properties:
         arcade_count:
           type: integer
@@ -568,10 +595,19 @@ components:
         ongoing_flag_count: {type: integer, format: int64}
         solved_flag_count: {type: integer, format: int64}
         visit_count: {type: integer, format: int64, description: Verified visits respecting deployment aggregate policy.}
-        page_view_count: {type: integer, format: int64}
+        page_view_count:
+          type: integer
+          format: int64
+          description: Total page views since September 30, 2026; independent of the daily series window.
+        page_views_mode:
+          type: string
+          enum: [daily]
+          description: Counts in page_views are daily values, not cumulative totals.
         page_views:
           type: array
-          description: Daily UTC cumulative distinct page-view event groups since 2026-09-30, including zero-activity days through today. Public arcades only, including closed venues.
+          minItems: 30
+          maxItems: 30
+          description: Daily distinct page-view event groups for today and the preceding 29 UTC dates. Counts are not cumulative. Inactive dates have zero counts; older dates are omitted. Public arcades only, including closed venues.
           items:
             type: object
             required: [date, count]
@@ -2096,7 +2132,7 @@ components:
           type: integer
     UserActivityTotals:
       type: object
-      required: [total_count, changelog_count, flag_count, legacy_ticket_count, attendance_count, max_daily_count]
+      required: [total_count, changelog_count, flag_count, legacy_ticket_count, attendance_count, achievement_count, max_daily_count]
       properties:
         total_count:
           type: integer
@@ -2108,11 +2144,14 @@ components:
           type: integer
         attendance_count:
           type: integer
+        achievement_count:
+          type: integer
+          description: Active achievement posts with at least one photo, grouped by original creation time in the requested timezone; independent of XP caps.
         max_daily_count:
           type: integer
     UserActivityDay:
       type: object
-      required: [date, total_count, level, changelog_count, flag_count, legacy_ticket_count, attendance_count]
+      required: [date, total_count, level, changelog_count, flag_count, legacy_ticket_count, attendance_count, achievement_count]
       properties:
         date:
           type: string
@@ -2132,6 +2171,9 @@ components:
           type: integer
         attendance_count:
           type: integer
+        achievement_count:
+          type: integer
+          description: Active achievement posts with at least one photo, grouped by original creation time in the requested timezone; independent of XP caps.
     UserActivityResponse:
       type: object
       required: [user, range, totals, days]
@@ -4071,7 +4113,7 @@ paths:
           description: Successful operation
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/CommunityComment'}
+              schema: {$ref: '#/components/schemas/CommunityCommentMutation'}
         '400': {description: Invalid input}
         '404': {description: Comment or post not found}
         '401': {description: Sign-in required}
@@ -4125,7 +4167,7 @@ paths:
           description: Authoritative current count and viewer state
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/CommunityLike'}
+              schema: {$ref: '#/components/schemas/CommunityLikeMutation'}
         '401': {description: Sign-in required}
         '403': {description: Inactive account}
         '404': {description: Target or parent post not active}
@@ -4156,7 +4198,7 @@ paths:
           description: Authoritative current count and viewer state
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/CommunityLike'}
+              schema: {$ref: '#/components/schemas/CommunityLikeMutation'}
         '401': {description: Sign-in required}
         '403': {description: Inactive account}
         '404': {description: Target or parent post not active}
@@ -5196,7 +5238,7 @@ paths:
           description: Original is public immediately. Translation is disabled for launch; an explicitly enabled prototype worker may translate after five minutes.
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/CommunityPost'}
+              schema: {$ref: '#/components/schemas/CommunityPostMutation'}
         '400':
           description: Invalid body, flair, or game series.
           content:
