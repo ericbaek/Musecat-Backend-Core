@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/communitymention"
+	"github.com/ericbaek/musecat-backend-core/service/usernotification"
+	"github.com/ericbaek/musecat-backend-core/service/xp"
 	"io"
 	"net/http"
 	"os"
@@ -45,11 +48,68 @@ var allowedFlairs = map[string]struct{}{
 }
 
 type postInput struct {
-	Title      string             `json:"title"`
-	Body       string             `json:"body"`
-	Flair      string             `json:"flair"`
-	GameSeries string             `json:"game_series"`
-	Photos     []*filesystem.File `json:"-"`
+	BodyDocument json.RawMessage `json:"body_document"`
+	document     communitymention.Node
+	Mentions     []communitymention.Mention `json:"mentions"`
+	Title        string                     `json:"title"`
+	Body         string                     `json:"body"`
+	Flair        string                     `json:"flair"`
+	GameSeries   string                     `json:"game_series"`
+	Photos       []*filesystem.File         `json:"-"`
+	PhotoOrder   []postPhotoReference       `json:"photo_order,omitempty"`
+}
+
+// A reference selects exactly one retained filename or zero-based upload index.
+type postPhotoReference struct {
+	Name   string `json:"name,omitempty"`
+	Upload *int   `json:"upload,omitempty"`
+}
+
+func finalPostPhotos(existing []string, input postInput) ([]any, error) {
+	result := make([]any, 0, MaxPostPhotos)
+	if input.PhotoOrder == nil {
+		for _, name := range existing {
+			result = append(result, name)
+		}
+		for _, file := range input.Photos {
+			result = append(result, file)
+		}
+	} else {
+		retained := map[string]bool{}
+		for _, name := range existing {
+			retained[name] = true
+		}
+		usedNames, usedUploads := map[string]bool{}, map[int]bool{}
+		for _, ref := range input.PhotoOrder {
+			if (ref.Name != "") == (ref.Upload != nil) {
+				return nil, fmt.Errorf("invalid_photo_order")
+			}
+			if ref.Upload != nil {
+				index := *ref.Upload
+				if index < 0 || index >= len(input.Photos) || usedUploads[index] {
+					return nil, fmt.Errorf("invalid_photo_order")
+				}
+				usedUploads[index] = true
+				result = append(result, input.Photos[index])
+			} else {
+				if !retained[ref.Name] || usedNames[ref.Name] {
+					return nil, fmt.Errorf("invalid_photo_order")
+				}
+				usedNames[ref.Name] = true
+				result = append(result, ref.Name)
+			}
+		}
+		if len(usedUploads) != len(input.Photos) {
+			return nil, fmt.Errorf("invalid_photo_order")
+		}
+	}
+	if len(result) > MaxPostPhotos {
+		return nil, fmt.Errorf("too_many_photos")
+	}
+	if input.Flair == "achievement" && len(result) == 0 {
+		return nil, fmt.Errorf("achievement_photo_required")
+	}
+	return result, nil
 }
 
 func RegisterRoutes(se *core.ServeEvent) { RegisterAccountRoutes(se.Router.RouterGroup) }
@@ -64,6 +124,8 @@ func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
+	auth.PUT("/post/view", ViewPost).Bind(apis.BodyLimit(1024))
+	auth.DELETE("/post/view", ViewPost).Bind(apis.BodyLimit(1024))
 	auth.POST("/post", CreatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
 	auth.PUT("/post", UpdatePost).Bind(apis.BodyLimit(MaxPostBodyBytes))
 	auth.DELETE("/post", DeletePost)
@@ -86,7 +148,7 @@ func CreatePost(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
 	}
-	if err := validatePostInput(re.App, input); err != nil {
+	if err := validatePostInput(re.App, &input); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "validation failed", "details": err.Error()})
 	}
 
@@ -105,7 +167,8 @@ func CreatePost(re *core.RequestEvent) error {
 	record.Set("author", re.Auth.Id)
 	record.Set("game_series", input.GameSeries)
 	record.Set("title", input.Title)
-	record.Set("body", input.Body)
+	record.Set("mentions", input.Mentions)
+	record.Set("body_document", input.document)
 	record.Set("original_locale", OriginalLocale)
 	record.Set("flair", input.Flair)
 	record.Set("status", "active")
@@ -117,7 +180,21 @@ func CreatePost(re *core.RequestEvent) error {
 	record.Set("translations", map[string]any{})
 	record.Set("photos", input.Photos)
 
-	if err := re.App.Save(record); err != nil {
+	if input.Title == "" && input.Body == "" {
+		record.Set("translation_status", "ready")
+		record.Set("translated_at", now)
+	}
+	if err := re.App.RunInTransaction(func(tx core.App) error {
+		if err := tx.Save(record); err != nil {
+			return err
+		}
+		if record.GetString("flair") == "achievement" {
+			if err := xp.AwardCommunityTx(tx, re.Auth.Id, "post", record.Id, now); err != nil {
+				return err
+			}
+		}
+		return usernotification.NotifyMentionsTx(tx, record, re.Auth.Id)
+	}); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to create community post", "details": err.Error()})
 	}
 	return servePost(re, record, OriginalLocale, http.StatusCreated)
@@ -137,7 +214,7 @@ func UpdatePost(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid JSON body", "details": err.Error()})
 	}
-	if err := validatePostInput(re.App, input); err != nil {
+	if err := validatePostInput(re.App, &input); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "validation failed", "details": err.Error()})
 	}
 
@@ -155,20 +232,27 @@ func UpdatePost(re *core.RequestEvent) error {
 			return fmt.Errorf("edit_window_closed")
 		}
 
-		if input.Flair == "achievement" && len(record.GetStringSlice("photos"))+len(input.Photos) == 0 {
-			return fmt.Errorf("achievement_photo_required")
+		photos, err := finalPostPhotos(record.GetStringSlice("photos"), input)
+		if err != nil {
+			return err
 		}
-
+		document := any(input.document)
+		beforeMentions, _ := json.Marshal(communitymention.Read(record))
+		nextMentions := input.Mentions
+		if nextMentions == nil {
+			nextMentions = []communitymention.Mention{}
+		}
+		afterMentions, _ := json.Marshal(nextMentions)
+		if len(input.BodyDocument) == 0 && communitymention.Body(record) == input.Body && string(beforeMentions) == string(afterMentions) {
+			document = postDocument(record)
+		}
+		record.Set("body_document", document)
 		record.Set("game_series", input.GameSeries)
 		record.Set("title", input.Title)
-		record.Set("body", input.Body)
+		record.Set("mentions", input.Mentions)
 		record.Set("flair", input.Flair)
-		if len(input.Photos) > 0 {
-			record.Set("photos+", input.Photos)
-		}
-		if len(record.Original().GetStringSlice("photos"))+len(input.Photos) > MaxPostPhotos {
-			return fmt.Errorf("too_many_photos")
-		}
+		record.Set("photos", photos)
+
 		record.Set("translation_status", "pending")
 		record.Set("translation_attempts", 0)
 		record.Set("translation_started_at", "")
@@ -176,7 +260,14 @@ func UpdatePost(re *core.RequestEvent) error {
 		record.Set("translation_error", "")
 		record.Set("translations", map[string]any{})
 		record.Set("original_hash", contentHash(input.Title, input.Body))
+		if input.Title == "" && input.Body == "" {
+			record.Set("translation_status", "ready")
+			record.Set("translated_at", now)
+		}
 		if err := tx.Save(record); err != nil {
+			return err
+		}
+		if err := usernotification.NotifyMentionsTx(tx, record, re.Auth.Id); err != nil {
 			return err
 		}
 		updated = record
@@ -188,6 +279,8 @@ func UpdatePost(re *core.RequestEvent) error {
 			return re.JSON(http.StatusNotFound, map[string]any{"error": "community post not found"})
 		case "forbidden":
 			return re.JSON(http.StatusForbidden, map[string]any{"error": "only the author can edit this post"})
+		case "invalid_photo_order":
+			return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid photo_order"})
 		case "achievement_photo_required":
 			return re.JSON(http.StatusBadRequest, map[string]any{"error": "achievement posts require at least one photo"})
 		case "too_many_photos":
@@ -280,6 +373,7 @@ func ListPosts(re *core.RequestEvent) error {
 	filter := "status = 'active'"
 	params := dbx.Params{}
 	countFilter := dbx.And(dbx.HashExp{"status": "active"})
+	gameFacetFilter := dbx.And(dbx.HashExp{"status": "active"})
 	series := re.Request.URL.Query()["game_series"]
 	if len(series) > 50 {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "at most 50 game series are allowed"})
@@ -314,6 +408,7 @@ func ListPosts(re *core.RequestEvent) error {
 		filter += " && " + name + " = {:" + name + "}"
 		params[name] = value
 		countFilter = dbx.And(countFilter, dbx.HashExp{name: value})
+		gameFacetFilter = dbx.And(gameFacetFilter, dbx.HashExp{name: value})
 	}
 	if raw := re.Request.URL.Query().Get("has_images"); raw != "" {
 		if raw != "true" {
@@ -321,20 +416,25 @@ func ListPosts(re *core.RequestEvent) error {
 		}
 		filter += " && photos:length > 0"
 		countFilter = dbx.And(countFilter, dbx.NewExp("json_array_length(photos) > 0"))
+		gameFacetFilter = dbx.And(gameFacetFilter, dbx.NewExp("json_array_length(photos) > 0"))
 	}
 
 	total, err := re.App.CountRecords(CollectionPost, countFilter)
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count community posts", "details": err.Error()})
 	}
-	records, err := re.App.FindRecordsByFilter(
-		CollectionPost,
-		filter,
-		"-created,-id",
-		perPage,
-		(page-1)*perPage,
-		params,
-	)
+	sort := re.Request.URL.Query().Get("sort")
+	if sort != "" && sort != "newest" && sort != "popular" {
+		return re.JSON(http.StatusBadRequest, map[string]any{"error": "invalid sort"})
+	}
+	var records []*core.Record
+	if sort == "popular" {
+		err = re.App.RecordQuery(CollectionPost).AndWhere(countFilter).
+			OrderBy("(SELECT COUNT(*) FROM community_post_like WHERE post = community_post.id) DESC", "created DESC", "id DESC").
+			Limit(int64(perPage)).Offset(int64((page - 1) * perPage)).All(&records)
+	} else {
+		records, err = re.App.FindRecordsByFilter(CollectionPost, filter, "-created,-id", perPage, (page-1)*perPage, params)
+	}
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to list community posts", "details": err.Error()})
 	}
@@ -342,13 +442,24 @@ func ListPosts(re *core.RequestEvent) error {
 	if err != nil {
 		return err
 	}
+	var gameRows []struct {
+		ID string `db:"game_series"`
+	}
+	if err := re.App.DB().Select("game_series").Distinct(true).From(CollectionPost).Where(gameFacetFilter).AndWhere(dbx.NewExp("game_series != ''")).OrderBy("game_series").All(&gameRows); err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to list community games"})
+	}
+	gameIDs := make([]string, 0, len(gameRows))
+	for _, row := range gameRows {
+		gameIDs = append(gameIDs, row.ID)
+	}
+
 	privateSocialResponse(re)
 	lastPage := 0
 	if total > 0 {
 		lastPage = int((total + int64(perPage) - 1) / int64(perPage))
 	}
 	return re.JSON(http.StatusOK, map[string]any{
-		"page": page, "per_page": perPage, "last_page": lastPage, "total": total, "items": items,
+		"page": page, "per_page": perPage, "last_page": lastPage, "total": total, "items": items, "game_series_ids": gameIDs,
 	})
 }
 
@@ -360,6 +471,17 @@ func decodePostInput(re *core.RequestEvent) (postInput, error) {
 		}
 		input.Title = re.Request.FormValue("title")
 		input.Body = re.Request.FormValue("body")
+		if values, ok := re.Request.MultipartForm.Value["body_document"]; ok {
+			if len(values) != 1 {
+				return input, fmt.Errorf("invalid body_document")
+			}
+			input.BodyDocument = json.RawMessage(values[0])
+		}
+		if values, ok := re.Request.MultipartForm.Value["mentions"]; ok {
+			if len(values) != 1 || json.Unmarshal([]byte(values[0]), &input.Mentions) != nil {
+				return input, fmt.Errorf("invalid mentions")
+			}
+		}
 		input.Flair = re.Request.FormValue("flair")
 		input.GameSeries = re.Request.FormValue("game_series")
 		files, err := re.FindUploadedFiles("photos")
@@ -367,11 +489,32 @@ func decodePostInput(re *core.RequestEvent) (postInput, error) {
 			return input, err
 		}
 		input.Photos = files
+		if values, exists := re.Request.MultipartForm.Value["photo_order"]; exists {
+			if len(values) != 1 {
+				return input, fmt.Errorf("invalid photo_order")
+			}
+			decoder := json.NewDecoder(strings.NewReader(values[0]))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&input.PhotoOrder); err != nil || input.PhotoOrder == nil {
+				return input, fmt.Errorf("invalid photo_order")
+			}
+		}
 	} else if err := json.NewDecoder(io.LimitReader(re.Request.Body, 1<<20)).Decode(&input); err != nil {
 		return input, err
 	}
+	if len(input.BodyDocument) > 0 {
+		doc, body, mentions, err := communitymention.ParseDocument(input.BodyDocument)
+		if err != nil {
+			return input, err
+		}
+		input.document = doc
+		input.Body = body
+		input.Mentions = mentions
+	}
 	input.Title = strings.TrimSpace(input.Title)
-	input.Body = strings.TrimSpace(input.Body)
+	if len(input.Mentions) == 0 && len(input.BodyDocument) == 0 {
+		input.Body = strings.TrimSpace(input.Body)
+	}
 	input.Flair = strings.ToLower(strings.TrimSpace(input.Flair))
 	input.GameSeries = strings.TrimSpace(input.GameSeries)
 	if input.Flair == "" {
@@ -380,11 +523,21 @@ func decodePostInput(re *core.RequestEvent) (postInput, error) {
 	return input, nil
 }
 
-func validatePostInput(app core.App, input postInput) error {
+func validatePostInput(app core.App, input *postInput) error {
+	if err := communitymention.Validate(app, input.Body, input.Mentions); err != nil {
+		return err
+	}
+	if len(input.BodyDocument) == 0 {
+		input.document = communitymention.DocumentFromText(input.Body, input.Mentions)
+		raw, _ := json.Marshal(input.document)
+		if _, _, _, err := communitymention.ParseDocument(raw); err != nil {
+			return err
+		}
+	}
 	if err := validatePhotos(input.Photos, MaxPostPhotos); err != nil {
 		return err
 	}
-	if input.Body == "" {
+	if strings.TrimSpace(input.Body) == "" && input.Flair != "achievement" {
 		return fmt.Errorf("body is required")
 	}
 	if len([]rune(input.Body)) > 10000 {
@@ -395,6 +548,9 @@ func validatePostInput(app core.App, input postInput) error {
 	}
 	if _, ok := allowedFlairs[input.Flair]; !ok {
 		return fmt.Errorf("flair is invalid")
+	}
+	if input.Flair == "achievement" && input.GameSeries == "" {
+		return fmt.Errorf("game_series is required for achievements")
 	}
 	if input.GameSeries != "" {
 		if _, err := app.FindRecordById("game_series", input.GameSeries); err != nil {
@@ -407,7 +563,7 @@ func validatePostInput(app core.App, input postInput) error {
 func buildPostResponse(app core.App, record *core.Record, requested string) map[string]any {
 	authorName := record.GetString("author")
 	title := record.GetString("title")
-	body := record.GetString("body")
+	body := communitymention.Body(record)
 	servedLocale := OriginalLocale
 	translated := false
 	if translationsPublic() && requested != OriginalLocale && record.GetString("translation_status") == "ready" {
@@ -425,6 +581,8 @@ func buildPostResponse(app core.App, record *core.Record, requested string) map[
 		"game_series":        record.GetString("game_series"),
 		"title":              title,
 		"body":               body,
+		"mentions":           communitymention.Read(record),
+		"body_document":      postDocument(record),
 		"flair":              record.GetString("flair"),
 		"photos":             append([]string{}, record.GetStringSlice("photos")...),
 		"locale":             servedLocale,
@@ -473,7 +631,17 @@ func requestedLocale(raw string) (string, error) {
 	}
 }
 
+// TranslationsEnabled reports whether the optional community translation runtime
+// is explicitly enabled. It defaults off independently of provider credentials.
+func TranslationsEnabled() bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv("MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED")))
+	return value == "1" || value == "true" || value == "yes"
+}
+
 func translationsPublic() bool {
+	if !TranslationsEnabled() {
+		return false
+	}
 	value := strings.ToLower(strings.TrimSpace(os.Getenv("MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC")))
 	return value == "1" || value == "true" || value == "yes"
 }
@@ -502,3 +670,5 @@ func contentHash(title, body string) string {
 	sum := sha256.Sum256([]byte(title + "\x00" + body))
 	return hex.EncodeToString(sum[:])
 }
+
+func postDocument(record *core.Record) any { return communitymention.BodyDocument(record) }

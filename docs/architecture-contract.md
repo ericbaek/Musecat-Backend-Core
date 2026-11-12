@@ -134,21 +134,36 @@ Its raw PocketBase REST rules are locked; clients use only `GET /community/posts
   validated result or retry state. Source hashes prevent stale results from
   overwriting a concurrently changed post.
 - Translation retries are bounded to five attempts. Provider failures remain
-  visible only as translation status while the Korean original stays readable.
-- `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC` defaults off. Until explicitly
-  enabled, `locale=en-US|ja-JP` falls back to the Korean original even when
+  represented only in API translation metadata while the original stays readable;
+  the launch UI does not display translation state.
+- `MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED` defaults off for launch. Executables
+  skip translator setup and cron registration while disabled, independently of
+  a shared `OPENAI_API_KEY`. Explicitly injected prototype workers remain callable.
+- `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC` also defaults off and requires runtime
+  enablement. Until both flags are explicitly enabled, `locale=en-US|ja-JP`
+  falls back to the Korean original even when
   translations are ready. This allows translation quality to be verified
   before the non-Korean experience is launched.
 - Translation providers are selected by the executable and injected into the
   worker. The reference runner reads server environment variables; reusable
-  OpenAI is the only translation adapter; `OPENAI_API_KEY` selects availability.
+  OpenAI is the only translation adapter; explicit runtime enablement and
+  `OPENAI_API_KEY` together select availability.
   The default model is `gpt-6-luna` with reasoning effort `none` (`low` is optional). Prompts preserve official arcade,
   game, cabinet, version, product, username, URL, price, and mention values and
   may include an operator-maintained Musecat glossary.
 
-Community achievement posts require at least one attached photo. Creation rejects
-text-only achievements with 400. Updates count retained and newly attached photos
-inside the author mutation transaction and reject a photo-less conversion with 400.
+Community achievement posts require a valid game series and at least one attached
+photo; their body is optional. Other flairs still require a nonblank body. Updates
+validate the final retained/uploaded photo set inside the author transaction.
+Optional `photo_order` selects retained filenames or upload indices in final order;
+omission retains the legacy append behavior. Invalid, duplicate, foreign, omitted
+upload references or a photo-less achievement return 400 without changing the post.
+The five-minute deadline never extends. Empty title/body content is ready without
+calling a translation provider; adding text queues the usual translation flow.
+`game_series_ids` lists distinct games across the author/flair/image scope before
+game filtering and pagination, so profile pills include games beyond page one.
+`sort=newest|popular` applies before pagination; popular uses all-time like count,
+created time and ID descending. Responses remain private/no-store with viewer state.
 
 ### Community conversations and likes
 
@@ -1369,4 +1384,43 @@ account even when authenticated, and ignores user query parameters. Guests can
 read guidance/status/history; opting in or cancelling still requires an active
 account through the existing authenticated `/user/notifications/aime` routes.
 
+
+## Achievement notifications
+
+Community mutations reuse `user_notification` and its device outbox atomically.
+`community_like` events are unique per recipient/post/actor, never enqueue device
+push, and survive unlike/re-like without resetting read state. Only active likes
+appear. Top-level comments notify the achievement author; replies notify the
+specific `reply_to` comment author. Self events and withdrawn recipients are excluded.
+`community_comment` groups by recipient/post; `community_reply` additionally groups
+by the replied-to comment. Latest live event selection happens before pagination
+and unread counting. Read acknowledges only that group's events through the
+selected event, preserving newer arrivals. `groupKey` is stable across new events.
+Retracted posts/comments disappear from inbox and queued delivery eligibility.
+
+Full reuses its existing retry/expiry/device pipeline: the first unseen comment
+push is immediate, then each recipient/post/device has a ten-minute cooldown
+started only by a successful send. Queued bursts retain only the latest live
+unread event. Each device is independent. No push is generated for likes.
+`PUT/DELETE /community/post/view?id=...` accepts a caller-owned random `session`
+(up to 64 alphanumeric/hyphen characters, body at most 1 KiB). Active account
+required. PUT leases a visible detail for 45 seconds; clients renew every 20
+seconds only while visible. DELETE releases just that session. Concurrent tabs
+remain independent; expired leases are cleaned in bounded batches. Reading a
+detail marks that account's post notifications read. Creation and delivery both
+suppress pushes while any lease is live; inbox history remains available.
+
+Notification links use `/community/{post}` or
+`/community/{post}?comment={comment}#comment-{comment}`. Public original comment
+reads allow the Web detail to fetch a linked older comment/thread outside the
+first list page, reject cross-post targets, and focus the exact comment.
+
+### Achievement caption mentions
+
+`community_post.mentions` stores up to ten ordered UTF-16 ranges over the plain-text body, with kind, stable target ID and canonical label. The server verifies @label text, active users and public arcades; no HTML is accepted. User mentions create one durable `community_mention` inbox/outbox event per post and recipient in the post transaction. Self-mentions do not notify; edits and removal/readdition do not duplicate events. Removed mentions and inactive posts invalidate visibility and queued pushes. Arcade mentions create links without notifying owners. The ranges are a server-derived projection of canonical mention nodes for notification visibility checks.
+
+`body_document` is the only stored caption source from launch. Its schema accepts paragraphs, text, hardBreak and stable-ID mention nodes, with limits of 64 KiB, 500 paragraphs, 2,000 inline nodes, 10,000 text characters and ten mentions. Formatting marks, HTML, embeds, links and arbitrary CSS are rejected. The response-only `body` and UTF-16 mention ranges are derived on the server. Legacy body/mention writes remain an input adapter; game/photo-only legacy edits preserve the existing document. The guarded Full forward migration converts and validates every row atomically before requiring the document and removing the legacy body column, preserving text, photos, timestamps, edit deadlines and event identities. Recovery uses the complete database/files snapshot. Author deadlines are unchanged and public translation remains disabled.
+
 Developers may read another account's bot console through `GET /user/bot-keys?user=<id>` and `/user/changelog?user=<id>&bot=all|<key-id>`. Bot names remain owner-only; foreign key metadata omits the name and never includes secrets. Other roles cannot inspect foreign consoles. Issuance and revocation remain scoped to the authenticated owner. Public user-history summaries retain redacted bot attribution for activity badges without exposing edit details.
+
+Community post and comment uploads validate JPEG/PNG/WebP/GIF metadata before saving. Each photo is limited to 10 MiB and 64,000,000 pixels. Header-only dimension validation avoids allocating the decoded image; ordinary 48MP photos remain supported. The pixel bound complements optimized thumbnails and does not re-encode the original.

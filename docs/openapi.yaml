@@ -26,7 +26,7 @@ tags:
   - name: Users
     description: Public and authenticated user profile endpoints.
   - name: Community
-    description: Community posts and delayed cached translations.
+    description: Community achievement posts. Automatic translation and translated output are disabled for launch; prototype use requires MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED and publication also requires MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC.
   - name: Arcade Mutations
     description: Authenticated arcade editing endpoints.
 components:
@@ -233,17 +233,25 @@ components:
           description: Empty for a permanent restriction; otherwise a UTC date-time.
         permanent:
           type: boolean
+    CommunityPostMention:
+      type: object
+      required: [kind, id, label, start, end]
+      properties:
+        kind: {type: string, enum: [arcade, user]}
+        id: {type: string, description: Stable public arcade or user record ID.}
+        label: {type: string, description: Canonical arcade name or username.}
+        start: {type: integer, minimum: 0, description: Inclusive UTF-16 offset in body.}
+        end: {type: integer, minimum: 1, description: Exclusive UTF-16 offset in body.}
     CommunityPostInput:
       type: object
-      required: [body]
       properties:
         title:
           type: string
           maxLength: 200
         body:
           type: string
-          minLength: 1
           maxLength: 10000
+          description: Optional for achievements; other flairs require nonblank text. Legacy body input is converted into the canonical body_document; the response derives an empty string for an omitted achievement description.
         flair:
           type: string
           enum: [achievement, question, tip, news, event, art, chitchat]
@@ -252,10 +260,34 @@ components:
           type: array
           maxItems: 8
           items: {type: string, format: binary}
-          description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes. Achievement posts require at least one photo; updates count retained photos.
+          description: Multipart only; each JPEG/PNG/WebP/GIF is at most 10485760 bytes and 64000000 pixels; image headers are checked before decoding thumbnails. Achievement posts require at least one photo; updates count retained photos.
+        body_document:
+          type: object
+          description: Tiptap JSON launch schema (doc/paragraph/text/hardBreak/mention; no formatting marks at launch). At most 65536 bytes and 2000 inline nodes. When provided, body and mentions are derived on the server. Legacy plain-text writes are converted before storage.
+        mentions:
+          type: array
+          maxItems: 10
+          items: {$ref: '#/components/schemas/CommunityPostMention'}
+          description: Ordered, non-overlapping ranges matching @label. Multipart encodes JSON. Omission clears mentions on edit. Server validates active users and public arcades. Body whitespace is preserved when mentions exist.
+        photo_order:
+          type: array
+          maxItems: 8
+          description: Update only. Ordered final photos; each entry selects a retained filename or a zero-based photos upload index. Multipart encodes this array as JSON. Omit to retain existing photos and append uploads. Every upload must be referenced exactly once; retained names must belong to the post and cannot repeat. Achievements retain at least one photo.
+          items:
+            oneOf:
+              - type: object
+                additionalProperties: false
+                required: [name]
+                properties:
+                  name: {type: string, minLength: 1}
+              - type: object
+                additionalProperties: false
+                required: [upload]
+                properties:
+                  upload: {type: integer, minimum: 0}
         game_series:
           type: string
-          description: Optional canonical game_series id.
+          description: Canonical game_series id; required for achievements.
     CommunityPost:
       type: object
       required: [id, photos, author, game_series, title, body, flair, locale, requested_locale, source_locale, translated, translation_status, editable_until, created, updated]
@@ -270,7 +302,9 @@ components:
         game_series: {type: string}
         photos: {type: array, items: {type: string}, maxItems: 8, description: Ordered stored filenames.}
         title: {type: string}
-        body: {type: string}
+        body: {type: string, description: Server-derived plain text for preview/search compatibility.}
+        body_document: {type: object, description: Required canonical Tiptap JSON after the guarded Full migration; body is a response-only text projection.}
+        mentions: {type: array, items: {$ref: '#/components/schemas/CommunityPostMention'}}
         flair: {type: string, enum: [achievement, question, tip, news, event, art, chitchat]}
         locale: {type: string, enum: [ko-KR, en-US, ja-JP]}
         requested_locale: {type: string, enum: [ko-KR, en-US, ja-JP]}
@@ -335,6 +369,11 @@ components:
       type: object
       required: [page, per_page, last_page, total, items]
       properties:
+        game_series_ids:
+          type: array
+          items: {type: string}
+          description: Distinct games across all active posts matching author, flair and has_images, before game filtering and pagination. Used for profile game pills.
+
         page: {type: integer}
         per_page: {type: integer}
         last_page: {type: integer}
@@ -3450,6 +3489,50 @@ components:
     InquiryBotConfig: {"type":"object","properties":{"enabled":{"type":"boolean"},"start":{"type":"string"},"nodes":{"type":"array","maxItems":16,"items":{"$ref":"#/components/schemas/InquiryBotNode"}}},"required":["enabled","start","nodes"]}
     InquiryBotPreview: {"type": "object", "required": ["text", "choices", "revision", "createdAt"], "properties": {"text": {"type": "string"}, "choices": {"type": "array", "items": {"$ref": "#/components/schemas/InquiryBotChoice"}}, "revision": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"}}}
 paths:
+  /community/post/view:
+    put:
+      summary: Lease the signed-in account's currently visible achievement detail
+      description: Private no-store. Body limit 1 KiB. The 45-second session lease suppresses push and marks this account's post events read. Renew every 20 seconds only while visible. No other account's presence is exposed.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session]
+              properties:
+                session: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9-]+$'}
+      responses:
+        '200': {description: Caller-owned view lease renewed; no credentials or other views returned}
+        '400': {description: Invalid session}
+        '401': {description: Authentication required}
+        '403': {description: Active account required}
+        '404': {description: Post not active}
+        '413': {description: Body exceeds 1 KiB}
+    delete:
+      summary: Release only the caller's specified achievement view session
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session]
+              properties:
+                session: {type: string, minLength: 1, maxLength: 64, pattern: '^[a-zA-Z0-9-]+$'}
+      responses:
+        '200': {description: Lease released idempotently; other tabs unaffected}
+        '400': {description: Invalid session}
+        '401': {description: Authentication required}
+        '403': {description: Active account required}
+        '404': {description: Post not active}
+        '413': {description: Body exceeds 1 KiB}
   /community/comments:
     get:
       tags: [Community]
@@ -4441,6 +4524,10 @@ paths:
       tags: [Community]
       summary: List immediately public community posts
       parameters:
+        - name: sort
+          in: query
+          schema: {type: string, enum: [newest, popular], default: newest}
+          description: Popular sorts all filtered records by total likes descending, then created descending and ID descending, before pagination. Newest sorts created descending then ID descending.
         - name: game_series
           in: query
           style: form
@@ -4464,7 +4551,7 @@ paths:
         - name: locale
           in: query
           schema: {type: string, enum: [ko-KR, en-US, ja-JP], default: ko-KR}
-          description: Requested display locale. Non-Korean variants fall back to ko-KR until translation publication is enabled.
+          description: Requested display locale. Launch reads return the original; cached variants require both MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED and MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC.
         - name: page
           in: query
           schema: {type: integer, minimum: 1, default: 1}
@@ -4501,7 +4588,7 @@ paths:
           schema: {type: string, enum: [ko-KR, en-US, ja-JP], default: ko-KR}
       responses:
         '200':
-          description: Active post, localized only when translation publication is enabled and ready.
+          description: Active post. Launch reads serve the original; cached localization requires both translation runtime and publication flags and a ready result.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/CommunityPost'}
@@ -4529,7 +4616,7 @@ paths:
             schema: {$ref: '#/components/schemas/CommunityPostInput'}
       responses:
         '201':
-          description: Korean original is public immediately; translation is scheduled five minutes later.
+          description: Original is public immediately. Translation is disabled for launch; an explicitly enabled prototype worker may translate after five minutes.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/CommunityPost'}
@@ -7534,7 +7621,7 @@ paths:
   /user/notifications:
     get:
       summary: List the authenticated user's notifications
-      description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. The durable arcade_setup notice remains visible to current active exact arcade_owner accounts regardless of saved inquiry/report modes; reading it never changes settings. Does not expose endpoints or subscription credentials.
+      description: Active account required. Private, no-store inbox with up to 20 visible entries, newest first. Rechecks source visibility and current arcade management rights. Community events group before pagination and unread counting; likes never push, and comments/replies use a ten-minute per-post/device push cooldown. The durable arcade_setup notice remains visible to current active exact arcade_owner accounts regardless of saved inquiry/report modes; reading it never changes settings. Does not expose endpoints or subscription credentials.
       security: [{bearerAuth: []}]
       parameters:
         - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}, description: Announcement title/summary language and audience filter; message team names and photo-only previews also use this locale.}
@@ -7555,7 +7642,8 @@ paths:
                       required: [id, kind, read, created, arcadeName, gameName, message, reaction, url]
                       properties:
                         id: {type: string}
-                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement]}
+                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement, community_like, community_comment, community_reply]}
+                        groupKey: {type: string, description: Stable community grouping identity across new event IDs.}
                         read: {type: boolean}
                         created: {type: string}
                         arcadeName: {type: string}
@@ -7563,7 +7651,7 @@ paths:
                         title: {type: string, description: Localized announcement title or message sender identity.}
                         message: {type: string}
                         reaction: {type: string}
-                        url: {type: string, description: "Server-generated relative deep link. Announcements open /community/updates?announcement=id, feedback opens /updates/feedback?thread=id, and arcade_setup resolves current ownership to /arcade/id?setup=dashboard (legacy redirect fallback)."}
+                        url: {type: string, description: "Server-generated relative deep link. Announcements open /community/updates?announcement=id, feedback opens /updates/feedback?thread=id, and arcade_setup resolves current ownership to /arcade/id?setup=dashboard (legacy redirect fallback). Community events open /community/postId or /community/postId?comment=commentId#comment-commentId."}
                   unread: {type: integer, minimum: 0}
                   next: {type: string, description: Empty at the end of the inbox.}
         '401': {description: Authentication required.}
@@ -7582,7 +7670,7 @@ paths:
                 id: {type: string}
                 all: {type: boolean}
       responses:
-        '200': {description: 'Own notifications marked read. A message notification acknowledges earlier events in that conversation through its message sequence only; newer arrivals remain unread. A foreign id cannot modify another account.'}
+        '200': {description: 'Own notifications marked read. A message notification acknowledges earlier events in that conversation through its message sequence only; newer arrivals remain unread. Community group reads acknowledge only events through the selected event; newer arrivals remain unread. A foreign id cannot modify another account.'}
         '400': {description: Notification id or all=true required.}
         '401': {description: Authentication required.}
         '403': {description: Active account required.}

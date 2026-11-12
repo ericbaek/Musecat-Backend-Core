@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/communitymention"
 	"image"
 	"image/png"
 	"io"
@@ -198,6 +199,12 @@ func TestCommunityPost_OriginalIsImmediateAndTranslationPublishesLater(t *testin
 	}
 
 	t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC", "true")
+	t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED", "false")
+	disabled := decodeBody(t, communityRequest(t, app, http.MethodGet, "/community/post?id="+id+"&locale=ja-JP", "", ""))
+	if disabled["locale"] != "ko-KR" || disabled["translated"] != false {
+		t.Fatalf("runtime-disabled translations must remain original even with publication enabled: %#v", disabled)
+	}
+	t.Setenv("MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED", "true")
 	after := communityRequest(t, app, http.MethodGet, "/community/post?id="+id+"&locale=ja-JP", "", "")
 	afterPayload := decodeBody(t, after)
 	if afterPayload["locale"] != "ja-JP" || afterPayload["translated"] != true {
@@ -399,7 +406,7 @@ func TestCommunityPost_AuthorMutationsAndDeletion(t *testing.T) {
 	}
 	res.Body.Close()
 	record, _ = app.FindRecordById(community.CollectionPost, id)
-	if record.GetString("editable_until") != deadline || record.GetString("body") != "수정된 본문" {
+	if record.GetString("editable_until") != deadline || communitymention.Body(record) != "수정된 본문" {
 		t.Fatal("update must preserve fixed edit deadline")
 	}
 	record.Set("editable_until", time.Now().Add(-time.Hour))
@@ -553,6 +560,8 @@ func communityPhotoRequest(t *testing.T, app *tests.TestApp, token, flair string
 	writer := multipart.NewWriter(&body)
 	writer.WriteField("body", "이미지 업적 테스트")
 	writer.WriteField("flair", flair)
+	series := achievementSeries(t, app)
+	writer.WriteField("game_series", series.Id)
 	for i, data := range files {
 		part, err := writer.CreateFormFile("photos", fmt.Sprintf("photo%d.png", i))
 		if err != nil {
@@ -624,7 +633,7 @@ func TestCommunityPost_MultiplePhotosAndAchievementGallery(t *testing.T) {
 	if response.StatusCode != 200 || payload["total"] != float64(1) || payload["items"].([]any)[0].(map[string]any)["id"] != id {
 		t.Fatalf("gallery: %d %#v", response.StatusCode, payload)
 	}
-	response = communityRequest(t, app, http.MethodPut, "/community/post?id="+id, `{"body":"사진은 그대로 유지","flair":"achievement"}`, token)
+	response = communityRequest(t, app, http.MethodPut, "/community/post?id="+id, fmt.Sprintf(`{"body":"사진은 그대로 유지","flair":"achievement","game_series":%q}`, achievementSeries(t, app).Id), token)
 	payload = decodeBody(t, response)
 	if response.StatusCode != 200 || len(payload["photos"].([]any)) != 8 {
 		t.Fatalf("edit: %d %#v", response.StatusCode, payload)
@@ -669,7 +678,7 @@ func TestCommunityPost_RejectTextOnlyAchievementUpdate(t *testing.T) {
 		t.Fatalf("text-only achievement update accepted: %d", response.StatusCode)
 	}
 	record, err := app.FindRecordById(community.CollectionPost, id)
-	if err != nil || record.GetString("flair") != "chitchat" || record.GetString("body") != "사진 없는 잡담" {
+	if err != nil || record.GetString("flair") != "chitchat" || communitymention.Body(record) != "사진 없는 잡담" {
 		t.Fatalf("rejected update changed post: %v", err)
 	}
 }

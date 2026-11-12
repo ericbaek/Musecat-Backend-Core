@@ -6,6 +6,7 @@ English and Japanese variants after a fixed five-minute edit window.
 ## Configuration
 
 ```dotenv
+MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED=false
 OPENAI_API_KEY=your-openai-api-key
 MUSECAT_TRANSLATION_MODEL=gpt-6-luna
 MUSECAT_TRANSLATION_BASE_URL=https://api.openai.com/v1
@@ -20,8 +21,10 @@ compare quality. `OPENAI_API_KEY` must be set in the backend `.env`; never expos
 it in frontend environment variables. Full reads `.env` before `.env.community.local`,
 and already-set variables take precedence.
 
-When the API key is empty, the cron worker stays idle and Korean posts remain
-available with `translation_status=pending`. Failures retry at one, five, fifteen,
+At launch, `MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED=false` disables provider setup
+and cron registration even when `OPENAI_API_KEY` is present. Set it to `true`
+only for deliberate prototype testing. When it is off or the API key is empty,
+Korean posts remain available with `translation_status=pending`. Failures retry at one, five, fifteen,
 and sixty-minute intervals, up to five total attempts.
 
 ## Smoke test
@@ -41,12 +44,15 @@ The response is immediately public through:
 curl 'http://localhost:8090/community/posts?locale=ko-KR'
 ```
 
-After five minutes, confirm that `translation_status` becomes `ready`. While
+For prototype testing, set `MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED=true` and
+restart before publishing. After five minutes, confirm that `translation_status`
+becomes `ready`. While
 `MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC=false`, an English or Japanese request
 still returns Korean with `translated=false`. After reviewing stored results,
-enable the feature and restart the service:
+keep the runtime enabled, enable publication and restart the service:
 
 ```dotenv
+MUSECAT_COMMUNITY_TRANSLATIONS_ENABLED=true
 MUSECAT_COMMUNITY_TRANSLATIONS_PUBLIC=true
 ```
 
@@ -84,3 +90,19 @@ five-minute restriction and returns 204, including retries. It sets `status=dele
 clears photos and translations and prevents further public reads and worker claims.
 Deletion does not physically erase the internal post tombstone or original text.
 The web asks for confirmation and refreshes the feed or returns from detail to the feed.
+
+## Canonical launch descriptions and XP
+
+`community_post.body_document` is the required canonical Tiptap JSON source. The
+legacy database `body` field is removed only after guarded atomic conversion of
+all posts. API `body` remains a derived plain-text response and legacy plain-text
+request adapter. Launch accepts paragraphs, text, hard breaks and typed user/arcade
+mentions; formatting marks, links, HTML and embedded media are rejected. Translation
+remains disabled at launch. Existing mention references are derived and retained
+for notification liveness queries.
+
+Achievement creation awards its author 2 XP, capped at 10 XP per KST calendar day.
+Comments and likes award the actor 1 XP, sharing a 5 XP daily cap. Own-post comments
+and self likes are excluded. Existing level eligibility applies. Rewards and the
+source mutation commit together; edits and deletes do not refund caps. Stable like
+identities prevent unlike/re-like rewards, including across days.
