@@ -9176,7 +9176,8 @@ paths:
     post:
       tags: [Arcade Mutations]
       summary: /arcade/visit
-      security: [{bearerAuth: []}]
+      description: Uses the same GPS visit handler for web JWTs and registered first-party Native sessions. Native authentication is operation-scoped; distance, accuracy, local-day deduplication, XP, deployment trust policy and error behavior are unchanged.
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9198,6 +9199,7 @@ paths:
                   exp: {type: integer}
                   level: {type: integer}
                   xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
+        '401': {description: Missing, invalid, expired, revoked or unregistered authentication.}
         '400': {description: Invalid coordinates or GPS accuracy greater than 150 m.}
         '403': {description: Inactive user, ineligible arcade, outside the 100m radius, or a deployment-provided visit policy restriction.}
         '409': {description: Missing arcade coordinates or timezone.}

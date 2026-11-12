@@ -1947,3 +1947,23 @@ metadata and campaigns; cabinet permissions and deployment read quotas are
 unchanged. Invalid, expired, revoked, removed-client and banned native sessions
 fail before the handler. Native responses remain no-store. This grants no
 credential support to other routes and adds no native domain alias or migration.
+
+
+### Canonical Native visit writes
+
+Configured Native sessions authenticate only `POST /arcade/visit` through the
+existing operation-scoped `nativeauth.FirstPartyAuthentication` adapter and the
+same `VisitArcade` handler as web JWTs. The request remains `{arcade, lat, lon,
+accuracy}`; the response retains `visited`, `already_visited`,
+`first_visit_to_arcade`, the arcade/local-date-only `visit`, `gained_exp`, `exp`,
+`level` and `xp_feedback`. The authenticated account owns the visit; supplied
+account IDs cannot redirect it. Native responses remain no-store.
+
+Active-account/ban checks, public open arcade eligibility, the 100 m radius,
+150 m accuracy limit, arcade timezone, local-day deduplication, XP transaction,
+deployment-owned visit policy, rate limits and errors are unchanged. Visits are
+activity and do not create arcade changelog rows. Full owns the visit-warning
+route and Passport trust policy; its selected warning adapter is coordinated
+separately. Campaign check, favorite ordering, unrelated writes, raw collections
+and management routes gain no Native capability. No `/native/arcade/visit`
+route, migration or alternate handler is introduced.
