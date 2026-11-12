@@ -127,7 +127,7 @@ func TestCanonicalArcadeNativeReadAndEditingAuthorization(t *testing.T) {
 	}
 	// Domain adapters are deliberately not aliases and do not authorize raw REST.
 	nativeReadRequest(t, app, "GET", "/native/arcade?id="+arcade.Id, native, nil, 404)
-	r := doUserRequest(t, app, "PUT", "/arcade/memo", map[string]string{"Authorization": "Bearer " + native}, `{}`)
+	r := doUserRequest(t, app, "PUT", "/arcade/photo", map[string]string{"Authorization": "Bearer " + native}, `{}`)
 	defer r.Body.Close()
 	if r.StatusCode != 401 {
 		t.Fatal("native credentials authorized an unselected operation")

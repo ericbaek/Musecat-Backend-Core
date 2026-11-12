@@ -4721,6 +4721,7 @@ paths:
       description: Creates an immutable Tiptap JSON revision and moves the arcade memo pointer. Requires an authenticated user with arcade write access. Saves and changelog creation are atomic.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -7495,6 +7496,7 @@ paths:
         Requires `developer`, `moderator`, or `arcade_owner` in `tag` or `tags`, or a `supporter`/`founding_supporter` at level 30 or above. Developers and moderators may create on any arcade. Official accounts may create only on their own `owns` arcades. Level-30+ supporters may create unless another official account manages the target through `owns`. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
+        - nativeSession: []
       x-upload-limits: {maxPhotos: 3, maxPhotoBytes: 5242880, maxBodyBytes: 16777216}
       requestBody:
         required: true
@@ -7566,6 +7568,7 @@ paths:
         Developers and moderators may update every notice. Official account authors may update their own notices and authorless legacy notices belonging to their own arcade. Level-30+ supporter authors may update their own notices. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
+        - nativeSession: []
       x-upload-limits: {maxPhotos: 3, maxPhotoBytes: 5242880, maxBodyBytes: 16777216}
       requestBody:
         required: true
@@ -7637,6 +7640,7 @@ paths:
         Developers and moderators may delete every notice. Official account authors may delete their own notices and authorless legacy notices belonging to their own arcade. Level-30+ supporter authors may delete their own notices. Private drafts additionally require the draft creator or a developer/moderator.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:

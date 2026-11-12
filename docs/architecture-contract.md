@@ -1968,6 +1968,20 @@ authentication even on public reads; an empty allowlist grants no native identit
 is bound per GET operation; mutations, staff queues, raw REST and delegated
 routes gain no native credential support. No schema or migration is required.
 
+### Shared first-party memo and notice writes
+
+Configured native sessions also select only `PUT /arcade/memo` and
+`POST|PUT|DELETE /arcade/notice`. Web and native callers share the same handlers,
+DTOs, active-account and arcade-write guards. Memo saves preserve validated
+extension documents, immutable revisions, changelog/XP transaction policy and
+`changed=false` no-ops. Private drafts still require the creator or strict reviewer.
+Notice creation retains official ownership, level-30 supporter and other-official
+management restrictions. Updates/deletes retain author/staff and authorless legacy
+ownership rules. JSON/multipart, partial updates, three 5 MiB photos, 16 MiB
+POST/PUT body limits, soft deletion and display-slot 409 conflicts are unchanged.
+Native responses remain no-store. Photo mutations, rollback, publication, campaign
+and management operations are not enabled. No schema or migration is added.
+
 ### Shared first-party favorite toggle
 
 Configured native sessions authenticate `PUT /arcade/favorite` through the same

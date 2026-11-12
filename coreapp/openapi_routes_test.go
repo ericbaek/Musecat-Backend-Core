@@ -223,9 +223,10 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 	}
 	var contract struct {
 		Paths map[string]struct {
-			Get  *operation `yaml:"get"`
-			Post *operation `yaml:"post"`
-			Put  *operation `yaml:"put"`
+			Get    *operation `yaml:"get"`
+			Post   *operation `yaml:"post"`
+			Put    *operation `yaml:"put"`
+			Delete *operation `yaml:"delete"`
 		} `yaml:"paths"`
 		Components struct {
 			SecuritySchemes map[string]struct {
@@ -270,6 +271,28 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 		}
 		if _, exists := contract.Paths["/native"+path]; exists {
 			t.Fatalf("duplicate native domain URL remains: %s", path)
+		}
+	}
+	for _, sample := range []struct{ path, method string }{{"/arcade/memo", "put"}, {"/arcade/notice", "post"}, {"/arcade/notice", "put"}, {"/arcade/notice", "delete"}} {
+		entry := contract.Paths[sample.path]
+		op := entry.Put
+		if sample.method == "post" {
+			op = entry.Post
+		}
+		if sample.method == "delete" {
+			op = entry.Delete
+		}
+		if op == nil {
+			t.Fatal("canonical content operation missing")
+		}
+		seen := map[string]bool{}
+		for _, alternative := range op.Security {
+			for scheme := range alternative {
+				seen[scheme] = true
+			}
+		}
+		if !seen["bearerAuth"] || !seen["nativeSession"] || len(seen) != 2 {
+			t.Fatal("canonical content auth alternatives changed")
 		}
 	}
 	for _, route := range []struct {
