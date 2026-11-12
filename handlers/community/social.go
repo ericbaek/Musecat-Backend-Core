@@ -273,6 +273,12 @@ func DeleteComment(re *core.RequestEvent) error {
 	return re.NoContent(http.StatusNoContent)
 }
 func eraseComment(app core.App, record *core.Record) error {
+	if err := xp.RevokeCommunityTx(app, record.GetString("author"), "reaction", "comment:"+record.Id); err != nil {
+		return err
+	}
+	if err := revokeLikesXP(app, "community_comment_like", "comment", record.Id); err != nil {
+		return err
+	}
 	record.Set("status", "deleted")
 	record.Set("body", "")
 	record.Set("photos", []string{})
@@ -380,6 +386,9 @@ func setLike(re *core.RequestEvent, targetCollection, likeCollection, key string
 			return err
 		}
 		if re.Request.Method == http.MethodDelete {
+			if err := xp.RevokeCommunityTx(tx, re.Auth.Id, "reaction", "like-"+key+":"+id); err != nil {
+				return err
+			}
 			if len(existing) > 0 {
 				if err = tx.Delete(existing[0]); err != nil {
 					return err
@@ -617,4 +626,17 @@ func servePost(re *core.RequestEvent, record *core.Record, locale string, status
 		items[0]["xp_feedback"] = feedback[0]
 	}
 	return re.JSON(status, items[0])
+}
+
+func revokeLikesXP(app core.App, collection, key, targetID string) error {
+	likes, err := app.FindAllRecords(collection, dbx.HashExp{key: targetID})
+	if err != nil {
+		return err
+	}
+	for _, like := range likes {
+		if err := xp.RevokeCommunityTx(app, like.GetString("author"), "reaction", "like-"+key+":"+targetID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
