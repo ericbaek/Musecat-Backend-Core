@@ -61,7 +61,7 @@ rows, and `developer`/`moderator` reviewers may audit all rows. The optional
 `changed` filter accepts exactly `basic`, `game`, `hour`, `sns`, `gtk`, or
 `photo`, or `memo`. These are the complete current changelog categories in the Core
 bootstrap schema and mutation handlers; activity-only values such as `flag`,
-`flag_reaction`, `visit`, and `legacy` are not `arcade_changelog.changed`
+`flag_reaction`, `visit`, `achievement`, and `legacy` are not `arcade_changelog.changed`
 values and are intentionally excluded. Rows whose arcade aggregate was deleted
 are omitted, and withdrawn users return an empty page to avoid exposing
 history after profile withdrawal.

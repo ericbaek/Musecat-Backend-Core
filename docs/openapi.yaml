@@ -1356,7 +1356,7 @@ components:
               description: Ordered list of arcade parts changed in the grouped block.
               items:
                 type: string
-                enum: [basic, hour, sns, gtk, game, photo, flag, flag_reaction]
+                enum: [basic, hour, sns, gtk, game, photo, flag, flag_reaction, visit, achievement]
     ArcadesNearbyResponse:
       type: object
       required: [page, per_page, last_page, total, country_totals, items, campaigns]
@@ -4286,7 +4286,7 @@ paths:
     get:
       tags: [Arcades]
       summary: Fixed public dashboard summary
-      description: Returns at most six latest blocks from distinct public open arcades. If a non-KR arcade has history, at least one is included, replacing the sixth KR entry when necessary. Results remain newest first. Concurrent reads share only the in-flight aggregate query; results are not cached across loads. Query parameters, including page and limit, are rejected.
+      description: Returns at most six latest blocks from distinct public open arcades. If a non-KR arcade has history, at least one is included, replacing the sixth KR entry when necessary. Active achievement posts with photos contribute achievement activity for their linked arcades, using the original post creation time; edits do not bump activity and deleted posts are excluded. Results remain newest first. Concurrent reads share only the in-flight aggregate query; results are not cached across loads. Query parameters, including page and limit, are rejected.
       responses:
         '200':
           description: Fixed summary array.
