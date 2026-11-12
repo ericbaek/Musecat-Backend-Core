@@ -191,7 +191,7 @@ func registerAPIRoutes(se *core.ServeEvent, nativeClients []nativeauth.Client, m
 	se.Router.POST("/guest/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
 	se.Router.PATCH("/guest/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(arcadeadmin.RequireGuestFeedback(), apis.BodyLimit(4096))
 	se.Router.GET("/aime/status", usernotifications.AimePublicStatus)
-	registerSessionRoutes(se.Router.RouterGroup)
+	registerSessionRoutes(se.Router.RouterGroup, nativeClients...)
 	registerAccountRoutes(se.Router.RouterGroup, nativeClients...)
 }
 
@@ -201,11 +201,15 @@ func RegisterAccountDelegationRoutes(se *core.ServeEvent, manager *delegation.Ma
 	api := se.Router.Group("/developer/v1/account").Bind(delegationhandler.AccountResource(manager))
 	registerAccountRoutes(api)
 }
-func registerSessionRoutes(api *router.RouterGroup[*core.RequestEvent]) {
+func registerSessionRoutes(api *router.RouterGroup[*core.RequestEvent], nativeClients ...nativeauth.Client) {
+	var firstPartyAuth []*hook.Handler[*core.RequestEvent]
+	if len(nativeClients) > 0 {
+		firstPartyAuth = append(firstPartyAuth, nativeauth.FirstPartyAuthentication(nativeClients))
+	}
 	auth := api.Group("/user").Bind(apis.RequireAuth("user"))
 	auth.POST("/signup", userhandler.SignUp)
 	auth.POST("/withdraw", userhandler.Withdraw)
-	auth.PUT("/arcade-account/credentials", userhandler.UpdateArcadeCredentials).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(16<<10))
+	auth.PUT("/arcade-account/credentials", userhandler.UpdateArcadeCredentials).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(16<<10))
 	review := api.Group("/moderation/user").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), arcadequery.RequireStrictReviewerAccess())
 	review.POST("/test-account", userhandler.CreateTestAccount).Bind(apis.BodyLimit(16 << 10))
 	creation := api.Group("/moderation/user").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
@@ -316,7 +320,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
 	// Public user profile read endpoint
 	api.GET("/user", userhandler.GetUserByID).Bind(firstPartyAuth...)
-	api.GET("/user/arcade-inquiry-onboarding", arcadereporting.InquiryOnboarding).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	api.GET("/user/arcade-inquiry-onboarding", arcadereporting.InquiryOnboarding).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
 	api.GET("/user/activity", userhandler.GetUserActivity).Bind(firstPartyAuth...)
 	// Public user-scoped changelog read endpoint; private arcade rows are
 	// returned only to their owner or strict reviewers.
@@ -372,9 +376,9 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom).Bind(firstPartyAuth...)
 	// Allow up to 10 * 20MB photo files (+multipart overhead) in a single request.
 	authArcade.POST("/photo/upload", arcadephoto.UploadArcadePhotos).Bind(firstPartyAuth...).Bind(apis.BodyLimit(220 << 20))
-	authArcade.GET("/report-settings", arcadereporting.GetSettings)
-	authArcade.PUT("/report-settings", arcadereporting.UpdateSettings).Bind(apis.BodyLimit(64 << 10))
-	authArcade.PUT("/inquiry-settings", arcadereporting.UpdateInquirySettings).Bind(apis.BodyLimit(64 << 10))
+	authArcade.GET("/report-settings", arcadereporting.GetSettings).Bind(firstPartyAuth...)
+	authArcade.PUT("/report-settings", arcadereporting.UpdateSettings).Bind(firstPartyAuth...).Bind(apis.BodyLimit(64 << 10))
+	authArcade.PUT("/inquiry-settings", arcadereporting.UpdateInquirySettings).Bind(firstPartyAuth...).Bind(apis.BodyLimit(64 << 10))
 	authArcade.POST("/report-subscription/status", arcadereporting.SubscriptionStatus).Bind(apis.BodyLimit(4 << 10))
 	authArcade.PUT("/report-subscription", arcadereporting.SaveSubscription).Bind(apis.BodyLimit(16 << 10))
 	authArcade.DELETE("/report-subscription", arcadereporting.DeleteSubscription).Bind(apis.BodyLimit(4 << 10))

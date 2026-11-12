@@ -2130,3 +2130,19 @@ another reporter's records. Staff moderation and raw collection routes do not
 gain Native access. Invalid enabled Native credentials fail closed; an empty
 allowlist grants no Native identity. Native responses are no-store. No alias,
 schema, migration, deduplication or report policy change is introduced.
+
+### Shared first-party official settings
+
+Configured Native sessions select existing `GET /user/arcade-inquiry-onboarding`,
+`GET|PUT /arcade/report-settings`, `PUT /arcade/inquiry-settings` and
+`PUT /user/arcade-account/credentials`. Exact current official ownership and strict
+staff settings access are unchanged; onboarding includes only the caller's assigned
+arcades, while staff-only accounts receive an empty list. Credential changes still
+require the active caller's official role and exact current password, including
+whitespace. Existing validation, uniqueness, atomic token-key rotation and 16 KiB
+credential / 64 KiB destination body limits remain unchanged. Old Web JWTs and Native
+access/refresh credentials fail after rotation. No password, email or session value
+is returned. Settings write no content revision, arcade changelog or XP. Native
+responses are no-store; invalid enabled Native bearers do not fall back to cookies.
+An empty client allowlist grants no Native identity. No APNs/device capability,
+subscription, withdrawal, raw REST, schema or migration is added.

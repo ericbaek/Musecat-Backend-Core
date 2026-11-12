@@ -272,7 +272,7 @@ func TestCanonicalNativeCampaignKeepsRateLimitsAndCredentialScope(t *testing.T) 
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"GET", "/arcade/campaigns", 401}, {"PUT", "/arcade/report-settings", 401}, {"GET", "/api/collections/arcade_campaign/records", 403}} {
+	}{{"GET", "/arcade/campaigns", 401}, {"PUT", "/arcade/report-subscription", 401}, {"GET", "/api/collections/arcade_campaign/records", 403}} {
 		r := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + session.AccessToken})
 		r.Body.Close()
 		if r.StatusCode != op.status {

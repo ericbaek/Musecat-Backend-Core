@@ -431,7 +431,7 @@ func TestCanonicalNativeFlagWritesKeepRateLimitsAndDoNotEnablePhotoReads(t *test
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"POST", "/arcade/check-notes", 401}, {"PUT", "/arcade/report-settings", 401}, {"GET", "/arcade/flag/photo", 404}, {"GET", "/native/arcade/flag/photo", 404}, {"POST", "/native/arcade/flag", 404}} {
+	}{{"POST", "/arcade/check-notes", 401}, {"PUT", "/arcade/report-subscription", 401}, {"GET", "/arcade/flag/photo", 404}, {"GET", "/native/arcade/flag/photo", 404}, {"POST", "/native/arcade/flag", 404}} {
 		res := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + credentials.AccessToken})
 		res.Body.Close()
 		if res.StatusCode != op.status {
