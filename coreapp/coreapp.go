@@ -310,13 +310,13 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireGameToolsAccess(),
 	)
-	catalogManagement.GET("/catalog", gamecataloghandler.GetCatalog)
+	catalogManagement.GET("/catalog", gamecataloghandler.GetCatalog).Bind(firstPartyAuth...)
 	catalogManagement.POST("/catalog", gamecataloghandler.Create)
 	catalogManagement.PUT("/catalog", gamecataloghandler.Update)
 	catalogManagement.DELETE("/catalog", gamecataloghandler.Archive)
 	catalogManagement.POST("/catalog/restore", gamecataloghandler.Restore)
 	catalogManagement.POST("/catalog/compatibilities", gamecataloghandler.ReplaceCompatibilities)
-	catalogManagement.GET("/catalog/changes", gamecataloghandler.ListChanges)
+	catalogManagement.GET("/catalog/changes", gamecataloghandler.ListChanges).Bind(firstPartyAuth...)
 	catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
 	// Public user profile read endpoint
 	api.GET("/user", userhandler.GetUserByID).Bind(firstPartyAuth...)

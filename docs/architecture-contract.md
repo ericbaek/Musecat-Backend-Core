@@ -499,6 +499,15 @@ compatibility. Every request carries a UUID `operation_id`, a 10–500 character
 operation IDs replay only an identical request from the same actor and stale
 revisions return `409`.
 
+Configured first-party Native sessions separately select only
+`GET /moderation/game/catalog` and `GET /moderation/game/catalog/changes`. They
+share Web JWT handlers and the existing active staff or level-30 supporter guard.
+Locale, archived records, version-alias exclusion, cabinet order, raw price and
+audit snapshots, filters and pagination remain canonical. Native responses are
+no-store. Empty client configuration grants no Native identity; catalog writes,
+other moderation, raw REST and delegated routes remain unselected. No schema or
+migration is added.
+
 Catalog records are never hard-deleted. Archive and restore are revisioned
 operations. Archive fails when the record is referenced by a current arcade
 installation, active child catalog relation, or active campaign. Every accepted
@@ -511,7 +520,7 @@ it does not erase history. Full owns notifications for those log records.
 Configured first-party Native sessions select the same `GET /arcade/games` and
 `POST /arcade/game/bulk_version` handlers as web JWTs. Reads still require staff
 or a level-30 supporter role; version swaps remain developer/moderator-only.
-The adapter does not grant catalog-management or moderation routes. DTOs, filters,
+These bulk bindings do not grant catalog-management or moderation routes. DTOs, filters,
 active-account checks, immutable revisions, atomic cross-arcade updates and
 changelog/XP policy remain unchanged. Native responses are no-store. Clients send
 stable entry IDs and do not replay failed mutations. No domain alias, schema or

@@ -6551,8 +6551,7 @@ paths:
       tags: [Moderator]
       summary: Read protected game catalog management data
       description: Active developer or moderator, or an active supporter or founding supporter at level 30 or above. Historical version aliases (non-empty alias_of) are omitted from the versions list without deleting their records or historical references. Cabinets are ordered by the earliest release date among active compatible versions, newest first.
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - name: locale
           in: query
@@ -6669,8 +6668,7 @@ paths:
     get:
       tags: [Moderator]
       summary: List immutable game catalog changes
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - name: entity
           in: query
