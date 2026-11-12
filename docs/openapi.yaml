@@ -9447,7 +9447,7 @@ paths:
     post:
       tags: [Moderator]
       summary: Create an update campaign
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9466,7 +9466,7 @@ paths:
     put:
       tags: [Moderator]
       summary: Update an update campaign
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9561,7 +9561,7 @@ paths:
     post:
       tags: [Moderator]
       summary: End an update campaign
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9660,6 +9660,7 @@ paths:
         Repeated confirmations with the same verification do not append reports.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:

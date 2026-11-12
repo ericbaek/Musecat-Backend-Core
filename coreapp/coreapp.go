@@ -272,17 +272,17 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
-	api.POST("/campaign", arcadecampaign.CreateCampaign).Bind(
+	api.POST("/campaign", arcadecampaign.CreateCampaign).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	api.PUT("/campaign", arcadecampaign.UpdateCampaign).Bind(
+	api.PUT("/campaign", arcadecampaign.UpdateCampaign).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	api.POST("/campaign/end", arcadecampaign.EndCampaign).Bind(
+	api.POST("/campaign/end", arcadecampaign.EndCampaign).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
@@ -388,7 +388,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authArcade.POST("/visit", userhandler.VisitArcade).Bind(firstPartyAuth...)
 	authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite).Bind(firstPartyAuth...)
 	authArcade.PUT("/favorite/order", userhandler.UpdateArcadeFavoriteOrder).Bind(firstPartyAuth...)
-	api.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
+	api.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)

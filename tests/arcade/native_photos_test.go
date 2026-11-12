@@ -370,7 +370,7 @@ func TestCanonicalNativePhotosKeepRateLimitsAndUnselectedFlagFileScope(t *testin
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"GET", "/arcade/flag/photo", 404}, {"GET", "/native/arcade/photo/file", 404}, {"POST", "/native/arcade/photo/upload", 404}, {"POST", "/campaign/end", 401}, {"GET", "/api/collections/arcade_photo_atoms/records", 403}} {
+	}{{"GET", "/arcade/flag/photo", 404}, {"GET", "/native/arcade/photo/file", 404}, {"POST", "/native/arcade/photo/upload", 404}, {"PUT", "/arcade/report-settings", 401}, {"GET", "/api/collections/arcade_photo_atoms/records", 403}} {
 		nativeDraftRequest(t, app, op.method, op.path, session.AccessToken, nil, op.status, false)
 	}
 }

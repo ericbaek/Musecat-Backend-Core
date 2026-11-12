@@ -1948,7 +1948,7 @@ Profile JSON/multipart retains its 35 MiB route limit; game preferences retain
 128 KiB. Country level gates, profile media access, normalized preference order,
 independent timeline hiding, and omitted-favorite append behavior are unchanged.
 Native responses remain no-store. Invalid credentials fail closed; this does
-not authorize withdrawal, campaign checks, push, raw REST or other settings.
+not authorize withdrawal, push, raw REST or other settings.
 There is no schema or migration change.
 
 ### Shared first-party arcade editing
@@ -2102,6 +2102,20 @@ Active-account/ban checks, public open arcade eligibility, the 100 m radius,
 deployment-owned visit policy, rate limits and errors are unchanged. Visits are
 activity and do not create arcade changelog rows. Full owns the visit-warning
 route and Passport trust policy; its selected warning adapter is coordinated
-separately. Campaign check, favorite ordering, unrelated writes, raw collections
-and management routes gain no Native capability. No `/native/arcade/visit`
+separately. Campaign checks use the separately selected operation below.
+The visit adapter grants no unrelated writes, raw collections or management access. No `/native/arcade/visit`
 route, migration or alternate handler is introduced.
+
+### Shared first-party campaign operations
+
+Configured Native sessions select existing `POST|PUT /campaign`, `POST /campaign/end`
+and `POST /campaign/check` handlers. Management stays developer/moderator-only,
+including management of another creator's campaign. The authenticated creator,
+201/200 receipts, validation and body limits remain unchanged. Checks require an
+active member and the same public/open target, active campaign, same-day verified
+visit or explicit location bypass. Configured XP, reduced bypass XP, duplicate
+report handling, seven-day rollback, immutable revisions and atomic writes remain
+owned by the shared handlers. Invalid credentials fail closed without cookie
+fallback; disabled Native clients grant no identity. Native responses are no-store.
+Public reads, raw collection access and unrelated management operations gain no
+Native capability. No Native alias, schema or migration is introduced.
