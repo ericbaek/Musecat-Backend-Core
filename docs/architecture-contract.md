@@ -1119,8 +1119,8 @@ requesterOnly restricts public contact surfaces to the caller's own inquiries.
 Mention metadata affects alerts, not conversation-list membership. Actual sender user and acting party are separately stored;
 when a requester is also a responder they explicitly choose their sending identity.
 Summaries expose `allowedSenderIdentities` and `allowedStatusTransitions` from the
-same inquiry policy used by writes. Requesters can choose waiting/solved; current
-responders can choose waiting/recognised/solved. `canManageStatus` remains a
+same inquiry policy used by writes. Only current responders can choose waiting/recognised/solved. Requester
+summaries expose no internal status or transitions. `canManageStatus` remains a
 compatibility field derived from the nonempty transition list. DM sender identities
 are empty when current receive/block/account policy prevents sending.
 
@@ -2165,3 +2165,17 @@ Web-compatible legacy-inquiry ID resolver. Clients read its authorized
 history. They do not infer sending/status rights from the compatibility DTO or
 scan every conversation to resolve an ID. Guest access is unchanged; no legacy
 Native alias or independent support store is restored.
+
+### Shared first-party messaging writes
+
+Configured Native sessions select canonical conversation creation, message send,
+own read-cursor PUT and inquiry-status PATCH through the same Web handlers.
+Stable clientMessageId replay/conflict rules, exact acting identities, current
+receiver/block/ownership/account checks and responder-only internal status remain
+authoritative. Message/status/read writes and recipient outbox stay atomic; retries
+do not manufacture messages or status events. General text stays 4000 Unicode code
+points, with three 15000000-byte photos and the existing 46048576-byte body limit.
+Read/status bodies retain 4096 bytes. These bindings do not select SSE, guest
+credentials, preferences, blocks, reports or the separate legacy automatic-error
+intake. The existing 12000-UTF16 diagnostic/13000-legacy boundary is unchanged. No
+Native alias, schema, duplicate store, raw REST or global bearer support is added.

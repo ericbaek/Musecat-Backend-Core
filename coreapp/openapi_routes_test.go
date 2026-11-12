@@ -227,6 +227,7 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 			Post   *operation `yaml:"post"`
 			Put    *operation `yaml:"put"`
 			Delete *operation `yaml:"delete"`
+			Patch  *operation `yaml:"patch"`
 		} `yaml:"paths"`
 		Components struct {
 			SecuritySchemes map[string]struct {
@@ -273,7 +274,7 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 			t.Fatalf("duplicate native domain URL remains: %s", path)
 		}
 	}
-	for _, sample := range []struct{ path, method string }{{"/user/feedback/thread", "get"}, {"/user/conversations", "get"}, {"/user/conversations/{id}", "get"}, {"/user/conversations/{id}/messages", "get"}, {"/user/conversations/{id}/attachments/{messageId}/{file}", "get"}, {"/user/inquiry-preview", "get"}, {"/user/arcade-account/credentials", "put"}, {"/user/arcade-inquiry-onboarding", "get"}, {"/arcade/report-settings", "get"}, {"/arcade/report-settings", "put"}, {"/arcade/inquiry-settings", "put"}, {"/user/report", "get"}, {"/user/report", "post"}, {"/campaign", "post"}, {"/campaign", "put"}, {"/campaign/end", "post"}, {"/campaign/check", "post"}, {"/arcade/photo/atoms", "get"}, {"/arcade/photo/file", "get"}, {"/arcade/photo/upload", "post"}, {"/arcade/photo/atom", "delete"}, {"/arcade/photo", "put"}, {"/arcade/new", "post"}, {"/arcade/public", "get"}, {"/arcade/public", "put"}, {"/arcade/location-verification", "post"}, {"/arcade/draft", "delete"}, {"/arcade/rollback", "post"}, {"/arcade/edit_report", "post"}, {"/arcade/request_admin", "post"}, {"/arcade/memo", "put"}, {"/arcade/notice", "post"}, {"/arcade/notice", "put"}, {"/arcade/notice", "delete"}, {"/arcade/flag", "post"}, {"/arcade/flag/reaction", "post"}, {"/arcade/flag/delete", "post"}} {
+	for _, sample := range []struct{ path, method string }{{"/user/conversations", "post"}, {"/user/conversations/{id}/messages", "post"}, {"/user/conversations/{id}/read", "put"}, {"/user/conversations/{id}/inquiry", "patch"}, {"/user/feedback/thread", "get"}, {"/user/conversations", "get"}, {"/user/conversations/{id}", "get"}, {"/user/conversations/{id}/messages", "get"}, {"/user/conversations/{id}/attachments/{messageId}/{file}", "get"}, {"/user/inquiry-preview", "get"}, {"/user/arcade-account/credentials", "put"}, {"/user/arcade-inquiry-onboarding", "get"}, {"/arcade/report-settings", "get"}, {"/arcade/report-settings", "put"}, {"/arcade/inquiry-settings", "put"}, {"/user/report", "get"}, {"/user/report", "post"}, {"/campaign", "post"}, {"/campaign", "put"}, {"/campaign/end", "post"}, {"/campaign/check", "post"}, {"/arcade/photo/atoms", "get"}, {"/arcade/photo/file", "get"}, {"/arcade/photo/upload", "post"}, {"/arcade/photo/atom", "delete"}, {"/arcade/photo", "put"}, {"/arcade/new", "post"}, {"/arcade/public", "get"}, {"/arcade/public", "put"}, {"/arcade/location-verification", "post"}, {"/arcade/draft", "delete"}, {"/arcade/rollback", "post"}, {"/arcade/edit_report", "post"}, {"/arcade/request_admin", "post"}, {"/arcade/memo", "put"}, {"/arcade/notice", "post"}, {"/arcade/notice", "put"}, {"/arcade/notice", "delete"}, {"/arcade/flag", "post"}, {"/arcade/flag/reaction", "post"}, {"/arcade/flag/delete", "post"}} {
 		entry := contract.Paths[sample.path]
 		op := entry.Put
 		if sample.method == "get" {
@@ -284,6 +285,9 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 		}
 		if sample.method == "delete" {
 			op = entry.Delete
+		}
+		if sample.method == "patch" {
+			op = entry.Patch
 		}
 		if op == nil {
 			t.Fatal("canonical content operation missing")

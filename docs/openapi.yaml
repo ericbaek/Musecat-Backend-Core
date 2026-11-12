@@ -17101,7 +17101,7 @@ paths:
       tags: ["Messaging"]
       summary: "Create or find an unordered user pair, or create an independent inquiry"
       description: "DM returns 200 for either existing or new pair; no self-DM. Inquiry returns 201, or 200 on an identical initial-message retry. Default receive preference is everyone; explicit nobody preferences and blocks remain enforced. Arcade inquiries are managed in the arcade admin dashboard by current official responders and platform staff. Explicit musecat mentions notify active platform staff; they are not required to list authorized inquiries. Plain-text @Musecat is not a mention. Inquiry creation retries use the initial clientMessageId. Multipart inquiries accept kind,inboxType,inboxId,text,clientMessageId,mentions(JSON array string),photos. Maximum three JPEG/PNG/WebP/GIF photos, 15,000,000 bytes each; request ceiling 46,048,576 bytes."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Existing or new DM, or idempotent inquiry replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}}
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingCreate"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "kind": {"type": "string", "enum": ["inquiry"]}, "inboxType": {"type": "string"}, "inboxId": {"type": "string"}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
 
@@ -17126,7 +17126,7 @@ paths:
       tags: ["Messaging"]
       summary: "Append an idempotent message"
       description: "Same clientMessageId and normalized text, ordered photo byte hashes, canonical mentions and acting identity returns original message with 200; changed content returns 409. Inquiry requester who also manages the inbox must explicitly choose actingAs. DM staff has no bypass. Multipart has text,clientMessageId,actingAs(JSON string),mentions(JSON array string),photos. Nonempty mentions are only supported for arcade inquiries. Ordinary arcade notifications target current official responders; musecat additionally targets platform staff. Inbox replies notify the requester as usual. Team notifications are unchanged. 3 photos at 15,000,000 bytes each. Sender limit 60 messages/minute, 30/conversation/minute, 12 photos/minute; replay does not consume a limit."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Idempotent replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
       requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingSend"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "actingAs": {"type": "string", "description": "JSON encoded MessagingIdentity."}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
@@ -17136,7 +17136,7 @@ paths:
       tags: ["Messaging"]
       summary: "Advance this user's read cursor"
       description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"conversationId": {"type": "string"}, "lastReadSequence": {"type": "integer", "minimum": 0}, "unreadCount": {"type": "integer", "minimum": 0}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
       requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"throughSequence": {"type": "integer", "minimum": 0}}, "required": ["throughSequence"]}}}}
@@ -17145,8 +17145,8 @@ paths:
     patch:
       tags: ["Messaging"]
       summary: "Change inquiry workflow status"
-      description: "Requester may set waiting/solved; current inbox responders may also set recognised. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
-      security: [{"bearerAuth": []}]
+      description: "Only current inbox responders may set waiting/recognised/solved. Requesters cannot read or change internal inquiry status. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
       requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"status": {"type": "string", "enum": ["waiting", "recognised", "solved"]}}, "required": ["status"]}}}}
@@ -17738,7 +17738,7 @@ paths:
     patch:
       tags: ["Messaging"]
       summary: "Change inquiry workflow status"
-      description: "Requester may set waiting/solved; current inbox responders may also set recognised. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
+      description: "Only current inbox responders may set waiting/recognised/solved. Requesters cannot read or change internal inquiry status. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
       security: [{"guestFeedbackKey": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
@@ -19787,7 +19787,7 @@ paths:
       security: [{botKeyAuth: []}]
       tags: ["Messaging"]
       summary: "Change inquiry workflow status"
-      description: "Requester may set waiting/solved; current inbox responders may also set recognised. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
+      description: "Only current inbox responders may set waiting/recognised/solved. Requesters cannot read or change internal inquiry status. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
       requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"status": {"type": "string", "enum": ["waiting", "recognised", "solved"]}}, "required": ["status"]}}}}
@@ -19963,7 +19963,7 @@ x-musecat-joint-connection:
     patch:
       tags: ["Messaging"]
       summary: "Change inquiry workflow status"
-      description: "Requester may set waiting/solved; current inbox responders may also set recognised. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
+      description: "Only current inbox responders may set waiting/recognised/solved. Requesters cannot read or change internal inquiry status. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
       security: [{"guestFeedbackKey": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
