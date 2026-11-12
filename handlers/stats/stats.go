@@ -93,17 +93,20 @@ GROUP BY substr(e.created, 1, 10) ORDER BY date
 `).WithContext(ctx).All(&daily); err != nil {
 		return nil, fmt.Errorf("load view stats: %w", err)
 	}
+	today := time.Now().UTC().Truncate(24 * time.Hour)
 	counts := map[string]int64{}
+	var cumulative int64
 	for _, day := range daily {
-		counts[day.Date] = day.Count
+		if day.Date <= today.Format("2006-01-02") {
+			counts[day.Date] = day.Count
+			cumulative += day.Count
+		}
 	}
 	series := []viewDay{}
-	var cumulative int64
-	start := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
-	for day := start; !day.After(time.Now().UTC()); day = day.AddDate(0, 0, 1) {
+	start := today.AddDate(0, 0, -29)
+	for day := start; !day.After(today); day = day.AddDate(0, 0, 1) {
 		date := day.Format("2006-01-02")
-		cumulative += counts[date]
-		series = append(series, viewDay{date, cumulative})
+		series = append(series, viewDay{date, counts[date]})
 	}
 	return map[string]any{
 		"ongoing_flag_count":  ongoingCount,
@@ -111,6 +114,7 @@ GROUP BY substr(e.created, 1, 10) ORDER BY date
 		"visit_count":         visitCount,
 		"page_view_count":     cumulative,
 		"page_views":          series,
+		"page_views_mode":     "daily",
 		"arcade_count":        arcadeCount,
 		"changelog_count":     changelogCount,
 		"flag_count":          flagCount,

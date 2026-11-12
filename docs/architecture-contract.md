@@ -824,8 +824,11 @@ publication workflow, not this administrative correction.
 open/resolved report counts, verified visits respecting
 deployment aggregate policy, and cumulative page views. All totals exclude private
 arcades and include public closed venues. Page views deduplicate `event_group`
-across game-series rows and provide a daily UTC cumulative series from September
-30, 2026 through today, carrying the previous total through inactive days.
+across game-series rows. `page_view_count` retains the cumulative total since
+September 30, 2026. `page_views` contains exactly 30 daily UTC counts, from midnight
+29 days before today through today, with zero for inactive days. Dates before that
+window are never returned. `page_views_mode: "daily"` distinguishes this series from
+the former cumulative response, so clients can support the transition.
 
 `GET /arcades/updates` is the public Summary API: no query parameters are
 accepted, and at most six latest distinct-arcade blocks are returned. If the six
