@@ -108,7 +108,7 @@ WITH filtered AS (
 		c.id
 	FROM arcade_changelog c
 	INNER JOIN arcade a ON a.id = c.arcade
-	WHERE %s
+	WHERE %s AND COALESCE(json_extract(c.contribution_source, '$.kind'), '') <> 'bot'
 	UNION ALL
 	SELECT
 		f.arcade,

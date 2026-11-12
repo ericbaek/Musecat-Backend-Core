@@ -1283,6 +1283,40 @@ preserves the saved value. Profile responses return the saved flag. When true,
 profile Passport statistics, maps and stamps retain their existing visibility rules.
 Private visits remain excluded regardless of this flag.
 
+## Account-owned bot credentials
+
+Personal bot keys are a distinct non-session credential for `/bot/v1` arcade
+creation, information editing, notices, report/inquiry settings, automatic replies,
+memo edits, analytics and conversation reads/replies/status. Issuance and use require
+arcade_owner, founding supporter, supporter, designer, moderator or developer.
+The live role is checked on each call. Owners retain list/revoke
+access after losing eligibility. See [`bot-api.md`](bot-api.md) and the bot
+operations in OpenAPI. A live key resolves the issuing account, rechecks
+revocation, account token-key fingerprint and active-account policy, and uses the
+existing handlers. Keys never authenticate web/session/raw collection APIs and
+cannot issue credentials or reach moderation/account-management routes.
+Official operations reuse current ownership and conversation ACL checks; removing
+ownership immediately removes management access even while the key remains valid.
+Public and ordinary-user reads/edits retain their existing visibility policy. Each key permits 60 calls
+per minute; its quota and last use are stored atomically. Secrets are returned
+once, hashed at rest, and excluded from history and list responses. Bot keys have
+no automatic expiry; existing expiry timestamps are ignored. Every unrevoked key
+counts toward the five-key account limit.
+
+`service/contribution` wraps the request app and its nested transaction apps with
+a verified source. Saves of new arcade, changelog and photo-atom records retain
+an immutable `contribution_source` snapshot. `by`/`createdBy` remain the owner's
+user ID. Bot names are private to the issuing account: custom history responses
+omit the name for every other viewer, including staff. Raw record responses never
+expose the stored attribution snapshot. Public UI uses an API badge without the name.
+Normal records have a null source. Bot edits earn no XP; creation origins,
+per-change backfill and photo eligibility preserve that policy across web/API
+handoffs. Deferred rewards for actual web changes use their persisted origin,
+including when a bot later publishes them. Legacy rewards are not reclassified.
+
+Bot API rollout is independent of the excluded external integration release.
+Future OAuth adapters may share attribution and domain policy; this release does
+not register Developer Center or broaden existing OAuth scopes.
 ### Deployment public-read policy
 
 `service/readpolicy.Register` installs an optional, app-scoped check before public
@@ -1383,6 +1417,8 @@ first list page, reject cross-post targets, and focus the exact comment.
 
 ### Achievement caption mentions
 
-`community_post.mentions` stores up to ten ordered UTF-16 ranges over the plain-text body, with kind, stable target ID and canonical label. Existing posts return an empty array. The server verifies @label text, active users and public arcades; no HTML is accepted. User mentions create one durable `community_mention` inbox/outbox event per post and recipient in the post transaction. Self-mentions do not notify; edits and removal/readdition do not duplicate events. Removed mentions and inactive posts invalidate visibility and queued pushes. Arcade mentions create links without notifying owners. Future rich-text migration can convert these typed ranges to mention nodes without guessing targets from text.
+`community_post.mentions` stores up to ten ordered UTF-16 ranges over the plain-text body, with kind, stable target ID and canonical label. The server verifies @label text, active users and public arcades; no HTML is accepted. User mentions create one durable `community_mention` inbox/outbox event per post and recipient in the post transaction. Self-mentions do not notify; edits and removal/readdition do not duplicate events. Removed mentions and inactive posts invalidate visibility and queued pushes. Arcade mentions create links without notifying owners. The ranges are a server-derived projection of canonical mention nodes for notification visibility checks.
 
-`body_document` is canonical Tiptap JSON from launch. Legacy body/mention writes are adapted to paragraphs and mention nodes. Rich document writes derive `body` and UTF-16 mention ranges on the server. The launch schema accepts only paragraphs, text, hardBreak, stable-ID mention nodes, bold, and textStyle fontSize 14px/16px/20px; documents are limited to 64 KiB, 500 paragraphs and 2000 inline nodes. HTML, embeds, links and arbitrary CSS are rejected. Existing rows without a document are adapted on read. A legacy update that changes only game/photos preserves the existing document when body/mentions are unchanged. The author/edit deadline is unaffected. Public translation remains disabled; future translated documents require their own matching mention ranges.
+`body_document` is the only stored caption source from launch. Its schema accepts paragraphs, text, hardBreak and stable-ID mention nodes, with limits of 64 KiB, 500 paragraphs, 2,000 inline nodes, 10,000 text characters and ten mentions. Formatting marks, HTML, embeds, links and arbitrary CSS are rejected. The response-only `body` and UTF-16 mention ranges are derived on the server. Legacy body/mention writes remain an input adapter; game/photo-only legacy edits preserve the existing document. The guarded Full forward migration converts and validates every row atomically before requiring the document and removing the legacy body column, preserving text, photos, timestamps, edit deadlines and event identities. Recovery uses the complete database/files snapshot. Author deadlines are unchanged and public translation remains disabled.
+
+Developers may read another account's bot console through `GET /user/bot-keys?user=<id>` and `/user/changelog?user=<id>&bot=all|<key-id>`. Bot names remain owner-only; foreign key metadata omits the name and never includes secrets. Other roles cannot inspect foreign consoles. Issuance and revocation remain scoped to the authenticated owner. Public user-history summaries retain redacted bot attribution for activity badges without exposing edit details.
