@@ -5820,8 +5820,8 @@ paths:
     post:
       tags: [Support]
       summary: /supporter/request
-      security:
-        - bearerAuth: []
+      description: Web JWTs and configured Native sessions use the same active-account, XP threshold, duplicate and notification policy. No role is granted by application creation.
+      security: [{bearerAuth: []}, {nativeSession: []}]
       responses:
         '200':
           description: Supporter request created and notifications sent.
@@ -5841,6 +5841,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Account is inactive or banned.
+        '429':
+          description: Existing configured route or IP rate limit exceeded.
         '409':
           description: Existing pending or approved supporter request.
           content:

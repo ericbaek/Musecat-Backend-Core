@@ -82,6 +82,15 @@ not the public upload contract. The strict reviewer-only GET queue is unchanged.
 
 ## Supporter application review
 
+`POST /supporter/request` accepts Web JWTs and configured first-party Native
+sessions through the same handler and active-account guard. XP qualification,
+server-owned applicant and score snapshot, pending/approved duplicate 409,
+rejected-application retry and existing notifications remain unchanged. Creation
+does not grant roles or award XP. Native responses are no-store; empty client
+configuration grants no Native identity. This operation-scoped binding does not
+enable supporter review, withdrawal, raw REST or delegated-account access, and
+requires no schema or migration.
+
 `GET /moderation/supporter/requests`, `GET /moderation/supporter/request?id=...`,
 and `PUT /moderation/supporter/request` require an active developer or moderator.
 Supporter roles alone cannot read applicant ledgers or make decisions. Detail

@@ -457,7 +457,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		userhandler.RequireActiveUser(),
 	)
 	authSupporter.GET("/score", arcadeadmin.GetSupporterScore).Bind(firstPartyAuth...)
-	authSupporter.POST("/request", arcadeadmin.CreateSupporterRequest)
+	authSupporter.POST("/request", arcadeadmin.CreateSupporterRequest).Bind(firstPartyAuth...)
 }
 
 func RegisterDocumentationRoutes(se *core.ServeEvent, config DocumentationConfig) {
