@@ -1788,3 +1788,14 @@ remain authoritative. Notice lists remain public-arcade-only. When native client
 authentication even on public reads; an empty allowlist grants no native identity. The adapter
 is bound per GET operation; mutations, staff queues, raw REST and delegated
 routes gain no native credential support. No schema or migration is required.
+
+### Shared first-party favorite toggle
+
+Configured native sessions authenticate `PUT /arcade/favorite` through the same
+selected-operation adapter and handler as web JWTs. Both accept `{arcade, favorited}`
+and return `{arcade, favorited}`. The authenticated account alone owns the write;
+client-supplied account IDs do not select an owner. Repeated desired-state writes
+are idempotent and only public arcades may be favorited. Existing active-account,
+revocation and client-allowlist guards apply; native responses remain no-store.
+`PUT /arcade/favorite/order` remains unsupported for native sessions. No native
+domain alias, schema, migration, arcade changelog or XP behavior is introduced.

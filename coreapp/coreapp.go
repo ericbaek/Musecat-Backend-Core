@@ -385,7 +385,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authArcade.PUT("/notice", arcadenotice.UpdateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
 	authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
 	authArcade.POST("/visit", userhandler.VisitArcade)
-	authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite)
+	authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite).Bind(firstPartyAuth...)
 	authArcade.PUT("/favorite/order", userhandler.UpdateArcadeFavoriteOrder)
 	api.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
 		apis.RequireAuth("user"),

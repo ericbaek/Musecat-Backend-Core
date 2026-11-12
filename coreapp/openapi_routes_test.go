@@ -225,6 +225,7 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 		Paths map[string]struct {
 			Get  *operation `yaml:"get"`
 			Post *operation `yaml:"post"`
+			Put  *operation `yaml:"put"`
 		} `yaml:"paths"`
 		Components struct {
 			SecuritySchemes map[string]struct {
@@ -247,8 +248,11 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 	if _, ok := contract.Components.Schemas["NativeCredentials"]; !ok {
 		t.Fatal("native credential schema is missing from components")
 	}
-	for _, path := range []string{"/user/visits", "/user/passport", "/user/passport/stamps", "/rankings", "/user/notifications", "/user/notifications/read", "/user", "/user/activity", "/user/changelog", "/supporter/score", "/arcade/changelog", "/arcade/request_admin", "/arcade/drafts", "/arcade/memo", "/arcade/notice"} {
+	for _, path := range []string{"/user/visits", "/user/passport", "/user/passport/stamps", "/rankings", "/user/notifications", "/user/notifications/read", "/user", "/user/activity", "/user/changelog", "/supporter/score", "/arcade/changelog", "/arcade/request_admin", "/arcade/drafts", "/arcade/memo", "/arcade/notice", "/arcade/favorite"} {
 		op := contract.Paths[path].Get
+		if path == "/arcade/favorite" {
+			op = contract.Paths[path].Put
+		}
 		if path == "/user/notifications/read" {
 			op = contract.Paths[path].Post
 		}

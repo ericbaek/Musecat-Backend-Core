@@ -9461,7 +9461,8 @@ paths:
     put:
       tags: [Arcades]
       summary: /arcade/favorite
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
+      description: Configured first-party native sessions use the same account-owned idempotent toggle as web JWTs. Favorite ordering does not accept native sessions. Native responses are no-store.
       requestBody:
         required: true
         content:
@@ -9475,6 +9476,18 @@ paths:
       responses:
         '200':
           description: Updated favorite state for the arcade.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, favorited]
+                properties:
+                  arcade: {type: string}
+                  favorited: {type: boolean}
+        '401':
+          description: Missing, invalid, revoked or disabled native authentication.
+        '403':
+          description: The account is inactive or restricted.
         '404':
           description: Arcade does not exist or is not public.
   /arcade/favorite/order:
