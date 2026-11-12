@@ -2243,3 +2243,19 @@ latest-map/file delivery, delegated account routes and other moderation operatio
 are unchanged. Invalid/revoked native bearers fail closed, an empty client allowlist
 grants no native identity, and native responses remain no-store. No schema,
 migration, XP or arcade history change is introduced.
+
+
+### Shared first-party moderation reads
+
+Configured Native sessions select only `GET /moderation/arcade/requests`,
+`GET /moderation/arcade/status`, `GET /moderation/supporter/requests`,
+`GET /moderation/supporter/request`, `GET /moderation/user/reports` and
+`GET /moderation/user/bans`. The existing active developer/moderator guard
+remains required; supporter, designer and official tags confer no reviewer access.
+Canonical DTOs, complete newest-first snapshots, report status filtering and
+private/closed arcade status access are unchanged. These reads do not mutate
+records, XP or content history. Enabled invalid Native credentials fail closed
+and Native responses are no-store; an empty client allowlist grants no Native
+identity. Moderation writes, account provisioning/withdrawal, Passport Full-owned
+review routes, raw collection and delegated access remain outside this selection.
+No alias, schema or migration is introduced.

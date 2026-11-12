@@ -431,12 +431,12 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireStrictReviewerAccess(),
 	)
-	supporterReview.GET("/requests", arcadeadmin.ListSupporterRequests)
-	supporterReview.GET("/request", arcadeadmin.GetSupporterRequest)
+	supporterReview.GET("/requests", arcadeadmin.ListSupporterRequests).Bind(firstPartyAuth...)
+	supporterReview.GET("/request", arcadeadmin.GetSupporterRequest).Bind(firstPartyAuth...)
 	supporterReview.PUT("/request", arcadeadmin.ReviewSupporterRequest)
-	reviewQueue.GET("/requests", arcadeadmin.ListModerationRequests)
+	reviewQueue.GET("/requests", arcadeadmin.ListModerationRequests).Bind(firstPartyAuth...)
 	reviewQueue.PUT("/request", arcadeadmin.ReviewModerationRequest)
-	reviewQueue.GET("/status", arcadeadmin.GetArcadeStatus)
+	reviewQueue.GET("/status", arcadeadmin.GetArcadeStatus).Bind(firstPartyAuth...)
 	reviewQueue.PUT("/status", arcadeadmin.UpdateArcadeStatus)
 	reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
 	reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
@@ -446,9 +446,9 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireStrictReviewerAccess(),
 	)
-	userReview.GET("/reports", arcadeadmin.ListAllUserReports)
+	userReview.GET("/reports", arcadeadmin.ListAllUserReports).Bind(firstPartyAuth...)
 	userReview.PUT("/report", arcadeadmin.ReviewUserReport)
-	userReview.GET("/bans", userhandler.ListUserBans)
+	userReview.GET("/bans", userhandler.ListUserBans).Bind(firstPartyAuth...)
 	userReview.POST("/ban", userhandler.CreateOrUpdateUserBan)
 	userReview.DELETE("/ban", userhandler.DeleteUserBan)
 
