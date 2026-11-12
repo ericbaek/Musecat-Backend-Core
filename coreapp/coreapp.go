@@ -387,7 +387,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
 	authArcade.POST("/visit", userhandler.VisitArcade).Bind(firstPartyAuth...)
 	authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite).Bind(firstPartyAuth...)
-	authArcade.PUT("/favorite/order", userhandler.UpdateArcadeFavoriteOrder)
+	authArcade.PUT("/favorite/order", userhandler.UpdateArcadeFavoriteOrder).Bind(firstPartyAuth...)
 	api.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
@@ -405,15 +405,15 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authNotifications.PUT("/device", usernotifications.SaveDevice).Bind(apis.BodyLimit(16384))
 	authNotifications.DELETE("/device", usernotifications.DeleteDevice).Bind(apis.BodyLimit(4096))
 	authUser.GET("/me", userhandler.GetMe)
-	authUser.PUT("/profile", userhandler.UpdateProfile).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(35<<20))
-	authUser.PUT("/game-preferences", userhandler.UpdateGamePreferences).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(128<<10))
+	authUser.PUT("/profile", userhandler.UpdateProfile).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(35<<20))
+	authUser.PUT("/game-preferences", userhandler.UpdateGamePreferences).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(128<<10))
 	authUser.POST("/check-in", userhandler.CheckIn).Bind(userhandler.RequireActiveUser())
 	api.GET("/user/passport", userhandler.GetMyPassport).Bind(firstPartyAuth...)
 	api.GET("/user/passport/stamps", userhandler.GetMyPassportStamps).Bind(firstPartyAuth...)
 	authUser.GET("/visits", userhandler.GetMyVisits).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
-	authUser.PUT("/countries", userhandler.UpdateCountries).Bind(userhandler.RequireActiveUser())
-	authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())
-	authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(userhandler.RequireActiveUser())
+	authUser.PUT("/countries", userhandler.UpdateCountries).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
+	authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
+	authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
 	authUser.GET("/report", arcadeadmin.ListUserReport).Bind(userhandler.RequireActiveUser())
 	authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(userhandler.RequireActiveUser())
 

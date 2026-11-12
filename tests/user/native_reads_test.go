@@ -186,7 +186,7 @@ func TestNativeReadCredentialBoundaryBanAndDisabledRoutes(t *testing.T) {
 		status       int
 	}{
 		{"GET", "/user/me", 401},
-		{"PUT", "/user/profile", 401},
+		{"POST", "/user/withdraw", 401},
 		{"POST", "/user/notifications/device", 401},
 		{"GET", "/user/conversations", 401},
 		{"POST", "/moderation/user/test-account", 401},

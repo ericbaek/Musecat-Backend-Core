@@ -1894,6 +1894,19 @@ body limit. Disabling the optional BFF configuration removes these routes while
 preserving consumed tickets and native session history. No credential, code,
 verifier or configured secret may be logged.
 
+### Shared first-party account settings
+
+Configured first-party native sessions bind only to `PUT /user/profile`,
+`/user/countries`, `/user/game-preferences`, `/user/visit-visibility`,
+`/user/favorite-visibility` and `/arcade/favorite/order` for account settings.
+They use the existing web handlers, DTOs, active-account and owner guards.
+Profile JSON/multipart retains its 35 MiB route limit; game preferences retain
+128 KiB. Country level gates, profile media access, normalized preference order,
+independent timeline hiding, and omitted-favorite append behavior are unchanged.
+Native responses remain no-store. Invalid credentials fail closed; this does
+not authorize withdrawal, campaign checks, push, raw REST or other settings.
+There is no schema or migration change.
+
 ### Shared first-party arcade editing
 
 Configured first-party native sessions use the same canonical `GET /arcade`,
@@ -1934,8 +1947,9 @@ and return `{arcade, favorited}`. The authenticated account alone owns the write
 client-supplied account IDs do not select an owner. Repeated desired-state writes
 are idempotent and only public arcades may be favorited. Existing active-account,
 revocation and client-allowlist guards apply; native responses remain no-store.
-`PUT /arcade/favorite/order` remains unsupported for native sessions. No native
-domain alias, schema, migration, arcade changelog or XP behavior is introduced.
+`PUT /arcade/favorite/order` uses the separately selected canonical account-settings
+operation described above. No native domain alias, schema, migration, arcade
+changelog or XP behavior is introduced.
 
 ### Shared first-party nearby reads
 

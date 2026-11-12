@@ -5397,6 +5397,7 @@ paths:
       summary: Update the authenticated user's profile
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -5459,6 +5460,7 @@ paths:
       summary: Replace the authenticated user's preferred game series and visibility
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -9655,7 +9657,7 @@ paths:
     put:
       tags: [Users]
       summary: /user/visit-visibility
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9676,7 +9678,7 @@ paths:
     put:
       tags: [Users]
       summary: /user/favorite-visibility
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9694,7 +9696,7 @@ paths:
       tags: [Arcades]
       summary: /arcade/favorite
       security: [{bearerAuth: []}, {nativeSession: []}]
-      description: Configured first-party native sessions use the same account-owned idempotent toggle as web JWTs. Favorite ordering does not accept native sessions. Native responses are no-store.
+      description: Configured first-party native sessions use the same account-owned idempotent toggle as web JWTs. Favorite ordering uses the separately selected canonical order operation. Native responses are no-store.
       requestBody:
         required: true
         content:
@@ -9726,7 +9728,7 @@ paths:
     put:
       tags: [Arcades]
       summary: /arcade/favorite/order
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -9749,7 +9751,7 @@ paths:
       tags: [Users]
       summary: /user/countries
       description: Replaces the authenticated user's ordered profile country list and display mode. Empty is allowed. Accounts below level 15 may select zero or one country; accounts at level 15 or above may select up to three. Supporter and staff tags do not change this limit.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:

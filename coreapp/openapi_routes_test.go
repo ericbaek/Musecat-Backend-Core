@@ -248,9 +248,9 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 	if _, ok := contract.Components.Schemas["NativeCredentials"]; !ok {
 		t.Fatal("native credential schema is missing from components")
 	}
-	for _, path := range []string{"/user/visits", "/user/passport", "/user/passport/stamps", "/rankings", "/user/notifications", "/user/notifications/read", "/user", "/user/activity", "/user/changelog", "/supporter/score", "/arcade/changelog", "/arcade/request_admin", "/arcade/drafts", "/arcade/memo", "/arcade/notice", "/arcade/favorite", "/arcade/visit", "/arcades/nearby"} {
+	for _, path := range []string{"/user/visits", "/user/passport", "/user/passport/stamps", "/rankings", "/user/notifications", "/user/notifications/read", "/user", "/user/activity", "/user/changelog", "/supporter/score", "/arcade/changelog", "/arcade/request_admin", "/arcade/drafts", "/arcade/memo", "/arcade/notice", "/arcade/favorite", "/arcade/visit", "/arcades/nearby", "/user/profile", "/user/countries", "/user/game-preferences", "/user/visit-visibility", "/user/favorite-visibility", "/arcade/favorite/order"} {
 		op := contract.Paths[path].Get
-		if path == "/arcade/favorite" {
+		if path == "/arcade/favorite" || path == "/user/profile" || path == "/user/countries" || path == "/user/game-preferences" || path == "/user/visit-visibility" || path == "/user/favorite-visibility" || path == "/arcade/favorite/order" {
 			op = contract.Paths[path].Put
 		}
 		if path == "/user/notifications/read" || path == "/arcade/visit" {
