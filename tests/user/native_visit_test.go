@@ -68,7 +68,7 @@ func TestCanonicalNativeVisitMatchesWebDeduplicationAndXP(t *testing.T) {
 	if count, err := app.CountRecords("arcade_changelog"); err != nil || count != 0 {
 		t.Fatal("visit wrote arcade mutation history", err)
 	}
-	for _, route := range []struct{ method, path string }{{"PUT", "/moderation/supporter/request"}, {"PUT", "/arcade/report-subscription"}, {"POST", "/user/withdraw"}, {"POST", "/api/collections/user/auth-refresh"}} {
+	for _, route := range []struct{ method, path string }{{"PUT", "/moderation/arcade/edit-report"}, {"PUT", "/arcade/report-subscription"}, {"POST", "/user/withdraw"}, {"POST", "/api/collections/user/auth-refresh"}} {
 		response := doUserRequest(t, app, route.method, route.path, map[string]string{"Authorization": "Bearer " + token}, "{}")
 		response.Body.Close()
 		if response.StatusCode != 401 {

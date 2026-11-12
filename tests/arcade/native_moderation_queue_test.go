@@ -276,7 +276,7 @@ func TestCanonicalNativeModerationQueueRateAndUnselectedScope(t *testing.T) {
 	for _, r := range []struct {
 		method, path string
 		want         int
-	}{{"PUT", "/moderation/arcade/status", 401}, {"PUT", "/moderation/supporter/request", 401}, {"POST", "/moderation/user/ban", 401}, {"DELETE", "/moderation/user/ban", 401}, {"POST", "/moderation/user/test-account", 401}, {"POST", "/moderation/user/arcade-account", 401}, {"PUT", "/developer/v1/account/moderation/arcade/request", 403}, {"GET", "/api/collections/arcade/records", 403}, {"PUT", "/native/moderation/arcade/request", 404}, {"PUT", "/native/moderation/user/report", 404}} {
+	}{{"POST", "/user/signup", 401}, {"PUT", "/moderation/arcade/edit-report", 401}, {"POST", "/moderation/user/ban", 401}, {"DELETE", "/moderation/user/ban", 401}, {"POST", "/moderation/user/test-account", 401}, {"POST", "/moderation/user/arcade-account", 401}, {"PUT", "/developer/v1/account/moderation/arcade/request", 403}, {"GET", "/api/collections/arcade/records", 403}, {"PUT", "/native/moderation/arcade/request", 404}, {"PUT", "/native/moderation/user/report", 404}} {
 		res := executeJSONRequest(t, app, r.method, r.path, `{}`, map[string]string{"Authorization": "Bearer " + s.AccessToken})
 		res.Body.Close()
 		if res.StatusCode != r.want {

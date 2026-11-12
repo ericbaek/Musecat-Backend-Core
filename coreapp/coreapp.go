@@ -433,11 +433,11 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	)
 	supporterReview.GET("/requests", arcadeadmin.ListSupporterRequests).Bind(firstPartyAuth...)
 	supporterReview.GET("/request", arcadeadmin.GetSupporterRequest).Bind(firstPartyAuth...)
-	supporterReview.PUT("/request", arcadeadmin.ReviewSupporterRequest)
+	supporterReview.PUT("/request", arcadeadmin.ReviewSupporterRequest).Bind(firstPartyAuth...)
 	reviewQueue.GET("/requests", arcadeadmin.ListModerationRequests).Bind(firstPartyAuth...)
 	reviewQueue.PUT("/request", arcadeadmin.ReviewModerationRequest).Bind(firstPartyAuth...)
 	reviewQueue.GET("/status", arcadeadmin.GetArcadeStatus).Bind(firstPartyAuth...)
-	reviewQueue.PUT("/status", arcadeadmin.UpdateArcadeStatus)
+	reviewQueue.PUT("/status", arcadeadmin.UpdateArcadeStatus).Bind(firstPartyAuth...)
 	reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
 	reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
 

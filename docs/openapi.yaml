@@ -7084,7 +7084,7 @@ paths:
       tags: [Support]
       summary: Approve or reject a pending supporter application
       description: Approval atomically appends founding_supporter to user.tags without removing existing tags. Rejection does not change tags. Already decided applications return 409.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -7177,7 +7177,7 @@ paths:
     put:
       tags: [Arcade]
       summary: Set arcade admin settings (strict reviewer only; no XP)
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:

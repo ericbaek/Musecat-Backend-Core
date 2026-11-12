@@ -2274,3 +2274,19 @@ Native credentials fail closed; Native responses are no-store, while an empty
 client allowlist grants no Native identity. Supporter grants, bans, provisioning,
 visibility correction and Full passport decisions remain unselected. No alias,
 schema, migration, delegated or raw collection capability is introduced.
+
+
+### Shared first-party supporter decisions and arcade status
+
+Configured Native sessions select existing `PUT /moderation/supporter/request`
+and `PUT /moderation/arcade/status` behind the unchanged strict active reviewer
+guard. Approval grants only existing `founding_supporter`, preserves other tags,
+and saves applicant/request atomically; it never grants strict reviewer access.
+Pending-only and unavailable-applicant conflicts remain 409. Status correction
+retains both required booleans, ISO/IANA validation, the four-field transaction,
+accepted repeated writes and existing post-commit discovery invalidation. Neither
+operation awards XP or writes content history. Invalid enabled Native credentials
+fail closed; Native responses are no-store, and disabled configuration grants no
+Native identity. Bans, provisioning, signup/withdrawal, edit-report decisions and
+Full passport decisions remain outside this selection. No schema, migration,
+handler copy, Native alias, delegated or raw collection capability is introduced.

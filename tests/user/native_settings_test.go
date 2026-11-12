@@ -204,7 +204,7 @@ func TestCanonicalNativeSettingsRejectInvalidSessionsAndUnselectedCapabilities(t
 			}
 		}
 	}
-	for _, route := range []struct{ method, path string }{{"POST", "/user/withdraw"}, {"PUT", "/moderation/supporter/request"}, {"POST", "/user/notifications/device"}, {"POST", "/api/collections/user/auth-refresh"}} {
+	for _, route := range []struct{ method, path string }{{"POST", "/user/withdraw"}, {"PUT", "/moderation/arcade/edit-report"}, {"POST", "/user/notifications/device"}, {"POST", "/api/collections/user/auth-refresh"}} {
 		response := doUserRequest(t, app, route.method, route.path, map[string]string{"Authorization": "Bearer " + credentials.AccessToken}, "{}")
 		response.Body.Close()
 		if response.StatusCode != 401 {
