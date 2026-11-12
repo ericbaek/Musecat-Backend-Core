@@ -21,6 +21,7 @@ var activitySources = []activitySource{
 	{table: "arcade_flag", authorField: "createdBy", target: "flag"},
 	{table: "arcade_flag_reaction", authorField: "createdBy", target: "flag"},
 	{table: "z_legacy_tickets", authorField: "createdBy", target: "legacy"},
+	{table: "community_post", authorField: "author", target: "achievement"},
 }
 
 func BuildUserActivity(app core.App, profile *Profile, loc *time.Location, tzName string, days int, now time.Time) (*ActivityResponse, error) {
@@ -67,6 +68,8 @@ func BuildUserActivity(app core.App, profile *Profile, loc *time.Location, tzNam
 				day.FlagCount++
 			case "legacy":
 				day.LegacyTicketCount++
+			case "achievement":
+				day.AchievementCount++
 			}
 		}
 	}
@@ -96,12 +99,13 @@ func BuildUserActivity(app core.App, profile *Profile, loc *time.Location, tzNam
 	}
 
 	for _, day := range outDays {
-		day.TotalCount = day.ChangelogCount + day.FlagCount + day.LegacyTicketCount + day.AttendanceCount
+		day.TotalCount = day.ChangelogCount + day.FlagCount + day.LegacyTicketCount + day.AttendanceCount + day.AchievementCount
 		resp.Totals.TotalCount += day.TotalCount
 		resp.Totals.ChangelogCount += day.ChangelogCount
 		resp.Totals.FlagCount += day.FlagCount
 		resp.Totals.LegacyTicketCount += day.LegacyTicketCount
 		resp.Totals.AttendanceCount += day.AttendanceCount
+		resp.Totals.AchievementCount += day.AchievementCount
 		if day.TotalCount > resp.Totals.MaxDailyCount {
 			resp.Totals.MaxDailyCount = day.TotalCount
 		}
@@ -119,6 +123,10 @@ func loadActivityCreatedAt(app core.App, table, authorField, userID, startUTC, e
 		return nil, nil
 	}
 
+	condition := ""
+	if table == "community_post" {
+		condition = "AND status = 'active' AND flair = 'achievement' AND json_array_length(photos) > 0"
+	}
 	sql := fmt.Sprintf(`
 SELECT created
 FROM %s
@@ -127,8 +135,9 @@ WHERE %s = {:userId}
   AND created != ''
   AND created >= {:start}
   AND created < {:end}
+%s
 ORDER BY created ASC
-`, table, authorField, authorField)
+`, table, authorField, authorField, condition)
 
 	rows, err := app.DB().NewQuery(sql).
 		Bind(dbx.Params{

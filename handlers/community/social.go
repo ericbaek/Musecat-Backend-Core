@@ -114,6 +114,7 @@ func CreateComment(re *core.RequestEvent) error {
 		return apis.NewBadRequestError("A comment requires text or a photo", nil)
 	}
 	var saved *core.Record
+	var feedback *xp.ExpFeedback
 	err = re.App.RunInTransaction(func(tx core.App) error {
 		if err := activePost(tx, input.Post); err != nil {
 			return err
@@ -168,7 +169,8 @@ func CreateComment(re *core.RequestEvent) error {
 			return err
 		}
 		if post.GetString("flair") == "achievement" && post.GetString("author") != re.Auth.Id {
-			if err := xp.AwardCommunityTx(tx, re.Auth.Id, "reaction", "comment:"+saved.Id, now); err != nil {
+			feedback, err = xp.AwardCommunityWithFeedbackTx(tx, re.Auth.Id, "reaction", "comment:"+saved.Id, now)
+			if err != nil {
 				return err
 			}
 		}
@@ -177,7 +179,7 @@ func CreateComment(re *core.RequestEvent) error {
 	if err != nil {
 		return err
 	}
-	return serveComment(re, saved, OriginalLocale, http.StatusCreated)
+	return serveComment(re, saved, OriginalLocale, http.StatusCreated, feedback)
 }
 func UpdateComment(re *core.RequestEvent) error {
 	defer cleanupCommentUpload(re)
@@ -290,12 +292,15 @@ func GetComment(re *core.RequestEvent) error {
 	}
 	return serveComment(re, record, locale, http.StatusOK)
 }
-func serveComment(re *core.RequestEvent, record *core.Record, locale string, status int) error {
+func serveComment(re *core.RequestEvent, record *core.Record, locale string, status int, feedback ...*xp.ExpFeedback) error {
 	items, err := commentResponses(re.App, []*core.Record{record}, locale, viewerID(re))
 	if err != nil {
 		return err
 	}
 	privateSocialResponse(re)
+	if len(feedback) > 0 && feedback[0] != nil {
+		items[0]["xp_feedback"] = feedback[0]
+	}
 	return re.JSON(status, items[0])
 }
 func ListComments(re *core.RequestEvent) error {
@@ -359,6 +364,7 @@ func LikeComment(re *core.RequestEvent) error {
 func setLike(re *core.RequestEvent, targetCollection, likeCollection, key string) error {
 	id := re.Request.URL.Query().Get("id")
 	var result socialCount
+	var feedback *xp.ExpFeedback
 	err := re.App.RunInTransaction(func(tx core.App) error {
 		if targetCollection == CollectionPost {
 			if err := activePost(tx, id); err != nil {
@@ -407,7 +413,8 @@ func setLike(re *core.RequestEvent, targetCollection, likeCollection, key string
 				}
 			}
 			if post.GetString("flair") == "achievement" && target.GetString("author") != re.Auth.Id {
-				if err := xp.AwardCommunityTx(tx, re.Auth.Id, "reaction", "like-"+key+":"+id, time.Now().UTC()); err != nil {
+				feedback, err = xp.AwardCommunityWithFeedbackTx(tx, re.Auth.Id, "reaction", "like-"+key+":"+id, time.Now().UTC())
+				if err != nil {
 					return err
 				}
 			}
@@ -432,7 +439,11 @@ func setLike(re *core.RequestEvent, targetCollection, likeCollection, key string
 		return err
 	}
 	privateSocialResponse(re)
-	return re.JSON(http.StatusOK, map[string]any{"like_count": result.Count, "liked": result.Liked > 0})
+	resultBody := map[string]any{"like_count": result.Count, "liked": result.Liked > 0}
+	if feedback != nil {
+		resultBody["xp_feedback"] = feedback
+	}
+	return re.JSON(http.StatusOK, resultBody)
 }
 
 // All identifiers in this query are internal constants, never request input.
@@ -596,11 +607,14 @@ func postResponses(app core.App, records []*core.Record, locale, viewer string) 
 	}
 	return result, nil
 }
-func servePost(re *core.RequestEvent, record *core.Record, locale string, status int) error {
+func servePost(re *core.RequestEvent, record *core.Record, locale string, status int, feedback ...*xp.ExpFeedback) error {
 	items, err := postResponses(re.App, []*core.Record{record}, locale, viewerID(re))
 	if err != nil {
 		return err
 	}
 	privateSocialResponse(re)
+	if len(feedback) > 0 && feedback[0] != nil {
+		items[0]["xp_feedback"] = feedback[0]
+	}
 	return re.JSON(status, items[0])
 }
