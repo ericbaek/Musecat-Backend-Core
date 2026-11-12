@@ -2290,3 +2290,18 @@ fail closed; Native responses are no-store, and disabled configuration grants no
 Native identity. Bans, provisioning, signup/withdrawal, edit-report decisions and
 Full passport decisions remain outside this selection. No schema, migration,
 handler copy, Native alias, delegated or raw collection capability is introduced.
+
+
+### Shared first-party user bans
+
+Configured Native sessions select existing `POST|DELETE /moderation/user/ban`
+behind the unchanged strict active developer/moderator guard. POST retains its
+target-ID/normalized-email-hash upsert, required reason, permanent or future
+RFC3339 expiry and accepted repeated200 updates. DELETE retains user-query/body
+fallback, target-ID lookup, deleted confirmation and missing/repeated404. Existing
+self/staff-target behavior, account request restrictions and persistence errors
+are unchanged; no session-family revocation, account deletion, XP or content
+history write is introduced. Invalid enabled Native credentials fail closed;
+Native responses are no-store, disabled configuration grants no Native identity.
+Provisioning/withdrawal, raw/delegated routes and Native aliases stay outside the
+selection. No schema, migration, duplicate handler or new privilege policy is added.

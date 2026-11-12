@@ -200,8 +200,8 @@ func TestCanonicalOrdinaryNativeReadsKeepCredentialScope(t *testing.T) {
 	}{
 		{"PUT", "/developer/v1/account/arcade/favorite", 401}, {"PUT", "/native/arcade/favorite", 404},
 		{"PUT", "/arcade/report-subscription", 401},
-		{"PUT", "/arcade/report-subscription", 401}, {"POST", "/arcade/check-notes", 401}, {"DELETE", "/moderation/user/ban", 401},
-		{"PUT", "/moderation/arcade/edit-report", 401}, {"POST", "/moderation/user/ban", 401}, {"GET", "/user/feedback", 401},
+		{"PUT", "/arcade/report-subscription", 401}, {"POST", "/arcade/check-notes", 401}, {"POST", "/api/collections/user/auth-refresh", 401},
+		{"PUT", "/moderation/arcade/edit-report", 401}, {"POST", "/user/notifications/device", 401}, {"GET", "/user/feedback", 401},
 		{"GET", "/api/collections/arcade/records", 403}, {"GET", "/developer/v1/account/user?id=" + owner.Id, 401},
 		{"GET", "/native/user?id=" + owner.Id, 404}, {"GET", "/native/arcade/drafts", 404},
 	} {

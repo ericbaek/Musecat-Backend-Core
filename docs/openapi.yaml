@@ -7392,7 +7392,7 @@ paths:
     post:
       tags: [Moderator]
       summary: Create or update a user ban
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -7429,7 +7429,7 @@ paths:
     delete:
       tags: [Moderator]
       summary: Remove a user ban
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - name: user
           in: query
