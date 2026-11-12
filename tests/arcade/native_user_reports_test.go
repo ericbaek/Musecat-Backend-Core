@@ -174,7 +174,7 @@ func TestCanonicalNativeUserReportsKeepRateLimitsAndExcludeModerationAndAliases(
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"GET", "/native/user/report", 404}, {"POST", "/native/user/report", 404}, {"PUT", "/moderation/user/report", 401}} {
+	}{{"GET", "/native/user/report", 404}, {"POST", "/native/user/report", 404}, {"PUT", "/moderation/arcade/status", 401}} {
 		response := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + session.AccessToken})
 		response.Body.Close()
 		if response.StatusCode != op.status {

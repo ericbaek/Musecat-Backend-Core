@@ -7130,7 +7130,7 @@ paths:
     put:
       tags: [Support]
       summary: Resolve an arcade inquiry or report (strict reviewer only)
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -7324,7 +7324,7 @@ paths:
     put:
       tags: [Moderator]
       summary: Review a user report
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:

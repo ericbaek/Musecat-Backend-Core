@@ -2259,3 +2259,18 @@ and Native responses are no-store; an empty client allowlist grants no Native
 identity. Moderation writes, account provisioning/withdrawal, Passport Full-owned
 review routes, raw collection and delegated access remain outside this selection.
 No alias, schema or migration is introduced.
+
+
+### Shared first-party moderation queue decisions
+
+Configured Native sessions select existing `PUT /moderation/arcade/request` and
+`PUT /moderation/user/report` only. Active developer/moderator access remains
+required. Arcade decisions retain authenticated reviewer attribution, note limits,
+transactional metadata and repeat-resolution 409. User-report status updates
+retain their existing accepted same-status repeat behavior and stored reporter/
+target; no new idempotency policy is imposed. Both retain their canonical DTOs,
+validation, persistence errors and no XP/content history effects. Invalid enabled
+Native credentials fail closed; Native responses are no-store, while an empty
+client allowlist grants no Native identity. Supporter grants, bans, provisioning,
+visibility correction and Full passport decisions remain unselected. No alias,
+schema, migration, delegated or raw collection capability is introduced.

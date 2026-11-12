@@ -179,7 +179,7 @@ func TestCanonicalNativeModerationReadRolesAndCredentialScope(t *testing.T) {
 		moderationRead(t, app, path, strings.Repeat("z", 43), web, 401)
 		moderationRead(t, app, "/native"+path, s.AccessToken, "", 404)
 	}
-	for _, r := range []struct{ method, path string }{{"PUT", "/moderation/arcade/request"}, {"PUT", "/moderation/arcade/status"}, {"PUT", "/moderation/supporter/request"}, {"PUT", "/moderation/user/report"}, {"POST", "/moderation/user/ban"}, {"DELETE", "/moderation/user/ban"}, {"POST", "/moderation/user/test-account"}, {"POST", "/moderation/user/arcade-account"}, {"POST", "/user/withdraw"}, {"GET", "/moderation/arcade/edit-reports"}} {
+	for _, r := range []struct{ method, path string }{{"POST", "/arcade/check-notes"}, {"PUT", "/moderation/arcade/status"}, {"PUT", "/moderation/supporter/request"}, {"PUT", "/arcade/report-subscription"}, {"POST", "/moderation/user/ban"}, {"DELETE", "/moderation/user/ban"}, {"POST", "/moderation/user/test-account"}, {"POST", "/moderation/user/arcade-account"}, {"POST", "/user/withdraw"}, {"GET", "/moderation/arcade/edit-reports"}} {
 		res := executeJSONRequest(t, app, r.method, r.path, "", map[string]string{"Authorization": "Bearer " + s.AccessToken})
 		res.Body.Close()
 		if res.StatusCode != 401 {

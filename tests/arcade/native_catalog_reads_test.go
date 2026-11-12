@@ -242,7 +242,7 @@ func TestCanonicalNativeCatalogReadsKeepOtherModerationUnselectedAndRateLimits(t
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"PUT", "/moderation/user/report", 401}, {"PUT", "/moderation/arcade/request", 401}, {"PUT", "/moderation/supporter/request", 401}, {"GET", "/native/moderation/game/catalog", 404}, {"GET", "/native/moderation/game/catalog/changes", 404}} {
+	}{{"POST", "/moderation/user/ban", 401}, {"PUT", "/moderation/arcade/status", 401}, {"PUT", "/moderation/supporter/request", 401}, {"GET", "/native/moderation/game/catalog", 404}, {"GET", "/native/moderation/game/catalog/changes", 404}} {
 		res := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + session.AccessToken})
 		res.Body.Close()
 		if res.StatusCode != op.status {
