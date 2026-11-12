@@ -1985,8 +1985,9 @@ Notice creation retains official ownership, level-30 supporter and other-officia
 management restrictions. Updates/deletes retain author/staff and authorless legacy
 ownership rules. JSON/multipart, partial updates, three 5 MiB photos, 16 MiB
 POST/PUT body limits, soft deletion and display-slot 409 conflicts are unchanged.
-Native responses remain no-store. Photo mutations, rollback, publication, campaign
-and management operations are not enabled. No schema or migration is added.
+Native responses remain no-store. These memo/notice bindings do not enable photo
+mutations, publication, campaign or management operations. Rollback is selected
+separately below. No schema or migration is added.
 
 ### Shared first-party flag writes
 
@@ -2003,6 +2004,20 @@ encoded body. Mutation acknowledgements and deployment public-read checks retain
 the existing web boundary; no read quota or visibility policy is changed.
 Native responses remain no-store. No photo read route, raw file/collection access,
 Native domain alias, schema or migration is added by these bindings.
+
+### Shared first-party history actions
+
+Configured Native sessions also select canonical `POST /arcade/rollback`,
+`POST /arcade/edit_report` and `POST /arcade/request_admin`. The web handlers,
+DTOs and active-account policy remain authoritative. Rollback preserves the
+historical target relation, public/private write access and atomic changelog
+and optional abuse-report transaction. `previous_value` remains an absent-value
+fallback, not a compare-and-swap token. Edit reports derive the editor from the
+cited immutable changelog and retain private visibility, 1200-character limits
+and unresolved-report 409 conflicts. General requests remain account-owned and
+are visible through the existing owner-filtered list. Native mutation responses
+are no-store and clients do not replay writes after authentication failures.
+No domain alias, moderation capability, schema or migration is introduced.
 
 ### Shared first-party favorite toggle
 

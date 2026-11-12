@@ -6964,6 +6964,7 @@ paths:
       summary: /arcade/request_admin
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -7003,6 +7004,7 @@ paths:
       description: Creates an independent abuse report linked to one immutable changelog row. The server derives the reported editor; unresolved duplicates for the same arcade/changelog return `409`.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -7700,6 +7702,7 @@ paths:
       description: Applies an immediate rollback. With `report=true`, it atomically creates a `rollback_report` linked to the cited changelog; it never auto-bans the cited editor. Private drafts require the creator or a developer/moderator; public arcades have no editor level threshold.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:

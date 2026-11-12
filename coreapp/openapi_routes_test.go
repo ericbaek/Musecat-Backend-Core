@@ -273,7 +273,7 @@ func TestOpenAPINativeLoginPathsAndSecurity(t *testing.T) {
 			t.Fatalf("duplicate native domain URL remains: %s", path)
 		}
 	}
-	for _, sample := range []struct{ path, method string }{{"/arcade/memo", "put"}, {"/arcade/notice", "post"}, {"/arcade/notice", "put"}, {"/arcade/notice", "delete"}, {"/arcade/flag", "post"}, {"/arcade/flag/reaction", "post"}, {"/arcade/flag/delete", "post"}} {
+	for _, sample := range []struct{ path, method string }{{"/arcade/rollback", "post"}, {"/arcade/edit_report", "post"}, {"/arcade/request_admin", "post"}, {"/arcade/memo", "put"}, {"/arcade/notice", "post"}, {"/arcade/notice", "put"}, {"/arcade/notice", "delete"}, {"/arcade/flag", "post"}, {"/arcade/flag/reaction", "post"}, {"/arcade/flag/delete", "post"}} {
 		entry := contract.Paths[sample.path]
 		op := entry.Put
 		if sample.method == "post" {
