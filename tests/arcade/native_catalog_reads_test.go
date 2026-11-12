@@ -235,14 +235,14 @@ func TestCanonicalNativeCatalogReadsRejectInvalidInactiveAndDisabledSessions(t *
 	}
 }
 
-func TestCanonicalNativeCatalogReadsDoNotEnableWritesOrModerationAndKeepRateLimits(t *testing.T) {
+func TestCanonicalNativeCatalogReadsKeepOtherModerationUnselectedAndRateLimits(t *testing.T) {
 	app := nativeNearbyApp(t, true)
 	_, user := createAuthUserWithTags(t, app, []string{"developer"})
 	_, session := nativeNearbySession(t, app, user)
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"POST", "/moderation/game/catalog", 401}, {"PUT", "/moderation/game/catalog", 401}, {"DELETE", "/moderation/game/catalog", 401}, {"POST", "/moderation/game/catalog/restore", 401}, {"POST", "/moderation/game/catalog/compatibilities", 401}, {"POST", "/moderation/game/catalog/changes/revert", 401}, {"GET", "/moderation/supporter/requests", 401}, {"GET", "/native/moderation/game/catalog", 404}, {"GET", "/native/moderation/game/catalog/changes", 404}} {
+	}{{"GET", "/moderation/user/reports", 401}, {"GET", "/moderation/arcade/requests", 401}, {"GET", "/moderation/supporter/requests", 401}, {"GET", "/native/moderation/game/catalog", 404}, {"GET", "/native/moderation/game/catalog/changes", 404}} {
 		res := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + session.AccessToken})
 		res.Body.Close()
 		if res.StatusCode != op.status {

@@ -6570,8 +6570,7 @@ paths:
     post:
       tags: [Moderator]
       summary: Create a catalog item
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -6589,8 +6588,7 @@ paths:
     put:
       tags: [Moderator]
       summary: Update a catalog item with optimistic concurrency
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -6608,8 +6606,7 @@ paths:
     delete:
       tags: [Moderator]
       summary: Archive a catalog item
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -6628,8 +6625,7 @@ paths:
     post:
       tags: [Moderator]
       summary: Restore an archived catalog item
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -6648,8 +6644,7 @@ paths:
       tags: [Moderator]
       summary: Atomically replace a version's compatible cabinet set
       description: Reconciles creates, restores, and archives in one transaction. The expected active revisions reject stale checklist submissions.
-      security:
-        - bearerAuth: []
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -6658,7 +6653,7 @@ paths:
               $ref: '#/components/schemas/GameCatalogCompatibilityMutationRequest'
       responses:
         '200':
-          description: The complete resulting compatibility set and immutable audit rows.
+          description: The complete resulting compatibility set and immutable audit rows. Changes is an empty array for replay or zero-change requests.
           content:
             application/json:
               schema:
@@ -6700,8 +6695,8 @@ paths:
     post:
       tags: [Moderator]
       summary: Revert a catalog change as a new audited operation
-      security:
-        - bearerAuth: []
+      description: Restores the original stored before fields for updates, archives, and restores; reverting a creation archives its retained item. Original audit records remain immutable. Corrupt or mismatched stored snapshots fail closed.
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -6716,6 +6711,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GameCatalogMutationResponse'
         '409': { description: Current item cannot safely be reverted. }
+        '502': { description: Stored catalog snapshot is invalid or cannot be restored atomically. }
   /user/feedback:
     get:
       tags: [Support, Users]

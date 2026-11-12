@@ -504,9 +504,20 @@ Configured first-party Native sessions separately select only
 share Web JWT handlers and the existing active staff or level-30 supporter guard.
 Locale, archived records, version-alias exclusion, cabinet order, raw price and
 audit snapshots, filters and pagination remain canonical. Native responses are
-no-store. Empty client configuration grants no Native identity; catalog writes,
-other moderation, raw REST and delegated routes remain unselected. No schema or
-migration is added.
+no-store. Empty client configuration grants no Native identity. Catalog writes
+are selected separately below; other moderation, raw REST and delegated routes
+remain unselected. No schema or migration is added.
+
+Configured Native sessions also select `POST|PUT|DELETE /moderation/game/catalog`,
+`POST /moderation/game/catalog/restore`,
+`POST /moderation/game/catalog/compatibilities` and
+`POST /moderation/game/catalog/changes/revert`.
+All six share the existing Web handlers, active staff/level-30 supporter guard
+and 128 KiB body limit. UUID operation identity, same-actor payload replay, stale
+revision and dependency conflicts, atomic item/audit changes and raw snapshots
+remain unchanged; these catalog edits do not award arcade XP. Compatibility
+replacement audit IDs remain UUIDv5-derived per activate/archive cabinet intent,
+not the parent request UUID. No schema or migration changes are required.
 
 Catalog records are never hard-deleted. Archive and restore are revisioned
 operations. Archive fails when the record is referenced by a current arcade
@@ -516,6 +527,12 @@ authenticated actor and tags, reason, before/after snapshots, and revisions.
 `GET /moderation/game/catalog/changes` lists that evidence and a guarded
 `POST /moderation/game/catalog/changes/revert` records a new revert operation;
 it does not erase history. Full owns notifications for those log records.
+Revert decodes the stored before snapshot and restores its original fields for
+updates, archives and restores. Only a create audit with absent or explicit-null
+before data is undone by archiving the retained item. Invalid JSON, a missing
+non-create snapshot or mismatched snapshot identity fails closed without changing
+the item or original audit. Compatibility reconciliation returns `changes: []`
+for replay and zero-change requests; it never returns a null changes array.
 
 Configured first-party Native sessions select the same `GET /arcade/games` and
 `POST /arcade/game/bulk_version` handlers as web JWTs. Reads still require staff
