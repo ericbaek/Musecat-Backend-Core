@@ -3,10 +3,13 @@ package community_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
 	"github.com/ericbaek/musecat-backend-core/service/communitymention"
 	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
+	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -70,6 +73,11 @@ func TestPostMentionsAtomicAndIdempotent(t *testing.T) {
 
 func TestArcadeMentionRequiresPublicCanonicalTarget(t *testing.T) {
 	app := newCommunityTestApp(t)
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		se.Router.GET("/arcades/updates", query.ListArcadeUpdates)
+		se.Router.GET("/arcades/updates/history", query.ListArcadeUpdateHistory)
+		return se.Next()
+	})
 	defer app.Cleanup()
 	token, _ := createCommunityUser(t, app)
 	series := achievementSeries(t, app)
@@ -91,8 +99,8 @@ func TestArcadeMentionRequiresPublicCanonicalTarget(t *testing.T) {
 	if err := app.Save(arcade); err != nil {
 		t.Fatal(err)
 	}
-	mentions, _ := json.Marshal([]communitymention.Mention{{Kind: "arcade", ID: arcade.Id, Label: "Beta Arcade", Start: 0, End: 12}})
-	fields := map[string]string{"flair": "achievement", "game_series": series.Id, "body": "@Beta Arcade", "mentions": string(mentions)}
+	mentions, _ := json.Marshal([]communitymention.Mention{{Kind: "arcade", ID: arcade.Id, Label: "Beta Arcade", Start: 0, End: 12}, {Kind: "arcade", ID: arcade.Id, Label: "Beta Arcade", Start: 13, End: 25}})
+	fields := map[string]string{"flair": "achievement", "game_series": series.Id, "body": "@Beta Arcade @Beta Arcade", "mentions": string(mentions)}
 	res := achievementRequest(t, app, "POST", "", token, fields, 1)
 	if res.StatusCode != 400 {
 		t.Fatal("private arcade accepted", res.StatusCode)
@@ -108,6 +116,84 @@ func TestArcadeMentionRequiresPublicCanonicalTarget(t *testing.T) {
 	if n, _ := app.CountRecords(usernotification.Inbox); n != 0 {
 		t.Fatal("arcade mention generated user alert")
 	}
+	id := decodeBody(t, res)["id"].(string)
+	post, err := app.FindRecordById("community_post", id)
+	if err != nil || !reflect.DeepEqual(post.GetStringSlice("arcades"), []string{arcade.Id}) {
+		t.Fatal("arcade relation missing or duplicated", err)
+	}
+	created := post.GetString("created")
+	assertActivity := func(want bool) {
+		t.Helper()
+		for _, path := range []string{"/arcades/updates", "/arcades/updates/history"} {
+			response := communityRequest(t, app, http.MethodGet, path, "", token)
+			if response.StatusCode != 200 {
+				t.Fatal(response.StatusCode, decodeBody(t, response))
+			}
+			var payload any
+			if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			rows, ok := payload.([]any)
+			if !ok {
+				rows = payload.(map[string]any)["items"].([]any)
+			}
+			if !want {
+				if len(rows) != 0 {
+					t.Fatal("ineligible achievement leaked", payload)
+				}
+				continue
+			}
+			if len(rows) != 1 {
+				t.Fatal("missing or duplicated arcade activity", payload)
+			}
+			row := rows[0].(map[string]any)
+			if row["id"] != arcade.Id || !reflect.DeepEqual(row["updated_parts"], []any{"achievement"}) {
+				t.Fatal(payload)
+			}
+			changes := row["changes"].([]any)
+			if len(changes) != 1 || changes[0].(map[string]any)["created"] != created {
+				t.Fatal("achievement timestamp or deduplication changed", payload)
+			}
+		}
+	}
+	assertActivity(true)
+	for _, field := range []string{"closed", "public"} {
+		arcade.Set(field, field == "closed")
+		if err := app.Save(arcade); err != nil {
+			t.Fatal(err)
+		}
+		assertActivity(false)
+		arcade.Set(field, field == "public")
+		if err := app.Save(arcade); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertActivity(true)
+	update := func(body string, refs string, flair string) {
+		t.Helper()
+		response := communityRequest(t, app, "PUT", "/community/post?id="+id, fmt.Sprintf(`{"body":%q,"mentions":%s,"flair":%q,"game_series":%q,"arcades":[%q]}`, body, refs, flair, series.Id, arcade.Id), token)
+		if response.StatusCode != 200 {
+			t.Fatal(response.StatusCode, decodeBody(t, response))
+		}
+		response.Body.Close()
+	}
+	update("removed", "[]", "achievement")
+	post, _ = app.FindRecordById("community_post", id)
+	if len(post.GetStringSlice("arcades")) != 0 {
+		t.Fatal("removed mention retained relation or trusted client relation")
+	}
+	assertActivity(false)
+	update(fields["body"], string(mentions), "tip")
+	assertActivity(false)
+	update(fields["body"], string(mentions), "achievement")
+	assertActivity(true)
+	response := communityRequest(t, app, "DELETE", "/community/post?id="+id, "", token)
+	if response.StatusCode != 204 {
+		t.Fatal(response.StatusCode)
+	}
+	response.Body.Close()
+	assertActivity(false)
 }
 
 func TestTiptapDocumentIsCanonicalAndLegacyUpdatesPreserveDocument(t *testing.T) {
