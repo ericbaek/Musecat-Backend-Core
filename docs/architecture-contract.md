@@ -2019,6 +2019,21 @@ are visible through the existing owner-filtered list. Native mutation responses
 are no-store and clients do not replay writes after authentication failures.
 No domain alias, moderation capability, schema or migration is introduced.
 
+### Shared first-party draft creation and publication
+
+Configured Native sessions select canonical `POST /arcade/new`, `GET|PUT /arcade/public`,
+`POST /arcade/location-verification` and `DELETE /arcade/draft`. The web handlers,
+DTOs and active-account checks remain unchanged; no Native domain aliases exist.
+Creation derives the creator from authentication and requires the existing geo
+contract. Preview, publication, location proof and deletion remain creator-only,
+including when the caller is staff. Preview is read-only; level-based publication
+requirements cannot be bypassed by supporter/staff tags. Publication retains its
+transactional, idempotent XP grants. The 100-meter distance and accuracy proof is
+tied to the current basic revision and grants neither visits nor XP. Public/closed
+state and published-draft deletion restrictions remain authoritative. Native
+responses are no-store. These bindings add no photo/raw-REST/delegated capability,
+schema or migration, and do not change existing immutable history semantics.
+
 ### Shared first-party favorite toggle
 
 Configured native sessions authenticate `PUT /arcade/favorite` through the same

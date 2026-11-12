@@ -4618,6 +4618,7 @@ paths:
       description: Deletes only the authenticated creator's private draft. Published arcade history is never deleted by this endpoint.
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: id
           in: query
@@ -6879,6 +6880,7 @@ paths:
       summary: /arcade/new
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -7865,6 +7867,7 @@ paths:
       description: Reads the creator's current level-based public-conversion requirements and currently eligible public-conversion (5 XP) and draft-backfill (2 XP per eligible changed area) without changing visibility or the XP ledger. Levels 0-4 require game, contact-or-hours, and facility-photo-or-location-verification; levels 5-9 require game and facility-photo-or-location-verification; levels 10+ require game only. Only the private arcade creator may call this endpoint.
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: arcade
           in: query
@@ -7929,6 +7932,7 @@ paths:
       summary: /arcade/public
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -7981,6 +7985,7 @@ paths:
       description: Stores a one-time location proof tied to the arcade's current basic-information revision. Editing basic information changes that revision and invalidates the proof. This endpoint does not create a Passport visit or award XP.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
