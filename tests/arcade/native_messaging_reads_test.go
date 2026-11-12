@@ -344,7 +344,7 @@ func TestCanonicalNativeMessagingRejectsBadExpiredInactiveAndDisabledSessions(t 
 	nativeBulkRequest(t, disabled, "GET", "/user/conversations", disabledWeb, nil, 200)
 }
 
-func TestCanonicalNativeMessagingReadsPreserveRateLimitsAndExcludeWritesEvents(t *testing.T) {
+func TestCanonicalNativeMessagingReadsPreserveRateLimitsAndExcludeUnselectedOperations(t *testing.T) {
 	app := nativeNearbyApp(t, true)
 	_, user := createAuthUser(t, app)
 	_, session := nativeNearbySession(t, app, user)
@@ -364,7 +364,7 @@ func TestCanonicalNativeMessagingReadsPreserveRateLimitsAndExcludeWritesEvents(t
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"PUT", "/user/messaging/preferences", 401}, {"PUT", "/user/messaging/blocks/missing", 401}, {"POST", "/user/messages/missing/report", 401}, {"PUT", "/user/inquiry-bots/arcade/missing", 401}, {"GET", "/user/events", 401}, {"GET", "/user/messaging/preferences", 401}, {"GET", "/api/collections/messaging_message/records", 403}} {
+	}{{"PUT", "/user/messaging/preferences", 401}, {"PUT", "/user/messaging/blocks/missing", 401}, {"POST", "/user/messages/missing/report", 401}, {"PUT", "/user/inquiry-bots/arcade/missing", 401}, {"GET", "/moderation/messages/reports", 401}, {"GET", "/user/messaging/preferences", 401}, {"GET", "/api/collections/messaging_message/records", 403}} {
 		r := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + session.AccessToken})
 		r.Body.Close()
 		if r.StatusCode != op.status {

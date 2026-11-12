@@ -68,7 +68,7 @@ func RegisterRoutes(se *core.ServeEvent, nativeClients ...nativeauth.Client) {
 	api.DELETE("/messaging/blocks/{userId}", Unblock)
 	api.GET("/messaging/recipients", Recipients)
 	api.POST("/messages/{messageId}/report", Report).Bind(apis.BodyLimit(8192))
-	api.GET("/events", Events)
+	api.GET("/events", func(re *core.RequestEvent) error { return eventsWithNative(re, nativeClients) }).Bind(firstPartyAuth...)
 	if se.App.Store().Get("messaging.hooks") == nil {
 		messaging.RegisterEvents(se.App)
 		se.App.Store().Set("messaging.hooks", true)
@@ -281,7 +281,9 @@ func Photo(re *core.RequestEvent) error {
 	re.Response.Header().Set("X-Content-Type-Options", "nosniff")
 	return fs.Serve(re.Response, re.Request, storage, filename)
 }
-func Events(re *core.RequestEvent) error {
+func Events(re *core.RequestEvent) error { return eventsWithNative(re, nil) }
+
+func eventsWithNative(re *core.RequestEvent, nativeClients []nativeauth.Client) error {
 	hub := messaging.Events(re.App)
 	sub := hub.Subscribe(re.Auth.Id)
 	if sub == nil {
@@ -305,11 +307,18 @@ func Events(re *core.RequestEvent) error {
 	valid := func() bool {
 		token := strings.TrimPrefix(re.Request.Header.Get("Authorization"), "Bearer ")
 		u, err := re.App.FindAuthRecordByToken(token, core.TokenTypeAuth)
+		if err != nil && len(nativeClients) > 0 {
+			u, _, err = (nativeauth.Service{Clients: nativeClients}).AuthenticateSession(re.App, token)
+		}
 		if err != nil || u.Id != re.Auth.Id {
 			return false
 		}
 		_, err = messaging.ActiveUser(re.App, u.Id)
 		return err == nil
+	}
+	if !valid() {
+		_ = write(messaging.Event{Name: "session.expired"})
+		return nil
 	}
 	if err := write(messaging.Event{Name: "ready"}); err != nil {
 		return nil
@@ -325,6 +334,10 @@ func Events(re *core.RequestEvent) error {
 		case <-lifetime.C:
 			return nil
 		case <-sub.Overflow:
+			if !valid() {
+				_ = write(messaging.Event{Name: "session.expired"})
+				return nil
+			}
 			_ = write(messaging.Event{Name: "resync"})
 			return nil
 		case <-heartbeat.C:

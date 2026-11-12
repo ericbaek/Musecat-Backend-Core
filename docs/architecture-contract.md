@@ -2197,3 +2197,19 @@ Read/status bodies retain 4096 bytes. These bindings do not select SSE, guest
 credentials, preferences, blocks, reports or the separate legacy automatic-error
 intake. The existing 12000-UTF16 diagnostic/13000-legacy boundary is unchanged. No
 Native alias, schema, duplicate store, raw REST or global bearer support is added.
+
+
+### Shared first-party messaging event stream
+
+Configured Native access sessions also select canonical `GET /user/events`. Entry
+uses the existing operation-scoped adapter; ready, normal events, overflow resync
+and each heartbeat recheck the existing Web JWT or Native session authentication
+plus the current active-user policy. Native revalidation reuses `AuthenticateSession`
+for configured client, access/family expiry, revocation and account-key rotation.
+Each conversation event still rechecks current ACL; staff gains no DM override.
+
+The same committed invalidation DTOs, private/no-store headers, 15-second heartbeat,
+25-minute lifetime, four/user and 1024/process limits, queue32, overflow close and
+cancellation cleanup apply to both clients. No event history, Last-Event-ID replay,
+message content, new guest/delegated capability, Native alias, schema, migration or
+global bearer support is added. Preference/block/report routes remain unselected.

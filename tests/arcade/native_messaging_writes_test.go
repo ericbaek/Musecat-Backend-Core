@@ -330,7 +330,7 @@ func TestCanonicalNativeMessagingWritesKeepRateLimitsAndExcludeUnrelatedProtocol
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"GET", "/user/events", 401}, {"PUT", "/user/messaging/preferences", 401}, {"POST", "/user/messages/missing/report", 401}, {"GET", "/api/collections/messaging_message/records", 403}} {
+	}{{"GET", "/moderation/messages/reports", 401}, {"PUT", "/user/messaging/preferences", 401}, {"POST", "/user/messages/missing/report", 401}, {"GET", "/api/collections/messaging_message/records", 403}} {
 		r := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + s.AccessToken})
 		r.Body.Close()
 		if r.StatusCode != op.status {
