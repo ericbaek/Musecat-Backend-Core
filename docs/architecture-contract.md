@@ -1388,6 +1388,32 @@ read guidance/status/history; opting in or cancelling still requires an active
 account through the existing authenticated `/user/notifications/aime` routes.
 
 
+## Achievement activity and XP feedback
+
+`GET /user/activity` includes `achievement_count` in each day and its totals.
+Only the requested author's active `achievement` posts with at least one photo
+count, grouped by their original `created` timestamp in the requested IANA timezone.
+Existing posts contribute without a backfill. Deleted posts, other flairs and empty
+media are excluded; edits do not move a post to another day. `total_count`, intensity
+and `max_daily_count` include this source. Activity counts actual qualifying rows,
+including posts beyond the XP cap; it never derives counts from the XP ledger.
+The existing author/flair/created index bounds the query; no schema migration is required.
+
+Achievement creation grants its actor 2 XP up to 10 XP per KST calendar day.
+Comments/replies and likes on other users' achievement content share a separate
+1 XP grant and 5 XP KST-day cap. Existing eligibility and stable event identities
+are unchanged. Self interactions, unlike/re-like and repeated likes cannot grant
+extra XP. Deleting content does not refund/reset those daily or durable identities.
+
+Successful POST post/comment and PUT like responses retain their existing top-level
+fields and optionally add `xp_feedback` using the common XP feedback contract.
+It is present only for a positive grant actually committed to the actor's ledger,
+with previous/new balances read inside the mutation transaction, never from the
+request's stale auth record. Caps, ineligible actors, self interactions, no-ops and
+duplicates omit the field. Reads, edits and deletes never include feedback. Content,
+XP, notification records and required state commit or roll back together; no external
+notification delivery occurs in that transaction.
+
 ## Achievement notifications
 
 Community mutations reuse `user_notification` and its device outbox atomically.
