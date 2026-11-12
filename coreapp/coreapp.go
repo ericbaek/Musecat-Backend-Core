@@ -290,8 +290,8 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	// Public read endpoint: list arcades by game series near a location with pagination
 	api.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation).Bind(firstPartyAuth...)
 	api.GET("/arcade/visits", userhandler.GetArcadeVisitStats)
-	// Public read endpoint: list machine rows filtered by country, game series, and version
-	api.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(
+	// Authenticated game-tools read: machine rows filtered by country, series, and version.
+	api.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireGameToolsAccess(),
@@ -355,7 +355,7 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin).Bind(firstPartyAuth...)
 	authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport).Bind(firstPartyAuth...)
 	authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart).Bind(firstPartyAuth...)
-	authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
+	authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(firstPartyAuth...).Bind(arcadequery.RequireAdminAccess())
 	authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic).Bind(firstPartyAuth...)
 	authArcade.PUT("/public", arcadepublic.RequestPublicArcade).Bind(firstPartyAuth...)
 	authArcade.POST("/location-verification", arcadepublic.VerifyArcadeLocation).Bind(firstPartyAuth...)

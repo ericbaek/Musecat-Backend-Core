@@ -6400,6 +6400,7 @@ paths:
         Requires an authenticated user with `developer` or `moderator` access, or a `supporter` or `founding_supporter` role at level 30 or above.
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - $ref: '#/components/parameters/CountryQuery'
         - name: game_series
@@ -7756,6 +7757,7 @@ paths:
         Requires an authenticated user with `developer` or `moderator` access. The selected stable game entries may span multiple arcades. Each affected arcade receives an immutable game-state batch and its own `changed=game` changelog row. This administrative version swap records only the resulting game-state change.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:

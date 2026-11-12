@@ -499,6 +499,15 @@ authenticated actor and tags, reason, before/after snapshots, and revisions.
 `POST /moderation/game/catalog/changes/revert` records a new revert operation;
 it does not erase history. Full owns notifications for those log records.
 
+Configured first-party Native sessions select the same `GET /arcade/games` and
+`POST /arcade/game/bulk_version` handlers as web JWTs. Reads still require staff
+or a level-30 supporter role; version swaps remain developer/moderator-only.
+The adapter does not grant catalog-management or moderation routes. DTOs, filters,
+active-account checks, immutable revisions, atomic cross-arcade updates and
+changelog/XP policy remain unchanged. Native responses are no-store. Clients send
+stable entry IDs and do not replay failed mutations. No domain alias, schema or
+migration is introduced.
+
 The `POST /arcade/game/bulk_version` operation is an administrative version
 swap for developer/moderator accounts. It applies the
 same immutable batch and `changed="game"` changelog semantics per affected
