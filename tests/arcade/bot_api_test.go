@@ -304,7 +304,7 @@ func TestBotKeyRoleEligibility(t *testing.T) {
 				tags = append(tags, role)
 			}
 			session, owner := createAuthUserWithTags(t, app, tags)
-			if role == "" || role == "arcade_owner" {
+			if role == "" {
 				botRequest(t, app, session, "POST", "/user/bot-keys", `{"name":"Denied"}`, 403)
 				count, err := app.CountRecords(botaccess.Keys)
 				if err != nil || count != 0 {

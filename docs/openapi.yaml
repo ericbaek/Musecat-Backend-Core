@@ -9463,6 +9463,638 @@ paths:
         '403': {description: Active developer or moderator required.}
         '404': {description: Missing story.}
 
+  /bot/v1/arcade/analytics:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: [Arcades]
+      summary: /arcade/analytics
+      description: |
+        Returns cumulative analytics for a public, open arcade. Anonymous and ordinary
+        contributors below level 15 receive only `page_views`, `fault_reports`, and `edit_count`.
+        Level-15+ users additionally receive `page_views_by_source` and `series_filter_entries`
+        when `page_views` exceeds 1000. These breakdowns remain available to privileged users.
+        `direction_clicks`,
+        `visit_verifications`, and `distinct_visitors` are omitted unless the bearer
+        user has both the `arcade_owner` tag and the arcade ID in `owns`, or has the
+        `developer` or `moderator` tag. The `createdBy` relation alone is insufficient.
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Public-safe or privileged cumulative analytics response.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeAnalyticsResponse'}
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist, is private, or is closed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /bot/v1/arcade/memo:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: [Arcades]
+      summary: /arcade/memo
+      description: Returns the current immutable memo revision. Public arcades are anonymously readable; private arcades require the creator or a developer/moderator bearer token.
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Current memo revision, or null when no memo has been written.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeMemoResponse'}
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist or private access is denied.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    put:
+      security:
+        - botKeyAuth: []
+      tags: [Arcade Mutations]
+      summary: /arcade/memo
+      description: Creates an immutable Tiptap JSON revision and moves the arcade memo pointer. Requires an authenticated user with arcade write access. Saves and changelog creation are atomic.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PutArcadeMemoRequest'}
+      responses:
+        '200':
+          description: Memo saved; unchanged documents return changed=false without creating a revision.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [arcade, changed, memo]
+                properties:
+                  arcade: {type: string}
+                  changed: {type: boolean}
+                  memo:
+                    $ref: '#/components/schemas/ArcadeMemo'
+        '400':
+          description: Invalid arcade id or Tiptap document.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PocketBaseAuthError'}
+        '403':
+          description: Authenticated arcade write access is required.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: Arcade does not exist or private access is denied.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+
+  /bot/v1/arcade/notice:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: [Arcades]
+      summary: /arcade/notice
+      parameters:
+        - name: arcade
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Active notices ordered required first, pinned second, then normal. Pinned notices sort by priority ascending; otherwise newer notices sort first, with id as a stable tie breaker. Soft-deleted notices are excluded. Notices whose `until` is reached are soft-deleted before the response is returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListArcadeNoticeResponse'
+        '400':
+          description: Missing arcade id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Arcade does not exist or is private.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: List failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      security:
+        - botKeyAuth: []
+      tags: [Arcade Mutations]
+      summary: /arcade/notice
+      description: |
+        Requires `developer`, `moderator`, or `arcade_owner` in `tag` or `tags`, or a `supporter`/`founding_supporter` at level 30 or above. Developers and moderators may create on any arcade. Official accounts may create only on their own `owns` arcades. Level-30+ supporters may create unless another official account manages the target through `owns`. Private drafts additionally require the draft creator or a developer/moderator.
+      x-upload-limits: {maxPhotos: 3, maxPhotoBytes: 5242880, maxBodyBytes: 16777216}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateArcadeNoticeRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CreateArcadeNoticeMultipartRequest'
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: Created notice.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeNotice'
+        '413': {description: Image exceeds 5 MiB or encoded body exceeds 16 MiB.}
+        '400':
+          description: Invalid JSON, missing arcade/document/title, empty or oversized title, or invalid display_mode.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: Notice role or supporter level-30 access is missing, official ownership is missing, or a supporter attempted to post on an officially managed arcade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Arcade not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The target arcade already has one active required notice or three active pinned notices. Expired and soft-deleted notices do not count. The failed mutation leaves all fields unchanged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code, display_mode, limit]
+                properties:
+                  error: {type: string}
+                  code: {type: string, enum: [notice_display_limit_exceeded]}
+                  display_mode: {type: string, enum: [required, pinned]}
+                  limit: {type: integer, enum: [1, 3]}
+        '502':
+          description: Create failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      security:
+        - botKeyAuth: []
+      tags: [Arcade Mutations]
+      summary: /arcade/notice
+      description: |
+        Developers and moderators may update every notice. Official account authors may update their own notices and authorless legacy notices belonging to their own arcade. Level-30+ supporter authors may update their own notices. Private drafts additionally require the draft creator or a developer/moderator.
+      x-upload-limits: {maxPhotos: 3, maxPhotoBytes: 5242880, maxBodyBytes: 16777216}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadeNoticeRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UpdateArcadeNoticeMultipartRequest'
+            encoding:
+              photos:
+                style: form
+                explode: true
+      responses:
+        '200':
+          description: Updated notice.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeNotice'
+        '413': {description: Image exceeds 5 MiB or encoded body exceeds 16 MiB.}
+        '400':
+          description: Invalid JSON, missing notice id, empty or oversized supplied title, or invalid display_mode.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: The caller lacks the required notice author role and level, or is neither the notice author nor a developer or moderator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Notice not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: The target arcade already has one active required notice or three active pinned notices. Expired and soft-deleted notices do not count. The failed mutation leaves all fields unchanged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code, display_mode, limit]
+                properties:
+                  error: {type: string}
+                  code: {type: string, enum: [notice_display_limit_exceeded]}
+                  display_mode: {type: string, enum: [required, pinned]}
+                  limit: {type: integer, enum: [1, 3]}
+        '502':
+          description: Update failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      security:
+        - botKeyAuth: []
+      tags: [Arcade Mutations]
+      summary: /arcade/notice
+      description: |
+        Developers and moderators may delete every notice. Official account authors may delete their own notices and authorless legacy notices belonging to their own arcade. Level-30+ supporter authors may delete their own notices. Private drafts additionally require the draft creator or a developer/moderator.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteArcadeNoticeRequest'
+      responses:
+        '200':
+          description: Soft-deleted notice.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, delete]
+                properties:
+                  id:
+                    type: string
+                  delete:
+                    type: boolean
+        '400':
+          description: Invalid JSON or missing notice id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '403':
+          description: The caller lacks the required notice author role and level, or is neither the notice author nor a developer or moderator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Notice not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Delete failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /bot/v1/arcade/report-settings:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: [Arcade Mutations]
+      summary: GET /arcade/report-settings
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{bearerAuth: []}]
+      parameters:
+        - in: query
+          name: arcade
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeReportSettings'
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
+    put:
+      security:
+        - botKeyAuth: []
+      tags: [Arcade Mutations]
+      summary: PUT /arcade/report-settings
+      description: Active developer/moderator may manage any arcade including private/closed arcades. Official accounts require arcade_owner and the arcade in owns. Subscription deletion only removes the caller's device even after ownership loss. Requests are limited to 16 KiB (4 KiB for DELETE).
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ArcadeReportSettings'
+                - type: object
+                  required: [arcade]
+                  properties:
+                    arcade: {type: string}
+      responses:
+        '200':
+          description: Settings returned or subscription saved/removed idempotently.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ArcadeReportSettings'
+        '400': {description: Invalid settings or subscription. External mode requires a contact. Push endpoints must belong to supported browser push services (including fcm.googleapis.com and Chromium staging jmt17.google.com).}
+        '401': {description: Authentication required.}
+        '403': {description: Active account or arcade management access required.}
+        '404': {description: Arcade not found.}
+        '413': {description: Encoded request exceeds its limit.}
+
+  /bot/v1/arcade/inquiry-settings:
+    put:
+      security:
+        - botKeyAuth: []
+      tags: [Arcade]
+      summary: Configure arcade inquiry destination
+      description: Current official owners assigned to this arcade and strict developer/moderator accounts only. Independent of fault-report settings. External mode requires an HTTP(S) URL or phone. Missing/invalid saved mode defaults to disabled with configured false. Explicit modes return derived configured true; client configured is ignored and never persisted. Disabled requires no contact. Existing conversations remain readable and replyable. No XP or arcade changelog.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, mode]
+              properties:
+                arcade: {type: string}
+                mode: {type: string, enum: [internal, external, disabled]}
+                loginRequired: {type: boolean, default: false, description: Require an authenticated account for new internal arcade inquiries while a current official account exists.}
+                contactType: {type: string, enum: [url, phone]}
+                contactValue: {type: string, maxLength: 2048}
+                guide: {type: string, maxLength: 2000}
+      responses:
+        '200':
+          description: Saved settings with derived configured true.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InquirySettings'
+        '400': {description: Invalid or missing external contact.}
+        '401': {description: Authentication required.}
+        '403': {description: Not an assigned official owner or strict staff.}
+        '404': {description: Arcade not found.}
+
+  /bot/v1/user/arcade-inquiry-onboarding:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: [Users, Arcade]
+      summary: List current official owner's inquiry settings
+      description: Active authenticated users only; reloads current exact arcade_owner role and owns relations. All currently owned arcades are returned, including configured arcades, including scoped private names. Staff-only and ordinary accounts receive empty items. Missing arcade relations are skipped; missing basic relations yield an empty name. Private no-store response.
+      responses:
+        '200':
+          description: Unconfigured currently owned arcades.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [arcadeId, arcadeName, settings, reportSettings]
+                      properties:
+                        arcadeId: {type: string}
+                        arcadeName: {type: string}
+                        settings:
+                          $ref: '#/components/schemas/InquirySettings'
+                        reportSettings:
+                          type: object
+                          required: [mode, contactType, contactValue, guide]
+                          properties:
+                            mode: {type: string, enum: [internal, external]}
+                            contactType: {type: string}
+                            contactValue: {type: string, maxLength: 2048}
+                            guide: {type: string, maxLength: 2000}
+        '401': {description: Authentication required.}
+        '403': {description: Inactive account.}
+
+  /bot/v1/arcade/flag/reaction:
+    post:
+      security:
+        - botKeyAuth: []
+      tags: [Arcade Mutations]
+      summary: /arcade/flag/reaction
+      description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold. A fixed reaction by a developer, moderator, or the official owner assigned to this arcade resolves immediately regardless of level; other users retain resolution voting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlagReactionRequest'
+      responses:
+        '409':
+          description: Arcade uses external reporting. The response code is REPORT_EXTERNAL; no mutation or XP is committed.
+        '200':
+          description: Reaction state updated. The response includes the authoritative resolution summary, current user vote, and newest-first report history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flag, reaction, action, reaction_id, solved, game, xp_feedback, resolution, reportHistory]
+                properties:
+                  flag:
+                    type: string
+                  reaction:
+                    type: string
+                  action:
+                    type: string
+                  reaction_id:
+                    type: string
+                  solved:
+                    type: boolean
+                  game:
+                    $ref: '#/components/schemas/ArcadeGameExpanded'
+                  xp_feedback:
+                    $ref: '#/components/schemas/XpFeedback'
+                  resolution:
+                    $ref: '#/components/schemas/ArcadeFlagResolution'
+                  reportHistory:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ArcadeFlagReportHistoryItem'
+        '400':
+          description: Invalid body or reaction rule failure.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PocketBaseAuthError'
+        '502':
+          description: The reaction transaction succeeded but the authoritative resolution response could not be built.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /bot/v1/user/inquiry-bots/arcade/{id}:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: ["Messaging"]
+      summary: "Read an arcade's automatic-reply configuration"
+      security: [{"bearerAuth":[]}]
+      description: "Current arcade owner or authorized staff only. No raw collection access. Existing inquiries retain their private configuration snapshot."
+      responses: {"200":{"description":"Configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/InquiryBotConfig"}}}},"401":{"description":"Authentication required"},"403":{"description":"Management required"},"404":{"description":"Arcade not found"}}
+    put:
+      security:
+        - botKeyAuth: []
+      tags: ["Messaging"]
+      summary: "Configure an arcade's greeting, replies and choices"
+      security: [{"bearerAuth":[]}]
+      description: "Owner-controlled bounded reply graph, at most 60000 encoded bytes. Node and choice IDs are unique, every target must exist. Terminal nodes and free text hand off to human chat. Does not change existing conversation snapshots."
+      requestBody: {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/InquiryBotConfig"}}}}
+      responses: {"200":{"description":"Saved configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/InquiryBotConfig"}}}},"400":{"description":"Invalid configuration"},"401":{"description":"Authentication required"},"403":{"description":"Management required"},"404":{"description":"Arcade not found"}}
+
+  /bot/v1/user/conversations:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: ["Messaging"]
+      summary: "List bounded authorized conversation summaries"
+      description: "Active user only. Direct-message conversations appear only after their first message; opening an empty DM does not add it to either participant's list. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationList"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "cursor", "in": "query", "schema": {"type": "string"}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 30}}, {"name": "kind", "in": "query", "schema": {"type": "string", "enum": ["dm", "inquiry"]}}, {"name": "inbox", "in": "query", "schema": {"type": "string"}}, {"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 100}}, {"name": "requesterOnly", "in": "query", "schema": {"type": "boolean", "default": false}, "description": "Public contact entry: restrict results to inquiries created by this caller. Arcade admin dashboards omit this flag."}]
+
+  /bot/v1/user/conversations/{id}:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: ["Messaging"]
+      summary: "Get a conversation summary"
+      description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+
+  /bot/v1/user/conversations/{id}/messages:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: ["Messaging"]
+      summary: "Read chronological history or sequence delta"
+      description: "Exactly one cursor direction. Without a cursor returns latest messages. before pages allow up to 100; after pages up to 200. Explicit afterSequence=0 starts from sequence one. Follow non-null nextBeforeSequence/nextAfterSequence until null. No durable SSE replay is implied."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagePage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "beforeSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "afterSequence", "in": "query", "schema": {"type": "integer", "minimum": 0}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}]
+    post:
+      security:
+        - botKeyAuth: []
+      tags: ["Messaging"]
+      summary: "Append an idempotent message"
+      description: "Same clientMessageId and normalized text, ordered photo byte hashes, canonical mentions and acting identity returns original message with 200; changed content returns 409. Inquiry requester who also manages the inbox must explicitly choose actingAs. DM staff has no bypass. Multipart has text,clientMessageId,actingAs(JSON string),mentions(JSON array string),photos. Nonempty mentions are only supported for arcade inquiries. Ordinary arcade notifications target current official responders; musecat additionally targets platform staff. Inbox replies notify the requester as usual. Team notifications are unchanged. 3 photos at 15,000,000 bytes each. Sender limit 60 messages/minute, 30/conversation/minute, 12 photos/minute; replay does not consume a limit."
+      security: [{"bearerAuth": []}]
+      responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}, "200": {"description": "Idempotent replay.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingMessage"}}}}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MessagingSend"}}, "multipart/form-data": {"schema": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 4000}, "clientMessageId": {"type": "string"}, "photos": {"type": "array", "maxItems": 3, "items": {"type": "string", "format": "binary"}}, "actingAs": {"type": "string", "description": "JSON encoded MessagingIdentity."}, "mentions": {"type": "string", "description": "JSON encoded array of musecat mentions (maximum 16 before canonicalization); nonempty only for arcade inquiries."}}, "required": ["clientMessageId"]}}}}
+
+  /bot/v1/user/conversations/{id}/read:
+    put:
+      security:
+        - botKeyAuth: []
+      tags: ["Messaging"]
+      summary: "Advance this user's read cursor"
+      description: "Active user only. Current official responders and platform staff can manage arcade inquiries in the arcade admin dashboard. Unscoped conversation lists include all inquiries currently authorized for the caller, including arcade inquiries without mentions and prior replies. Matching inbox scope narrows dashboard lists. requesterOnly restricts public contact lists to the caller's own inquiries. Responses are private, no-store."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"conversationId": {"type": "string"}, "lastReadSequence": {"type": "integer", "minimum": 0}, "unreadCount": {"type": "integer", "minimum": 0}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"throughSequence": {"type": "integer", "minimum": 0}}, "required": ["throughSequence"]}}}}
+
+  /bot/v1/user/conversations/{id}/inquiry:
+    patch:
+      security:
+        - botKeyAuth: []
+      tags: ["Messaging"]
+      summary: "Change inquiry workflow status"
+      description: "Requester may set waiting/solved; current inbox responders may also set recognised. DM has no status. Status updates do not alter lastMessageAt or anyone else's read cursor."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConversationSummary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]
+      requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"status": {"type": "string", "enum": ["waiting", "recognised", "solved"]}}, "required": ["status"]}}}}
+
+  /bot/v1/user/conversations/{id}/attachments/{messageId}/{file}:
+    get:
+      security:
+        - botKeyAuth: []
+      tags: ["Messaging"]
+      summary: "Read a protected conversation photo"
+      description: "Current conversation ACL and exact file/message ownership required. Existing legacy files are served from their unchanged storage reference only after verifying legacy inquiry mapping. No public file token or redirect."
+      security: [{"bearerAuth": []}]
+      responses: {"200": {"description": "Protected image; Cache-Control private, no-store.", "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
+      parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "messageId", "in": "path", "required": true, "schema": {"type": "string"}}, {"name": "file", "in": "path", "required": true, "schema": {"type": "string"}}]
+
   /bot/v1/search:
     get:
       security:
@@ -10826,7 +11458,7 @@ paths:
         '403': {description: Inactive account.}
     post:
       summary: Issue a bot key owned by the authenticated account
-      description: A completed active profile with founding_supporter, supporter, designer, moderator or developer is required. At most five unrevoked keys. Keys have no automatic expiry, including keys issued under the former expiry policy. The secret is returned once and only its SHA-256 hash is stored.
+      description: A completed active profile with arcade_owner, founding_supporter, supporter, designer, moderator or developer is required. At most five unrevoked keys. Keys have no automatic expiry, including keys issued under the former expiry policy. The secret is returned once and only its SHA-256 hash is stored.
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -10851,7 +11483,7 @@ paths:
                   token: {type: string, pattern: '^musecat_bot_[A-Za-z0-9_-]{43}$'}
         '400': {description: Invalid input, incomplete profile or five active keys already exist.}
         '401': {description: Web session required.}
-        '403': {description: Inactive account or founding-supporter entitlement missing.}
+        '403': {description: Inactive account or eligible API role missing.}
   /user/bot-keys/{id}:
     delete:
       summary: Revoke an account-owned bot key

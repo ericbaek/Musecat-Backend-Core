@@ -2,14 +2,20 @@ package coreapp
 
 import (
 	"github.com/ericbaek/musecat-backend-core/handlers"
+	arcadeanalytics "github.com/ericbaek/musecat-backend-core/handlers/arcade/analytics"
 	arcadebasic "github.com/ericbaek/musecat-backend-core/handlers/arcade/basic"
+	arcadeflag "github.com/ericbaek/musecat-backend-core/handlers/arcade/flag"
 	arcadegame "github.com/ericbaek/musecat-backend-core/handlers/arcade/game"
 	arcadegtk "github.com/ericbaek/musecat-backend-core/handlers/arcade/gtk"
 	arcadehour "github.com/ericbaek/musecat-backend-core/handlers/arcade/hour"
+	arcadememo "github.com/ericbaek/musecat-backend-core/handlers/arcade/memo"
+	arcadenotice "github.com/ericbaek/musecat-backend-core/handlers/arcade/notice"
 	arcadephoto "github.com/ericbaek/musecat-backend-core/handlers/arcade/photo"
 	arcadepublic "github.com/ericbaek/musecat-backend-core/handlers/arcade/public"
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
+	arcadereporting "github.com/ericbaek/musecat-backend-core/handlers/arcade/reporting"
 	arcadesns "github.com/ericbaek/musecat-backend-core/handlers/arcade/sns"
+	messaginghandler "github.com/ericbaek/musecat-backend-core/handlers/messaging"
 	search "github.com/ericbaek/musecat-backend-core/handlers/search"
 	user "github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/ericbaek/musecat-backend-core/service/botaccess"
@@ -19,8 +25,8 @@ import (
 	"github.com/pocketbase/pocketbase/tools/hook"
 )
 
-// The bot namespace is deliberately limited to arcade creation and information
-// edits. Registering a web/partner route never automatically exposes it to bots.
+// The automation namespace explicitly lists arcade and official-account operations.
+// Registering a web/partner route never automatically exposes it to API keys.
 func registerBotRoutes(se *core.ServeEvent) {
 	// Raw photo metadata is publicly readable. Stored attribution must only be
 	// serialized through the viewer-aware custom history endpoints.
@@ -58,4 +64,25 @@ func registerBotRoutes(se *core.ServeEvent) {
 	api.PUT("/arcade/photo", arcadephoto.UpdateArcadePhoto)
 	api.POST("/arcade/photo/upload", arcadephoto.UploadArcadePhotos).Bind(apis.BodyLimit(220 << 20))
 	api.PUT("/arcade/public", arcadepublic.RequestPublicArcade)
+	api.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
+	api.GET("/arcade/memo", arcadememo.GetArcadeMemo)
+	api.PUT("/arcade/memo", arcadememo.UpdateArcadeMemo)
+	api.GET("/arcade/notice", arcadenotice.ListArcadeNotice)
+	api.POST("/arcade/notice", arcadenotice.CreateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
+	api.PUT("/arcade/notice", arcadenotice.UpdateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
+	api.DELETE("/arcade/notice", arcadenotice.DeleteArcadeNotice)
+	api.GET("/arcade/report-settings", arcadereporting.GetSettings)
+	api.PUT("/arcade/report-settings", arcadereporting.UpdateSettings).Bind(apis.BodyLimit(64 << 10))
+	api.PUT("/arcade/inquiry-settings", arcadereporting.UpdateInquirySettings).Bind(apis.BodyLimit(64 << 10))
+	api.GET("/user/arcade-inquiry-onboarding", arcadereporting.InquiryOnboarding)
+	api.POST("/arcade/flag/reaction", arcadeflag.UpdateArcadeFlagReaction)
+	api.GET("/user/inquiry-bots/arcade/{id}", messaginghandler.GetArcadeBot)
+	api.PUT("/user/inquiry-bots/arcade/{id}", messaginghandler.SetArcadeBot).Bind(apis.BodyLimit(64 << 10))
+	api.GET("/user/conversations", messaginghandler.List)
+	api.GET("/user/conversations/{id}", messaginghandler.Get)
+	api.GET("/user/conversations/{id}/messages", messaginghandler.History)
+	api.POST("/user/conversations/{id}/messages", messaginghandler.Send).Bind(apis.BodyLimit(messaginghandler.MaxBodyBytes))
+	api.PUT("/user/conversations/{id}/read", messaginghandler.Read).Bind(apis.BodyLimit(4096))
+	api.PATCH("/user/conversations/{id}/inquiry", messaginghandler.Status).Bind(apis.BodyLimit(4096))
+	api.GET("/user/conversations/{id}/attachments/{messageId}/{file}", messaginghandler.Photo)
 }

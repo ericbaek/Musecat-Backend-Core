@@ -67,7 +67,7 @@ func List(re *core.RequestEvent) error {
 func Create(re *core.RequestEvent) error {
 	noStore(re)
 	if !CanIssueKey(re.Auth) {
-		return re.ForbiddenError("Founding supporter or higher access is required.", nil)
+		return re.ForbiddenError("An eligible API account role is required.", nil)
 	}
 	if re.Auth.GetString("username") == "" {
 		return re.BadRequestError("Complete your profile before issuing a bot key.", nil)
@@ -201,8 +201,7 @@ func RequireKey() *hook.Handler[*core.RequestEvent] {
 	}}
 }
 
-// CanIssueKey is a role entitlement, independent of XP level. Official arcade
-// ownership alone does not grant automation credentials.
+// CanIssueKey is a role entitlement, independent of XP level.
 func CanIssueKey(owner *core.Record) bool {
 	if owner == nil {
 		return false
@@ -210,7 +209,7 @@ func CanIssueKey(owner *core.Record) bool {
 	for _, tags := range [][]string{owner.GetStringSlice("tag"), owner.GetStringSlice("tags")} {
 		for _, tag := range tags {
 			switch strings.ToLower(strings.TrimSpace(tag)) {
-			case "founding_supporter", "supporter", "designer", "moderator", "developer":
+			case "arcade_owner", "founding_supporter", "supporter", "designer", "moderator", "developer":
 				return true
 			}
 		}
