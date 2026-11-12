@@ -185,12 +185,15 @@ func CreatePost(re *core.RequestEvent) error {
 		record.Set("translation_status", "ready")
 		record.Set("translated_at", now)
 	}
+	var feedback *xp.ExpFeedback
 	if err := re.App.RunInTransaction(func(tx core.App) error {
 		if err := tx.Save(record); err != nil {
 			return err
 		}
 		if record.GetString("flair") == "achievement" {
-			if err := xp.AwardCommunityTx(tx, re.Auth.Id, "post", record.Id, now); err != nil {
+			var err error
+			feedback, err = xp.AwardCommunityWithFeedbackTx(tx, re.Auth.Id, "post", record.Id, now)
+			if err != nil {
 				return err
 			}
 		}
@@ -198,7 +201,7 @@ func CreatePost(re *core.RequestEvent) error {
 	}); err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to create community post", "details": err.Error()})
 	}
-	return servePost(re, record, OriginalLocale, http.StatusCreated)
+	return servePost(re, record, OriginalLocale, http.StatusCreated, feedback)
 }
 
 func UpdatePost(re *core.RequestEvent) error {

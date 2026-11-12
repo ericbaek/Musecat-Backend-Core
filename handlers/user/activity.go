@@ -33,6 +33,7 @@ type ActivityTotals struct {
 	FlagCount         int `json:"flag_count"`
 	LegacyTicketCount int `json:"legacy_ticket_count"`
 	AttendanceCount   int `json:"attendance_count"`
+	AchievementCount  int `json:"achievement_count"`
 	MaxDailyCount     int `json:"max_daily_count"`
 }
 
@@ -44,6 +45,7 @@ type ActivityDay struct {
 	FlagCount         int    `json:"flag_count"`
 	LegacyTicketCount int    `json:"legacy_ticket_count"`
 	AttendanceCount   int    `json:"attendance_count"`
+	AchievementCount  int    `json:"achievement_count"`
 }
 
 type ActivityResponse struct {
