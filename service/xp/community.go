@@ -48,3 +48,35 @@ func AwardCommunityWithFeedbackTx(app core.App, userID, category, event string, 
 	feedback := BuildExpFeedback(base, current)
 	return &feedback, nil
 }
+
+// RevokeCommunityTx compensates an original grant once, without refunding the
+// original day's cap or allowing a cancelled event to earn XP again.
+// Call inside the same transaction as the deletion/cancellation.
+func RevokeCommunityTx(app core.App, userID, category, event string) error {
+	kind := "xp:community:" + category + ":" + event
+	grants, err := app.FindRecordsByFilter(CollectionUserLevelLog,
+		"user = {:user} && kind = {:kind}", "", 1, 0,
+		dbx.Params{"user": userID, "kind": kind})
+	if err != nil || len(grants) == 0 {
+		return err
+	}
+	grant := grants[0].GetInt("diff_exp")
+	if grant <= 0 {
+		return nil
+	}
+	reversalKind := "xp:community-revoke:" + category + ":" + event
+	reversals, err := app.FindRecordsByFilter(CollectionUserLevelLog,
+		"user = {:user} && kind = {:kind}", "", 1, 0,
+		dbx.Params{"user": userID, "kind": reversalKind})
+	if err != nil || len(reversals) > 0 {
+		return err
+	}
+	current, err := LoadCurrentExp(app, userID)
+	if err != nil {
+		return err
+	}
+	if err := updateUserLevelExpTx(app, userID, current-grant); err != nil {
+		return err
+	}
+	return createUserLevelLogTx(app, userID, reversalKind, current, current-grant, -grant)
+}

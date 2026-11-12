@@ -37,20 +37,24 @@ func TestAchievementXPSeparateDailyCapsAndDurableLikes(t *testing.T) {
 	expectSocialStatus(t, app, "PUT", "/community/post/like?id="+posts[0], "", actorToken, 200)
 	expectSocialStatus(t, app, "DELETE", "/community/post/like?id="+posts[0], "", actorToken, 200)
 	expectSocialStatus(t, app, "PUT", "/community/post/like?id="+posts[0], "", actorToken, 200)
-	if exp(actor.Id) != 2 {
-		t.Fatal("duplicate like XP", exp(actor.Id))
+	if exp(actor.Id) != 1 {
+		t.Fatal("cancelled like XP was re-awarded", exp(actor.Id))
 	}
 	ownerComment := socialCreate(t, app, ownerToken, posts[0], "", "", "owner comment")
 	expectSocialStatus(t, app, "PUT", "/community/comment/like?id="+ownerComment["id"].(string), "", actorToken, 200)
 	socialCreate(t, app, actorToken, posts[0], ownerComment["id"].(string), ownerComment["id"].(string), "reply")
 	socialCreate(t, app, actorToken, posts[1], "", "", "another comment")
 	expectSocialStatus(t, app, "PUT", "/community/post/like?id="+posts[1], "", actorToken, 200)
-	if exp(actor.Id) != 5 {
+	if exp(actor.Id) != 4 {
 		t.Fatal("shared reaction cap", exp(actor.Id))
 	}
 	expectSocialStatus(t, app, "DELETE", "/community/comment?id="+first["id"].(string), "", actorToken, 204)
-	if exp(actor.Id) != 5 {
-		t.Fatal("deletion reset XP")
+	if exp(actor.Id) != 3 {
+		t.Fatal("comment XP was not revoked")
+	}
+	socialCreate(t, app, actorToken, posts[1], "", "", "still capped after deletion")
+	if exp(actor.Id) != 3 {
+		t.Fatal("deletion refunded the daily cap")
 	}
 	expectSocialStatus(t, app, "PUT", "/community/post/like?id="+posts[0], "", ownerToken, 200)
 	if exp(owner.Id) != 10 {
@@ -64,11 +68,11 @@ func TestAchievementXPSeparateDailyCapsAndDurableLikes(t *testing.T) {
 	}
 	expectSocialStatus(t, app, "DELETE", "/community/post/like?id="+posts[0], "", actorToken, 200)
 	expectSocialStatus(t, app, "PUT", "/community/post/like?id="+posts[0], "", actorToken, 200)
-	if exp(actor.Id) != 5 {
+	if exp(actor.Id) != 3 {
 		t.Fatal("old like paid again across days")
 	}
 	expectSocialStatus(t, app, "PUT", "/community/post/like?id="+posts[2], "", actorToken, 200)
-	if exp(actor.Id) != 6 {
+	if exp(actor.Id) != 4 {
 		t.Fatal("new day did not reset cap", exp(actor.Id))
 	}
 	n, err := app.CountRecords("user_level_log", dbx.NewExp("user={:u} AND kind={:kind}", dbx.Params{"u": actor.Id, "kind": fmt.Sprintf("xp:community:reaction:like-post:%s", posts[0])}))
@@ -112,7 +116,7 @@ func TestCommunityMutationFeedbackOnlyReportsActualActorGrant(t *testing.T) {
 	assertNoXPFeedback(t, like("DELETE", actorToken, path))
 	assertNoXPFeedback(t, like("PUT", actorToken, path)) // durable dedupe
 	comment := socialCreate(t, app, actorToken, id, "", "", "a comment")
-	assertXPFeedback(t, comment, 1, 2)
+	assertXPFeedback(t, comment, 0, 1)
 	if comment["author"] != actor.Id {
 		t.Fatal("comment DTO was wrapped")
 	}
@@ -120,7 +124,7 @@ func TestCommunityMutationFeedbackOnlyReportsActualActorGrant(t *testing.T) {
 	assertXPFeedback(t, like("PUT", ownerToken, "/community/comment/like?id="+comment["id"].(string)), 2, 3)
 	for i := 0; i < 3; i++ {
 		result := socialCreate(t, app, actorToken, id, "", "", "cap comment")
-		assertXPFeedback(t, result, 2+i, 3+i)
+		assertXPFeedback(t, result, 1+i, 2+i)
 	}
 	assertNoXPFeedback(t, socialCreate(t, app, actorToken, id, "", "", "capped comment"))
 	for i := 0; i < 4; i++ {
@@ -216,5 +220,103 @@ func TestCommunityFeedbackUsesTransactionalBalanceAndKSTCapBoundary(t *testing.T
 	}
 	if f := award("next-day", after); f == nil || f.PreviousExp != 5 || f.NewExp != 6 {
 		t.Fatalf("KST boundary %#v", f)
+	}
+}
+
+func TestAchievementDeletionRevokesVisibleActivityXPOnce(t *testing.T) {
+	app := newCommunityTestApp(t)
+	defer app.Cleanup()
+	ownerToken, owner := createCommunityUser(t, app)
+	actorToken, actor := createCommunityUser(t, app)
+	replierToken, replier := createCommunityUser(t, app)
+	series := achievementSeries(t, app)
+	r := achievementRequest(t, app, "POST", "", ownerToken, map[string]string{"flair": "achievement", "game_series": series.Id}, 1)
+	if r.StatusCode != 201 {
+		t.Fatal(r.StatusCode, decodeBody(t, r))
+	}
+	postID := decodeBody(t, r)["id"].(string)
+	comment := socialCreate(t, app, actorToken, postID, "", "", "comment")
+	commentID := comment["id"].(string)
+	socialCreate(t, app, replierToken, postID, commentID, commentID, "reply")
+	expectSocialStatus(t, app, "PUT", "/community/post/like?id="+postID, "", actorToken, 200)
+	expectSocialStatus(t, app, "PUT", "/community/comment/like?id="+commentID, "", replierToken, 200)
+	assertXP := func(user string, want int) {
+		t.Helper()
+		got, err := xp.LoadCurrentExp(app, user)
+		if err != nil || got != want {
+			t.Fatalf("user %s XP: got %d want %d, error %v", user, got, want, err)
+		}
+	}
+	assertXP(owner.Id, 2)
+	assertXP(actor.Id, 2)
+	assertXP(replier.Id, 2)
+	// Parent comment deletion retains the visible reply, but revokes its own
+	// grant and all likes whose target is no longer visible.
+	for range 2 {
+		expectSocialStatus(t, app, "DELETE", "/community/comment?id="+commentID, "", actorToken, 204)
+	}
+	assertXP(actor.Id, 1)
+	assertXP(replier.Id, 1)
+	for range 2 {
+		expectSocialStatus(t, app, "DELETE", "/community/post?id="+postID, "", ownerToken, 204)
+	}
+	assertXP(owner.Id, 0)
+	assertXP(actor.Id, 0)
+	assertXP(replier.Id, 0)
+	var totals struct {
+		Total int `db:"total"`
+	}
+	if err := app.DB().NewQuery("SELECT SUM(diff_exp) AS total FROM user_level_log WHERE kind LIKE 'xp:community-revoke:%'").One(&totals); err != nil {
+		t.Fatal(err)
+	}
+	if totals.Total != -6 {
+		t.Fatalf("reversal ledger: %d", totals.Total)
+	}
+}
+
+func TestDeletedAchievementDoesNotRefundDailyCap(t *testing.T) {
+	app := newCommunityTestApp(t)
+	defer app.Cleanup()
+	token, user := createCommunityUser(t, app)
+	series := achievementSeries(t, app)
+	for range 6 {
+		r := achievementRequest(t, app, "POST", "", token, map[string]string{"flair": "achievement", "game_series": series.Id}, 1)
+		if r.StatusCode != 201 {
+			t.Fatal(r.StatusCode, decodeBody(t, r))
+		}
+		id := decodeBody(t, r)["id"].(string)
+		expectSocialStatus(t, app, "DELETE", "/community/post?id="+id, "", token, 204)
+	}
+	got, err := xp.LoadCurrentExp(app, user.Id)
+	if err != nil || got != 0 {
+		t.Fatalf("XP %d, error %v", got, err)
+	}
+	count, err := app.CountRecords("user_level_log", dbx.HashExp{"user": user.Id})
+	if err != nil || count != 10 {
+		t.Fatalf("expected five grants and five reversals, got %d, error %v", count, err)
+	}
+}
+
+func TestAchievementRevocationRollsBackWithDeletionFailure(t *testing.T) {
+	app := newCommunityTestApp(t)
+	defer app.Cleanup()
+	token, user := createCommunityUser(t, app)
+	series := achievementSeries(t, app)
+	r := achievementRequest(t, app, "POST", "", token, map[string]string{"flair": "achievement", "game_series": series.Id}, 1)
+	id := decodeBody(t, r)["id"].(string)
+	app.OnRecordCreate("user_level_log").BindFunc(func(e *core.RecordEvent) error {
+		if e.Record.GetInt("diff_exp") < 0 {
+			return fmt.Errorf("forced reversal failure")
+		}
+		return e.Next()
+	})
+	expectSocialStatus(t, app, "DELETE", "/community/post?id="+id, "", token, 502)
+	post, err := app.FindRecordById("community_post", id)
+	if err != nil || post.GetString("status") != "active" {
+		t.Fatal("post deletion did not roll back", err)
+	}
+	got, err := xp.LoadCurrentExp(app, user.Id)
+	if err != nil || got != 2 {
+		t.Fatal("XP did not roll back", got, err)
 	}
 }
