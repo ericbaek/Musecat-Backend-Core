@@ -251,7 +251,7 @@ components:
         body:
           type: string
           maxLength: 10000
-          description: Optional for achievements; other flairs require nonblank text. Omitted achievement bodies are stored as an empty string.
+          description: Optional for achievements; other flairs require nonblank text. Legacy body input is converted into the canonical body_document; the response derives an empty string for an omitted achievement description.
         flair:
           type: string
           enum: [achievement, question, tip, news, event, art, chitchat]
@@ -303,7 +303,7 @@ components:
         photos: {type: array, items: {type: string}, maxItems: 8, description: Ordered stored filenames.}
         title: {type: string}
         body: {type: string, description: Server-derived plain text for preview/search compatibility.}
-        body_document: {type: object, description: Canonical Tiptap JSON; legacy rows are adapted on read.}
+        body_document: {type: object, description: Required canonical Tiptap JSON after the guarded Full migration; body is a response-only text projection.}
         mentions: {type: array, items: {$ref: '#/components/schemas/CommunityPostMention'}}
         flair: {type: string, enum: [achievement, question, tip, news, event, art, chitchat]}
         locale: {type: string, enum: [ko-KR, en-US, ja-JP]}
