@@ -524,7 +524,7 @@ components:
           type: string
     StatsResponse:
       type: object
-      required: [arcade_count, changelog_count, flag_count, flag_reaction_count, ongoing_flag_count, solved_flag_count, visit_count, page_view_count, page_views]
+      required: [arcade_count, changelog_count, flag_count, flag_reaction_count, ongoing_flag_count, solved_flag_count, visit_count, page_view_count, page_views, page_views_mode]
       properties:
         arcade_count:
           type: integer
@@ -539,10 +539,19 @@ components:
         ongoing_flag_count: {type: integer, format: int64}
         solved_flag_count: {type: integer, format: int64}
         visit_count: {type: integer, format: int64, description: Verified visits respecting deployment aggregate policy.}
-        page_view_count: {type: integer, format: int64}
+        page_view_count:
+          type: integer
+          format: int64
+          description: Total page views since September 30, 2026; independent of the daily series window.
+        page_views_mode:
+          type: string
+          enum: [daily]
+          description: Counts in page_views are daily values, not cumulative totals.
         page_views:
           type: array
-          description: Daily UTC cumulative distinct page-view event groups since 2026-09-30, including zero-activity days through today. Public arcades only, including closed venues.
+          minItems: 30
+          maxItems: 30
+          description: Daily distinct page-view event groups for today and the preceding 29 UTC dates. Counts are not cumulative. Inactive dates have zero counts; older dates are omitted. Public arcades only, including closed venues.
           items:
             type: object
             required: [date, count]

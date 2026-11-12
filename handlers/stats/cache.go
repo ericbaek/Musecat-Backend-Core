@@ -19,6 +19,7 @@ type statsCache struct {
 	mu         sync.RWMutex
 	value      map[string]any
 	expires    time.Time
+	dayEnds    time.Time
 	retryAfter time.Time
 	build      singleflight.Group
 }
@@ -30,7 +31,7 @@ func getStatsCache(app core.App) *statsCache {
 func (c *statsCache) cached() map[string]any {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if time.Now().Before(c.expires) {
+	if time.Now().Before(c.expires) && time.Now().Before(c.dayEnds) {
 		return c.value
 	}
 	return nil
@@ -45,7 +46,7 @@ func (c *statsCache) load(ctx context.Context, app core.App) (map[string]any, er
 	}
 	c.mu.RLock()
 	var stale map[string]any
-	if time.Now().Before(c.expires.Add(statsStaleTTL)) {
+	if time.Now().Before(c.expires.Add(statsStaleTTL)) && time.Now().Before(c.dayEnds) {
 		stale = c.value
 	}
 	retry := time.Now().Before(c.retryAfter)
@@ -58,7 +59,7 @@ func (c *statsCache) load(ctx context.Context, app core.App) (map[string]any, er
 			return value, nil
 		}
 		c.mu.RLock()
-		if time.Now().Before(c.retryAfter) && time.Now().Before(c.expires.Add(statsStaleTTL)) && c.value != nil {
+		if time.Now().Before(c.retryAfter) && time.Now().Before(c.expires.Add(statsStaleTTL)) && time.Now().Before(c.dayEnds) && c.value != nil {
 			value := c.value
 			c.mu.RUnlock()
 			return value, nil
@@ -67,6 +68,7 @@ func (c *statsCache) load(ctx context.Context, app core.App) (map[string]any, er
 		// A disconnected viewer must not cancel the refresh for other viewers.
 		queryCtx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
+		dayEnds := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, 1)
 		value, err := queryStats(queryCtx, app)
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -75,11 +77,12 @@ func (c *statsCache) load(ctx context.Context, app core.App) (map[string]any, er
 			return nil, err
 		}
 		c.value, c.expires = value, time.Now().Add(statsCacheTTL)
+		c.dayEnds = dayEnds
 		c.retryAfter = time.Time{}
 		return value, nil
 	})
 	// Serve the last successful aggregate while refreshing; never extend its
-	// lifetime after an error. Cold or more than one-hour-old data must wait.
+	// lifetime after an error. Cold, previous-UTC-date or more than one-hour-old data must wait.
 	if stale != nil {
 		return stale, nil
 	}

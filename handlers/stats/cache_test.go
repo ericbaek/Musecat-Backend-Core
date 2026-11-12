@@ -152,3 +152,25 @@ func TestStatsCanceledViewerDoesNotStartRefresh(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestStatsCacheNeverServesPreviousUTCDay(t *testing.T) {
+	t.Cleanup(testutil.CleanupGoldenDir)
+	app := testutil.NewTestApp(t)
+	cache := getStatsCache(app)
+	if _, err := cache.load(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	cache.mu.Lock()
+	cache.dayEnds = time.Now().UTC().Truncate(24 * time.Hour)
+	cache.retryAfter = time.Now().Add(statsRetryDelay)
+	cache.mu.Unlock()
+	if cache.cached() != nil {
+		t.Fatal("fresh TTL retained the previous UTC day's window")
+	}
+	if _, err := app.NonconcurrentDB().NewQuery("ALTER TABLE arcade_analytics_event RENAME TO unavailable_stats_events").Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.load(context.Background(), app); err == nil {
+		t.Fatal("stale fallback retained the previous UTC day's window")
+	}
+}
