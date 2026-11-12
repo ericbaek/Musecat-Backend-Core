@@ -1403,7 +1403,13 @@ Achievement creation grants its actor 2 XP up to 10 XP per KST calendar day.
 Comments/replies and likes on other users' achievement content share a separate
 1 XP grant and 5 XP KST-day cap. Existing eligibility and stable event identities
 are unchanged. Self interactions, unlike/re-like and repeated likes cannot grant
-extra XP. Deleting content does not refund/reset those daily or durable identities.
+extra XP. Deleting content or cancelling a like revokes its original grant once using
+`xp:community-revoke:<category>:<event>` compensation entries. Original grants
+remain immutable and continue consuming their original KST-day cap; re-liking
+never re-awards a revoked target. Post deletion also revokes hidden comments,
+replies and likes; comment deletion preserves visible replies and their XP.
+Revocation is atomic with the source mutation and applies to recipients even
+when they are no longer eligible for new awards.
 
 Successful POST post/comment and PUT like responses retain their existing top-level
 fields and optionally add `xp_feedback` using the common XP feedback contract.

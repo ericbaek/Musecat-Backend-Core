@@ -4145,6 +4145,7 @@ paths:
     delete:
       tags: [Community]
       summary: Delete own comment at any time
+      description: Revokes the original comment XP and likes on this comment once. Visible replies and their XP remain. Daily grant caps are not refunded.
       security: [{bearerAuth: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
@@ -4174,6 +4175,7 @@ paths:
     delete:
       tags: [Community]
       summary: Remove a post like idempotently
+      description: Revokes previously granted like XP once, without refunding the daily cap. Re-liking does not re-award XP.
       security: [{bearerAuth: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
@@ -4205,6 +4207,7 @@ paths:
     delete:
       tags: [Community]
       summary: Remove a comment like idempotently
+      description: Revokes previously granted like XP once, without refunding the daily cap. Re-liking does not re-award XP.
       security: [{bearerAuth: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
@@ -5301,7 +5304,7 @@ paths:
     delete:
       tags: [Community]
       summary: Delete the author's post at any time
-      description: Retains a private tombstone, removes attached public files and cached translations, and excludes the post from detail, feeds, galleries, counts and translation jobs. Repeated deletion by the author returns 204.
+      description: Retains a private tombstone, removes attached public files and cached translations, and excludes the post from detail, feeds, galleries, counts and translation jobs. Repeated deletion by the author returns 204. Revokes original achievement XP and XP for hidden comments, replies and likes once, without refunding daily caps.
       security:
         - bearerAuth: []
       parameters:

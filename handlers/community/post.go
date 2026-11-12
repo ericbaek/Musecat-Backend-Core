@@ -317,6 +317,12 @@ func DeletePost(re *core.RequestEvent) error {
 		if record.GetString("status") == "deleted" {
 			return nil
 		}
+		if err := xp.RevokeCommunityTx(tx, record.GetString("author"), "post", record.Id); err != nil {
+			return err
+		}
+		if err := revokeLikesXP(tx, "community_post_like", "post", record.Id); err != nil {
+			return err
+		}
 		record.Set("status", "deleted")
 		record.Set("photos", []string{})
 		record.Set("translations", map[string]any{})
