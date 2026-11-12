@@ -414,8 +414,8 @@ func registerAccountRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	authUser.PUT("/countries", userhandler.UpdateCountries).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
 	authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
 	authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
-	authUser.GET("/report", arcadeadmin.ListUserReport).Bind(userhandler.RequireActiveUser())
-	authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(userhandler.RequireActiveUser())
+	authUser.GET("/report", arcadeadmin.ListUserReport).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
+	authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
 
 	reviewQueue := api.Group("/moderation/arcade").Bind(
 		apis.RequireAuth("user"),

@@ -2119,3 +2119,14 @@ owned by the shared handlers. Invalid credentials fail closed without cookie
 fallback; disabled Native clients grant no identity. Native responses are no-store.
 Public reads, raw collection access and unrelated management operations gain no
 Native capability. No Native alias, schema or migration is introduced.
+
+
+### Shared first-party user reports
+
+Configured Native sessions select existing `GET|POST /user/report`. Both clients
+share the same active-account, report-target validation, actor-derived creation
+and reporter-owned list handlers and DTOs. Filtering never grants access to
+another reporter's records. Staff moderation and raw collection routes do not
+gain Native access. Invalid enabled Native credentials fail closed; an empty
+allowlist grants no Native identity. Native responses are no-store. No alias,
+schema, migration, deduplication or report policy change is introduced.

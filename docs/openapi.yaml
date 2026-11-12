@@ -9933,6 +9933,7 @@ paths:
       summary: /user/report
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: user
           in: query
@@ -9968,6 +9969,7 @@ paths:
       summary: /user/report
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
