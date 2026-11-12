@@ -8778,6 +8778,7 @@ paths:
       description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold. Accepts at most 3 images, 15000000 bytes each, within a 46048576-byte encoded request body.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -8851,6 +8852,7 @@ paths:
       summary: /arcade/flag/delete
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -8893,6 +8895,7 @@ paths:
       description: Private drafts require the creator or a developer/moderator. Public arcades have no editor level threshold. A fixed reaction by a developer, moderator, or the official owner assigned to this arcade resolves immediately regardless of level; other users retain resolution voting.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:

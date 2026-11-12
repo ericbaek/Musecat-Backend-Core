@@ -1982,6 +1982,22 @@ POST/PUT body limits, soft deletion and display-slot 409 conflicts are unchanged
 Native responses remain no-store. Photo mutations, rollback, publication, campaign
 and management operations are not enabled. No schema or migration is added.
 
+### Shared first-party flag writes
+
+Configured Native sessions select only canonical `POST /arcade/flag`,
+`POST /arcade/flag/reaction` and `POST /arcade/flag/delete`. These invoke the same
+web handlers and DTOs with existing active-account and transaction guards.
+Creation/reactions retain current-game membership, private draft write access,
+external-reporting 409 policy, server-owned resolution state, notification and
+XP ledger behavior. Withdrawal is the existing author-only 15-minute action,
+not a staff deletion capability, and reverses only an actually granted report
+reward. Reaction deletion retains its own 15-minute limit and exact reward reversal.
+Creation still accepts at most three 15,000,000-byte images within a 46,048,576-byte
+encoded body. Mutation acknowledgements and deployment public-read checks retain
+the existing web boundary; no read quota or visibility policy is changed.
+Native responses remain no-store. No photo read route, raw file/collection access,
+Native domain alias, schema or migration is added by these bindings.
+
 ### Shared first-party favorite toggle
 
 Configured native sessions authenticate `PUT /arcade/favorite` through the same
