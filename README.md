@@ -1,8 +1,18 @@
 # Musecat Backend Core
 
-Musecat Backend Core is a PocketBase-based API server for arcade, user, and contribution workflows. It is the reusable server core only: production data, data-ingestion pipelines, bulk backfills, deployment configuration, and operational notifications are intentionally maintained outside this repository.
+[Musecat](https://musecat.app) is a community service for finding nearby arcades and keeping their information current. It helps players browse arcade locations and game lineups, then contribute corrections, arcade edits, and fault reports. Arcade pages can include practical information such as machine counts and condition, pricing, opening hours, facilities, location notes, and update history.
+
+## How Musecat handles a conflicting edit
+
+Two players open the same cabinet listing. One corrects the floor from 1F to 2F. When the other saves from the older version, the API detects the conflict. Each accepted edit creates a revision, advances the current state, and records who changed which fields. [See the edit and conflict test](https://github.com/ericbaek/Musecat-Backend-Core/commit/624a8b244164e358b383b48d78417488eec857b3).
+
+<img src="https://musecat.app/developer/blog/history/structuredHistoryArchive.png" width="520" alt="Musecat arcade edit history showing additions, modifications, and removals">
 
 ## Core and deployment ownership
+
+Musecat Backend Core is a PocketBase-based API server for arcade, user, and contribution workflows. It is the reusable server core only: production data, data-ingestion pipelines, bulk backfills, deployment configuration, and operational notifications are intentionally maintained outside this repository.
+
+The reusable backend code is published here; Musecat's production database, ingestion workflow, operational configuration, credentials, and provider-source exports are not included.
 
 Core is the reusable backend product, not a reduced edition of Full. It owns
 custom APIs, authorization, aggregate transactions, immutable history, XP,
@@ -23,12 +33,6 @@ See [the architecture contract](docs/architecture-contract.md) for the boundary.
 ## Status
 
 This repository is prepared for public release. The included license is source-available, not an OSI-approved open-source license: commercial use is not permitted and redistributed modifications must be published under the same terms.
-
-## About Musecat
-
-[Musecat](https://musecat.app) is a community service for finding nearby arcades and keeping their information current. It helps players browse arcade locations and game lineups, then contribute corrections, arcade edits, and fault reports. Arcade pages can include practical information such as machine counts and condition, pricing, opening hours, facilities, location notes, and update history.
-
-The reusable backend code is published here; Musecat's production database, ingestion workflow, operational configuration, credentials, and provider-source exports are not included.
 
 ## Project Goal
 
