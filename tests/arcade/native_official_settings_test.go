@@ -345,7 +345,7 @@ func TestCanonicalNativeOfficialSettingsKeepBodyRateAndProtocolBoundaries(t *tes
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"POST", "/user/withdraw", 401}, {"PUT", "/arcade/report-subscription", 401}, {"POST", "/arcade/apns-subscription/status", 404}, {"GET", "/api/collections/user/records", 403}} {
+	}{{"DELETE", "/user/notifications/device", 401}, {"PUT", "/arcade/report-subscription", 401}, {"POST", "/arcade/apns-subscription/status", 404}, {"GET", "/api/collections/user/records", 403}} {
 		r := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + session.AccessToken})
 		r.Body.Close()
 		if r.StatusCode != op.status {

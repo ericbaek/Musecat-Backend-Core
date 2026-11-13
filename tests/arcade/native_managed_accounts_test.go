@@ -231,7 +231,7 @@ func TestCanonicalNativeManagedAccountLifetimesAndScope(t *testing.T) {
 		}
 		managedAccountRequest(t, app, "/native"+path, s.AccessToken, "", nil, 404)
 	}
-	for _, path := range []string{"/user/signup", "/user/withdraw"} {
+	for _, path := range []string{"/user/signup", "/user/notifications/device"} {
 		managedAccountRequest(t, app, path, s.AccessToken, "", nil, 401)
 	}
 	if before != nativeGrantStatusState(t, app) {

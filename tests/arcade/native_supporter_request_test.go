@@ -158,7 +158,7 @@ func TestCanonicalNativeSupporterRequestRetainsRateAndUnselectedBoundaries(t *te
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"POST", "/native/supporter/request", 404}, {"POST", "/user/notifications/device", 401}, {"POST", "/user/signup", 401}, {"PUT", "/moderation/arcade/edit-report", 401}, {"POST", "/user/withdraw", 401}} {
+	}{{"POST", "/native/supporter/request", 404}, {"POST", "/user/notifications/device", 401}, {"POST", "/user/signup", 401}, {"PUT", "/moderation/arcade/edit-report", 401}, {"DELETE", "/user/notifications/device", 401}} {
 		response := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + session.AccessToken})
 		response.Body.Close()
 		if response.StatusCode != op.status {

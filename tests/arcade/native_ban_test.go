@@ -259,7 +259,7 @@ func TestCanonicalNativeBanRolesLifetimesDisabledAndScope(t *testing.T) {
 	for _, r := range []struct {
 		method, path string
 		want         int
-	}{{"POST", "/user/signup", 401}, {"POST", "/api/collections/user/auth-refresh", 401}, {"POST", "/user/withdraw", 401}, {"PUT", "/moderation/arcade/edit-report", 401}, {"POST", "/developer/v1/account/moderation/user/ban", 403}, {"DELETE", "/developer/v1/account/moderation/user/ban", 403}, {"GET", "/api/collections/arcade/records", 403}} {
+	}{{"POST", "/user/signup", 401}, {"POST", "/api/collections/user/auth-refresh", 401}, {"DELETE", "/user/notifications/device", 401}, {"PUT", "/moderation/arcade/edit-report", 401}, {"POST", "/developer/v1/account/moderation/user/ban", 403}, {"DELETE", "/developer/v1/account/moderation/user/ban", 403}, {"GET", "/api/collections/arcade/records", 403}} {
 		res := executeJSONRequest(t, app, r.method, r.path, "{}", map[string]string{"Authorization": "Bearer " + s.AccessToken})
 		res.Body.Close()
 		if res.StatusCode != r.want {

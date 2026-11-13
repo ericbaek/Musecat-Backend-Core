@@ -2318,3 +2318,21 @@ Creation does not replace the caller session, issue a new session, verify email,
 award XP. Official role/ownership and setup notice remain server-derived.
 Wire fixtures export only an explicit public-field projection; credential-bearing
 requests and the canonical response email are compared in test memory only.
+
+
+### Selected first-party account closure
+
+Only canonical `POST /user/withdraw` accepts registered Native access sessions
+through an authentication-only adapter. Its exact method/path guard preserves
+the existing Web policy allowing a banned account to withdraw; active bans still
+become permanent rejoin blocks. Other selected operations keep their existing
+active-user guard. Invalid, expired, revoked, disabled-client and account-key
+invalid sessions remain rejected, and Native responses are no-store.
+
+The existing withdrawal handler, password/OAuth/official-account reauthentication,
+anonymization, transaction rollback, owned-arcade cleanup and receipt are shared.
+Withdrawal rotates the account token key and marks the account withdrawn, making
+all existing Web/Native credentials unusable without adding physical Native-family
+revocations. The existing refresh-token logout may revoke the caller family. No
+Native alias, schema, migration, delegated capability or account lifecycle policy
+is added.

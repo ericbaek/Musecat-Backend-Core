@@ -155,6 +155,25 @@ func activeCredentials(e *core.RequestEvent, s Service, out Credentials) error {
 // PocketBase loads normal web JWTs first; raw REST, OAuth and delegated routes
 // never receive this adapter.
 func FirstPartyAuthentication(clients []Client) *hook.Handler[*core.RequestEvent] {
+	return firstPartyAuthentication(clients, true)
+}
+
+// FirstPartyAccountClosureAuthentication preserves canonical withdrawal of banned
+// accounts. Its authentication-only exception applies to this exact operation.
+func FirstPartyAccountClosureAuthentication(clients []Client) *hook.Handler[*core.RequestEvent] {
+	h := firstPartyAuthentication(clients, false)
+	h.Id = "firstPartyNativeAccountClosureAuthentication"
+	authenticate := h.Func
+	h.Func = func(e *core.RequestEvent) error {
+		if e.Request.Method != http.MethodPost || e.Request.URL.Path != "/user/withdraw" {
+			return e.Next()
+		}
+		return authenticate(e)
+	}
+	return h
+}
+
+func firstPartyAuthentication(clients []Client, requireActive bool) *hook.Handler[*core.RequestEvent] {
 	service := Service{Clients: clients}
 	return &hook.Handler[*core.RequestEvent]{
 		Id:       "firstPartyNativeAuthentication",
@@ -171,7 +190,10 @@ func FirstPartyAuthentication(clients []Client) *hook.Handler[*core.RequestEvent
 			if err := authenticateNativeRecord(e, service); err != nil {
 				return err
 			}
-			return user.RequireActiveUser().Func(e)
+			if requireActive {
+				return user.RequireActiveUser().Func(e)
+			}
+			return e.Next()
 		},
 	}
 }

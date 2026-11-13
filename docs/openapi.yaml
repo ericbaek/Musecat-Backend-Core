@@ -9881,9 +9881,10 @@ paths:
     post:
       tags: [Users]
       summary: /user/withdraw
-      description: Official arcade accounts require their exact current password even when an OAuth provider is linked. Successful official withdrawal removes arcade_owner and clears owns so the arcade is no longer officially managed by the withdrawn account.
+      description: Official arcade accounts require their exact current password even when an OAuth provider is linked. Registered first-party Native sessions use authentication only on this operation, preserving the canonical policy that permits banned accounts to withdraw. Other selected operations retain their active-user guard. Successful official withdrawal removes arcade_owner and clears owns so the arcade is no longer officially managed by the withdrawn account.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:

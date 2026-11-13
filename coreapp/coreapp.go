@@ -208,7 +208,7 @@ func registerSessionRoutes(api *router.RouterGroup[*core.RequestEvent], nativeCl
 	}
 	auth := api.Group("/user").Bind(apis.RequireAuth("user"))
 	auth.POST("/signup", userhandler.SignUp)
-	auth.POST("/withdraw", userhandler.Withdraw)
+	auth.POST("/withdraw", userhandler.Withdraw).Bind(nativeauth.FirstPartyAccountClosureAuthentication(nativeClients))
 	auth.PUT("/arcade-account/credentials", userhandler.UpdateArcadeCredentials).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(16<<10))
 	review := api.Group("/moderation/user").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), arcadequery.RequireStrictReviewerAccess())
 	review.POST("/test-account", userhandler.CreateTestAccount).Bind(firstPartyAuth...).Bind(apis.BodyLimit(16 << 10))
