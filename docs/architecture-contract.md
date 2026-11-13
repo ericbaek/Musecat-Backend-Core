@@ -723,7 +723,7 @@ transactions. Core's schema migration bootstraps only a fresh test database.
 committed first visit; duplicate same-day requests return false and never award another
 stamp or XP. Clients must acquire a fresh GPS position when the user explicitly starts a
 Passport check rather than submitting persisted coordinates. The measured point must be
-within 100 meters of the arcade, and reported GPS accuracy must be at most 150 meters.
+within 100 meters of the arcade (300 meters for supporter, founding_supporter, moderator and developer roles), and reported GPS accuracy must be at most 150 meters.
 The first visit awards 5 XP and a revisit awards 2 XP. Passport is GPS visit evidence, not play evidence.
 
 
