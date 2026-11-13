@@ -1781,7 +1781,7 @@ components:
           type: number
           minimum: 0
           maximum: 150
-          description: GPS accuracy in meters; must be at most 150. The measured point must be within 100 m of the arcade.
+          description: GPS accuracy in meters; must be at most 150. The measured point must be within 100 m of the arcade (300 m for supporter, founding_supporter, moderator and developer roles).
     CampaignCheckRequest:
       type: object
       required: [campaign, arcade, game_id, result]
@@ -8424,7 +8424,7 @@ paths:
                   level: {type: integer}
                   xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
         '400': {description: Invalid coordinates or GPS accuracy greater than 150 m.}
-        '403': {description: Inactive user, ineligible arcade, outside the 100m radius, or a deployment-provided visit policy restriction.}
+        '403': {description: Inactive user, ineligible arcade, outside the account’s visit radius, or a deployment-provided visit policy restriction.}
         '409': {description: Missing arcade coordinates or timezone.}
   /subway/map:
     get:
