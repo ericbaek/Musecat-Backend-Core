@@ -188,7 +188,7 @@ func TestNativeReadCredentialBoundaryBanAndDisabledRoutes(t *testing.T) {
 		{"GET", "/user/me", 401},
 		{"DELETE", "/user/notifications/device", 401},
 		{"POST", "/user/notifications/device", 401},
-		{"GET", "/user/messaging/preferences", 401},
+		{"GET", "/user/inquiry-bots/arcade/missing", 401},
 		{"POST", "/user/signup", 401},
 		{"POST", "/api/collections/user/auth-refresh", 401},
 		{"GET", "/developer/v1/account/user/notifications", 403},

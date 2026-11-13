@@ -325,7 +325,7 @@ func TestCanonicalNativeMessagingEventsDenyInvalidDisabledAndUnselectedRoutes(t 
 	nativeEventStatus(t, server, "/user/events", "", "", 401)
 	nativeEventStatus(t, server, "/user/events", strings.Repeat("z", 43), web, 401)
 	nativeEventStatus(t, server, "/native/user/events", credentials.AccessToken, "", 404)
-	nativeEventStatus(t, server, "/user/messaging/preferences", credentials.AccessToken, "", 401)
+	nativeEventStatus(t, server, "/user/inquiry-bots/arcade/missing", credentials.AccessToken, "", 401)
 	nativeEventStatus(t, server, "/moderation/messages/reports", credentials.AccessToken, "", 401)
 	nativeEventStatus(t, server, "/api/collections/messaging_message/records", credentials.AccessToken, "", 403)
 	seedUserBan(t, app, user.Id, "", "native_event_entry", time.Now().Add(time.Hour))

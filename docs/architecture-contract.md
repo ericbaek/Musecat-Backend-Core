@@ -2336,3 +2336,16 @@ all existing Web/Native credentials unusable without adding physical Native-fami
 revocations. The existing refresh-token logout may revoke the caller family. No
 Native alias, schema, migration, delegated capability or account lifecycle policy
 is added.
+
+
+### Selected first-party DM preferences and safety
+
+Registered Native sessions select only the existing seven Web operations for
+GET/PUT `/user/messaging/preferences`, GET `/user/messaging/blocks`,
+PUT/DELETE `/user/messaging/blocks/{userId}`, GET `/user/messaging/recipients`,
+and POST `/user/messages/{messageId}/report`. Existing active-user checks,
+participant-only DM ACL, receive/block/report rules, body and rate limits and
+transaction/event behavior remain unchanged. Invalid enabled Native bearer
+credentials fail closed rather than falling back to cookies. No Native alias,
+guest or staff bypass, new route, schema or migration is introduced. Inquiry bot
+configuration and message moderation remain outside this selected scope.

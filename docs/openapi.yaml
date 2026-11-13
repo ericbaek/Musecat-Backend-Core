@@ -17166,13 +17166,13 @@ paths:
       tags: ["Messaging"]
       summary: "Read DM receive preference"
       description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"receive": {"type": "string", "enum": ["everyone", "nobody"]}}, "required": ["receive"]}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
     put:
       tags: ["Messaging"]
       summary: "Set DM receive preference"
       description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"receive": {"type": "string", "enum": ["everyone", "nobody"]}}, "required": ["receive"]}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"receive": {"type": "string", "enum": ["everyone", "nobody"]}}, "required": ["receive"]}}}}
 
@@ -17181,7 +17181,7 @@ paths:
       tags: ["Messaging"]
       summary: "List this user's blocked users"
       description: "Active user only. Current conversation permissions are checked on every request. Responses are private, no-store."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/components/schemas/MessagingParty"}}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
 
   /user/messaging/blocks/{userId}:
@@ -17189,14 +17189,14 @@ paths:
       tags: ["Messaging"]
       summary: "Block or unblock personal DM"
       description: "Either side's block prevents new DM messages in both directions. Existing history stays accessible. Does not affect arcade/team inquiries; limit 100 directed blocks."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"204": {"description": "Success"}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "userId", "in": "path", "required": true, "schema": {"type": "string"}}]
     delete:
       tags: ["Messaging"]
       summary: "Block or unblock personal DM"
       description: "Either side's block prevents new DM messages in both directions. Existing history stays accessible. Does not affect arcade/team inquiries; limit 100 directed blocks."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"204": {"description": "Success"}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "userId", "in": "path", "required": true, "schema": {"type": "string"}}]
 
@@ -17205,7 +17205,7 @@ paths:
       tags: ["Messaging"]
       summary: "Search public users for a personal DM"
       description: "Authenticated bounded public profile projection, excludes self and withdrawn users. Does not disclose receive preference or block state."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"200": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/MessagingParty"}}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "q", "in": "query", "schema": {"type": "string", "minLength": 2, "maxLength": 100}}, {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10}}]
 
@@ -17214,7 +17214,7 @@ paths:
       tags: ["Messaging"]
       summary: "Report an accessible message and preserve evidence"
       description: "Only a user who can currently read the conversation may report. A repeated report returns its existing id with 200. Evidence is private and immutable; reporting grants no broader conversation access."
-      security: [{"bearerAuth": []}]
+      security: [{"bearerAuth": []}, {"nativeSession": []}]
       responses: {"201": {"description": "Success", "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string"}}}}}}, "400": {"description": "Invalid input."}, "401": {"description": "Authentication required."}, "403": {"description": "Restricted account or unavailable recipient."}, "404": {"description": "Missing or inaccessible conversation/message."}, "409": {"description": "Idempotency key conflicts with stored payload or inbox is unavailable."}, "413": {"description": "Upload exceeds limits."}, "429": {"description": "Rate or stream limit. Retry-After supplies delay in seconds."}}
       parameters: [{"name": "messageId", "in": "path", "required": true, "schema": {"type": "string"}}]
       requestBody: {"required": true, "content": {"application/json": {"schema": {"type": "object", "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": 2000}}, "required": ["reason"]}}}}
