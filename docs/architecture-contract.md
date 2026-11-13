@@ -559,6 +559,9 @@ New frontend code MUST NOT reintroduce collection names, PocketBase record rules
 Notice authorization denials terminate the handler before any save; the existing
 403 JSON error body is preserved. A denied create, update, or delete never changes
 persisted notice state.
+JSON and multipart notice updates preserve omitted `link`/`until` fields; explicit
+empty strings clear the link or expiration. Invalid expiration dates return 400
+without persisting any part of the update.
 
 Memo and notice writes validate nested document nodes, marks, text, and attributes
 before persistence. Documents allow extension node names but have a maximum of
