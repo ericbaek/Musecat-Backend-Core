@@ -26,9 +26,9 @@ func RegisterRoutes(se *core.ServeEvent, nativeClients ...nativeauth.Client) {
 		firstPartyAuth = append(firstPartyAuth, nativeauth.FirstPartyAuthentication(nativeClients))
 	}
 	review := se.Router.Group("/moderation/messages/reports").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	review.GET("", ReviewReports)
-	review.GET("/{id}", ReviewReport)
-	review.GET("/{id}/attachments/{file}", ReviewPhoto)
+	review.GET("", ReviewReports).Bind(firstPartyAuth...)
+	review.GET("/{id}", ReviewReport).Bind(firstPartyAuth...)
+	review.GET("/{id}/attachments/{file}", ReviewPhoto).Bind(firstPartyAuth...)
 	guest := se.Router.Group("/guest").BindFunc(func(re *core.RequestEvent) error {
 		if supportfeedback.GuestKeyHash(re.Request.Header.Get(supportfeedback.GuestHeader)) == "" {
 			return re.UnauthorizedError("Inquiry credentials required.", nil)

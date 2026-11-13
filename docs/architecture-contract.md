@@ -2357,4 +2357,23 @@ participant-only DM ACL, receive/block/report rules, body and rate limits and
 transaction/event behavior remain unchanged. Invalid enabled Native bearer
 credentials fail closed rather than falling back to cookies. No Native alias,
 guest or staff bypass, new route, schema or migration is introduced. Inquiry bot
-configuration and message moderation remain outside this selected scope.
+configuration and message-moderation writes remain outside this selected scope.
+
+
+### Selected first-party message-report review reads
+
+Only GET `/moderation/messages/reports`, GET `/moderation/messages/reports/{id}`
+and GET `/moderation/messages/reports/{id}/attachments/{file}` additionally accept
+registered first-party Native sessions. These are exactly three canonical operations
+(the combined Core/Full Native parity inventory advances from 87 to 90); this is
+a source-contract count, not deployment or UI acceptance. Existing Web JWT handling,
+active-user and current developer/moderator checks remain authoritative on every
+request, including role removal, ban and account/session revocation. Cookie-only
+Core requests gain no identity and an invalid bearer never falls back to cookies.
+
+List/detail preserve the canonical report snapshot and cursor (limit 1..50);
+only photos captured in that report may be streamed through its private no-store
+evidence route. This grants no staff access to other DM messages, history or
+unreported attachments. Raw REST, guest routes, management writes and Native
+aliases remain unselected. No schema, migration, role or domain-policy change is
+introduced. Public arcade-flag direct-file policy is unrelated to private DM evidence.

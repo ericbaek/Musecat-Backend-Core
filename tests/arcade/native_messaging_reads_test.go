@@ -364,7 +364,7 @@ func TestCanonicalNativeMessagingReadsPreserveRateLimitsAndExcludeUnselectedOper
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"PUT", "/user/inquiry-bots/arcade/missing", 401}, {"GET", "/moderation/messages/reports", 401}, {"GET", "/api/collections/messaging_message/records", 403}} {
+	}{{"PUT", "/user/inquiry-bots/arcade/missing", 401}, {"GET", "/moderation/announcements", 401}, {"GET", "/api/collections/messaging_message/records", 403}} {
 		r := executeJSONRequest(t, app, op.method, op.path, "{}", map[string]string{"Authorization": "Bearer " + session.AccessToken})
 		r.Body.Close()
 		if r.StatusCode != op.status {
