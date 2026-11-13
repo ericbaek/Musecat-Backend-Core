@@ -1797,7 +1797,7 @@ components:
           type: number
           minimum: 0
           maximum: 150
-          description: GPS accuracy in meters; must be at most 150. The measured point must be within 100 m of the arcade.
+          description: GPS accuracy in meters; must be at most 150. The measured point must be within 100 m of the arcade (300 m for supporter, founding_supporter, moderator and developer roles).
     CampaignCheckRequest:
       type: object
       required: [campaign, arcade, game_id, result]
@@ -2759,9 +2759,13 @@ components:
           description: Canonical Tiptap JSON document.
         link:
           type: string
+          description: Optional link. An empty string clears it; omitted updates preserve the stored link.
         until:
           type: string
-          format: date-time
+          description: Optional expiration timestamp. An empty string removes expiration; omitted updates preserve the stored expiration.
+          anyOf:
+            - format: date-time
+            - const: ''
         priority:
           type: number
     CreateArcadeNoticeMultipartRequest:
@@ -2788,9 +2792,13 @@ components:
           description: Canonical Tiptap JSON document serialized as multipart text.
         link:
           type: string
+          description: Optional link. An empty string clears it; omitted updates preserve the stored link.
         until:
           type: string
-          format: date-time
+          description: Optional expiration timestamp. An empty string removes expiration; omitted updates preserve the stored expiration.
+          anyOf:
+            - format: date-time
+            - const: ''
         priority:
           type: number
         photos:
@@ -2824,9 +2832,13 @@ components:
           description: Canonical Tiptap JSON document.
         link:
           type: string
+          description: Optional link. An empty string clears it; omitted updates preserve the stored link.
         until:
           type: string
-          format: date-time
+          description: Optional expiration timestamp. An empty string removes expiration; omitted updates preserve the stored expiration.
+          anyOf:
+            - format: date-time
+            - const: ''
         priority:
           type: number
     UpdateArcadeNoticeMultipartRequest:
@@ -2853,9 +2865,13 @@ components:
           description: Canonical Tiptap JSON document serialized as multipart text.
         link:
           type: string
+          description: Optional link. An empty string clears it; omitted updates preserve the stored link.
         until:
           type: string
-          format: date-time
+          description: Optional expiration timestamp. An empty string removes expiration; omitted updates preserve the stored expiration.
+          anyOf:
+            - format: date-time
+            - const: ''
         priority:
           type: number
         photos:
@@ -9271,7 +9287,7 @@ paths:
                   xp_feedback: {$ref: '#/components/schemas/XpFeedback'}
         '401': {description: Missing, invalid, expired, revoked or unregistered authentication.}
         '400': {description: Invalid coordinates or GPS accuracy greater than 150 m.}
-        '403': {description: Inactive user, ineligible arcade, outside the 100m radius, or a deployment-provided visit policy restriction.}
+        '403': {description: Inactive user, ineligible arcade, outside the account’s visit radius, or a deployment-provided visit policy restriction.}
         '409': {description: Missing arcade coordinates or timezone.}
   /subway/map:
     get:

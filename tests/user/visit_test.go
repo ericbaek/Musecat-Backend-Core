@@ -2,6 +2,7 @@ package user_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -445,5 +446,33 @@ func TestVisitTimelineVisibilitySetting(t *testing.T) {
 	info, _ := app.FindRecordById("user_info", user.Id)
 	if info.GetBool("visit_timeline_hidden") {
 		t.Fatal("expected opt-out cleared")
+	}
+}
+
+func TestArcadeVisitRoleRadius(t *testing.T) {
+	app := newUserFetchTestApp(t)
+	arcade := seedVisitArcade(t, app, "Asia/Seoul")
+	for _, tc := range []struct {
+		role   string
+		meters int
+		status int
+	}{
+		{"", 99, 200}, {"", 101, 403}, {"founding_supporter", 299, 200}, {"supporter", 301, 403}, {"moderator", 299, 200}, {"developer", 299, 200}, {"arcade_owner", 101, 403},
+	} {
+		t.Run(fmt.Sprintf("%s-%d", tc.role, tc.meters), func(t *testing.T) {
+			token, account := createAuthUser(t, app, true)
+			if tc.role != "" {
+				account.Set("tags", []string{tc.role})
+				if err := app.Save(account); err != nil {
+					t.Fatal(err)
+				}
+			}
+			body := fmt.Sprintf(`{"arcade":%q,"lat":%.10f,"lon":126.978,"accuracy":150}`, arcade.Id, 37.5665+float64(tc.meters)/6371000*180/math.Pi)
+			res := doUserRequest(t, app, http.MethodPost, "/arcade/visit", map[string]string{"Authorization": "Bearer " + token}, body)
+			defer res.Body.Close()
+			if res.StatusCode != tc.status {
+				t.Fatalf("got %d want %d", res.StatusCode, tc.status)
+			}
+		})
 	}
 }

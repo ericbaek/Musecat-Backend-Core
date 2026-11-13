@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	visitRadiusMeters      = 100.0
 	maxVisitAccuracyMeters = 150.0
 	firstVisitExp          = 5
 	revisitExp             = 2
@@ -71,6 +70,16 @@ func SetVisitNowForTest(nowFn func() time.Time) func() {
 	return func() { visitNow = prev }
 }
 
+func visitRadiusMeters(auth *core.Record) float64 {
+	for _, tag := range parseUserTag(auth) {
+		switch strings.ToLower(strings.TrimSpace(tag)) {
+		case "supporter", "founding_supporter", "moderator", "developer":
+			return 300
+		}
+	}
+	return 100
+}
+
 func VisitArcade(re *core.RequestEvent) error {
 	if re.Auth == nil {
 		return re.JSON(http.StatusUnauthorized, map[string]any{"error": "authentication required"})
@@ -106,7 +115,7 @@ func VisitArcade(re *core.RequestEvent) error {
 		return re.JSON(http.StatusConflict, map[string]any{"error": "arcade location unavailable"})
 	}
 	distance := visitDistanceMeters(in.Lat, in.Lon, lat, lon)
-	if distance > visitRadiusMeters {
+	if distance > visitRadiusMeters(re.Auth) {
 		return re.JSON(http.StatusForbidden, map[string]any{"error": "outside visit radius", "distance_meters": distance})
 	}
 	loc, err := time.LoadLocation(strings.TrimSpace(arcade.GetString("timezone")))

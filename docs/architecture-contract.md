@@ -603,6 +603,9 @@ New frontend code MUST NOT reintroduce collection names, PocketBase record rules
 Notice authorization denials terminate the handler before any save; the existing
 403 JSON error body is preserved. A denied create, update, or delete never changes
 persisted notice state.
+JSON and multipart notice updates preserve omitted `link`/`until` fields; explicit
+empty strings clear the link or expiration. Invalid expiration dates return 400
+without persisting any part of the update.
 
 Memo and notice writes validate nested document nodes, marks, text, and attributes
 before persistence. Documents allow extension node names but have a maximum of
@@ -767,7 +770,7 @@ transactions. Core's schema migration bootstraps only a fresh test database.
 committed first visit; duplicate same-day requests return false and never award another
 stamp or XP. Clients must acquire a fresh GPS position when the user explicitly starts a
 Passport check rather than submitting persisted coordinates. The measured point must be
-within 100 meters of the arcade, and reported GPS accuracy must be at most 150 meters.
+within 100 meters of the arcade (300 meters for supporter, founding_supporter, moderator and developer roles), and reported GPS accuracy must be at most 150 meters.
 The first visit awards 5 XP and a revisit awards 2 XP. Passport is GPS visit evidence, not play evidence.
 
 
