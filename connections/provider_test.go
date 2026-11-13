@@ -1,6 +1,9 @@
 package connections_test
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -65,18 +68,53 @@ func TestProviderConfigurationFailsClosed(t *testing.T) {
 		t.Fatal("dynamic providers must be removable", err)
 	}
 	var sealed struct{ Secret string }
-	ciphertext, err := keyOnly.Seal(map[string]string{"Secret": "s3"}, "purpose:a")
-	if err != nil || strings.Contains(ciphertext, "s3") {
+	plaintext := "synthetic-provider-secret-canary:" + strings.Repeat("private-value-", 4)
+	ciphertext, err := keyOnly.Seal(map[string]string{"Secret": plaintext}, "purpose:a")
+	// A random Base64 nonce/ciphertext can contain any short substring by chance.
+	// Check the complete canary and authenticated round trip, not two letters.
+	if err != nil || strings.Contains(ciphertext, plaintext) {
 		t.Fatal("seal", err)
+	}
+	stored, err := base64.RawStdEncoding.DecodeString(ciphertext)
+	if err != nil || len(stored) <= len(plaintext) || bytes.Contains(stored, []byte(plaintext)) {
+		t.Fatal("seal stored bytes expose plaintext or invalid format", err)
 	}
 	if err := keyOnly.Open(ciphertext, "purpose:b", &sealed); err == nil {
 		t.Fatal("purpose binding ignored")
 	}
-	if err := keyOnly.Open(ciphertext, "purpose:a", &sealed); err != nil || sealed.Secret != "s3" {
+	if err := keyOnly.Open(ciphertext, "purpose:a", &sealed); err != nil || sealed.Secret != plaintext {
 		t.Fatal("open", err)
 	}
 	if _, err := connections.ParseConfig(`[{"client_secret":"secret-value","typo":true}]`, base64.StdEncoding.EncodeToString(key)); err == nil || strings.Contains(err.Error(), "secret-value") {
 		t.Fatal("invalid config accepted or secrets leaked")
+	}
+}
+
+func TestProviderValidCiphertextCanContainShortPlaintextSubstring(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	manager, err := connections.NewManager(nil, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stored format prefixes its nonce; these bytes encode a literal "s3".
+	// Build one valid deterministic fixture without replacing global randomness.
+	nonce := make([]byte, aead.NonceSize())
+	nonce[0], nonce[1] = 0xb3, 0x70
+	ciphertext := base64.RawStdEncoding.EncodeToString(aead.Seal(nonce, nonce, []byte(`{"Secret":"s3"}`), []byte("purpose:a")))
+	if !strings.Contains(ciphertext, "s3") {
+		t.Fatal("counterexample fixture lost short substring")
+	}
+	var decoded struct{ Secret string }
+	if err := manager.Open(ciphertext, "purpose:a", &decoded); err != nil || decoded.Secret != "s3" {
+		t.Fatal("valid ciphertext with coincidental substring rejected", err)
 	}
 }
 
