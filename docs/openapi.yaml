@@ -8975,6 +8975,7 @@ paths:
       description: Active developer or moderator only. Does not change collection-wide password authentication or verify email.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -9019,6 +9020,7 @@ paths:
       description: Active developer, moderator, or designer only. Atomically sets arcade_owner and owns for an existing public arcade. Does not verify email or replace the caller session.
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:

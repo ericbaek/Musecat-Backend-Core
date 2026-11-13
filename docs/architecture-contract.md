@@ -2305,3 +2305,16 @@ history write is introduced. Invalid enabled Native credentials fail closed;
 Native responses are no-store, disabled configuration grants no Native identity.
 Provisioning/withdrawal, raw/delegated routes and Native aliases stay outside the
 selection. No schema, migration, duplicate handler or new privilege policy is added.
+
+### Native selected managed-account creation
+
+`POST /moderation/user/test-account` and `POST /moderation/user/arcade-account`
+accept registered first-party Native sessions through their individual operation
+adapters. Both use the existing Web handlers, 16 KiB limit and atomic account/profile
+transaction. Test accounts still require active strict staff; official accounts retain
+the existing developer/moderator/designer policy and public open/closed arcade lookup.
+The adapter adds no delegation, signup, withdrawal or raw collection access.
+Creation does not replace the caller session, issue a new session, verify email, or
+award XP. Official role/ownership and setup notice remain server-derived.
+Wire fixtures export only an explicit public-field projection; credential-bearing
+requests and the canonical response email are compared in test memory only.

@@ -277,7 +277,7 @@ func TestCanonicalNativeGrantStatusRolesAndCredentialScope(t *testing.T) {
 	for _, r := range []struct {
 		method, path string
 		want         int
-	}{{"PUT", "/arcade/report-subscription", 401}, {"POST", "/user/withdraw", 401}, {"POST", "/moderation/user/test-account", 401}, {"POST", "/moderation/user/arcade-account", 401}, {"PUT", "/moderation/arcade/edit-report", 401}, {"PUT", "/developer/v1/account/moderation/supporter/request", 403}, {"PUT", "/native/moderation/supporter/request", 404}, {"PUT", "/native/moderation/arcade/status", 404}} {
+	}{{"PUT", "/arcade/report-subscription", 401}, {"POST", "/user/withdraw", 401}, {"POST", "/user/signup", 401}, {"POST", "/api/collections/user/auth-refresh", 401}, {"PUT", "/moderation/arcade/edit-report", 401}, {"PUT", "/developer/v1/account/moderation/supporter/request", 403}, {"PUT", "/native/moderation/supporter/request", 404}, {"PUT", "/native/moderation/arcade/status", 404}} {
 		res := executeJSONRequest(t, app, r.method, r.path, "{}", map[string]string{"Authorization": "Bearer " + s.AccessToken})
 		res.Body.Close()
 		if res.StatusCode != r.want {
