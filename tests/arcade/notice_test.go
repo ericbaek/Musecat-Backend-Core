@@ -170,6 +170,66 @@ func TestArcadeNotice_OwnerCanCreateUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestArcadeNotice_OptionalFieldsPreserveOrClear(t *testing.T) {
+	for _, encoding := range []string{"json", "multipart"} {
+		t.Run(encoding, func(t *testing.T) {
+			app, arcadeID, headers := noticePolicyFixture(t)
+			body := policyNoticeBody(arcadeID, "normal")
+			body["link"] = "https://example.com/notice"
+			body["until"] = "2099-01-01T00:00:00Z"
+			created := noticePolicyRequest(t, app, headers, http.MethodPost, body, http.StatusOK)
+			id := created["id"].(string)
+			for _, step := range []struct {
+				name   string
+				fields map[string]string
+				status int
+				link   any
+				until  any
+			}{
+				{"omitted", map[string]string{"title": "Updated"}, http.StatusOK, created["link"], created["until"]},
+				{"invalid", map[string]string{"link": "", "until": "not-a-date"}, http.StatusBadRequest, created["link"], created["until"]},
+				{"clear", map[string]string{"link": "", "until": ""}, http.StatusOK, "", ""},
+			} {
+				t.Run(step.name, func(t *testing.T) {
+					step.fields["id"] = id
+					var requestBody bytes.Buffer
+					if encoding == "multipart" {
+						writer := multipart.NewWriter(&requestBody)
+						for key, value := range step.fields {
+							if err := writer.WriteField(key, value); err != nil {
+								t.Fatal(err)
+							}
+						}
+						if err := writer.Close(); err != nil {
+							t.Fatal(err)
+						}
+						headers["Content-Type"] = writer.FormDataContentType()
+					} else if err := json.NewEncoder(&requestBody).Encode(step.fields); err != nil {
+						t.Fatal(err)
+					}
+					res := executeRequest(t, app, http.MethodPut, "/arcade/notice", &requestBody, headers)
+					payload := decodeJSONMap(t, res)
+					if res.StatusCode != step.status {
+						t.Fatalf("expected %d, got %d: %#v", step.status, res.StatusCode, payload)
+					}
+					record, err := app.FindRecordById("arcade_notice", id)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if record.GetString("link") != step.link || record.GetDateTime("until").String() != step.until {
+						t.Fatalf("wrong persisted fields: %q / %q", record.GetString("link"), record.GetDateTime("until"))
+					}
+					read := decodeJSONMap(t, executeJSONRequest(t, app, http.MethodGet, "/arcade/notice?arcade="+arcadeID, "", nil))
+					items := read["items"].([]any)
+					if len(items) != 1 || items[0].(map[string]any)["link"] != step.link || items[0].(map[string]any)["until"] != step.until {
+						t.Fatalf("wrong read-back fields: %#v", read)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestArcadeNotice_SupporterCreateAndAuthorOnlyMutation(t *testing.T) {
 	app := newArcadeTestApp(t)
 	arcadeID, _ := seedPublicArcade(t, app, "", arcadeSeed{

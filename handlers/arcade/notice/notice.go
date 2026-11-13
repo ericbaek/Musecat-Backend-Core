@@ -44,7 +44,7 @@ type NoticeBody struct {
 	Type        *string            `json:"type,omitempty"`
 	Document    json.RawMessage    `json:"document,omitempty"`
 	Link        *string            `json:"link,omitempty"`
-	Until       *time.Time         `json:"until,omitempty"`
+	Until       *string            `json:"until,omitempty"`
 	Priority    *float64           `json:"priority,omitempty"`
 	Photos      []*filesystem.File `json:"-"`
 }
@@ -72,15 +72,11 @@ func parseNoticeBody(re *core.RequestEvent) (NoticeBody, error) {
 		if v := re.Request.FormValue("document"); v != "" {
 			body.Document = json.RawMessage(v)
 		}
-		if v := strings.TrimSpace(re.Request.FormValue("link")); v != "" {
-			body.Link = &v
+		if values, ok := re.Request.MultipartForm.Value["link"]; ok && len(values) > 0 {
+			body.Link = &values[0]
 		}
-		if v := strings.TrimSpace(re.Request.FormValue("until")); v != "" {
-			if parsed, err := parseNoticeTime(v); err == nil {
-				body.Until = &parsed
-			} else {
-				return NoticeBody{}, err
-			}
+		if values, ok := re.Request.MultipartForm.Value["until"]; ok && len(values) > 0 {
+			body.Until = &values[0]
 		}
 		if v := strings.TrimSpace(re.Request.FormValue("priority")); v != "" {
 			if parsed, err := parseNoticePriority(v); err == nil {
@@ -593,7 +589,15 @@ func applyNoticeFields(rec *core.Record, body NoticeBody) error {
 		rec.Set("link", strings.TrimSpace(*body.Link))
 	}
 	if body.Until != nil {
-		rec.Set("until", body.Until.UTC())
+		until := time.Time{}
+		if raw := strings.TrimSpace(*body.Until); raw != "" {
+			var err error
+			until, err = parseNoticeTime(raw)
+			if err != nil {
+				return err
+			}
+		}
+		rec.Set("until", until.UTC())
 	}
 	if body.Priority != nil {
 		rec.Set("priority", *body.Priority)

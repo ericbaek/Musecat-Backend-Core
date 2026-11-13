@@ -2740,9 +2740,13 @@ components:
           description: Canonical Tiptap JSON document.
         link:
           type: string
+          description: Optional link. An empty string clears it; omitted updates preserve the stored link.
         until:
           type: string
-          format: date-time
+          description: Optional expiration timestamp. An empty string removes expiration; omitted updates preserve the stored expiration.
+          anyOf:
+            - format: date-time
+            - const: ''
         priority:
           type: number
     CreateArcadeNoticeMultipartRequest:
@@ -2769,9 +2773,13 @@ components:
           description: Canonical Tiptap JSON document serialized as multipart text.
         link:
           type: string
+          description: Optional link. An empty string clears it; omitted updates preserve the stored link.
         until:
           type: string
-          format: date-time
+          description: Optional expiration timestamp. An empty string removes expiration; omitted updates preserve the stored expiration.
+          anyOf:
+            - format: date-time
+            - const: ''
         priority:
           type: number
         photos:
@@ -2805,9 +2813,13 @@ components:
           description: Canonical Tiptap JSON document.
         link:
           type: string
+          description: Optional link. An empty string clears it; omitted updates preserve the stored link.
         until:
           type: string
-          format: date-time
+          description: Optional expiration timestamp. An empty string removes expiration; omitted updates preserve the stored expiration.
+          anyOf:
+            - format: date-time
+            - const: ''
         priority:
           type: number
     UpdateArcadeNoticeMultipartRequest:
@@ -2834,9 +2846,13 @@ components:
           description: Canonical Tiptap JSON document serialized as multipart text.
         link:
           type: string
+          description: Optional link. An empty string clears it; omitted updates preserve the stored link.
         until:
           type: string
-          format: date-time
+          description: Optional expiration timestamp. An empty string removes expiration; omitted updates preserve the stored expiration.
+          anyOf:
+            - format: date-time
+            - const: ''
         priority:
           type: number
         photos:
