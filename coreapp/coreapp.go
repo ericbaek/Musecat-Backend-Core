@@ -183,7 +183,7 @@ func registerAPIRoutes(se *core.ServeEvent, nativeClients []nativeauth.Client, m
 	}
 	connectionhandler.RegisterRoutes(se, manager)
 	registerBotRoutes(se)
-	announcementhandler.RegisterRoutes(se)
+	announcementhandler.RegisterRoutes(se, nativeClients...)
 	messaginghandler.RegisterRoutes(se, nativeClients...)
 	se.Router.GET("/guest/feedback", arcadeadmin.ListGuestSupportFeedback).Bind(arcadeadmin.RequireGuestFeedback())
 	se.Router.GET("/guest/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(arcadeadmin.RequireGuestFeedback())

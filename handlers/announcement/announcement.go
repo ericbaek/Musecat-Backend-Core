@@ -10,24 +10,30 @@ import (
 
 	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/nativeauth"
 	"github.com/ericbaek/musecat-backend-core/service/announcement"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/hook"
 )
 
-func RegisterRoutes(se *core.ServeEvent) {
+func RegisterRoutes(se *core.ServeEvent, nativeClients ...nativeauth.Client) {
+	var firstPartyAuth []*hook.Handler[*core.RequestEvent]
+	if len(nativeClients) > 0 {
+		firstPartyAuth = append(firstPartyAuth, nativeauth.FirstPartyAuthentication(nativeClients))
+	}
 	se.Router.GET("/announcements", List)
 	se.Router.GET("/announcements/unseen", Unseen).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
 	se.Router.GET("/announcements/{id}", Get)
-	se.Router.GET("/announcements/{id}/images/{filename}", Image)
+	se.Router.GET("/announcements/{id}/images/{filename}", Image).Bind(firstPartyAuth...)
 	se.Router.POST("/announcements/{id}/view", View).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(4096))
 	staff := se.Router.Group("/moderation/announcements").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), arcadequery.RequireStrictReviewerAccess())
-	staff.GET("", ListAdmin)
-	staff.POST("", Create).Bind(apis.BodyLimit(announcement.MaxBodyBytes))
-	staff.PUT("/{id}", Update).Bind(apis.BodyLimit(announcement.MaxBodyBytes))
-	staff.POST("/{id}/publish", Publish).Bind(apis.BodyLimit(4096))
-	staff.POST("/{id}/archive", Archive).Bind(apis.BodyLimit(4096))
+	staff.GET("", ListAdmin).Bind(firstPartyAuth...)
+	staff.POST("", Create).Bind(firstPartyAuth...).Bind(apis.BodyLimit(announcement.MaxBodyBytes))
+	staff.PUT("/{id}", Update).Bind(firstPartyAuth...).Bind(apis.BodyLimit(announcement.MaxBodyBytes))
+	staff.POST("/{id}/publish", Publish).Bind(firstPartyAuth...).Bind(apis.BodyLimit(4096))
+	staff.POST("/{id}/archive", Archive).Bind(firstPartyAuth...).Bind(apis.BodyLimit(4096))
 }
 
 func List(re *core.RequestEvent) error      { return list(re, false) }

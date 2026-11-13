@@ -229,7 +229,7 @@ func TestCanonicalNativeDMPolicyRatesAndNoAliases(t *testing.T) {
 		nativeDMPolicyRequest(t, app, op.method, "/native"+op.path, s.AccessToken, map[string]any{}, 404)
 	}
 	app.Settings().RateLimits = core.RateLimitsConfig{}
-	nativeDMPolicyRequest(t, app, "GET", "/moderation/announcements", s.AccessToken, nil, 401)
+	nativeDMPolicyRequest(t, app, "GET", "/user/connections", s.AccessToken, nil, 401)
 	nativeDMPolicyRequest(t, app, "PUT", "/user/inquiry-bots/arcade/missing", s.AccessToken, map[string]any{}, 401)
 }
 

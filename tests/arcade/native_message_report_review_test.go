@@ -315,7 +315,7 @@ func TestCanonicalNativeMessageReviewPreservesRateAndUnselectedBoundaries(t *tes
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"GET", "/native/moderation/messages/reports", 404}, {"GET", "/moderation/announcements", 401}, {"PUT", "/user/inquiry-bots/arcade/missing", 401}, {"GET", "/api/collections/messaging_report/records", 403}} {
+	}{{"GET", "/native/moderation/messages/reports", 404}, {"GET", "/user/connections", 401}, {"PUT", "/user/inquiry-bots/arcade/missing", 401}, {"GET", "/api/collections/messaging_report/records", 403}} {
 		r := executeJSONRequest(t, f.app, op.method, op.path, "{}", reviewBearer(f.staffSession.AccessToken))
 		defer r.Body.Close()
 		if r.StatusCode != op.status {

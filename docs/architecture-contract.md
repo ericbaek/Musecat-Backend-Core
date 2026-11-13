@@ -2377,3 +2377,25 @@ evidence route. This grants no staff access to other DM messages, history or
 unreported attachments. Raw REST, guest routes, management writes and Native
 aliases remain unselected. No schema, migration, role or domain-policy change is
 introduced. Public arcade-flag direct-file policy is unrelated to private DM evidence.
+
+
+### Selected first-party announcement management
+
+Configured Native sessions select only the existing five announcement management
+operations: GET/POST `/moderation/announcements`, PUT
+`/moderation/announcements/{id}`, and POST to its `publish` and `archive` actions.
+The existing image GET `/announcements/{id}/images/{filename}` additionally
+interprets configured Native credentials so active staff can preview retained
+private slides. These six operations advance the Core/Full source inventory from
+90 to 96; this is not a deployment or UI acceptance result.
+
+Canonical handlers, DTOs, active developer/moderator access, ordered per-locale
+retained/upload references, image/body limits, publication language selection,
+`sendPush`, transaction and notification semantics remain unchanged. Draft and
+archived images and unselected language variants remain restricted to current
+active staff. Public published image reads and normal Web JWT handling are
+unchanged. Invalid enabled Native credentials fail closed without cookie fallback;
+Native responses are no-store, and an empty client allowlist grants no Native
+identity. Public metadata, unseen/view operations, raw REST, delegated routes and
+Native aliases gain no new authentication capability. No schema, migration,
+separate announcement handler, role or publication policy is added.

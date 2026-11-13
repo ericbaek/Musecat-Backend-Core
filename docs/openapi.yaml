@@ -17301,9 +17301,12 @@ paths:
       - {name: filename, in: path, required: true, schema: {type: string}}
     get:
       summary: Read a story image through current publication visibility
-      description: Raw file REST access is protected. This route verifies current story visibility and image membership, including after archive or draft removal. Unselected locale images remain private to active staff even when other languages are published. Private no-store.
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
+      description: Raw file REST access is protected. This route verifies current story visibility and image membership, including after archive or draft removal. Unselected locale images remain private to active staff even when other languages are published. Configured first-party Native sessions may authenticate for staff-only images; unauthenticated published image reads are unchanged. Invalid Native credentials fail closed. Private no-store.
       responses:
         '200': {description: PNG, JPEG or WebP bytes.}
+        '401': {description: Invalid, expired or revoked configured Native credentials.}
+        '403': {description: Native account is inactive.}
         '404': {description: Missing or inaccessible image.}
   /announcements/{id}/view:
     parameters:
@@ -17319,7 +17322,7 @@ paths:
   /moderation/announcements:
     get:
       summary: List all announcement drafts, publications and archives
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: before, in: query, schema: {type: string}}
       responses:
@@ -17330,7 +17333,7 @@ paths:
     post:
       summary: Create an announcement draft
       description: No notification is created before publication. Maximum 12 actual PNG/JPEG/WebP images per locale, 5 MiB and 40 megapixels per image; total body 181 MiB. Images containing text are supplied separately for ko, en and ja; no translation is inferred.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody: &announcementMutationBody
         required: true
         content:
@@ -17357,7 +17360,7 @@ paths:
     put:
       summary: Replace draft or published localized content and ordered image references
       description: Omitting references removes images. Retained files need no re-upload. Published content must remain complete for its selected locales. Edits preserve publication time, audience, inbox snapshots and read/view state without resending notifications. Archived content is immutable.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody: *announcementMutationBody
       responses:
         '200': {description: Draft saved., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
@@ -17373,7 +17376,7 @@ paths:
     post:
       summary: Publish selected language variants once
       description: Requires a nonempty unique supported locale selection. Only selected variants need titles and 1..12 images each. Image alt text may be empty. Selected locales become immutable. Published content remains editable by staff. A durable bounded worker creates one logical inbox event per existing non-withdrawn account; inbox reads filter by locale. When sendPush is true (the default), only already registered devices with selected saved locales get deliveries, and delivery rechecks current device locale. sendPush=false creates inbox events without device deliveries. Repeating the same selected locale set is idempotent, including after read/view, and does not change the original push policy. Device pushes remain at-least-once with a stable notification tag.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -17402,7 +17405,7 @@ paths:
     post:
       summary: Archive a draft or publication without deleting event/view identities
       description: Idempotent terminal state. Stops unfinished fan-out and prevents delivery of remaining queued push receipts; hides public metadata, images and inbox entries. Previously displayed OS notifications cannot be recalled.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       responses:
         '200': {description: Archived story., content: {application/json: {schema: {$ref: '#/components/schemas/Announcement'}}}}
         '401': {description: Authentication required.}
