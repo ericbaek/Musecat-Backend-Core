@@ -2,6 +2,8 @@
 
 [Musecat](https://musecat.app) is a community service for finding nearby arcades and keeping their information current. It helps players browse arcade locations and game lineups, then contribute corrections, arcade edits, and fault reports. Arcade pages can include practical information such as machine counts and condition, pricing, opening hours, facilities, location notes, and update history.
 
+Eric Baek leads the Musecat project and its operations. He developed both Backend Core and Backend Full in their entirety and co-developed the web frontend with a web designer.
+
 ## How Musecat handles a conflicting edit
 
 Two players open the same cabinet listing. One corrects the floor from 1F to 2F. When the other saves from the older version, the API detects the conflict. Each accepted edit creates a revision, advances the current state, and records who changed which fields. [See the edit and conflict test](https://github.com/ericbaek/Musecat-Backend-Core/commit/624a8b244164e358b383b48d78417488eec857b3).
