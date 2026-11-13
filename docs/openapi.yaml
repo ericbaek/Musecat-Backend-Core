@@ -17591,6 +17591,30 @@ paths:
         '403': {description: Account is inactive or banned.}
         '413': {description: Request body exceeds 4096 bytes.}
 
+  /native/user/notifications/apns:
+    get:
+      tags: [Users]
+      summary: Native APNs capability availability
+      description: Dedicated active opaque Native-session authentication only; Web JWTs and cookies cannot authorize this route. Returns unsupported without advertising a topic or environment. No provider, device/token registration, delivery or official subscription capability is enabled. Disabled without a configured Native client allowlist. GET responses use no-store.
+      security: [{nativeSession: []}]
+      responses:
+        '200':
+          description: APNs is unavailable on this server.
+          headers:
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [available]
+                properties:
+                  available: {type: boolean, enum: [false]}
+              example: {available: false}
+        '401': {description: Missing, invalid, expired or revoked Native session; Web credentials are not accepted.}
+        '403': {description: Account is inactive or banned.}
+        '404': {description: Native client allowlist is disabled or the HTTP method is unregistered; token/device and subscription operations remain absent.}
+
   /native/user/me:
     get:
       tags: [Users]

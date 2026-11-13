@@ -89,6 +89,9 @@ func RegisterRoutes(se *core.ServeEvent, clients []Client, webClients ...WebClie
 	}}
 	secured := g.Group("").Bind(guard, user.RequireActiveUser())
 	secured.GET("/user/me", user.GetMe)
+	secured.GET("/user/notifications/apns", func(e *core.RequestEvent) error {
+		return e.JSON(http.StatusOK, map[string]bool{"available": false})
+	})
 	if len(webClients) > 0 {
 		secured.POST("/session/web/code", func(e *core.RequestEvent) error {
 			var in struct {

@@ -1901,7 +1901,16 @@ sessions. Existing active-account guards reject banned users before returning
 credentials or the profile. Native credentials authenticate only the dedicated device protocol and the
 explicit canonical first-party operations below; raw collection, unrelated web,
 management, OAuth/OIDC and partner routes never resolve them. Web JWTs never
-authenticate the native profile route.
+authenticate the native profile or APNs capability route.
+
+`GET /native/user/notifications/apns` uses that same dedicated active Native
+session guard and returns exactly `{"available":false}` with no-store. This is
+an honest unsupported capability response, not an APNs provider configuration or
+delivery claim. No environment/topic is advertised. No token registration, device
+removal, test push or official subscription operation is registered, and no
+schema, provider credentials or Apple signing configuration is added. Missing,
+invalid, expired or revoked Native credentials and Web JWTs remain unauthorized;
+an empty client allowlist leaves the route absent.
 
 Only SHA-256 credential hashes are stored in three private SQL tables, without a
 PocketBase collection API. Core's fresh migration calls the reusable schema
