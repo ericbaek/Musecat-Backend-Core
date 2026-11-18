@@ -400,6 +400,9 @@ components:
           type: array
           items: {type: string}
           description: Distinct games across all active posts matching author, flair and has_images, before game filtering and pagination. Used for profile game pills.
+        author_received_like_count:
+          type: integer
+          description: Present only when both `author` and `flair=achievement` are given. All-time likes from other users on the author's active achievement posts, independent of game filter and pagination.
 
         page: {type: integer}
         per_page: {type: integer}
@@ -2172,6 +2175,23 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/UserActivityDay'
+        received_like_count:
+          type: integer
+          description: All-time likes from other users on the user's active achievement posts. Unlike `totals`, it is not limited to `range`.
+    CommunityPostLikerList:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [user, name, avatar_url]
+            properties:
+              user: {type: string}
+              name: {type: string}
+              avatar_url: {type: string, description: Relative file URL, or empty when the user has no avatar.}
+        next_cursor: {type: string, description: Opaque; empty on the last page.}
     SupporterLedgerDetail:
       type: object
       additionalProperties: true
@@ -3683,6 +3703,25 @@ paths:
         '404': {description: Comment or post not found}
         '401': {description: Sign-in required}
         '403': {description: Author-only operation or inactive account}
+  /community/post/likes:
+    get:
+      tags: [Community]
+      summary: List who liked a post (author only)
+      description: Newest first, 30 per page. Only the post's author may read it; the author's own like is excluded. Responses are `private, no-store`.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: query, required: true, schema: {type: string}}
+        - {name: cursor, in: query, required: false, schema: {type: string}}
+      responses:
+        '200':
+          description: One page of likers
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CommunityPostLikerList'}
+        '400': {description: Invalid cursor}
+        '401': {description: Sign-in required}
+        '403': {description: Not the post's author, or inactive account}
+        '404': {description: Post not active}
   /community/post/like:
     put:
       tags: [Community]
