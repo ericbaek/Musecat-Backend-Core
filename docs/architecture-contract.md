@@ -188,6 +188,14 @@ is a guest read. `comment_count` counts active root comments and replies. Root a
 reply wire pages contain up to 20 newest-first items with a stable created/id older
 cursor; the web client reverses loaded reply pages for chronological display.
 
+Who liked a post is visible only to that post's author through
+`GET /community/post/likes` (403 for anyone else); other viewers see the count
+only. The list excludes the author's own like and pages newest first by insertion
+rowid, because like rows carry no timestamp. The author's all-time received
+likes (other users' likes on active achievement posts) are exposed as
+`author_received_like_count` on author-filtered achievement lists and as
+`received_like_count` on `/user/activity`, which is outside its date range.
+
 The existing OpenAI worker processes up to 25 posts and 25 comments independently
 per run. Photo-only comments are ready immediately without an OpenAI call. Comments use empty titles and the same Korean-to-English/Japanese cache,
 leases, source hashes, retry bounds and five-minute delay. Claim, completion and

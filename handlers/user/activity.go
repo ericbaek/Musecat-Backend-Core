@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ericbaek/musecat-backend-core/service/communitylikes"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -53,6 +54,8 @@ type ActivityResponse struct {
 	Range  ActivityRange  `json:"range"`
 	Totals ActivityTotals `json:"totals"`
 	Days   []*ActivityDay `json:"days"`
+	// ReceivedLikeCount is all-time, unlike Totals which cover Range only.
+	ReceivedLikeCount int `json:"received_like_count"`
 }
 
 // GetUserActivity handles GET /user/activity?id=<userId>|username=<username>&tz=<timezone>&days=<1..365>.
@@ -101,6 +104,12 @@ func GetUserActivity(re *core.RequestEvent) error {
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "failed to load user activity",
 			"details": err.Error(),
+		})
+	}
+	resp.ReceivedLikeCount, err = communitylikes.ReceivedAchievementLikeCount(re.App, profile.ID)
+	if err != nil {
+		return re.JSON(http.StatusBadGateway, map[string]any{
+			"error": "failed to load received likes",
 		})
 	}
 
