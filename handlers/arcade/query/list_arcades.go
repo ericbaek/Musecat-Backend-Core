@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ericbaek/musecat-backend-core/service/readpolicy"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -67,9 +68,16 @@ func ListArcades(re *core.RequestEvent) error {
 	if end > total {
 		end = total
 	}
+	// Game membership is member-only, matching /arcades/nearby. A deployment
+	// may vouch for its own server-side renderer (see readpolicy).
+	includeGames := re.Auth != nil || readpolicy.IsTrustedReader(re)
 	out := make([]map[string]any, 0, end-start)
 	for _, candidate := range items[start:end] {
-		out = append(out, candidate.Summary(true, true))
+		item := candidate.Summary(true, includeGames)
+		if !includeGames {
+			delete(item, "game")
+		}
+		out = append(out, item)
 	}
 	return re.JSON(http.StatusOK, map[string]any{
 		"page":      page,

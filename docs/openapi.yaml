@@ -4331,7 +4331,7 @@ paths:
     get:
       tags: [Arcades]
       summary: /arcades
-      description: Returns operating public arcades only. Public closed arcades are deliberately excluded and remain available through detail/search.
+      description: Returns operating public arcades only. Public closed arcades are deliberately excluded and remain available through detail/search. `game_series` and `game` are member-only, matching `/arcades/nearby`; guests receive neither unless the deployment vouches for the request as a trusted server reader (Full uses the sitemap secret).
       parameters:
         - name: public
           in: query

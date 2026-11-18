@@ -18,3 +18,21 @@ func Check(re *core.RequestEvent, ids ...string) error {
 	}
 	return policy(re, ids)
 }
+
+// TrustedReader reports whether a deployment vouches for a request as a
+// server-side reader, such as the web server rendering public pages with the
+// sitemap secret. It never authenticates a user.
+type TrustedReader func(*core.RequestEvent) bool
+
+const trustedReaderKey = "musecat.trustedReader"
+
+func RegisterTrustedReader(app core.App, reader TrustedReader) {
+	app.Store().Set(trustedReaderKey, reader)
+}
+
+// IsTrustedReader is false when no deployment registered a reader, so
+// standalone Core treats every unauthenticated request as a guest.
+func IsTrustedReader(re *core.RequestEvent) bool {
+	reader, _ := re.App.Store().Get(trustedReaderKey).(TrustedReader)
+	return reader != nil && reader(re)
+}

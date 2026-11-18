@@ -32,3 +32,19 @@ func TestDefaultAndDeploymentIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTrustedReaderDefaultsToFalse(t *testing.T) {
+	app, err := tests.NewTestApp(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Cleanup()
+	re := &core.RequestEvent{App: app}
+	if IsTrustedReader(re) {
+		t.Fatal("standalone Core must not trust unauthenticated readers")
+	}
+	RegisterTrustedReader(app, func(*core.RequestEvent) bool { return true })
+	if !IsTrustedReader(re) {
+		t.Fatal("registered reader was ignored")
+	}
+}
