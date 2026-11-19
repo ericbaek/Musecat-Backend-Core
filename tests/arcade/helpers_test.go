@@ -3,6 +3,7 @@ package arcade_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/arcadearea"
 	"io"
 	"math"
 	"net/http"
@@ -124,6 +125,7 @@ func stubGeoLookupByLocation(tb testing.TB, resolve func(lat, lon float64) (coun
 func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 	app := testutil.NewTestApp(tb)
 	arcadeversion.RegisterHooks(app)
+	arcadearea.RegisterHooks(app)
 	arcadequery.RegisterCandidateSnapshotHooks(app)
 	user.RegisterHooks(app)
 	arcadeadmin.RegisterTelegramNotifyHooks(app)

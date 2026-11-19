@@ -755,12 +755,45 @@ components:
           type: string
         address:
           type: string
+        admin1: {type: string, description: "Derived ISO 3166-2 admin-1 (KR-11, JP-14); country code for HK, MO and SG; empty until classified."}
+        admin2: {type: string, description: Source admin-2 unit id; empty for countries with admin-1 only.}
+        admin2_name: {type: string, description: Local admin-2 name for district grouping.}
+        city: {type: string, description: Passport city key in the embedded admin-area catalog; empty when none.}
+        area_status: {type: string, enum: ['', resolved, near, estimated, ambiguous, unmapped], description: How the area was derived. See docs/offline-geo.md.}
         location:
           $ref: '#/components/schemas/Location'
         game_series:
           type: array
           items:
             type: string
+    ArcadeAreaAssignment:
+      type: object
+      required: [admin1, admin2, admin2_name, city, area_status]
+      properties:
+        admin1: {type: string}
+        admin2: {type: string}
+        admin2_name: {type: string}
+        city: {type: string}
+        area_status: {type: string, enum: ['', resolved, near, estimated, ambiguous, unmapped]}
+    ArcadeArea:
+      type: object
+      required: [arcade, country, public, admin1, admin2, admin2_name, city, area_status, area_manual]
+      properties:
+        arcade: {type: string}
+        country: {type: string}
+        public: {type: boolean}
+        name: {type: string}
+        address: {type: string}
+        location: {$ref: '#/components/schemas/Location'}
+        admin1: {type: string, description: "Derived ISO 3166-2 admin-1 (KR-11, JP-14); country code for HK, MO and SG; empty until classified."}
+        admin2: {type: string, description: Source admin-2 unit id; empty for countries with admin-1 only.}
+        admin2_name: {type: string, description: Local admin-2 name for district grouping.}
+        city: {type: string, description: Passport city key in the embedded admin-area catalog; empty when none.}
+        area_status: {type: string, enum: ['', resolved, near, estimated, ambiguous, unmapped], description: How the area was derived. See docs/offline-geo.md.}
+        area_manual: {type: boolean, description: Pinned by an administrator; location edits keep it.}
+        city_names:
+          type: object
+          additionalProperties: {type: string}
     NearbyArcadeSummary:
       type: object
       required: [id, country, updated]
@@ -777,6 +810,11 @@ components:
           type: string
         address:
           type: string
+        admin1: {type: string, description: "Derived ISO 3166-2 admin-1 (KR-11, JP-14); country code for HK, MO and SG; empty until classified."}
+        admin2: {type: string, description: Source admin-2 unit id; empty for countries with admin-1 only.}
+        admin2_name: {type: string, description: Local admin-2 name for district grouping.}
+        city: {type: string, description: Passport city key in the embedded admin-area catalog; empty when none.}
+        area_status: {type: string, enum: ['', resolved, near, estimated, ambiguous, unmapped], description: How the area was derived. See docs/offline-geo.md.}
         location:
           $ref: '#/components/schemas/Location'
         game_series:
@@ -818,7 +856,7 @@ components:
       type: object
       required: [id, name, address, direction, nickname, subway_line, location]
       properties:
-        city_id: {type: string}
+        city_id: {type: string, deprecated: true, description: Historic GeoNames city relation; no longer written. Use the arcade area fields.}
         id:
           type: string
         name:
@@ -1641,12 +1679,17 @@ components:
         visit_day: {type: string, format: date}
     PassportCity:
       type: object
-      required: [id, name, country, admin1, location, arcade_count, visit_count]
+      required: [id, name, names, country, admin1, estimated, location, arcade_count, visit_count]
       properties:
-        id: {type: string}
-        name: {type: string}
+        id: {type: string, description: Admin-area city key such as KR:11 or JP:14:横浜市.}
+        name: {type: string, description: English name, else the local name.}
+        names:
+          type: object
+          description: Display names by key local, en, ko and ja; keys may be absent.
+          additionalProperties: {type: string}
         country: {type: string}
-        admin1: {type: string}
+        admin1: {type: string, description: ISO 3166-2 code where one exists.}
+        estimated: {type: boolean, description: Nearest-seat city in a country without city boundaries.}
         location:
           nullable: true
           allOf: [{$ref: '#/components/schemas/Location'}]
@@ -1664,8 +1707,12 @@ components:
         arcade: {type: string}
         name: {type: string}
         country: {type: string}
-        city_id: {type: string}
+        city_id: {type: string, description: Admin-area city key; empty when unclassified.}
         city_name: {type: string}
+        city_names:
+          type: object
+          description: Display names by key local, en, ko and ja. Omitted when unclassified.
+          additionalProperties: {type: string}
         closed: {type: boolean}
         photo_url: {type: string}
         first_visit_day: {type: string, format: date, description: Lifetime first visit. Omitted for summary viewers.}
@@ -2716,7 +2763,7 @@ components:
       type: object
       required: [arcade]
       properties:
-        city_id: {type: string, description: Optional canonical city in the arcade country. Empty clears classification. Address or coordinate changes clear an omitted city.}
+        city_id: {type: string, deprecated: true, description: Ignored. The Passport city is derived from the location; administrators use the area override.}
         base_basic_id: {type: string, description: Optional optimistic concurrency token; stale values return 409.}
         arcade:
           type: string
@@ -4344,6 +4391,10 @@ paths:
             type: boolean
           description: "`true` is rejected; `/arcades` is an operating-discovery endpoint."
         - $ref: '#/components/parameters/CountryQuery'
+        - name: admin1
+          in: query
+          description: Comma-separated stored admin-1 codes (at most 20); a region spanning several codes passes them together, e.g. `KR-29,KR-46`.
+          schema: {type: string}
         - name: page
           in: query
           schema: {type: integer, minimum: 1, default: 1}
@@ -4366,12 +4417,17 @@ paths:
                     country: AU
                     name: Sydney Arcade
                     address: 123 George St, Sydney NSW
+                    admin1: AU-NSW
+                    admin2: "52423323B30574093128049"
+                    admin2_name: Sydney
+                    city: "AU:52423323B30574093128049"
+                    area_status: resolved
                     location:
                       lat: -33.8708
                       lon: 151.2062
                     game_series: [series_1, series_2]
         '400':
-          description: Invalid boolean filter.
+          description: Invalid boolean filter or more than 20 admin1 codes.
           content:
             application/json:
               schema:
@@ -6294,12 +6350,15 @@ paths:
               $ref: '#/components/schemas/NewArcadeRequest'
       responses:
         '200':
-          description: Newly created arcade summary.
+          description: Newly created arcade summary. `city_id` and `area` carry the derived admin area; classification never fails creation.
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
+                properties:
+                  city_id: {type: string, description: Passport city key; empty when unclassified.}
+                  area: {$ref: '#/components/schemas/ArcadeAreaAssignment'}
         '400':
           description: Invalid JSON or validation failure.
           content:
@@ -6601,6 +6660,64 @@ paths:
         '401': {description: Authentication required}
         '403': {description: Active developer or moderator required}
         '404': {description: Arcade not found}
+  /admin/arcade/areas:
+    get:
+      tags: [Arcade]
+      summary: Arcades whose derived area needs review (strict reviewer only)
+      description: Every visibility is included. Sorted unmapped, ambiguous, near, estimated; at most 500 rows.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: status
+          in: query
+          description: Comma list of unmapped, ambiguous, near, estimated. Defaults to all four.
+          schema: {type: string}
+        - $ref: '#/components/parameters/CountryQuery'
+      responses:
+        '200':
+          description: Review queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  total: {type: integer}
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/ArcadeArea'}
+        '400': {description: Unknown status}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '503': {description: Admin-area catalog unavailable}
+  /admin/arcade/area:
+    put:
+      tags: [Arcade]
+      summary: Pin or release an arcade's admin area (strict reviewer only; no XP, no changelog)
+      description: "`manual: true` pins `admin1` and an optional catalog `city` of the arcade's country; location edits then keep it. `manual: false` clears the pin and recomputes from the current location."
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [arcade, manual]
+              properties:
+                arcade: {type: string, minLength: 15, maxLength: 15}
+                manual: {type: boolean}
+                admin1: {type: string, description: Defaults to the city's admin-1 when a city is given.}
+                city: {type: string, description: Catalog city key in the arcade's country; empty pins no city.}
+      responses:
+        '200':
+          description: Stored area
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ArcadeArea'}
+        '400': {description: Invalid input, foreign city or admin-1}
+        '401': {description: Authentication required}
+        '403': {description: Active developer or moderator required}
+        '404': {description: Arcade not found}
+        '503': {description: Admin-area catalog unavailable}
   /moderation/arcade/edit-reports:
     get:
       tags: [Moderator]
@@ -7204,6 +7321,8 @@ paths:
                     type: string
                   basic:
                     type: string
+                  city_id: {type: string, description: Passport city key after the edit; empty when unclassified.}
+                  area: {$ref: '#/components/schemas/ArcadeAreaAssignment'}
                   changed:
                     type: array
                     items:
@@ -11108,12 +11227,15 @@ paths:
         '429':
           description: Bot key or client IP rate limit exceeded; Retry-After is returned for the per-key limit.
         '200':
-          description: Newly created arcade summary.
+          description: Newly created arcade summary. `city_id` and `area` carry the derived admin area; classification never fails creation.
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
+                properties:
+                  city_id: {type: string, description: Passport city key; empty when unclassified.}
+                  area: {$ref: '#/components/schemas/ArcadeAreaAssignment'}
         '400':
           description: Invalid JSON or validation failure.
           content:
@@ -11173,6 +11295,8 @@ paths:
                     type: string
                   basic:
                     type: string
+                  city_id: {type: string, description: Passport city key after the edit; empty when unclassified.}
+                  area: {$ref: '#/components/schemas/ArcadeAreaAssignment'}
                   changed:
                     type: array
                     items:

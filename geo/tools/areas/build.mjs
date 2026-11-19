@@ -213,6 +213,9 @@ function geoBoundariesUnits(country, ne) {
     // CHN ADM2 also draws Taiwan, Hong Kong and Macau; those come from their
     // own sources, so drop any unit whose interior lies in another country.
     if (foreign.some((candidate) => contains(candidate, ix, iy))) continue;
+    // A nameless CHN sliver covers part of Coloane (Macau); unnamed units are not
+    // real admin areas in any source used here.
+    if (!shapeName) continue;
     const parent =
       parents.find((candidate) => contains(candidate, ix, iy)) ??
       nearestByInnerPoint(parents, ix, iy);

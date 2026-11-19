@@ -38,16 +38,23 @@ missing or ambiguous timezones still fail. The resolver validates that
 the timezone is an installed IANA location and returns a failure when the
 timezone is missing or ambiguous, or no country provider succeeds.
 
-City labels are not obtained from an external reverse-geocoder. `passport_city`
-is imported from the versioned GeoNames catalog and stores names, aliases,
-administrative ids, and coordinates locally. After the country lookup, the
-request and the one-time Full backfill choose the nearest catalog city in that
-country with a deterministic distance/tie-break rule. There is intentionally
-no distance cutoff: an assigned city is more useful to Passport coverage than
-an avoidable `도시 미분류` label. Full ships a versioned GeoNames `cities500`
-catalog for the one-time backfill; a request with no valid city rows keeps the
-city relation empty.
+Admin areas and Passport cities come from `geo/data/admin_areas.geojson.gz`,
+built offline from pinned boundary sources (see `geo/tools/areas/README.md`).
+Each arcade stores `admin1` (ISO 3166-2 where one exists), `admin2`,
+`admin2_name`, `city` (a catalog key such as `KR:11` or `JP:14:横浜市`) and
+`area_status` on the `arcade` record. A hook recomputes them in the same save
+whenever `arcade.basic` or `arcade.country` changes, so creation, edits, bot
+edits and rollbacks all agree. Only units of the arcade's stored country are
+considered. Inside one unit is `resolved`; within 5 km of one (coastline,
+reclaimed land) is `near`; countries without city boundaries take the nearest
+capital or large-town seat within 60 km as `estimated`; nothing in reach is
+`unmapped`. HK, MO and SG are one admin-1 and one city each. Classification
+never blocks a write; failures are logged and stored as `unmapped`.
+`area_manual` keeps an administrator's override until it is cleared.
 
-The Full repository owns the production data migration and seeds that catalog
-when `passport_city` is empty. The guarded one-time backfill is idempotent and
-can be retried safely. No proposal or editor token is required.
+City labels are not obtained from an external reverse-geocoder and there is no
+city collection: the embedded catalog carries each city's local, English,
+Korean and Japanese names, admin-1 and marker point. The former
+`passport_city` collection and `arcade_basic.city_id` are deprecated and no
+longer read or written by Core; Full owns their removal and the backfill of
+existing arcades.

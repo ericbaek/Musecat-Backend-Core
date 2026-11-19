@@ -10,6 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 
+	"github.com/ericbaek/musecat-backend-core/arcadearea"
 	"github.com/ericbaek/musecat-backend-core/docs"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	"github.com/ericbaek/musecat-backend-core/handlers"
@@ -61,6 +62,13 @@ type DocumentationConfig struct {
 func Configure(app *pocketbase.PocketBase, config Config) {
 	geo.SetOfflineResolver(config.GeoResolver, true)
 	arcadeversion.RegisterHooks(app)
+	arcadearea.RegisterHooks(app)
+	// Decode the embedded admin areas off the request path (~1s, ~50MB).
+	go func() {
+		if _, err := geo.EmbeddedAreas(); err != nil {
+			app.Logger().Error("admin areas failed to load", "error", err)
+		}
+	}()
 	arcadequery.RegisterCandidateSnapshotHooks(app)
 	arcadeflag.RegisterAutoSolveReactionCreateHook(app)
 	userhandler.RegisterHooks(app)
@@ -172,6 +180,17 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
+	)
+	se.Router.GET("/admin/arcade/areas", arcadeadmin.ListArcadeAreas).Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireAdminAccess(),
+	)
+	se.Router.PUT("/admin/arcade/area", arcadeadmin.UpdateArcadeArea).Bind(
+		apis.BodyLimit(4096),
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+		arcadequery.RequireAdminAccess(),
 	)
 	se.Router.POST("/campaign", arcadecampaign.CreateCampaign).Bind(
 		apis.RequireAuth("user"),

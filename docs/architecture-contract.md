@@ -596,10 +596,9 @@ or invalid country code (including the bundled France/Norway `-99` sentinel)
 uses BigDataCloud, then Nominatim, within an eight-second total budget, keeping
 the offline timezone. Each provider response must have a two-letter uppercase
 country code; invalid responses try the next provider. A missing or invalid bundle returns the same
-`503` dependency failure. City labels come from the local `passport_city`
-GeoNames catalog: after the country lookup, the nearest catalog city is chosen
-deterministically. This deliberately favours a populated Passport over an
-unclassified venue; the country boundary still prevents cross-country labels.
+`503` dependency failure. Admin areas and Passport cities are derived from the
+embedded admin-area catalog and stored on `arcade`; see
+[`docs/offline-geo.md`](offline-geo.md). They never block an arcade write.
 Valid offline results do not enter the external HTTP cache; they are read from the
 immutable in-memory bundle on every request. Successful country fallbacks use the
 bounded 24-hour geo cache and coordinate-keyed singleflight; failures are not cached.
@@ -716,13 +715,10 @@ Distances use current locations, with both consecutive endpoints inside the sele
 period; missing locations and excluded period records break a segment. Totals are
 straight-line distances, not actual travel or play time. Month series include zero months.
 
-Canonical `passport_city` records use GeoNames IDs as unique source identifiers; raw
-REST is locked. `arcade_basic.city_id` is optional and versioned with basic history.
-Current city metadata applies retrospectively. A missing or country-mismatched city is
-unclassified; those arcades remain in country and venue totals. Cities are matched by
-country, admin1 and locality aliases, never proximity. Explicit GeoNames hierarchy
-links attach PPLX neighbourhood aliases to a unique parent city; standalone cities
-such as Petaling Jaya remain distinct. Absent or ambiguous parentage is not inferred.
+Passport cities are the arcade's stored `city` key resolved against the embedded
+catalog, so catalog names apply retrospectively. An empty or unknown key is
+unclassified; those arcades remain in country and venue totals. `estimated`
+cities come from the nearest-seat fallback for countries without city boundaries.
 Rows missing admin1 are skipped during import. Address-based candidates require a
 named alias and use coordinates only to reject distant homonyms (50 km sanity limit,
 not a boundary). Every address candidate remains unapproved until operator review.

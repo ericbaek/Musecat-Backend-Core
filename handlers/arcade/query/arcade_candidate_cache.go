@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/arcadearea"
 	"sort"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ type ArcadeCandidate struct {
 	ID                string
 	Updated           string
 	Country           string
+	Area              arcadearea.Assignment
 	Closed            bool
 	Name              string
 	Address           string
@@ -63,6 +65,12 @@ func (c ArcadeCandidate) Summary(includeLocation bool, includeGameSeries bool) m
 		"address":  c.Address,
 		"nickname": cloneStringSliceOrEmpty(c.Nicknames),
 		"closed":   c.Closed,
+		// Derived admin area and Passport city (arcadearea); empty until classified.
+		"admin1":      c.Area.Admin1,
+		"admin2":      c.Area.Admin2,
+		"admin2_name": c.Area.Admin2Name,
+		"city":        c.Area.City,
+		"area_status": c.Area.Status,
 	}
 	if includeLocation && c.Location != nil {
 		item["location"] = map[string]any{
@@ -345,6 +353,7 @@ func buildArcadeCandidateFromRecords(arcadeRec, basicRec *core.Record, installat
 		ID:      arcadeRec.Id,
 		Updated: arcadeRec.GetString("updated"),
 		Country: strings.TrimSpace(arcadeRec.GetString("country")),
+		Area:    arcadearea.FromRecord(arcadeRec),
 		Closed:  arcadeRec.GetBool("closed"),
 		GameID:  strings.TrimSpace(arcadeRec.GetString("game_v2")),
 	}
