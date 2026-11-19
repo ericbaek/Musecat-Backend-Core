@@ -78,7 +78,8 @@
         "CN-SH",
         "CN-TJ",
         "CN-CQ"
-      ]
+      ],
+      "rollUpGeoNamesAdmin2": true
     },
     "GB": {
       "iso3": "GBR",

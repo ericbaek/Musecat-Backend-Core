@@ -88,7 +88,11 @@ A city without a clear row (cities500 has no Yongin) keeps its local name.
   시. Gwangju's 구 inside 전남광주통합특별시 form 광주. Everything else is its 시·군.
 - JP: wards of 政令指定都市 join the city. Tokyo's 23 special wards are one city.
   Other municipalities stand alone.
-- CN: 直辖市 are one city each; other units are prefecture or county level.
+- CN: 直辖市 are one city each. CHN ADM2 mixes prefecture cities with county
+  units under old names (Changshaxian; Wangcheng became a Changsha district in
+  2011), so each unit joins the prefecture (GeoNames admin-2) most places
+  inside it are filed under, named from `admin2Codes.txt`
+  (`rollUpGeoNamesAdmin2`). Units with no coded place keep their own city.
 - TW: each 縣市 is a city (Natural Earth admin-1). HK, MO and SG are one city each.
 - Capitals split into districts in the source are one city: Bangkok (TH-10),
   Jakarta (ID-JK), Hà Nội, TP HCM, Hải Phòng, Đà Nẵng, Cần Thơ, and Greater

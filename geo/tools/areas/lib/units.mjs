@@ -172,3 +172,57 @@ export function naturalEarthUnits(ctx, ne, covered) {
   }
   return [...units, ...whole.values()];
 }
+
+// --- GeoNames admin-2 roll-up -------------------------------------------------
+
+// "Xinyang Shi" → Xinyang; "Yushu Zangzu Zizhizhou" → Yushu.
+const ADMIN2_SUFFIX = /\s+(Shi|Diqu|Meng|City|County|Prefecture|Municipality|Tibetan Autonomous Prefecture|(\S+zu\s+)*Zizhizhou|Menggu Zizhizhou)$/u;
+
+export const cleanAdmin2Name = (name) => name.replace(/^Prefecture of\s+/u, "").replace(ADMIN2_SUFFIX, "").trim() || name;
+
+/** admin2Codes.txt: "CN.09.4115" → { name, id } of the admin-2 feature. */
+export function loadAdmin2Names(file) {
+  const out = new Map();
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    const [code, , ascii, id] = line.split("\t");
+    if (code && ascii) out.set(code, { name: cleanAdmin2Name(ascii), id });
+  }
+  return out;
+}
+
+/**
+ * CHN ADM2 mixes prefecture-level cities with county units under old names
+ * (Changshaxian, Wangchengxian, which has been a Changsha district since
+ * 2011). GeoNames codes every place with its current prefecture (admin2), so
+ * each unit joins the prefecture most of the places inside it belong to; the
+ * city takes the prefecture's GeoNames name and its translations. A few rows
+ * carry a wrong code (GeoNames files Xinyang under Xinxiang), which a
+ * majority vote outweighs. Units with no coded place inside keep their own
+ * city.
+ */
+export function rollUpByGeoNamesAdmin2(units, rows, country, admin2Names, keep = () => false) {
+  const candidates = units.filter((unit) => unit.country === country && !keep(unit));
+  const votes = new Map(candidates.map((unit) => [unit, new Map()]));
+  for (const row of rows) {
+    const code = `${country}.${row.admin1}.${row.admin2}`;
+    if (!row.admin1 || !row.admin2 || !admin2Names.has(code)) continue;
+    for (const unit of candidates) {
+      if (contains(unit, row.x, row.y)) {
+        const tally = votes.get(unit);
+        tally.set(code, (tally.get(code) ?? 0) + 1);
+        break;
+      }
+    }
+  }
+  let rolled = 0;
+  for (const [unit, tally] of votes) {
+    const [code] = [...tally].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0] ?? [];
+    if (!code) continue;
+    const admin2 = admin2Names.get(code);
+    unit.group = `${country}:pref:${code}`;
+    unit.cityName = admin2.name;
+    unit.nameSource = admin2.id;
+    rolled++;
+  }
+  return rolled;
+}

@@ -14,7 +14,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 import { bboxOf } from "./lib/geometry.mjs";
-import { createContext, geoBoundariesUnits, japanUnits, koreaUnits, loadNaturalEarth, naturalEarthUnits } from "./lib/units.mjs";
+import { createContext, geoBoundariesUnits, japanUnits, koreaUnits, loadNaturalEarth, loadAdmin2Names, naturalEarthUnits, rollUpByGeoNamesAdmin2 } from "./lib/units.mjs";
 import { linkCities, loadAlternateNames, loadGeoNames } from "./lib/names.mjs";
 import { assignKeys, buildAdmin1Catalog, buildCityCatalog, buildSeatCatalog, checkKeyLock, groupCities, selectSeats, versionOf } from "./lib/catalog.mjs";
 
@@ -63,13 +63,22 @@ for (const unit of units) unit.bbox = bboxOf(unit.geometry);
 
 step("cities");
 const geonames = loadGeoNames(sourceFile("geonames-cities500"));
+const admin2Names = loadAdmin2Names(sourceFile("geonames-admin2codes"));
+for (const [country, config] of Object.entries(rules.countries)) {
+  if (!config.rollUpGeoNamesAdmin2) continue;
+  const isAdmin1City = (unit) => config.cityIsAdmin1?.includes(unit.admin1);
+  console.log(`  ${country}: ${rollUpByGeoNamesAdmin2(units, geonames.get(country) ?? [], country, admin2Names, isAdmin1City)} units rolled up to GeoNames admin-2`);
+}
 const groups = groupCities(units);
 const keys = assignKeys(groups, rules);
 const { rowsById, unlinked, shared } = linkCities(groups, geonames);
 const seats = selectSeats(geonames, covered, rules);
 
 step("names");
-const ids = new Set([...[...groups.values()].map((members) => members.link).filter(Boolean), ...seats.map(({ row }) => row.id)]);
+const ids = new Set([
+  ...[...groups.values()].flatMap((members) => [members.link, members[0].nameSource]).filter(Boolean),
+  ...seats.map(({ row }) => row.id),
+]);
 const alternates = await loadAlternateNames(sourceFile("geonames-alternatenames-v2"), ids);
 const cities = { ...buildCityCatalog(groups, keys, rowsById, alternates, rules), ...buildSeatCatalog(ctx, seats, ne, alternates) };
 const admin1 = buildAdmin1Catalog(ctx, units, ne, cities);

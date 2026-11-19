@@ -8,7 +8,7 @@ source while handling a request.
 | --- | --- | --- | --- |
 | `countries.geojson.gz` | [datasets/geo-countries](https://github.com/datasets/geo-countries/blob/master/data/countries.geojson), repository snapshot used for this release | Natural Earth-derived country boundaries; see the upstream repository and Natural Earth terms | `cc314bd804b9eee416f553401a42b2be208759284273a533c3977b3459821cbf` |
 | `timezones.geojson.gz` | [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder/releases/tag/2026c), `timezones.geojson.zip` / `combined.json`, release 2026c | MIT; see the upstream repository | `aef830dc0edea6cdd83b5f65e9c0752e93eae8b98270907d19ba3a37647b919a` |
-| `admin_areas.geojson.gz` | Built by `geo/tools/areas/build.mjs` from the pinned sources in `geo/tools/areas/sources.json` (URLs, versions and SHA-256 of each input) | See "Admin-area attribution" below | `bec9e68dc348321da76d22b08200a4eabd72f684556c15117deef6d1cacb56ba` |
+| `admin_areas.geojson.gz` | Built by `geo/tools/areas/build.mjs` from the pinned sources in `geo/tools/areas/sources.json` (URLs, versions and SHA-256 of each input) | See "Admin-area attribution" below | `4c2b8a99dee6336c563b82bc01b6b1966e9253ac22a9475f7ebc0fe3b7473f6c` |
 
 Refreshes must update the source URL/version and hash in the same change.
 
@@ -33,6 +33,6 @@ public-domain, CC BY, PDDL and open-government licences are used.
 | [kr-sgis-admdong-20261001](https://raw.githubusercontent.com/vuski/admdongkor/078ef4ac13b8bfeb215d2eabace49f4fdea71d5e/ver20261001/HangJeongDong_ver20261001.geojson) | CC BY 4.0 (source: KOGL Type 1) | 통계청 SGIS 행정동 경계 (공공누리 제1유형), processed by vuski/admdongkor (CC BY 4.0) |
 | [jp-ksj-n03-2025](https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2025/N03-20250101_GML.zip) | CC BY 4.0 | 「国土数値情報（行政区域データ）」（国土交通省）を加工して作成 |
 | [naturalearth-admin1-5.1.1](https://naciscdn.org/naturalearth/10m/cultural/ne_10m_admin_1_states_provinces.zip) | Public Domain | Made with Natural Earth |
-| [GeoNames cities500 and alternateNamesV2](https://download.geonames.org/export/dump/) | Creative Commons Attribution 4.0 (CC BY 4.0) | City names, translations and marker points from GeoNames (geonames.org) |
+| [GeoNames cities500, alternateNamesV2 and admin2Codes](https://download.geonames.org/export/dump/) | Creative Commons Attribution 4.0 (CC BY 4.0) | City names, translations and marker points from GeoNames (geonames.org) |
 
 geoBoundaries: Runfola, D. et al. (2020) geoBoundaries: A global database of political administrative boundaries. PLoS ONE 15(4): e0231866.

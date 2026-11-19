@@ -158,6 +158,17 @@
       "source": "GeoNames",
       "year": "2026-11-20",
       "attribution": "GeoNames (geonames.org), CC BY 4.0"
+    },
+    {
+      "id": "geonames-admin2codes",
+      "file": "geonames/admin2Codes.txt",
+      "url": "https://download.geonames.org/export/dump/admin2Codes.txt",
+      "sha256": "6dac23d72035181f6cbbdfaeb80c6b73cbecffccf9148734e45c4a8540e3c978",
+      "rolling": true,
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "source": "GeoNames",
+      "year": "2026-11-19",
+      "attribution": "GeoNames (geonames.org), CC BY 4.0"
     }
   ]
 }

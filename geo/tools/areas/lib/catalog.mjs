@@ -2,7 +2,7 @@
 // admin-1 names and address aliases, plus the key lock and dataset version.
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import { admin1CodeOf } from "./units.mjs";
+import { admin1CodeOf, cleanAdmin2Name } from "./units.mjs";
 import { areaOf, contains, interiorPoint, round5 } from "./geometry.mjs";
 import { namesOf } from "./names.mjs";
 
@@ -65,6 +65,21 @@ export function assignKeys(groups, rules) {
   return keys;
 }
 
+/**
+ * Per language, the admin-2 feature's names win (信阳市 for a rolled-up
+ * prefecture) and the linked town fills gaps. English admin-2 names drop
+ * their administrative suffix (Xinyang Shi → Xinyang).
+ */
+function mergeAlternates(primary, fallback) {
+  if (!primary) return fallback;
+  const out = { ...fallback };
+  for (const [language, list] of Object.entries(primary)) {
+    if (!list.length) continue;
+    out[language] = language === "en" ? list.map((entry) => ({ ...entry, name: cleanAdmin2Name(entry.name) })) : list;
+  }
+  return out;
+}
+
 export function buildCityCatalog(groups, keys, rowsById, alternates, rules) {
   const catalog = {};
   for (const [group, members] of groups) {
@@ -76,7 +91,9 @@ export function buildCityCatalog(groups, keys, rowsById, alternates, rules) {
     catalog[key] = {
       country: largest.country,
       admin1: home.admin1,
-      names: namesOf(largest.country, members[0].cityName, row, alternates.get(row?.id), rules.cityNames?.[key]),
+      // Rolled-up prefectures take the admin-2 feature's translations (信阳市),
+      // not the linked town's.
+      names: namesOf(largest.country, members[0].cityName, row, mergeAlternates(alternates.get(members[0].nameSource), alternates.get(row?.id)), rules.cityNames?.[key]),
       lat: round5(y),
       lon: round5(x),
       geonames_id: row?.id ?? "",

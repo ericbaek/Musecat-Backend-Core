@@ -31,7 +31,7 @@ export function loadGeoNames(zip) {
     if (f.length !== 19 || f[6] !== "P" || !CITY_CODES.has(f[7])) continue;
     const alternates = f[3] ? f[3].split(",") : [];
     const names = new Set([f[1], f[2], ...alternates].map(normalizeName).filter(Boolean));
-    const row = { id: f[0], name: f[1], code: f[7], x: Number(f[5]), y: Number(f[4]), population: Number(f[14]) || 0, names };
+    const row = { id: f[0], name: f[1], code: f[7], x: Number(f[5]), y: Number(f[4]), population: Number(f[14]) || 0, names, admin1: f[10], admin2: f[11] };
     const list = byCountry.get(f[8]) ?? [];
     list.push(row);
     byCountry.set(f[8], list);

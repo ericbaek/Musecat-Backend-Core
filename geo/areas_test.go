@@ -28,6 +28,7 @@ func TestEmbeddedAreasClassify(t *testing.T) {
 		{"Hong Kong is one city", "HK", 22.319, 114.169, "HK", "HK/香港", AreaResolved},
 		{"Shanghai municipality is one city", "CN", 31.23, 121.47, "CN-SH", "CN-SH/Shanghai", AreaResolved},
 		{"Taipei", "TW", 25.042, 121.507, "TW-TPE", "TW-TPE/Taipei City", AreaResolved},
+		{"Wangcheng, an old county unit, rolls up to Changsha", "CN", 28.34334, 112.818431, "CN-HN", "CN-HN/Changsha", AreaResolved},
 		{"Bangkok districts are one city", "TH", 13.75, 100.50, "TH-10", "TH-10/Bangkok Metropolis", AreaResolved},
 		{"Greater London is one city", "GB", 51.51, -0.12, "", "GB/London", AreaResolved},
 	}
