@@ -136,6 +136,28 @@
       "license": "Public Domain",
       "year": "5.1.1",
       "attribution": "Made with Natural Earth"
+    },
+    {
+      "id": "geonames-cities500",
+      "file": "geonames/cities500.zip",
+      "url": "https://download.geonames.org/export/dump/cities500.zip",
+      "sha256": "bd049a6c356464a8dcd230037b9ae15941c55200ee360035f1145e4da00945e2",
+      "rolling": true,
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "source": "GeoNames",
+      "year": "2026-11-20",
+      "attribution": "GeoNames (geonames.org), CC BY 4.0"
+    },
+    {
+      "id": "geonames-alternatenames-v2",
+      "file": "geonames/alternateNamesV2.zip",
+      "url": "https://download.geonames.org/export/dump/alternateNamesV2.zip",
+      "sha256": "78f9083d97c3e484059c967ecbec5d141f22adf2bf25e855d06e63d052d44cd5",
+      "rolling": true,
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "source": "GeoNames",
+      "year": "2026-11-20",
+      "attribution": "GeoNames (geonames.org), CC BY 4.0"
     }
   ]
 }

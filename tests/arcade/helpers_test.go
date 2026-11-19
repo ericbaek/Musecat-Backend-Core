@@ -3,7 +3,6 @@ package arcade_test
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ericbaek/musecat-backend-core/arcadearea"
 	"io"
 	"math"
 	"net/http"
@@ -23,9 +22,6 @@ import (
 	"github.com/ericbaek/musecat-backend-core/coreapp"
 	"github.com/ericbaek/musecat-backend-core/geo"
 	arcadeadmin "github.com/ericbaek/musecat-backend-core/handlers/arcade/admin"
-	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
-	arcadeversion "github.com/ericbaek/musecat-backend-core/handlers/arcade/version"
-	"github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/ericbaek/musecat-backend-core/testutil"
 )
 
@@ -124,10 +120,7 @@ func stubGeoLookupByLocation(tb testing.TB, resolve func(lat, lon float64) (coun
 
 func newArcadeTestApp(tb testing.TB) *tests.TestApp {
 	app := testutil.NewTestApp(tb)
-	arcadeversion.RegisterHooks(app)
-	arcadearea.RegisterHooks(app)
-	arcadequery.RegisterCandidateSnapshotHooks(app)
-	user.RegisterHooks(app)
+	coreapp.RegisterDomainHooks(app)
 	arcadeadmin.RegisterTelegramNotifyHooks(app)
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		coreapp.RegisterAPIRoutes(se)

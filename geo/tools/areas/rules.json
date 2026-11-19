@@ -133,5 +133,68 @@
     "KR": 1e-05,
     "JP": 1e-05
   },
-  "seatMinPopulation": 100000
+  "seatMinPopulation": 100000,
+  "mapSimplifyMeters": 2000,
+  "admin1": {
+    "KR-12": {
+      "names": {
+        "en": "Jeonnam-Gwangju"
+      },
+      "aliases": [
+        "광주광역시",
+        "광주",
+        "전라남도",
+        "전남",
+        "Gwangju",
+        "South Jeolla",
+        "Jeollanam-do"
+      ]
+    },
+    "KR-43": {
+      "aliases": [
+        "충북"
+      ]
+    },
+    "KR-44": {
+      "aliases": [
+        "충남"
+      ]
+    },
+    "KR-47": {
+      "aliases": [
+        "경북"
+      ]
+    },
+    "KR-48": {
+      "aliases": [
+        "경남"
+      ]
+    },
+    "KR-45": {
+      "aliases": [
+        "전북",
+        "전라북도"
+      ]
+    },
+    "KR-42": {
+      "aliases": [
+        "강원도"
+      ]
+    },
+    "KR-49": {
+      "aliases": [
+        "제주도"
+      ]
+    },
+    "GB-LND": {
+      "excludeAliases": [
+        "London"
+      ],
+      "$comment": "City of London only; addresses say London for every Greater London borough."
+    }
+  },
+  "cityNames": {},
+  "cityKeyOverrides": {},
+  "keyRenames": {},
+  "keyRetired": []
 }

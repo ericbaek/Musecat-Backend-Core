@@ -758,7 +758,7 @@ components:
         admin1: {type: string, description: "Derived ISO 3166-2 admin-1 (KR-11, JP-14); country code for HK, MO and SG; empty until classified."}
         admin2: {type: string, description: Source admin-2 unit id; empty for countries with admin-1 only.}
         admin2_name: {type: string, description: Local admin-2 name for district grouping.}
-        city: {type: string, description: Passport city key in the embedded admin-area catalog; empty when none.}
+        city: {type: string, description: "Passport city key in the embedded admin-area catalog, `<admin1 or country>/<local name>` (KR-11/서울특별시, JP-14/横浜市, GB/London) or GN:<geonames id> for estimated seat cities; empty when none."}
         area_status: {type: string, enum: ['', resolved, near, estimated, ambiguous, unmapped], description: How the area was derived. See docs/offline-geo.md.}
         location:
           $ref: '#/components/schemas/Location'
@@ -768,16 +768,17 @@ components:
             type: string
     ArcadeAreaAssignment:
       type: object
-      required: [admin1, admin2, admin2_name, city, area_status]
+      required: [admin1, admin2, admin2_name, city, area_status, area_mismatch]
       properties:
         admin1: {type: string}
         admin2: {type: string}
         admin2_name: {type: string}
         city: {type: string}
         area_status: {type: string, enum: ['', resolved, near, estimated, ambiguous, unmapped]}
+        area_mismatch: {type: boolean, description: The address names another admin-1 area of the country.}
     ArcadeArea:
       type: object
-      required: [arcade, country, public, admin1, admin2, admin2_name, city, area_status, area_manual]
+      required: [arcade, country, public, admin1, admin2, admin2_name, city, area_status, area_mismatch, area_manual]
       properties:
         arcade: {type: string}
         country: {type: string}
@@ -788,9 +789,17 @@ components:
         admin1: {type: string, description: "Derived ISO 3166-2 admin-1 (KR-11, JP-14); country code for HK, MO and SG; empty until classified."}
         admin2: {type: string, description: Source admin-2 unit id; empty for countries with admin-1 only.}
         admin2_name: {type: string, description: Local admin-2 name for district grouping.}
-        city: {type: string, description: Passport city key in the embedded admin-area catalog; empty when none.}
+        city: {type: string, description: "Passport city key in the embedded admin-area catalog, `<admin1 or country>/<local name>` (KR-11/서울특별시, JP-14/横浜市, GB/London) or GN:<geonames id> for estimated seat cities; empty when none."}
         area_status: {type: string, enum: ['', resolved, near, estimated, ambiguous, unmapped], description: How the area was derived. See docs/offline-geo.md.}
+        area_mismatch: {type: boolean, description: The address names another admin-1 area of the country.}
+        address_admin1:
+          type: array
+          description: Admin-1 codes the address names; present when area_mismatch is true.
+          items: {type: string}
         area_manual: {type: boolean, description: Pinned by an administrator; location edits keep it.}
+        admin1_names:
+          type: object
+          additionalProperties: {type: string}
         city_names:
           type: object
           additionalProperties: {type: string}
@@ -813,7 +822,7 @@ components:
         admin1: {type: string, description: "Derived ISO 3166-2 admin-1 (KR-11, JP-14); country code for HK, MO and SG; empty until classified."}
         admin2: {type: string, description: Source admin-2 unit id; empty for countries with admin-1 only.}
         admin2_name: {type: string, description: Local admin-2 name for district grouping.}
-        city: {type: string, description: Passport city key in the embedded admin-area catalog; empty when none.}
+        city: {type: string, description: "Passport city key in the embedded admin-area catalog, `<admin1 or country>/<local name>` (KR-11/서울특별시, JP-14/横浜市, GB/London) or GN:<geonames id> for estimated seat cities; empty when none."}
         area_status: {type: string, enum: ['', resolved, near, estimated, ambiguous, unmapped], description: How the area was derived. See docs/offline-geo.md.}
         location:
           $ref: '#/components/schemas/Location'
@@ -1681,7 +1690,7 @@ components:
       type: object
       required: [id, name, names, country, admin1, estimated, location, arcade_count, visit_count]
       properties:
-        id: {type: string, description: Admin-area city key such as KR:11 or JP:14:横浜市.}
+        id: {type: string, description: Admin-area city key such as KR-11/서울특별시 or JP-14/横浜市.}
         name: {type: string, description: English name, else the local name.}
         names:
           type: object
@@ -4420,7 +4429,7 @@ paths:
                     admin1: AU-NSW
                     admin2: "52423323B30574093128049"
                     admin2_name: Sydney
-                    city: "AU:52423323B30574093128049"
+                    city: AU-NSW/Sydney
                     area_status: resolved
                     location:
                       lat: -33.8708
@@ -6664,12 +6673,12 @@ paths:
     get:
       tags: [Arcade]
       summary: Arcades whose derived area needs review (strict reviewer only)
-      description: Every visibility is included. Sorted unmapped, ambiguous, near, estimated; at most 500 rows.
+      description: Every visibility is included. Sorted unmapped, ambiguous, mismatch, near, estimated; at most 500 rows.
       security: [{bearerAuth: []}]
       parameters:
         - name: status
           in: query
-          description: Comma list of unmapped, ambiguous, near, estimated. Defaults to all four.
+          description: Comma list of unmapped, ambiguous, mismatch (address names another admin-1), near, estimated. Defaults to all five.
           schema: {type: string}
         - $ref: '#/components/parameters/CountryQuery'
       responses:

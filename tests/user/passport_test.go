@@ -17,12 +17,12 @@ func TestPassportPeriodsCitiesAndVisibility(t *testing.T) {
 	a := seedVisitArcade(t, app, "Asia/Seoul")
 	b := seedVisitArcade(t, app, "Asia/Seoul")
 	// Cities are the stored arcade area resolved against the embedded catalog.
-	a.Set("city", "KR:11")
+	a.Set("city", "KR-11/서울특별시")
 	if err := app.Save(a); err != nil {
 		t.Fatal(err)
 	}
 	// An unknown key (catalog refresh before backfill) counts as unclassified.
-	b.Set("city", "KR:missing")
+	b.Set("city", "KR-11/missing")
 	if err := app.Save(b); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestPassportPeriodsCitiesAndVisibility(t *testing.T) {
 	if p.TotalVisits != 3 || p.NewArcades != 1 || p.DistinctCities != 1 || p.DistinctArcades != 2 || p.VisitDays != 2 || p.MaxArcadesInDay != 2 || p.UnclassifiedArcades != 1 || len(p.Months) != 12 {
 		t.Fatalf("unexpected passport: %+v", p)
 	}
-	if seoul := p.Cities[0]; seoul.ID != "KR:11" || seoul.Name != "Seoul" || seoul.Names["ko"] != "서울" || seoul.Admin1 != "KR-11" || seoul.Estimated || seoul.Location == nil {
+	if seoul := p.Cities[0]; seoul.ID != "KR-11/서울특별시" || seoul.Name != "Seoul" || seoul.Names["ko"] != "서울" || seoul.Admin1 != "KR-11" || seoul.Estimated || seoul.Location == nil {
 		t.Fatalf("city: %+v", seoul)
 	}
 	if p.Months[0].NewArcades != 1 || p.Months[0].Visits != 2 {

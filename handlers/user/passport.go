@@ -120,11 +120,14 @@ func LoadPassport(app core.App, userID, year string) (Passport, error) {
 	}
 	out.CityCatalogAvailable = true
 	for i := range records {
-		// A key the catalog no longer knows (dataset refresh before backfill)
-		// counts as unclassified rather than an anonymous city.
-		if _, ok := areas.City(records[i].cityID); !ok {
-			records[i].cityID = ""
+		// Until the startup refresh rewrites rows from an older dataset, a
+		// renamed key follows the rename and a retired one counts as
+		// unclassified rather than an anonymous city.
+		key, ok := areas.CurrentCityKey(records[i].cityID)
+		if !ok {
+			key = ""
 		}
+		records[i].cityID = key
 	}
 	stamps := map[string]*PassportStamp{}
 	cities := map[string]*PassportCity{}

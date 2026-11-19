@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Area classification statuses stored on arcades.
@@ -65,9 +67,25 @@ type AreaResult struct {
 	DistanceMeters float64
 }
 
-// flat rings keep memory at two float64 per vertex instead of a slice each.
+// AreaAdmin1 is one first-level area with display names and the aliases an
+// address may use for it.
+type AreaAdmin1 struct {
+	Code    string            `json:"-"`
+	Country string            `json:"country"`
+	Names   map[string]string `json:"names"`
+	Aliases []string          `json:"aliases"`
+}
+
+// Name returns the display name for locale, falling back to English and then
+// the local name.
+func (a AreaAdmin1) Name(locale string) string {
+	return AreaCity{Names: a.Names}.Name(locale)
+}
+
+// flat float32 rings keep memory at eight bytes per vertex; the source data
+// is rounded to 1e-5 degrees (about 1 m), well inside float32 precision.
 type areaPolygon struct {
-	rings                          [][]float64 // lon,lat pairs; rings[0] is the exterior
+	rings                          [][]float32 // lon,lat pairs; rings[0] is the exterior
 	minLon, minLat, maxLon, maxLat float64
 }
 
@@ -81,18 +99,28 @@ const areaGridDegrees = 0.5
 
 type areaGridKey struct{ x, y int32 }
 
+type areaAlias struct {
+	text   string // lower-cased
+	admin1 string
+	latin  bool // matched on word boundaries
+}
+
 type areaCountry struct {
-	units []areaUnit
-	grid  map[areaGridKey][]int32
-	seats []string
+	units   []areaUnit
+	grid    map[areaGridKey][]int32
+	seats   []string
+	aliases []areaAlias
 }
 
 // Areas is the immutable, embedded admin-area catalog. It is safe for
 // concurrent use.
 type Areas struct {
-	whole     map[string]bool
+	version   string
+	whole     map[string]string // country → its single city key
 	countries map[string]*areaCountry
 	cities    map[string]AreaCity
+	admin1    map[string]AreaAdmin1
+	renames   map[string]string
 }
 
 //go:embed data/admin_areas.geojson.gz
@@ -119,9 +147,12 @@ func EmbeddedAreas() (*Areas, error) {
 }
 
 type areaFile struct {
-	Type         string              `json:"type"`
-	WholeCountry []string            `json:"whole_country"`
-	Cities       map[string]AreaCity `json:"cities"`
+	Type         string                `json:"type"`
+	Version      string                `json:"version"`
+	WholeCountry []string              `json:"whole_country"`
+	Renames      map[string]string     `json:"renames"`
+	Admin1       map[string]AreaAdmin1 `json:"admin1"`
+	Cities       map[string]AreaCity   `json:"cities"`
 	Features     []struct {
 		Properties struct {
 			Country string `json:"country"`
@@ -144,9 +175,24 @@ func DecodeAreas(r io.Reader) (*Areas, error) {
 	if file.Type != "FeatureCollection" || len(file.Features) == 0 {
 		return nil, errors.New("admin areas must be a non-empty FeatureCollection")
 	}
-	out := &Areas{whole: map[string]bool{}, countries: map[string]*areaCountry{}, cities: map[string]AreaCity{}}
+	if file.Version == "" {
+		return nil, errors.New("admin areas have no version")
+	}
+	out := &Areas{version: file.Version, whole: map[string]string{}, countries: map[string]*areaCountry{}, cities: map[string]AreaCity{}, admin1: map[string]AreaAdmin1{}, renames: map[string]string{}}
+	whole := map[string]bool{}
 	for _, country := range file.WholeCountry {
-		out.whole[strings.ToUpper(country)] = true
+		whole[strings.ToUpper(country)] = true
+	}
+	for code, admin1 := range file.Admin1 {
+		admin1.Code = code
+		out.admin1[code] = admin1
+		c := out.country(admin1.Country)
+		for _, alias := range admin1.Aliases {
+			text := strings.ToLower(strings.TrimSpace(alias))
+			if text != "" {
+				c.aliases = append(c.aliases, areaAlias{text: text, admin1: code, latin: isLatin(text)})
+			}
+		}
 	}
 	for key, city := range file.Cities {
 		city.Key = key
@@ -165,6 +211,9 @@ func DecodeAreas(r io.Reader) (*Areas, error) {
 			if _, ok := out.cities[p.City]; !ok {
 				return nil, fmt.Errorf("admin area %d names unknown city %q", i, p.City)
 			}
+		}
+		if whole[p.Country] {
+			out.whole[p.Country] = p.City
 		}
 		unit := areaUnit{country: p.Country, admin1: p.Admin1, admin2: p.Admin2, name: p.Name, city: p.City}
 		polygons, err := decodeAreaPolygons(feature.Geometry)
@@ -187,10 +236,32 @@ func DecodeAreas(r io.Reader) (*Areas, error) {
 			}
 		}
 	}
+	for country := range whole {
+		if out.whole[country] == "" {
+			return nil, fmt.Errorf("whole-country %s has no city", country)
+		}
+	}
+	for from, to := range file.Renames {
+		if _, ok := out.cities[to]; !ok {
+			return nil, fmt.Errorf("rename %q → unknown city %q", from, to)
+		}
+		out.renames[from] = to
+	}
 	for _, c := range out.countries {
 		sort.Strings(c.seats)
+		// Longest first, so 東京都 wins over 京都 at the same position.
+		sort.SliceStable(c.aliases, func(i, j int) bool { return len(c.aliases[i].text) > len(c.aliases[j].text) })
 	}
 	return out, nil
+}
+
+func isLatin(text string) bool {
+	for _, r := range text {
+		if r > unicode.MaxLatin1 && !unicode.Is(unicode.Latin, r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *Areas) country(code string) *areaCountry {
@@ -225,17 +296,18 @@ func decodeAreaPolygons(geometry geoJSONGeometry) ([]areaPolygon, error) {
 		if len(rings) == 0 || len(rings[0]) < 3 {
 			continue
 		}
-		polygon := areaPolygon{rings: make([][]float64, len(rings)), minLon: math.Inf(1), minLat: math.Inf(1), maxLon: math.Inf(-1), maxLat: math.Inf(-1)}
+		polygon := areaPolygon{rings: make([][]float32, len(rings)), minLon: math.Inf(1), minLat: math.Inf(1), maxLon: math.Inf(-1), maxLat: math.Inf(-1)}
 		for r, ring := range rings {
-			flat := make([]float64, 0, len(ring)*2)
+			flat := make([]float32, 0, len(ring)*2)
 			for _, point := range ring {
 				if len(point) < 2 {
 					return nil, errors.New("short coordinate")
 				}
-				flat = append(flat, point[0], point[1])
+				flat = append(flat, float32(point[0]), float32(point[1]))
 				if r == 0 {
-					polygon.minLon, polygon.maxLon = math.Min(polygon.minLon, point[0]), math.Max(polygon.maxLon, point[0])
-					polygon.minLat, polygon.maxLat = math.Min(polygon.minLat, point[1]), math.Max(polygon.maxLat, point[1])
+					x, y := float64(float32(point[0])), float64(float32(point[1]))
+					polygon.minLon, polygon.maxLon = math.Min(polygon.minLon, x), math.Max(polygon.maxLon, x)
+					polygon.minLat, polygon.maxLat = math.Min(polygon.minLat, y), math.Max(polygon.maxLat, y)
 				}
 			}
 			polygon.rings[r] = flat
@@ -248,10 +320,118 @@ func decodeAreaPolygons(geometry geoJSONGeometry) ([]areaPolygon, error) {
 	return out, nil
 }
 
+// Version identifies the dataset; arcades classified with another version are
+// recomputed.
+func (a *Areas) Version() string { return a.version }
+
 // City returns the catalog entry for a stored city key.
 func (a *Areas) City(key string) (AreaCity, bool) {
 	city, ok := a.cities[key]
 	return city, ok
+}
+
+// CurrentCityKey maps a stored key through dataset renames. It returns the
+// key unchanged when it is current, and false when it is neither current nor
+// renamed (retired).
+func (a *Areas) CurrentCityKey(key string) (string, bool) {
+	for i := 0; i < 8; i++ {
+		if _, ok := a.cities[key]; ok {
+			return key, true
+		}
+		next, ok := a.renames[key]
+		if !ok {
+			return key, false
+		}
+		key = next
+	}
+	return key, false
+}
+
+// Admin1 returns the catalog entry for an admin-1 code.
+func (a *Areas) Admin1(code string) (AreaAdmin1, bool) {
+	admin1, ok := a.admin1[code]
+	return admin1, ok
+}
+
+// AddressAdmin1 lists the admin-1 codes of the arcade's country that an
+// address names, using the catalog aliases. Overlapping matches keep the
+// longest (東京都 over 京都); Latin aliases match whole words only.
+func (a *Areas) AddressAdmin1(country, address string) []string {
+	c := a.countries[strings.ToUpper(strings.TrimSpace(country))]
+	text := strings.ToLower(address)
+	if c == nil || strings.TrimSpace(text) == "" {
+		return nil
+	}
+	taken := make([]bool, len(text))
+	var out []string
+	seen := map[string]bool{}
+	for _, alias := range c.aliases {
+		for from := 0; from < len(text); {
+			index := strings.Index(text[from:], alias.text)
+			if index < 0 {
+				break
+			}
+			start, end := from+index, from+index+len(alias.text)
+			from = start + 1
+			if alias.latin && !(wordBoundary(text, start, true) && wordBoundary(text, end, false)) {
+				continue
+			}
+			free := true
+			for i := start; i < end; i++ {
+				if taken[i] {
+					free = false
+					break
+				}
+			}
+			if !free {
+				continue
+			}
+			for i := start; i < end; i++ {
+				taken[i] = true
+			}
+			if !seen[alias.admin1] {
+				seen[alias.admin1] = true
+				out = append(out, alias.admin1)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// AddressMismatch reports whether an address names admin-1 areas of the
+// country but not the one the coordinate falls in, a hint that the marker or
+// the address is wrong.
+func (a *Areas) AddressMismatch(country, admin1, address string) bool {
+	if admin1 == "" {
+		return false
+	}
+	named := a.AddressAdmin1(country, address)
+	if len(named) == 0 {
+		return false
+	}
+	for _, code := range named {
+		if code == admin1 {
+			return false
+		}
+	}
+	return true
+}
+
+func wordBoundary(text string, at int, before bool) bool {
+	var r rune
+	if before {
+		if at == 0 {
+			return true
+		}
+		r, _ = utf8.DecodeLastRuneInString(text[:at])
+	} else {
+		if at >= len(text) {
+			return true
+		}
+		r, _ = utf8.DecodeRuneInString(text[at:])
+	}
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
 // Classify places a coordinate within the arcade's country. Only that
@@ -262,11 +442,7 @@ func (a *Areas) Classify(country string, lat, lon float64) AreaResult {
 	if math.IsNaN(lat) || math.IsNaN(lon) || math.Abs(lat) > 90 || math.Abs(lon) > 180 || country == "" {
 		return AreaResult{Status: AreaUnmapped}
 	}
-	if a.whole[country] {
-		key := country + ":all"
-		if _, ok := a.cities[key]; !ok {
-			key = ""
-		}
+	if key, ok := a.whole[country]; ok {
 		return AreaResult{Admin1: country, City: key, Status: AreaResolved}
 	}
 	c := a.countries[country]
@@ -347,12 +523,12 @@ func (u *areaUnit) contains(lat, lon float64) bool {
 	return false
 }
 
-func flatRingContains(ring []float64, lat, lon float64) bool {
+func flatRingContains(ring []float32, lat, lon float64) bool {
 	inside := false
 	n := len(ring) / 2
 	for i, j := 0, n-1; i < n; j, i = i, i+1 {
-		xi, yi := ring[2*i], ring[2*i+1]
-		xj, yj := ring[2*j], ring[2*j+1]
+		xi, yi := float64(ring[2*i]), float64(ring[2*i+1])
+		xj, yj := float64(ring[2*j]), float64(ring[2*j+1])
 		if (yi > lat) != (yj > lat) && lon < (xj-xi)*(lat-yi)/(yj-yi)+xi {
 			inside = !inside
 		}
@@ -385,8 +561,8 @@ func (c *areaCountry) nearest(lat, lon, reach float64) (*areaUnit, float64) {
 					ring := polygon.rings[0]
 					n := len(ring) / 2
 					for i, j := 0, n-1; i < n; j, i = i, i+1 {
-						ax, ay := (ring[2*j]-lon)*xScale, (ring[2*j+1]-lat)*metersPerDegree
-						bx, by := (ring[2*i]-lon)*xScale, (ring[2*i+1]-lat)*metersPerDegree
+						ax, ay := (float64(ring[2*j])-lon)*xScale, (float64(ring[2*j+1])-lat)*metersPerDegree
+						bx, by := (float64(ring[2*i])-lon)*xScale, (float64(ring[2*i+1])-lat)*metersPerDegree
 						dx, dy := bx-ax, by-ay
 						t := 0.0
 						if l := dx*dx + dy*dy; l > 0 {

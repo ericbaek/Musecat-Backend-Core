@@ -3,7 +3,6 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,10 +14,11 @@ import (
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
 )
 
-// reviewStatuses are the area statuses an administrator should look at.
-var reviewStatuses = []string{geo.AreaUnmapped, geo.AreaAmbiguous, geo.AreaNear, geo.AreaEstimated}
+// reviewStatuses are the area statuses an administrator should look at, and
+// `mismatch` for addresses that name another admin-1 area.
+var reviewStatuses = []string{geo.AreaUnmapped, geo.AreaAmbiguous, reviewMismatch, geo.AreaNear, geo.AreaEstimated}
 
-var admin1Pattern = regexp.MustCompile(`^[A-Z]{2}(-[A-Za-z0-9-]{1,12})?$`)
+const reviewMismatch = "mismatch"
 
 // ListArcadeAreas handles GET /admin/arcade/areas: arcades whose derived area
 // needs review, every visibility included. `status` narrows to a comma list
@@ -41,6 +41,10 @@ func ListArcadeAreas(re *core.RequestEvent) error {
 	clauses := []string{}
 	for i, status := range statuses {
 		key := "s" + string(rune('0'+i))
+		if status == reviewMismatch {
+			clauses = append(clauses, arcadearea.FieldMismatch+"=true")
+			continue
+		}
 		params[key] = status
 		clauses = append(clauses, arcadearea.FieldStatus+"={:"+key+"}")
 	}
@@ -59,7 +63,7 @@ func ListArcadeAreas(re *core.RequestEvent) error {
 	}
 	items := make([]map[string]any, 0, len(records))
 	for _, record := range records {
-		item := arcadeAreaPayload(areas, record)
+		item := arcadeAreaPayload(re.App, areas, record)
 		if basic, err := re.App.FindRecordById(arcadeinternal.CollectionArcadeBasic, record.GetString("basic")); err == nil {
 			point := basic.GetGeoPoint("location")
 			item["name"] = basic.GetString("name")
@@ -69,7 +73,7 @@ func ListArcadeAreas(re *core.RequestEvent) error {
 		items = append(items, item)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
-		return statusRank(items[i]["area_status"]) < statusRank(items[j]["area_status"])
+		return statusRank(items[i]) < statusRank(items[j])
 	})
 	return re.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
@@ -117,12 +121,17 @@ func UpdateArcadeArea(re *core.RequestEvent) error {
 				body.Admin1 = city.Admin1
 			}
 		}
-		if !admin1Pattern.MatchString(body.Admin1) || !strings.HasPrefix(body.Admin1, country) {
+		if admin1, ok := areas.Admin1(body.Admin1); !ok || admin1.Country != country {
 			invalid = "admin1 must be an admin-1 code of the arcade country"
 			return nil
 		}
-		arcadearea.Apply(arcade, arcadearea.Assignment{Admin1: body.Admin1, City: body.City, Status: geo.AreaResolved}, time.Now())
+		now := time.Now()
+		arcadearea.Apply(arcade, arcadearea.Assignment{Admin1: body.Admin1, City: body.City, Status: geo.AreaResolved}, now)
 		arcade.Set(arcadearea.FieldManual, true)
+		// Refreshes the address check and dataset version for the pinned area.
+		if err := arcadearea.Recompute(txApp, arcade, now); err != nil {
+			return err
+		}
 		return txApp.Save(arcade)
 	})
 	if invalid != "" {
@@ -134,21 +143,30 @@ func UpdateArcadeArea(re *core.RequestEvent) error {
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to update arcade area"})
 	}
-	return re.JSON(http.StatusOK, arcadeAreaPayload(areas, arcade))
+	return re.JSON(http.StatusOK, arcadeAreaPayload(re.App, areas, arcade))
 }
 
-func arcadeAreaPayload(areas *geo.Areas, arcade *core.Record) map[string]any {
+func arcadeAreaPayload(app core.App, areas *geo.Areas, arcade *core.Record) map[string]any {
 	a := arcadearea.FromRecord(arcade)
 	item := map[string]any{
-		"arcade":      arcade.Id,
-		"country":     arcade.GetString("country"),
-		"public":      arcade.GetBool("public"),
-		"admin1":      a.Admin1,
-		"admin2":      a.Admin2,
-		"admin2_name": a.Admin2Name,
-		"city":        a.City,
-		"area_status": a.Status,
-		"area_manual": arcade.GetBool(arcadearea.FieldManual),
+		"arcade":        arcade.Id,
+		"country":       arcade.GetString("country"),
+		"public":        arcade.GetBool("public"),
+		"admin1":        a.Admin1,
+		"admin2":        a.Admin2,
+		"admin2_name":   a.Admin2Name,
+		"city":          a.City,
+		"area_status":   a.Status,
+		"area_mismatch": a.Mismatch,
+		"area_manual":   arcade.GetBool(arcadearea.FieldManual),
+	}
+	if admin1, ok := areas.Admin1(a.Admin1); ok {
+		item["admin1_names"] = admin1.Names
+	}
+	if a.Mismatch {
+		if basic, err := app.FindRecordById(arcadeinternal.CollectionArcadeBasic, arcade.GetString("basic")); err == nil {
+			item["address_admin1"] = areas.AddressAdmin1(arcade.GetString("country"), basic.GetString("address"))
+		}
 	}
 	if city, ok := areas.City(a.City); ok {
 		item["city_names"] = city.Names
@@ -156,13 +174,21 @@ func arcadeAreaPayload(areas *geo.Areas, arcade *core.Record) map[string]any {
 	return item
 }
 
-func statusRank(value any) int {
-	for i, status := range reviewStatuses {
-		if value == status {
+func statusRank(item map[string]any) int {
+	if item["area_mismatch"] == true {
+		return indexOf(reviewStatuses, reviewMismatch)
+	}
+	status, _ := item["area_status"].(string)
+	return indexOf(reviewStatuses, status)
+}
+
+func indexOf(values []string, value string) int {
+	for i, v := range values {
+		if v == value {
 			return i
 		}
 	}
-	return len(reviewStatuses)
+	return len(values)
 }
 
 func contains(values []string, value string) bool {

@@ -1,10 +1,12 @@
 package coreapp
 
 import (
+	"context"
 	"crypto/subtle"
 	usernotifications "github.com/ericbaek/musecat-backend-core/handlers/user/notifications"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
@@ -61,17 +63,9 @@ type DocumentationConfig struct {
 
 func Configure(app *pocketbase.PocketBase, config Config) {
 	geo.SetOfflineResolver(config.GeoResolver, true)
-	arcadeversion.RegisterHooks(app)
-	arcadearea.RegisterHooks(app)
-	// Decode the embedded admin areas off the request path (~1s, ~50MB).
-	go func() {
-		if _, err := geo.EmbeddedAreas(); err != nil {
-			app.Logger().Error("admin areas failed to load", "error", err)
-		}
-	}()
-	arcadequery.RegisterCandidateSnapshotHooks(app)
+	RegisterDomainHooks(app)
+	startArcadeAreaRefresh(app)
 	arcadeflag.RegisterAutoSolveReactionCreateHook(app)
-	userhandler.RegisterHooks(app)
 
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		se.Router.Bind(clientIPForwarding(config.ClientIPForwardSecret))
@@ -441,4 +435,45 @@ func (c DocumentationConfig) authorize(re *core.RequestEvent) error {
 
 	re.Response.Header().Set("WWW-Authenticate", `Basic realm="Delta-DB Docs"`)
 	return re.String(http.StatusUnauthorized, "Unauthorized")
+}
+
+// RegisterDomainHooks binds the record hooks that keep derived data
+// consistent on every write path: arcade version pointers, stored admin areas,
+// candidate snapshot invalidation and user hooks. Test apps that write arcades
+// call it too, so they derive exactly what production does.
+func RegisterDomainHooks(app core.App) {
+	arcadeversion.RegisterHooks(app)
+	arcadearea.RegisterHooks(app)
+	arcadequery.RegisterCandidateSnapshotHooks(app)
+	userhandler.RegisterHooks(app)
+}
+
+// startArcadeAreaRefresh decodes the embedded admin areas off the request path
+// (~1s) once the server starts, then reclassifies arcades stored with an
+// older dataset version in small batches. Each batch is one short write
+// transaction, so SQLite's single writer is held only briefly and ordinary
+// edits interleave; rows edited meanwhile are recomputed by their own save.
+func startArcadeAreaRefresh(app *pocketbase.PocketBase) {
+	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		ctx, cancel := context.WithCancel(context.Background())
+		se.App.OnTerminate().BindFunc(func(e *core.TerminateEvent) error {
+			cancel()
+			return e.Next()
+		})
+		go func() {
+			if _, err := geo.EmbeddedAreas(); err != nil {
+				se.App.Logger().Error("admin areas failed to load", "error", err)
+				return
+			}
+			written, err := arcadearea.RecomputeStale(ctx, se.App, 100, 200*time.Millisecond, func() {
+				arcadequery.InvalidateArcadeCandidateSnapshots(se.App)
+			})
+			if err != nil && ctx.Err() == nil {
+				se.App.Logger().Error("arcade area refresh failed", "written", written, "error", err)
+			} else if written > 0 {
+				se.App.Logger().Info("arcade areas refreshed", "written", written)
+			}
+		}()
+		return se.Next()
+	})
 }
