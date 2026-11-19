@@ -474,11 +474,11 @@ summary/full settings take the new scope immediately; there is no versioned opt-
 
 Arcade country/timezone detection uses the vendored offline bundle (or an
 explicit `MUSECAT_GEO_DATA_DIR` override); see
-[`docs/offline-geo.md`](offline-geo.md). City detection then selects the nearest
-imported GeoNames city in the resolved country using a deterministic tie-break.
-This same rule is used by the one-time Full backfill, so ordinary creation and
-edits do not depend on a reverse-geocoding server. Full seeds an embedded
-`cities500` catalog when the Passport city collection is empty.
+[`docs/offline-geo.md`](offline-geo.md). The arcade's admin area and Passport
+city are derived from the embedded admin-area catalog and stored on `arcade`,
+so creation and edits do not depend on a reverse-geocoding server or a city
+collection. City entries carry `names` (`local`, `en`, `ko`, `ja` when known);
+`name` and `city_name` are the English name, else the local one.
 
 Periods use stored local `visit_day`; active days deduplicate those date strings even
 across countries. New discoveries use lifetime first chronological verification.
@@ -486,13 +486,10 @@ Distances use current locations, with both consecutive endpoints inside the sele
 period; missing locations and excluded period records break a segment. Totals are
 straight-line distances, not actual travel or play time. Month series include zero months.
 
-Canonical `passport_city` records use GeoNames IDs as unique source identifiers; raw
-REST is locked. `arcade_basic.city_id` is optional and versioned with basic history.
-Current city metadata applies retrospectively. A missing or country-mismatched city is
-unclassified; those arcades remain in country and venue totals. Cities are matched by
-country, admin1 and locality aliases, never proximity. Explicit GeoNames hierarchy
-links attach PPLX neighbourhood aliases to a unique parent city; standalone cities
-such as Petaling Jaya remain distinct. Absent or ambiguous parentage is not inferred.
+Passport cities are the arcade's stored `city` key resolved against the embedded
+catalog, so catalog names apply retrospectively. An empty or unknown key is
+unclassified; those arcades remain in country and venue totals. `estimated`
+cities come from the nearest-seat fallback for countries without city boundaries.
 Rows missing admin1 are skipped during import. Address-based candidates require a
 named alias and use coordinates only to reject distant homonyms (50 km sanity limit,
 not a boundary). Every address candidate remains unapproved until operator review.

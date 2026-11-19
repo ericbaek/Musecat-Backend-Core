@@ -1,0 +1,174 @@
+{
+  "sources": [
+    {
+      "id": "geoboundaries-aus-adm2",
+      "file": "gb/AUS-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/AUS/ADM2/geoBoundaries-AUS-ADM2.geojson",
+      "sha256": "b70870c890477b75abab7fdad3c643d93d10d02d6928407f9eee88bd97ea963f",
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "source": "Australian Bureau of Statistics",
+      "year": "2022",
+      "attribution": "geoBoundaries (Runfola et al. 2020), Australian Bureau of Statistics"
+    },
+    {
+      "id": "geoboundaries-can-adm2",
+      "file": "gb/CAN-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/CAN/ADM2/geoBoundaries-CAN-ADM2.geojson",
+      "sha256": "c0a58ce01d009c0519964a7a98fe8d11fa45042f6c66dd87aea0b62695cd3b18",
+      "license": "Open Government Canada 2.0",
+      "source": "Statistics Canada (StatCan)",
+      "year": "2022",
+      "attribution": "geoBoundaries (Runfola et al. 2020), Statistics Canada (StatCan)"
+    },
+    {
+      "id": "geoboundaries-chn-adm2",
+      "file": "gb/CHN-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/CHN/ADM2/geoBoundaries-CHN-ADM2.geojson",
+      "sha256": "2b68d8a808742fc6d7acd769584db960d8fc2c25b9f1d20e3e98c72e9f1c4d34",
+      "license": "Open Data Commons Public Domain Dedication and License (PDDL) v1.0",
+      "source": "National Administration of Surveying, Mapping and Geoinformation of China, Revolutionary GIS",
+      "year": "2017",
+      "attribution": "geoBoundaries (Runfola et al. 2020), National Administration of Surveying, Mapping and Geoinformation of China, Revolutionary GIS"
+    },
+    {
+      "id": "geoboundaries-gbr-adm2",
+      "file": "gb/GBR-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/GBR/ADM2/geoBoundaries-GBR-ADM2.geojson",
+      "sha256": "efa95e1406a13f1e19fda25ece417c5464969acb7715472d6d17918d0c6c1e42",
+      "license": "Open Government Licence v3.0",
+      "source": "Office for National Statistics Open Geography Portal",
+      "year": "2019",
+      "attribution": "geoBoundaries (Runfola et al. 2020), Office for National Statistics Open Geography Portal"
+    },
+    {
+      "id": "geoboundaries-idn-adm2",
+      "file": "gb/IDN-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/IDN/ADM2/geoBoundaries-IDN-ADM2.geojson",
+      "sha256": "947cedc058888c0c2b2628071d289956c85fe279adb369dcf1327ce2236a5602",
+      "license": "Creative Commons Attribution 3.0 Intergovernmental Organisations (CC BY 3.0 IGO)",
+      "source": "Badan Pusat Statistik (BPS - Statistics Indonesia), World Food Programme, OCHA ROAP",
+      "year": "2020",
+      "attribution": "geoBoundaries (Runfola et al. 2020), Badan Pusat Statistik (BPS - Statistics Indonesia), World Food Programme, OCHA ROAP"
+    },
+    {
+      "id": "geoboundaries-mys-adm2",
+      "file": "gb/MYS-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/MYS/ADM2/geoBoundaries-MYS-ADM2.geojson",
+      "sha256": "1a7db3b44563073171b02eba59b109fc1bc6256ab0b011531ea6d5053515e550",
+      "license": "Creative Commons Attribution 3.0 License",
+      "source": "geoBoundaries, citypopulation.de",
+      "year": "2020",
+      "attribution": "geoBoundaries (Runfola et al. 2020), geoBoundaries, citypopulation.de"
+    },
+    {
+      "id": "geoboundaries-nzl-adm2",
+      "file": "gb/NZL-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/NZL/ADM2/geoBoundaries-NZL-ADM2.geojson",
+      "sha256": "276c768d2b22e5299e9c0854ad3d16be0051faa1d10a67889094f72390bae7cc",
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "source": "Stats NZ",
+      "year": "2021",
+      "attribution": "geoBoundaries (Runfola et al. 2020), Stats NZ"
+    },
+    {
+      "id": "geoboundaries-phl-adm2",
+      "file": "gb/PHL-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/41af8f1/releaseData/gbOpen/PHL/ADM2/geoBoundaries-PHL-ADM2.geojson",
+      "sha256": "99ee15cfc487c2315de65b630afac1e83c25b3e249927772b3bdb019335b64c6",
+      "license": "Creative Commons Attribution 3.0 Intergovernmental Organisations (CC BY 3.0 IGO)",
+      "source": "National Mapping and Resource Information Authority (NAMRIA), Philippines Statistics Authority (PSA), OCHA Philippines",
+      "year": "2020",
+      "attribution": "geoBoundaries (Runfola et al. 2020), National Mapping and Resource Information Authority (NAMRIA), Philippines Statistics Authority (PSA), OCHA Philippines"
+    },
+    {
+      "id": "geoboundaries-tha-adm2",
+      "file": "gb/THA-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/THA/ADM2/geoBoundaries-THA-ADM2.geojson",
+      "sha256": "d3496a7a342e6b895afaa7c2b6710afac243cd45359d3ecb0adec487e4bd3d59",
+      "license": "Creative Commons Attribution 3.0 Intergovernmental Organisations (CC BY 3.0 IGO)",
+      "source": "Royal Thai Survey Department, OCHA ROAP",
+      "year": "2019",
+      "attribution": "geoBoundaries (Runfola et al. 2020), Royal Thai Survey Department, OCHA ROAP"
+    },
+    {
+      "id": "geoboundaries-usa-adm2",
+      "file": "gb/USA-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/USA/ADM2/geoBoundaries-USA-ADM2.geojson",
+      "sha256": "81fdd384df8012e5007ed2994a8ab306352f3c48e32cd8ea99182195e8647f43",
+      "license": "Public Domain",
+      "source": "United States Census Bureau, MAF/TIGER Database",
+      "year": "2018",
+      "attribution": "geoBoundaries (Runfola et al. 2020), United States Census Bureau, MAF/TIGER Database"
+    },
+    {
+      "id": "geoboundaries-vnm-adm2",
+      "file": "gb/VNM-ADM2.geojson",
+      "url": "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen/VNM/ADM2/geoBoundaries-VNM-ADM2.geojson",
+      "sha256": "17db305257c1794fb5f3f4ff3c4f747a07cc5525774b8edb395d53f65219fc33",
+      "license": "Creative Commons Attribution 3.0 Intergovernmental Organisations (CC BY 3.0 IGO)",
+      "source": "OCHA ROAP, Government of Viet Nam",
+      "year": "2020",
+      "attribution": "geoBoundaries (Runfola et al. 2020), OCHA ROAP, Government of Viet Nam"
+    },
+    {
+      "id": "kr-sgis-admdong-20261001",
+      "file": "kr/HangJeongDong_ver20261001.geojson",
+      "url": "https://raw.githubusercontent.com/vuski/admdongkor/078ef4ac13b8bfeb215d2eabace49f4fdea71d5e/ver20261001/HangJeongDong_ver20261001.geojson",
+      "sha256": "843ece3a0b3429742cd4a1b699cc13987a88b5e5401f382e7fdaaa194ea5e605",
+      "license": "CC BY 4.0 (source: KOGL Type 1)",
+      "year": "2026-10-01",
+      "attribution": "통계청 SGIS 행정동 경계 (공공누리 제1유형), processed by vuski/admdongkor (CC BY 4.0)"
+    },
+    {
+      "id": "jp-ksj-n03-2025",
+      "file": "N03-20250101_GML.zip",
+      "url": "https://nlftp.mlit.go.jp/ksj/gml/data/N03/N03-2025/N03-20250101_GML.zip",
+      "sha256": "df20ebf7193e445ef3846b41578068848bb1a79836151cc8c1ec6275cca984a5",
+      "license": "CC BY 4.0",
+      "year": "2025-01-01",
+      "attribution": "「国土数値情報（行政区域データ）」（国土交通省）を加工して作成"
+    },
+    {
+      "id": "naturalearth-admin1-5.1.1",
+      "file": "ne/ne1.zip",
+      "url": "https://naciscdn.org/naturalearth/10m/cultural/ne_10m_admin_1_states_provinces.zip",
+      "sha256": "efc59726337323058f9446210adc96673179cd344e053666ee3d28cb58ba2b05",
+      "license": "Public Domain",
+      "year": "5.1.1",
+      "attribution": "Made with Natural Earth"
+    },
+    {
+      "id": "geonames-cities500",
+      "file": "geonames/cities500.zip",
+      "url": "https://download.geonames.org/export/dump/cities500.zip",
+      "sha256": "bd049a6c356464a8dcd230037b9ae15941c55200ee360035f1145e4da00945e2",
+      "rolling": true,
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "source": "GeoNames",
+      "year": "2026-11-20",
+      "attribution": "GeoNames (geonames.org), CC BY 4.0"
+    },
+    {
+      "id": "geonames-alternatenames-v2",
+      "file": "geonames/alternateNamesV2.zip",
+      "url": "https://download.geonames.org/export/dump/alternateNamesV2.zip",
+      "sha256": "78f9083d97c3e484059c967ecbec5d141f22adf2bf25e855d06e63d052d44cd5",
+      "rolling": true,
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "source": "GeoNames",
+      "year": "2026-11-20",
+      "attribution": "GeoNames (geonames.org), CC BY 4.0"
+    },
+    {
+      "id": "geonames-admin2codes",
+      "file": "geonames/admin2Codes.txt",
+      "url": "https://download.geonames.org/export/dump/admin2Codes.txt",
+      "sha256": "6dac23d72035181f6cbbdfaeb80c6b73cbecffccf9148734e45c4a8540e3c978",
+      "rolling": true,
+      "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)",
+      "source": "GeoNames",
+      "year": "2026-11-19",
+      "attribution": "GeoNames (geonames.org), CC BY 4.0"
+    }
+  ]
+}

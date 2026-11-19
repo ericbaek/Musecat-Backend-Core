@@ -1,0 +1,13 @@
+{
+  "name": "musecat-geo-areas",
+  "private": true,
+  "type": "module",
+  "description": "Builds geo/data/admin_areas.geojson.gz from pinned boundary sources.",
+  "scripts": {
+    "fetch": "node fetch.mjs",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "mapshaper": "0.6.121"
+  }
+}
