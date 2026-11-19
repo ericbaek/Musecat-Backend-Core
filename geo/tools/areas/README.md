@@ -25,21 +25,31 @@ covers the country. Properties:
 | `admin1` | ISO 3166-2 code where one exists (`KR-11`, `JP-14`). Otherwise `CC-<NE adm1_code>`. `KR-12` is the 2026 전남광주통합특별시, which has no ISO code yet. Whole-territory places (HK, MO, SG) use the country code. |
 | `admin2` | Source unit id (KR 시군구 code, JP 団体コード, geoBoundaries `shapeID`); empty for Natural Earth units |
 | `name` | Local unit name |
-| `city_key` | Stable id of the Passport city the unit belongs to (`KR:11`, `JP:14:横浜市`, `US:<shapeID>`); empty when the country has no city rule |
-| `city_name` | Local name of that city |
-| `city_source_id` | GeoNames id when a `passport_city` row clearly is this city; empty otherwise, and the server creates a row for `city_key` |
+| `city` | Key of the Passport city the unit belongs to (`KR:11`, `JP:14:横浜市`, `US:<shapeID>`); empty when the country has no city rule |
 
-The collection also carries `whole_country`: territories (HK, MO, SG) that are
-one admin-1 and one city, classified by country code without a shape test.
+The collection also carries:
+
+- `whole_country`: territories (HK, MO, SG) that are one admin-1 and one city,
+  classified by country code without a shape test.
+- `cities`: the Passport city catalog by key: `country`, `admin1`, `names`
+  (`local` from the boundary source, `en`/`ko`/`ja` from GeoNames when linked),
+  `lat`/`lon` marker point and `geonames_id`. Keys `GN:<id>` are `estimated`
+  fallback cities (capitals, admin-1 seats and towns of 100k+) for countries
+  without city boundaries; the server takes the nearest one in the country.
+
+Passport reads this catalog directly; there is no city collection in the
+database.
 
 ## City rules (`rules.json`)
 
-A Passport city is a union of units. It links to a GeoNames row in this order:
+A Passport city is a union of units. For names and a marker point it links to
+a GeoNames row in this order:
 a row whose local or alternate name matches the city near it; the most populous
 PPLC/PPLA/PPLA2 inside it; the most populous place inside that no other city
 claimed. A row is never shared by two cities. GeoNames points drift across
 borders and miss towns (no Yongin in cities500), so a city without a clear row
-gets its own Passport row instead of borrowing a neighbour's.
+keeps its local name instead of borrowing a neighbour's. GeoNames alternates
+carry no language tag, so `ko`/`ja` are picked by script and may need fixes.
 
 - KR: 특별·광역·특별자치시 are one city each. A 일반구 (수원시 장안구) joins its
   시. Gwangju's 구 inside 전남광주통합특별시 form 광주. Everything else is its 시·군.

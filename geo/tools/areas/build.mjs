@@ -272,15 +272,20 @@ function naturalEarthUnits(ne, covered) {
 // whose local or alternate name matches the city name near the city, or an
 // administrative seat (PPLC/PPLA/PPLA2) inside it. A plain populated place
 // inside is not enough, since GeoNames points drift across borders (its
-// Uiwang point lies in Gunpo). Unlinked cities become their own Passport rows.
+// Uiwang point lies in Gunpo). The link only supplies translated names and a
+// marker point; the city itself is the boundary union, linked or not.
 
 const SEAT_CODES = new Set(["PPLC", "PPLA", "PPLA2"]);
+// Fallback cities for countries without boundaries: capitals and admin-1
+// seats only; PPLA2 would add every French commune seat.
+const SEAT_CITY_CODES = new Set(["PPLC", "PPLA"]);
 const CITY_CODES = new Set(["PPL", "PPLC", "PPLA", "PPLA2", "PPLA3", "PPLA4", "PPLA5"]);
 const NAME_MATCH_DEGREES = 0.3;
 
-const SUFFIX = /(특별자치시|특별자치도|특별시|광역시|시|군|구|都|道|府|県|市|町|村|区|City|County|Shire|Municipality|Regency|District|Province|省|市辖区|地区|自治州|盟|縣|縣市)$/u;
+const SUFFIX = /(특별자치시|특별자치도|특별시|광역시|시|군|구|都|道|府|県|市|町|村|区|City|County|Shire|Municipality|Regency|District|Province|省|市辖区|地区|自治州|盟|縣|縣市)$/iu;
 function normalizeName(name) {
-  let value = String(name ?? "").normalize("NFKC").trim();
+  // Accents are dropped (Hồ Chí Minh = Ho Chi Minh); NFC restores Hangul and kana.
+  let value = String(name ?? "").normalize("NFKD").replace(/\p{M}/gu, "").replace(/đ/gi, "d").normalize("NFC").trim();
   for (let i = 0; i < 2; i++) {
     const stripped = value.replace(SUFFIX, "").trim();
     if (stripped.length >= 2 || /[^\x00-\x7F]/.test(stripped)) value = stripped;
@@ -295,10 +300,10 @@ function loadGeoNames() {
   const byCountry = new Map();
   for (const line of text.split("\n")) {
     const f = line.split("\t");
-    // Same filter as passportcities.ReadGeoNames, so every link exists in passport_city.
-    if (f.length !== 19 || f[6] !== "P" || !CITY_CODES.has(f[7]) || !f[10]) continue;
-    const names = new Set([f[1], f[2], ...f[3].split(",")].map(normalizeName).filter(Boolean));
-    const row = { id: f[0], name: f[1], code: f[7], x: Number(f[5]), y: Number(f[4]), population: Number(f[14]) || 0, names };
+    if (f.length !== 19 || f[6] !== "P" || !CITY_CODES.has(f[7])) continue;
+    const alternates = f[3] ? f[3].split(",") : [];
+    const names = new Set([f[1], f[2], ...alternates].map(normalizeName).filter(Boolean));
+    const row = { id: f[0], name: f[1], code: f[7], x: Number(f[5]), y: Number(f[4]), population: Number(f[14]) || 0, names, alternates };
     const list = byCountry.get(f[8]) ?? [];
     list.push(row);
     byCountry.set(f[8], list);
@@ -368,6 +373,129 @@ function linkCities(units, geonames) {
   return { unlinked, shared: shared.length };
 }
 
+// --- city catalog --------------------------------------------------------
+
+const HANGUL = /\p{Script=Hangul}/u;
+const KANA = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const HAN_ONLY = /^[\p{Script=Han}]+$/u;
+const HAN_COUNTRIES = new Set(["CN", "TW", "HK", "MO", "JP"]);
+const shortest = (values) => values.reduce((a, b) => (!a || b.length < a.length ? b : a), "");
+const longest = (values) => values.reduce((a, b) => (b.length > a.length ? b : a), "");
+
+/**
+ * GeoNames alternates carry no language tag. For Hangul, the longest spaceless
+ * name is the transliteration (상하이 over 상해, 요코하마 over 요코하마 시);
+ * for Han, the shortest two-plus character name skips one-glyph abbreviations
+ * (上海 over 沪) and administrative suffixes.
+ */
+function pickHangul(values) {
+  const plain = values.map((name) => name.replace(/\s+/g, "")).filter((name) => name.length >= 2);
+  const bare = plain.filter((name) => !(/시$/.test(name) && plain.includes(name.slice(0, -1))));
+  return longest(bare);
+}
+const pickHan = (values) => shortest(values.filter((name) => name.length >= 2));
+const round = (value) => Math.round(value * 1e5) / 1e5;
+
+/** Display names: the local name from the boundary source, then GeoNames. */
+function namesOf(country, local, row) {
+  const alternates = row?.alternates ?? [];
+  const hangul = alternates.filter((name) => HANGUL.test(name));
+  const kana = alternates.filter((name) => KANA.test(name));
+  const han = alternates.filter((name) => HAN_ONLY.test(name));
+  const names = { local };
+  const en = row?.name || (/^[\p{Script=Latin}\p{N}\s.'’()-]+$/u.test(local) ? local : "");
+  if (en) names.en = en;
+  const ko = country === "KR" ? local.replace(/(특별자치시|특별시|광역시)$/, "") : pickHangul(hangul);
+  if (ko) names.ko = ko;
+  const ja =
+    country === "JP" ? local : HAN_COUNTRIES.has(country) ? pickHan(han) || shortest(kana) : shortest(kana);
+  if (ja) names.ja = ja;
+  return names;
+}
+
+/** A point inside the unit for map markers: centroid when inside, else a grid probe. */
+function interiorPoint(unit) {
+  const [minX, minY, maxX, maxY] = unit.bbox;
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  if (contains(unit, cx, cy)) return [cx, cy];
+  let best;
+  let bestDistance = Infinity;
+  for (let i = 1; i < 24; i++) {
+    for (let j = 1; j < 24; j++) {
+      const x = minX + ((maxX - minX) * i) / 24;
+      const y = minY + ((maxY - minY) * j) / 24;
+      const distance = Math.hypot(x - cx, y - cy);
+      if (distance < bestDistance && contains(unit, x, y)) {
+        bestDistance = distance;
+        best = [x, y];
+      }
+    }
+  }
+  return best ?? polygonsOf(unit.geometry)[0][0][0];
+}
+
+const areaOf = ([minX, minY, maxX, maxY]) => (maxX - minX) * (maxY - minY);
+
+function buildCityCatalog(units, rowsById) {
+  const groups = new Map();
+  for (const unit of units) {
+    if (!unit.city) continue;
+    const group = groups.get(unit.city) ?? [];
+    group.push(unit);
+    groups.set(unit.city, group);
+  }
+  const catalog = {};
+  for (const [key, members] of groups) {
+    const largest = members.reduce((a, b) => (areaOf(b.bbox) > areaOf(a.bbox) ? b : a));
+    const row = rowsById.get(members[0].citySourceId);
+    const [x, y] = row && members.some((member) => contains(member, row.x, row.y)) ? [row.x, row.y] : interiorPoint(largest);
+    const home = members.find((member) => contains(member, x, y)) ?? largest;
+    catalog[key] = {
+      country: largest.country,
+      admin1: home.admin1,
+      names: namesOf(largest.country, members[0].cityName, row),
+      lat: round(y),
+      lon: round(x),
+      geonames_id: row?.id ?? "",
+    };
+  }
+  return catalog;
+}
+
+/**
+ * Countries with only Natural Earth admin-1 have no city boundaries. Their
+ * cities are GeoNames seats and large towns; the server takes the nearest one
+ * in the arcade's country and marks the result estimated.
+ */
+function buildSeatCatalog(ne, covered, geonames) {
+  const catalog = {};
+  const neByCountry = new Map();
+  for (const feature of ne) {
+    const list = neByCountry.get(feature.properties.cc) ?? [];
+    list.push(feature);
+    neByCountry.set(feature.properties.cc, list);
+  }
+  for (const [country, rows] of geonames) {
+    if (covered.has(country) || rules.wholeCountry.includes(country)) continue;
+    const regions = neByCountry.get(country) ?? [];
+    for (const row of rows) {
+      if (!SEAT_CITY_CODES.has(row.code) && row.population < rules.seatMinPopulation) continue;
+      const region = regions.find((feature) => contains(feature, row.x, row.y));
+      catalog[`GN:${row.id}`] = {
+        country,
+        admin1: region ? admin1CodeOf(region) : "",
+        names: namesOf(country, row.name, row),
+        lat: round(row.y),
+        lon: round(row.x),
+        geonames_id: row.id,
+        estimated: true,
+      };
+    }
+  }
+  return catalog;
+}
+
 // --- main ------------------------------------------------------------------
 
 verifySources();
@@ -380,12 +508,19 @@ const covered = new Set(units.map((unit) => unit.country));
 units.push(...naturalEarthUnits(ne, covered));
 for (const unit of units) unit.bbox = bboxOf(unit.geometry);
 
-const { unlinked, shared } = linkCities(units, loadGeoNames());
+const geonames = loadGeoNames();
+const { unlinked, shared } = linkCities(units, geonames);
+const rowsById = new Map([...geonames.values()].flat().map((row) => [row.id, row]));
+const cities = buildCityCatalog(units, rowsById);
+const seats = buildSeatCatalog(ne, covered, geonames);
 
 const collection = {
   type: "FeatureCollection",
   // Places classified by country code alone: one admin-1 and one city each.
   whole_country: rules.wholeCountry,
+  // Passport cities by key. Boundary cities are unions of the features that
+  // name them; seat cities (estimated) cover countries without city rules.
+  cities: { ...cities, ...seats },
   features: units.map((unit) => ({
     type: "Feature",
     properties: {
@@ -393,9 +528,7 @@ const collection = {
       admin1: unit.admin1,
       admin2: unit.admin2,
       name: unit.name,
-      city_key: unit.city,
-      city_name: unit.city ? unit.cityName : "",
-      city_source_id: unit.citySourceId ?? "",
+      city: unit.city,
     },
     geometry: unit.geometry,
   })),

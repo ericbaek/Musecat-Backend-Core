@@ -8,7 +8,7 @@ source while handling a request.
 | --- | --- | --- | --- |
 | `countries.geojson.gz` | [datasets/geo-countries](https://github.com/datasets/geo-countries/blob/master/data/countries.geojson), repository snapshot used for this release | Natural Earth-derived country boundaries; see the upstream repository and Natural Earth terms | `cc314bd804b9eee416f553401a42b2be208759284273a533c3977b3459821cbf` |
 | `timezones.geojson.gz` | [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder/releases/tag/2026c), `timezones.geojson.zip` / `combined.json`, release 2026c | MIT; see the upstream repository | `aef830dc0edea6cdd83b5f65e9c0752e93eae8b98270907d19ba3a37647b919a` |
-| `admin_areas.geojson.gz` | Built by `geo/tools/areas/build.mjs` from the pinned sources in `geo/tools/areas/sources.json` (URLs, versions and SHA-256 of each input) | See "Admin-area attribution" below | `cabf0f919014c8233dc92621d1b2b05ce0f8229776f2a4faddaa75a574f053f8` |
+| `admin_areas.geojson.gz` | Built by `geo/tools/areas/build.mjs` from the pinned sources in `geo/tools/areas/sources.json` (URLs, versions and SHA-256 of each input) | See "Admin-area attribution" below | `63115e73098d54a7babdd73ff521aa2391480f77dafda71e9552e3059d101dbd` |
 
 Refreshes must update the source URL/version and hash in the same change. The
 GeoNames city catalog is a separate database import and is documented by the
