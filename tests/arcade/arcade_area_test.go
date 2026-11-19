@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
@@ -198,5 +199,38 @@ func requireBodyIDs(tb testing.TB, res *http.Response, want, reject []string) {
 		if strings.Contains(string(raw), id) {
 			tb.Fatalf("response unexpectedly has %s: %s", id, raw)
 		}
+	}
+}
+
+func TestAreaPlanBackfillsWithoutTouchingUpdated(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, u := createAuthUser(t, app)
+	seoul, _ := seedArcade(t, app, u.Id, arcadeSeed{Name: "Seoul", Address: "Seoul", Location: location{Lat: 37.551, Lon: 126.849}})
+	pinned, _ := seedArcade(t, app, u.Id, arcadeSeed{Name: "Pinned", Address: "Suwon", Location: location{Lat: 37.304, Lon: 127.010}})
+	// Existing databases start empty; the pinned row must survive the backfill.
+	if _, err := app.DB().NewQuery("UPDATE arcade SET admin1='', admin2='', admin2_name='', city='', area_status=''").Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.DB().NewQuery("UPDATE arcade SET admin1='KR-41', city='KR:41:용인시', area_status='resolved', area_manual=1 WHERE id={:id}").Bind(map[string]any{"id": pinned}).Execute(); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := app.FindRecordById("arcade", seoul)
+	plan, err := arcadearea.Plan(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := arcadearea.ApplyPlan(app, plan, before.GetDateTime("created").Time())
+	if err != nil || written != 1 {
+		t.Fatalf("written=%d err=%v", written, err)
+	}
+	assertArea(t, app, seoul, "KR-11", "KR:11", "resolved", false)
+	assertArea(t, app, pinned, "KR-41", "KR:41:용인시", "resolved", true)
+	after, _ := app.FindRecordById("arcade", seoul)
+	if after.GetString("updated") != before.GetString("updated") {
+		t.Fatal("backfill bumped arcade.updated")
+	}
+	again, _ := arcadearea.Plan(app)
+	if n, err := arcadearea.ApplyPlan(app, again, time.Time{}); err != nil || n != 0 {
+		t.Fatalf("second run wrote %d (%v)", n, err)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/types"
@@ -225,4 +226,92 @@ func RegisterHooks(app core.App) {
 	}
 	app.OnRecordCreate(collectionArcade).Bind(&hook.Handler[*core.RecordEvent]{Id: "__arcadeAreaCreate__", Func: handler})
 	app.OnRecordUpdate(collectionArcade).Bind(&hook.Handler[*core.RecordEvent]{Id: "__arcadeAreaUpdate__", Func: handler})
+}
+
+// Change is the planned area of one arcade next to what it stores now.
+type Change struct {
+	Arcade  string
+	Country string
+	Public  bool
+	Manual  bool
+	Lat     float64
+	Lon     float64
+	Current Assignment
+	Next    Assignment
+}
+
+// Changed reports whether applying the plan would alter stored values.
+func (c Change) Changed() bool { return c.Current != c.Next }
+
+// Plan classifies every arcade (all visibilities) from its current basic
+// location without writing. Manual assignments plan to keep their values.
+func Plan(app core.App) ([]Change, error) {
+	areas, err := geo.EmbeddedAreas()
+	if err != nil {
+		return nil, err
+	}
+	type row struct {
+		ID      string  `db:"id"`
+		Country string  `db:"country"`
+		Public  bool    `db:"public"`
+		Manual  bool    `db:"area_manual"`
+		Admin1  string  `db:"admin1"`
+		Admin2  string  `db:"admin2"`
+		Admin2N string  `db:"admin2_name"`
+		City    string  `db:"city"`
+		Status  string  `db:"area_status"`
+		Lat     float64 `db:"lat"`
+		Lon     float64 `db:"lon"`
+		HasLoc  bool    `db:"has_loc"`
+	}
+	var rows []row
+	err = app.DB().NewQuery(`SELECT a.id, COALESCE(a.country,'') AS country, COALESCE(a.public,0) AS public,
+ COALESCE(a.area_manual,0) AS area_manual, COALESCE(a.admin1,'') AS admin1, COALESCE(a.admin2,'') AS admin2,
+ COALESCE(a.admin2_name,'') AS admin2_name, COALESCE(a.city,'') AS city, COALESCE(a.area_status,'') AS area_status,
+ COALESCE(json_extract(b.location,'$.lat'),0) AS lat, COALESCE(json_extract(b.location,'$.lon'),0) AS lon,
+ (b.id IS NOT NULL) AS has_loc
+ FROM arcade a LEFT JOIN arcade_basic b ON b.id=a.basic ORDER BY a.id`).All(&rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Change, 0, len(rows))
+	for _, r := range rows {
+		current := Assignment{Admin1: r.Admin1, Admin2: r.Admin2, Admin2Name: r.Admin2N, City: r.City, Status: r.Status}
+		next := current
+		if !r.Manual {
+			if !r.HasLoc || (r.Lat == 0 && r.Lon == 0) {
+				next = Assignment{Status: geo.AreaUnmapped}
+			} else {
+				res := areas.Classify(r.Country, r.Lat, r.Lon)
+				next = Assignment{Admin1: res.Admin1, Admin2: res.Admin2, Admin2Name: res.Admin2Name, City: res.City, Status: res.Status}
+			}
+		}
+		out = append(out, Change{Arcade: r.ID, Country: r.Country, Public: r.Public, Manual: r.Manual, Lat: r.Lat, Lon: r.Lon, Current: current, Next: next})
+	}
+	return out, nil
+}
+
+// ApplyPlan writes planned values that differ from the stored ones. It updates
+// only the derived columns, so `updated`, history and XP are untouched, and it
+// is idempotent. Callers own the transaction and cache invalidation.
+func ApplyPlan(app core.App, changes []Change, now time.Time) (int, error) {
+	checked := types.NowDateTime()
+	if !now.IsZero() {
+		checked, _ = types.ParseDateTime(now.UTC())
+	}
+	written := 0
+	for _, c := range changes {
+		if !c.Changed() || c.Manual {
+			continue
+		}
+		_, err := app.DB().Update(collectionArcade, map[string]any{
+			FieldAdmin1: c.Next.Admin1, FieldAdmin2: c.Next.Admin2, FieldAdmin2Nm: c.Next.Admin2Name,
+			FieldCity: c.Next.City, FieldStatus: c.Next.Status, FieldCheckedAt: checked.String(),
+		}, dbx.HashExp{"id": c.Arcade}).Execute()
+		if err != nil {
+			return written, fmt.Errorf("arcade %s: %w", c.Arcade, err)
+		}
+		written++
+	}
+	return written, nil
 }
