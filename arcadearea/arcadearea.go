@@ -264,10 +264,22 @@ func Plan(app core.App) ([]Change, error) {
 		Lon     float64 `db:"lon"`
 		HasLoc  bool    `db:"has_loc"`
 	}
+	collection, err := app.FindCollectionByNameOrId(collectionArcade)
+	if err != nil {
+		return nil, err
+	}
+	// Before the schema migration (report on a backup copy) the area columns
+	// do not exist yet; read them as empty.
+	column := func(name, empty string) string {
+		if collection.Fields.GetByName(name) == nil {
+			return empty + " AS " + name
+		}
+		return "COALESCE(a." + name + "," + empty + ") AS " + name
+	}
 	var rows []row
-	err = app.DB().NewQuery(`SELECT a.id, COALESCE(a.country,'') AS country, COALESCE(a.public,0) AS public,
- COALESCE(a.area_manual,0) AS area_manual, COALESCE(a.admin1,'') AS admin1, COALESCE(a.admin2,'') AS admin2,
- COALESCE(a.admin2_name,'') AS admin2_name, COALESCE(a.city,'') AS city, COALESCE(a.area_status,'') AS area_status,
+	err = app.DB().NewQuery(`SELECT a.id, COALESCE(a.country,'') AS country, COALESCE(a.public,0) AS public, ` +
+		column(FieldManual, "0") + ", " + column(FieldAdmin1, "''") + ", " + column(FieldAdmin2, "''") + ", " +
+		column(FieldAdmin2Nm, "''") + ", " + column(FieldCity, "''") + ", " + column(FieldStatus, "''") + `,
  COALESCE(json_extract(b.location,'$.lat'),0) AS lat, COALESCE(json_extract(b.location,'$.lon'),0) AS lon,
  (b.id IS NOT NULL) AS has_loc
  FROM arcade a LEFT JOIN arcade_basic b ON b.id=a.basic ORDER BY a.id`).All(&rows)
