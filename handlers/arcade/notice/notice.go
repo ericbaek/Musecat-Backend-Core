@@ -286,6 +286,13 @@ func noticeCreateAccess(app core.App, auth *core.Record, arcadeID string) error 
 	return noticeError(http.StatusForbidden, "notice creation is not allowed for this arcade")
 }
 
+// CanManageArcadeStatus reports whether auth may use an arcade's admin tools.
+// It deliberately mirrors notice creation access: staff, the arcade's official
+// owner, or a level-gated supporter when no other official manager exists.
+func CanManageArcadeStatus(app core.App, auth *core.Record, arcadeID string) bool {
+	return noticeCreateAccess(app, auth, arcadeID) == nil
+}
+
 func noticeMutationAccess(app core.App, auth *core.Record, rec *core.Record) error {
 	if auth == nil {
 		return noticeError(http.StatusUnauthorized, "authentication required")

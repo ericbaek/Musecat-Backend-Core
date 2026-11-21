@@ -346,8 +346,14 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	supporterReview.PUT("/request", arcadeadmin.ReviewSupporterRequest)
 	reviewQueue.GET("/requests", arcadeadmin.ListModerationRequests)
 	reviewQueue.PUT("/request", arcadeadmin.ReviewModerationRequest)
-	reviewQueue.GET("/status", arcadeadmin.GetArcadeStatus)
-	reviewQueue.PUT("/status", arcadeadmin.UpdateArcadeStatus)
+	// Status tools are authorized per arcade inside the handler: staff, or the
+	// same supporter/owner rule used for notices.
+	arcadeStatus := se.Router.Group("/moderation/arcade").Bind(
+		apis.RequireAuth("user"),
+		userhandler.RequireActiveUser(),
+	)
+	arcadeStatus.GET("/status", arcadeadmin.GetArcadeStatus)
+	arcadeStatus.PUT("/status", arcadeadmin.UpdateArcadeStatus)
 	reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
 	reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
 
