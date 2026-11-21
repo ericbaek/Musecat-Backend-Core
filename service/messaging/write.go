@@ -429,9 +429,15 @@ func saveMessage(tx core.App, u *participant, c *core.Record, in SendInput, acti
 		if e != nil {
 			return nil, e
 		}
+		// A responder reply marks the inquiry as being handled. A requester reply
+		// only reopens a resolved inquiry; it must not bounce an in-progress one
+		// back to waiting on every back-and-forth message.
 		status := "recognised"
 		if acting.Type == "user" || acting.Type == "guest" {
-			status = "waiting"
+			status = q.GetString("status")
+			if status == "solved" {
+				status = "waiting"
+			}
 		}
 		if err = changeInquiryStatus(tx, u, c, q, status, m); err != nil {
 			return nil, err

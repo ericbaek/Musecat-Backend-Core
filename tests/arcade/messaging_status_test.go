@@ -121,3 +121,64 @@ func TestInquiryStatusHistoryAndSendingAfterResolution(t *testing.T) {
 		}
 	}
 }
+
+func TestInquiryRequesterReplyKeepsInProgressStatus(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, requester := createAuthUserWithTags(t, app, []string{})
+	_, responder := createAuthUserWithTags(t, app, []string{"moderator"})
+	viewer := messaging.Principal{UserID: requester.Id}
+	admin := messaging.Principal{UserID: responder.Id}
+	inbox := messaging.Identity{Type: "team", ID: "musecat"}
+	room, _, err := messaging.CreateFor(app, viewer, messaging.CreateInput{Kind: "inquiry", Inbox: inbox, InitialMessage: messaging.SendInput{Text: "Question", ClientMessageID: "initial"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := func() string {
+		t.Helper()
+		current, err := messaging.GetFor(app, admin, room.ID)
+		if err != nil || current.Status == nil {
+			t.Fatal(current, err)
+		}
+		return *current.Status
+	}
+	lastChange := func() *messaging.InquiryStatusChange {
+		t.Helper()
+		page, err := messaging.HistoryFor(app, admin, room.ID, 0, -1, 50)
+		if err != nil || len(page.Items) == 0 {
+			t.Fatal(page, err)
+		}
+		return page.Items[len(page.Items)-1].StatusChange
+	}
+	if status() != "waiting" {
+		t.Fatal("new inquiry should wait for a reply")
+	}
+	if _, _, err := messaging.Send(app, responder.Id, room.ID, messaging.SendInput{Text: "Looking into it", ClientMessageID: "staff-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if status() != "recognised" {
+		t.Fatal("responder reply should mark the inquiry in progress")
+	}
+	for i := range 2 {
+		if _, _, err := messaging.SendFor(app, viewer, room.ID, messaging.SendInput{Text: "Thanks", ClientMessageID: fmt.Sprintf("thanks-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+		if status() != "recognised" || lastChange() != nil {
+			t.Fatal("requester reply bounced an in-progress inquiry")
+		}
+		if _, _, err := messaging.Send(app, responder.Id, room.ID, messaging.SendInput{Text: "Sure", ClientMessageID: fmt.Sprintf("staff-ack-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+		if lastChange() != nil {
+			t.Fatal("responder reply re-recorded an unchanged status")
+		}
+	}
+	if _, err := messaging.SetStatus(app, responder.Id, room.ID, "solved"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := messaging.SendFor(app, viewer, room.ID, messaging.SendInput{Text: "One more thing", ClientMessageID: "reopen"}); err != nil {
+		t.Fatal(err)
+	}
+	if change := lastChange(); status() != "waiting" || change == nil || change.From != "solved" || change.To != "waiting" {
+		t.Fatal("requester reply should reopen a resolved inquiry", change)
+	}
+}
