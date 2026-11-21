@@ -6611,7 +6611,7 @@ paths:
   /moderation/arcade/status:
     get:
       tags: [Arcade]
-      summary: Read arcade admin settings (strict reviewer only)
+      summary: Read arcade admin settings (staff, or notice managers for this arcade)
       security: [{bearerAuth: []}]
       parameters:
         - name: arcade
@@ -6633,11 +6633,11 @@ paths:
                   country: {type: string, description: ISO 3166-1 alpha-2 code; trimmed and uppercased}
                   timezone: {type: string, description: Valid IANA timezone name; Local is rejected}
         '401': {description: Authentication required}
-        '403': {description: Active developer or moderator required}
+        '403': {description: "Requires staff, the arcade's official owner, or a level-30 supporter when no other official manager exists"}
         '404': {description: Arcade not found}
     put:
       tags: [Arcade]
-      summary: Set arcade admin settings (strict reviewer only; no XP)
+      summary: Set arcade admin settings (staff, or notice managers for this arcade; no XP)
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -6667,7 +6667,7 @@ paths:
                   timezone: {type: string, description: Valid IANA timezone name; Local is rejected}
         '400': {description: Invalid input}
         '401': {description: Authentication required}
-        '403': {description: Active developer or moderator required}
+        '403': {description: "Requires staff, the arcade's official owner, or a level-30 supporter when no other official manager exists. Non-staff may only toggle public/closed on an open arcade; changing country or timezone, or reopening a closed arcade, is staff-only."}
         '404': {description: Arcade not found}
   /admin/arcade/areas:
     get:
