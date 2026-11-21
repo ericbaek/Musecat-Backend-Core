@@ -30,8 +30,20 @@ func record(app core.App, col string, values map[string]any) (*core.Record, erro
 	}
 	return r, app.Save(r)
 }
-func existingRetry(app core.App, c, user, key string) (*core.Record, error) {
-	return app.FindFirstRecordByFilter(Messages, "conversation={:c} && (sender_user={:u} || sender_guest={:u}) && client_message_id={:k}", dbx.Params{"c": c, "u": user, "k": key})
+func existingRetry(app core.App, c string, u *participant, key string) (*core.Record, error) {
+	senderUser, senderGuest := "", u.ID
+	if u.Kind == "user" {
+		senderUser, senderGuest = u.ID, ""
+	}
+	// Use literal columns: relation-filter expansion would add joins and prevent
+	// this exact lookup from using the existing partial idempotency index.
+	collection, err := app.FindCollectionByNameOrId(Messages)
+	if err != nil {
+		return nil, err
+	}
+	row := core.NewRecord(collection)
+	err = app.RecordQuery(collection).AndWhere(dbx.NewExp("conversation={:c} AND sender_user={:user} AND sender_guest={:guest} AND client_message_id={:k} AND (sender_user!='' OR sender_guest!='')", dbx.Params{"c": c, "user": senderUser, "guest": senderGuest, "k": key})).One(row)
+	return row, err
 }
 func inputHash(in *SendInput) (string, error) {
 	in.Text = strings.TrimSpace(in.Text)
@@ -110,10 +122,14 @@ func inputHash(in *SendInput) (string, error) {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
 }
-func rateLimit(app core.App, user, c string, create bool) error {
+func rateLimit(app core.App, u *participant, c string, create bool) error {
 	since := time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05.000Z")
-	filter := "(sender_user={:u} OR sender_guest={:u}) AND created>={:since}"
-	params := dbx.Params{"u": user, "since": since}
+	filter := "sender_user={:u} AND created>={:since}"
+	if u.Kind == "guest" {
+		// Public-room growth must not turn guest inquiry quotas into a full scan.
+		filter = "sender_user='' AND sender_guest={:u} AND created>={:since}"
+	}
+	params := dbx.Params{"u": u.ID, "since": since}
 	collection := Messages
 	limit := 60
 	if create {
@@ -194,7 +210,7 @@ func CreateFor(app core.App, viewer Principal, in CreateInput) (Summary, bool, e
 				return apis.NewForbiddenError("Recipient is unavailable.", nil)
 			}
 			// Count the initiator, never users who only received new conversations.
-			if err = rateLimit(tx, user, "", true); err != nil {
+			if err = rateLimit(tx, u, "", true); err != nil {
 				return err
 			}
 			c, err := record(tx, Conversations, map[string]any{"kind": "dm", "created_by": user, "pair_key": key})
@@ -244,7 +260,7 @@ func CreateFor(app core.App, viewer Principal, in CreateInput) (Summary, bool, e
 				return router.NewApiError(401, "LOGIN_REQUIRED", nil)
 			}
 		}
-		if err = rateLimit(tx, user, "", true); err != nil {
+		if err = rateLimit(tx, u, "", true); err != nil {
 			return err
 		}
 		c, err := record(tx, Conversations, map[string]any{"kind": "inquiry", "created_by": user})
@@ -325,7 +341,6 @@ func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message,
 		if err != nil {
 			return err
 		}
-		user := u.ID
 		inboxType := ""
 		if c.GetString("kind") == "inquiry" {
 			q, e := inquiry(tx, cid)
@@ -339,7 +354,7 @@ func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message,
 			return err
 		}
 		// A committed retry is readable even after receive/block policy changes.
-		if prior, e := existingRetry(tx, cid, user, in.ClientMessageID); e == nil {
+		if prior, e := existingRetry(tx, cid, u, in.ClientMessageID); e == nil {
 			if prior.GetString("payload_hash") != hash || (in.ActingAs != nil && (prior.GetString("acting_type") != in.ActingAs.Type || prior.GetString("acting_id") != in.ActingAs.ID)) {
 				return router.NewApiError(409, "clientMessageId was already used for different content.", nil)
 			}
@@ -351,10 +366,10 @@ func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message,
 		if err != nil {
 			return err
 		}
-		if err = rateLimit(tx, user, "", false); err != nil {
+		if err = rateLimit(tx, u, "", false); err != nil {
 			return err
 		}
-		if err = rateLimit(tx, user, cid, false); err != nil {
+		if err = rateLimit(tx, u, cid, false); err != nil {
 			return err
 		}
 		if in.BotChoice != nil && acting.Type != "user" && acting.Type != "guest" {
@@ -401,7 +416,11 @@ func SendFor(app core.App, viewer Principal, cid string, in SendInput) (Message,
 func saveMessage(tx core.App, u *participant, c *core.Record, in SendInput, acting Identity, hash string) (*core.Record, error) {
 	if len(in.Photos) > 0 {
 		var used int
-		err := tx.DB().NewQuery("SELECT COALESCE(sum(json_array_length(photos)),0) FROM messaging_message WHERE (sender_user={:u} OR sender_guest={:u}) AND created>={:since}").Bind(dbx.Params{"u": u.ID, "since": time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05.000Z")}).Row(&used)
+		filter := "sender_user={:u}"
+		if u.Kind == "guest" {
+			filter = "sender_user='' AND sender_guest={:u}"
+		}
+		err := tx.DB().NewQuery("SELECT COALESCE(sum(json_array_length(photos)),0) FROM messaging_message WHERE " + filter + " AND created>={:since}").Bind(dbx.Params{"u": u.ID, "since": time.Now().UTC().Add(-time.Minute).Format("2006-01-02 15:04:05.000Z")}).Row(&used)
 		if err != nil {
 			return nil, err
 		}
@@ -437,6 +456,12 @@ func saveMessage(tx core.App, u *participant, c *core.Record, in SendInput, acti
 			return nil, err
 		}
 	}
+	if c.GetString("kind") == "plaza" {
+		// Fan out invalidations only to bounded live streams. Public chat never
+		// enumerates all members or creates per-member inbox/push notifications.
+		afterCommit(tx, Event{Name: "conversation.changed", ID: c.Id, LatestSequence: seq, Reason: "message", Plaza: true})
+		return m, nil
+	}
 	audience, err := conversationAudience(tx, c)
 	if err != nil {
 		return nil, err
@@ -460,6 +485,9 @@ func SetReadFor(app core.App, viewer Principal, id string, through int) (map[str
 		user := u.ID
 		if through < 0 || through > c.GetInt("last_sequence") {
 			return apis.NewBadRequestError("Invalid read sequence.", nil)
+		}
+		if c.GetString("kind") == "plaza" {
+			return apis.NewBadRequestError("Plaza has no read receipts.", nil)
 		}
 		row, e := tx.FindFirstRecordByFilter(Reads, "conversation={:c} && user={:u}", dbx.Params{"c": id, "u": user})
 		previous := 0
