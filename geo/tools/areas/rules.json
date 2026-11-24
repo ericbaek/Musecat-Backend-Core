@@ -1,0 +1,201 @@
+{
+  "$comment": "Per-country unit rules for build.mjs. See README.md.",
+  "simplifyMeters": {
+    "default": 300,
+    "NE": 1500,
+    "KR": 80,
+    "JP": 120,
+    "US": 500,
+    "AU": 600,
+    "CA": 1500,
+    "CN": 500,
+    "ID": 600,
+    "TH": 500,
+    "VN": 500,
+    "PH": 400,
+    "NZ": 500,
+    "MY": 400,
+    "GB": 250
+  },
+  "wholeCountry": [
+    "HK",
+    "MO",
+    "SG"
+  ],
+  "admin1IsCity": [
+    "TW"
+  ],
+  "countries": {
+    "KR": {
+      "sidoToAdmin1": {
+        "11": "KR-11",
+        "26": "KR-26",
+        "27": "KR-27",
+        "28": "KR-28",
+        "30": "KR-30",
+        "31": "KR-31",
+        "36": "KR-50",
+        "41": "KR-41",
+        "43": "KR-43",
+        "44": "KR-44",
+        "47": "KR-47",
+        "48": "KR-48",
+        "50": "KR-49",
+        "51": "KR-42",
+        "52": "KR-45",
+        "12": "KR-12"
+      },
+      "metropolitanSido": [
+        "11",
+        "26",
+        "27",
+        "28",
+        "30",
+        "31",
+        "36"
+      ],
+      "metropolitanGuInSido": {
+        "12": "광주"
+      }
+    },
+    "JP": {
+      "tokyoSpecialWards": [
+        "13101",
+        "13123"
+      ],
+      "tokyoSpecialWardsName": "東京都区部"
+    },
+    "AU": {
+      "iso3": "AUS"
+    },
+    "CA": {
+      "iso3": "CAN"
+    },
+    "CN": {
+      "iso3": "CHN",
+      "cityIsAdmin1": [
+        "CN-BJ",
+        "CN-SH",
+        "CN-TJ",
+        "CN-CQ"
+      ],
+      "rollUpGeoNamesAdmin2": true
+    },
+    "GB": {
+      "iso3": "GBR",
+      "cityByRegion": {
+        "Greater London": "London"
+      }
+    },
+    "ID": {
+      "iso3": "IDN",
+      "cityIsAdmin1": [
+        "ID-JK"
+      ]
+    },
+    "MY": {
+      "iso3": "MYS"
+    },
+    "NZ": {
+      "iso3": "NZL"
+    },
+    "PH": {
+      "iso3": "PHL"
+    },
+    "TH": {
+      "iso3": "THA",
+      "cityIsAdmin1": [
+        "TH-10"
+      ]
+    },
+    "US": {
+      "iso3": "USA"
+    },
+    "VN": {
+      "iso3": "VNM",
+      "cityIsAdmin1": [
+        "VN-HN",
+        "VN-SG",
+        "VN-HP",
+        "VN-DN",
+        "VN-CT"
+      ]
+    }
+  },
+  "wholeCountryNames": {
+    "HK": "香港",
+    "MO": "澳門",
+    "SG": "Singapore"
+  },
+  "minIslandKm2": 0.2,
+  "precision": {
+    "default": 0.0001,
+    "NE": 0.001,
+    "KR": 1e-05,
+    "JP": 1e-05
+  },
+  "seatMinPopulation": 100000,
+  "mapSimplifyMeters": 2000,
+  "admin1": {
+    "KR-12": {
+      "names": {
+        "en": "Jeonnam-Gwangju"
+      },
+      "aliases": [
+        "광주광역시",
+        "광주",
+        "전라남도",
+        "전남",
+        "Gwangju",
+        "South Jeolla",
+        "Jeollanam-do"
+      ]
+    },
+    "KR-43": {
+      "aliases": [
+        "충북"
+      ]
+    },
+    "KR-44": {
+      "aliases": [
+        "충남"
+      ]
+    },
+    "KR-47": {
+      "aliases": [
+        "경북"
+      ]
+    },
+    "KR-48": {
+      "aliases": [
+        "경남"
+      ]
+    },
+    "KR-45": {
+      "aliases": [
+        "전북",
+        "전라북도"
+      ]
+    },
+    "KR-42": {
+      "aliases": [
+        "강원도"
+      ]
+    },
+    "KR-49": {
+      "aliases": [
+        "제주도"
+      ]
+    },
+    "GB-LND": {
+      "excludeAliases": [
+        "London"
+      ],
+      "$comment": "City of London only; addresses say London for every Greater London borough."
+    }
+  },
+  "cityNames": {},
+  "cityKeyOverrides": {},
+  "keyRenames": {},
+  "keyRetired": []
+}

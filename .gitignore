@@ -7,3 +7,6 @@
 /.DS_Store
 /.idea/
 /.vscode/
+/geo/tools/areas/node_modules/
+/geo/tools/areas/.raw/
+/geo/tools/areas/.work/

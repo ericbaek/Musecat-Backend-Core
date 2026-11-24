@@ -254,14 +254,18 @@ func TestCanonicalNativeGrantAndStatusRollbackAndInvalidInput(t *testing.T) {
 }
 func TestCanonicalNativeGrantStatusRolesAndCredentialScope(t *testing.T) {
 	app := nativeNearbyApp(t, true)
-	_, request := seedNativeGrant(t, app, nil)
+	applicant, request := seedNativeGrant(t, app, nil)
+	// Status tools authorize per arcade after validating the body, so denied
+	// roles send a valid request for an arcade they do not manage.
+	arcadeID, _ := seedPublicArcade(t, app, applicant.Id, arcadeSeed{Name: "Synthetic role venue", Address: "Synthetic road", Location: location{Lat: 37.5, Lon: 127}})
+	statusBody := map[string]any{"arcade": arcadeID, "public": true, "closed": false, "country": "KR", "timezone": "Asia/Seoul"}
 	for _, tags := range [][]string{nil, {"supporter"}, {"founding_supporter"}, {"designer"}, {"arcade_owner"}} {
 		web, u := createAuthUserWithTags(t, app, tags)
 		_, s := nativeNearbySession(t, app, u)
 		before := nativeGrantStatusState(t, app)
 		for _, token := range []string{web, s.AccessToken} {
 			queueDecision(t, app, "/moderation/supporter/request", token, "", map[string]any{"id": request.Id, "status": "approved"}, 403)
-			queueDecision(t, app, "/moderation/arcade/status", token, "", map[string]any{}, 403)
+			queueDecision(t, app, "/moderation/arcade/status", token, "", statusBody, 403)
 		}
 		if before != nativeGrantStatusState(t, app) {
 			t.Fatal("denied role mutated data")

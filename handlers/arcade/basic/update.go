@@ -213,6 +213,11 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		})
 	}
 
+	// city_id is deprecated: the Passport city is derived from the location
+	// (arcadearea) and corrected through the admin area override. Accepted and
+	// ignored so existing bot clients keep working.
+	body.CityID = nil
+
 	// 2) validate basic constraints
 	if err := validateUpdateBasicBody(body); err != nil {
 		return re.JSON(http.StatusBadRequest, map[string]any{
@@ -255,20 +260,7 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 			})
 		}
 		geoResult = &res
-		if body.CityID == nil {
-			cityID, _, err := arcadeinternal.ResolveCityID(re.App, res, merged.Address, merged.Lat, merged.Lon)
-			if err != nil {
-				return re.JSON(http.StatusServiceUnavailable, map[string]any{
-					"error":   "city lookup failed",
-					"details": err.Error(),
-				})
-			}
-			merged.CityID = cityID
-		}
 	}
-	// ResolveCityID may add a city to an otherwise address/location-only edit.
-	// Compute the response/changelog field list after that resolution.
-	changed = computeChangedFields(cur, merged, body)
 	if len(changed) == 0 {
 		return re.JSON(http.StatusBadRequest, map[string]any{
 			"error": "at least one changed field is required",
@@ -287,16 +279,6 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 		}
 		if body.BaseBasicID != nil && arcadeRec.GetString("basic") != *body.BaseBasicID {
 			return errStaleBasic
-		}
-		if merged.CityID != "" {
-			city, e := txApp.FindRecordById("passport_city", merged.CityID)
-			country := arcadeRec.GetString("country")
-			if geoResult != nil {
-				country = geoResult.Country
-			}
-			if e != nil || !strings.EqualFold(city.GetString("country"), country) {
-				return errInvalidCity
-			}
 		}
 		baseExp, err := xp.LoadCurrentExp(txApp, re.Auth.Id)
 		if err != nil {
@@ -383,10 +365,12 @@ func UpdateArcadeBasic(re *core.RequestEvent) error {
 	}
 
 	// 7) success
+	area := arcadeinternal.LoadArcadeArea(re.App, body.Arcade)
 	return re.JSON(http.StatusOK, map[string]any{
 		"arcade":      body.Arcade,
 		"basic":       newBasicID,
-		"city_id":     merged.CityID,
+		"city_id":     area.City,
+		"area":        area,
 		"changed":     changed,
 		"xp_feedback": xpFeedback,
 	})

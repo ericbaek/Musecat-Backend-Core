@@ -69,3 +69,40 @@ func TestModerationArcadeStatusRejectsInvalidGeography(t *testing.T) {
 		}
 	}
 }
+
+func TestArcadeStatusSupporterAccessMirrorsNotices(t *testing.T) {
+	app := newArcadeTestApp(t)
+	_, creator := createAuthUser(t, app)
+	supporterToken, supporter := createAuthUserWithTags(t, app, []string{"supporter"})
+	supporterHeaders := map[string]string{"Authorization": "Bearer " + supporterToken}
+	arcadeID, _ := seedPublicArcade(t, app, creator.Id, arcadeSeed{Name: "Supporter Status", Address: "Test", Location: location{Lat: 37.5, Lon: 127}})
+	saved := mustFindRecord(t, app, "arcade", arcadeID)
+	country, timezone := saved.GetString("country"), saved.GetString("timezone")
+	if country == "" || timezone == "" {
+		country, timezone = "KR", "Asia/Seoul"
+		saved.Set("country", country)
+		saved.Set("timezone", timezone)
+		if err := app.Save(saved); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := "/moderation/arcade/status?arcade=" + arcadeID
+	body := func(public, closed bool, c, tz string) string {
+		return fmt.Sprintf(`{"arcade":%q,"public":%t,"closed":%t,"country":%q,"timezone":%q}`, arcadeID, public, closed, c, tz)
+	}
+
+	setUserLevel(t, app, supporter.Id, 29)
+	assertContractStatus(t, executeJSONRequest(t, app, http.MethodGet, path, "", supporterHeaders), http.StatusForbidden)
+	assertContractStatus(t, executeJSONRequest(t, app, http.MethodPut, "/moderation/arcade/status", body(false, false, country, timezone), supporterHeaders), http.StatusForbidden)
+
+	setUserLevel(t, app, supporter.Id, 30)
+	assertContractStatus(t, executeJSONRequest(t, app, http.MethodGet, path, "", supporterHeaders), http.StatusOK)
+	// Country and timezone remain staff-only.
+	assertContractStatus(t, executeJSONRequest(t, app, http.MethodPut, "/moderation/arcade/status", body(true, false, "JP", "Asia/Tokyo"), supporterHeaders), http.StatusForbidden)
+	assertContractStatus(t, executeJSONRequest(t, app, http.MethodPut, "/moderation/arcade/status", body(true, true, country, timezone), supporterHeaders), http.StatusOK)
+	if !mustFindRecord(t, app, "arcade", arcadeID).GetBool("closed") {
+		t.Fatal("supporter could not close the arcade")
+	}
+	// Reopening a closed arcade stays with staff.
+	assertContractStatus(t, executeJSONRequest(t, app, http.MethodPut, "/moderation/arcade/status", body(true, false, country, timezone), supporterHeaders), http.StatusForbidden)
+}

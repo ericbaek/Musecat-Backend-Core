@@ -1,12 +1,16 @@
 package admin
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	arcadeinternal "github.com/ericbaek/musecat-backend-core/handlers/arcade/internal"
+	arcadenotice "github.com/ericbaek/musecat-backend-core/handlers/arcade/notice"
+	arcadequery "github.com/ericbaek/musecat-backend-core/handlers/arcade/query"
 	"github.com/pocketbase/pocketbase/core"
 	"golang.org/x/text/language"
 )
@@ -24,13 +28,28 @@ func ListModerationRequests(re *core.RequestEvent) error {
 	return re.JSON(http.StatusOK, map[string]any{"items": items, "total": len(items)})
 }
 
+// arcadeStatusAccess lets staff manage any arcade and lets notice-capable
+// users (official owner or level-gated supporter) manage only their arcade.
+func arcadeStatusAccess(re *core.RequestEvent, arcadeID string) (staff bool, ok bool) {
+	if arcadequery.HasStrictReviewerAccess(re.Auth) {
+		return true, true
+	}
+	return false, arcadenotice.CanManageArcadeStatus(re.App, re.Auth, arcadeID)
+}
+
 func GetArcadeStatus(re *core.RequestEvent) error {
-	arcade, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, strings.TrimSpace(re.Request.URL.Query().Get("arcade")))
+	arcadeID := strings.TrimSpace(re.Request.URL.Query().Get("arcade"))
+	if _, ok := arcadeStatusAccess(re, arcadeID); !ok {
+		return re.JSON(http.StatusForbidden, map[string]any{"error": "supporter level 30 or staff access required"})
+	}
+	arcade, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, arcadeID)
 	if err != nil {
 		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
 	}
 	return re.JSON(http.StatusOK, arcadeStatusPayload(arcade))
 }
+
+var errArcadeStatusDenied = errors.New("arcade status change denied")
 
 func UpdateArcadeStatus(re *core.RequestEvent) error {
 	var body struct {
@@ -53,15 +72,31 @@ func UpdateArcadeStatus(re *core.RequestEvent) error {
 	if _, err := time.LoadLocation(body.Timezone); err != nil || body.Timezone == "" || body.Timezone == "Local" {
 		return re.JSON(http.StatusBadRequest, map[string]any{"error": "timezone must be a valid IANA timezone"})
 	}
-	if _, err := re.App.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade); err != nil {
-		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
+	staff, allowed := arcadeStatusAccess(re, body.Arcade)
+	if !allowed {
+		return re.JSON(http.StatusForbidden, map[string]any{"error": "supporter level 30 or staff access required"})
 	}
 	var arcade *core.Record
+	var denied string
 	err := re.App.RunInTransaction(func(txApp core.App) error {
 		var err error
 		arcade, err = txApp.FindRecordById(arcadeinternal.CollectionArcade, body.Arcade)
 		if err != nil {
 			return err
+		}
+		if !staff {
+			// Non-staff managers only toggle public/closed on an open arcade;
+			// location metadata and reopening closed arcades stay with staff.
+			// Checked on the transaction's record so a concurrent close cannot
+			// be overridden.
+			if arcade.GetBool("closed") {
+				denied = "closed arcades can only be changed by staff"
+				return errArcadeStatusDenied
+			}
+			if !strings.EqualFold(body.Country, strings.TrimSpace(arcade.GetString("country"))) || body.Timezone != strings.TrimSpace(arcade.GetString("timezone")) {
+				denied = "country and timezone can only be changed by staff"
+				return errArcadeStatusDenied
+			}
 		}
 		arcade.Set("public", *body.Public)
 		arcade.Set("closed", *body.Closed)
@@ -69,6 +104,12 @@ func UpdateArcadeStatus(re *core.RequestEvent) error {
 		arcade.Set("timezone", body.Timezone)
 		return txApp.Save(arcade)
 	})
+	if errors.Is(err, errArcadeStatusDenied) {
+		return re.JSON(http.StatusForbidden, map[string]any{"error": denied})
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return re.JSON(http.StatusNotFound, map[string]any{"error": "arcade not found"})
+	}
 	if err != nil {
 		return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to update arcade status"})
 	}

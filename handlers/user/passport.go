@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ericbaek/musecat-backend-core/geo"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -28,13 +29,15 @@ type VisitTimelineLocation struct {
 }
 
 type PassportCity struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Country     string `json:"country"`
-	Admin1      string `json:"admin1"`
-	Location    any    `json:"location"`
-	ArcadeCount int    `json:"arcade_count"`
-	VisitCount  int    `json:"visit_count"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Names       map[string]string `json:"names"`
+	Country     string            `json:"country"`
+	Admin1      string            `json:"admin1"`
+	Estimated   bool              `json:"estimated"`
+	Location    any               `json:"location"`
+	ArcadeCount int               `json:"arcade_count"`
+	VisitCount  int               `json:"visit_count"`
 }
 type PassportCountry struct {
 	Country     string `json:"country"`
@@ -42,19 +45,20 @@ type PassportCountry struct {
 	VisitCount  int    `json:"visit_count"`
 }
 type PassportStamp struct {
-	Arcade          string   `json:"arcade"`
-	Name            string   `json:"name"`
-	Country         string   `json:"country"`
-	CityID          string   `json:"city_id"`
-	CityName        string   `json:"city_name"`
-	Closed          bool     `json:"closed"`
-	PhotoURL        string   `json:"photo_url,omitempty"`
-	Location        any      `json:"location"`
-	FirstVisitDay   string   `json:"first_visit_day,omitempty"`
-	LastVisitDay    string   `json:"last_visit_day,omitempty"`
-	VisitDates      []string `json:"visit_dates,omitempty"`
-	VisitCount      int      `json:"visit_count"`
-	TotalVisitCount int      `json:"total_visit_count"`
+	Arcade          string            `json:"arcade"`
+	Name            string            `json:"name"`
+	Country         string            `json:"country"`
+	CityID          string            `json:"city_id"`
+	CityName        string            `json:"city_name"`
+	CityNames       map[string]string `json:"city_names,omitempty"`
+	Closed          bool              `json:"closed"`
+	PhotoURL        string            `json:"photo_url,omitempty"`
+	Location        any               `json:"location"`
+	FirstVisitDay   string            `json:"first_visit_day,omitempty"`
+	LastVisitDay    string            `json:"last_visit_day,omitempty"`
+	VisitDates      []string          `json:"visit_dates,omitempty"`
+	VisitCount      int               `json:"visit_count"`
+	TotalVisitCount int               `json:"total_visit_count"`
 	lastAt          string
 	firstAt         string
 	photoID         string
@@ -93,13 +97,15 @@ type Passport struct {
 }
 
 type passportRow struct {
-	arcade, name, country, photo, day, at, cityID, cityName, admin1 string
-	closed                                                          bool
-	location, cityLocation                                          sql.NullString
+	arcade, name, country, photo, day, at, cityID string
+	closed                                        bool
+	location                                      sql.NullString
 }
 
 // LoadPassport is the single aggregation source for private details and public summaries.
 // It never queries a geo provider and only includes currently public arcades.
+// Cities come from the arcade's stored area (arcade.city) and the embedded
+// admin-area catalog; there is no city collection.
 func LoadPassport(app core.App, userID, year string) (Passport, error) {
 	return loadPassport(app, userID, year, false)
 }
@@ -110,9 +116,8 @@ func loadPassport(app core.App, userID, year string, includeTimeline bool) (Pass
 		out.timeline = []VisitTimelineEntry{}
 	}
 	rows, err := app.DB().NewQuery(`SELECT v.arcade, COALESCE(b.name,''), a.country, a.photo, a.closed,
- v.visit_day, v.visited_at, b.location, COALESCE(c.id,''), COALESCE(c.name,''), COALESCE(c.admin1,''), c.location
+ v.visit_day, v.visited_at, b.location, COALESCE(a.city,'')
  FROM arcade_visit v JOIN arcade a ON a.id=v.arcade LEFT JOIN arcade_basic b ON b.id=a.basic
- LEFT JOIN passport_city c ON c.id=b.city_id AND c.country=a.country
  WHERE v.user={:user} AND a.public=true ORDER BY v.visited_at ASC, v.id ASC`).Bind(dbx.Params{"user": userID}).Rows()
 	if err != nil {
 		return out, err
@@ -120,7 +125,7 @@ func loadPassport(app core.App, userID, year string, includeTimeline bool) (Pass
 	records := []passportRow{}
 	for rows.Next() {
 		var r passportRow
-		if err = rows.Scan(&r.arcade, &r.name, &r.country, &r.photo, &r.closed, &r.day, &r.at, &r.location, &r.cityID, &r.cityName, &r.admin1, &r.cityLocation); err != nil {
+		if err = rows.Scan(&r.arcade, &r.name, &r.country, &r.photo, &r.closed, &r.day, &r.at, &r.location, &r.cityID); err != nil {
 			rows.Close()
 			return out, err
 		}
@@ -131,8 +136,20 @@ func loadPassport(app core.App, userID, year string, includeTimeline bool) (Pass
 	if err != nil {
 		return out, err
 	}
-	if err := app.DB().NewQuery("SELECT EXISTS(SELECT 1 FROM passport_city)").Row(&out.CityCatalogAvailable); err != nil {
+	areas, err := geo.EmbeddedAreas()
+	if err != nil {
 		return out, err
+	}
+	out.CityCatalogAvailable = true
+	for i := range records {
+		// Until the startup refresh rewrites rows from an older dataset, a
+		// renamed key follows the rename and a retired one counts as
+		// unclassified rather than an anonymous city.
+		key, ok := areas.CurrentCityKey(records[i].cityID)
+		if !ok {
+			key = ""
+		}
+		records[i].cityID = key
 	}
 	stamps := map[string]*PassportStamp{}
 	cities := map[string]*PassportCity{}
@@ -151,7 +168,8 @@ func loadPassport(app core.App, userID, year string, includeTimeline bool) (Pass
 		years[day.Year()] = true
 		stamp, exists := stamps[r.arcade]
 		if !exists {
-			stamp = &PassportStamp{Arcade: r.arcade, Name: r.name, Country: r.country, CityID: r.cityID, CityName: r.cityName, Closed: r.closed, FirstVisitDay: r.day, firstAt: r.at, photoID: r.photo, days: []string{}}
+			city, _ := areas.City(r.cityID)
+			stamp = &PassportStamp{Arcade: r.arcade, Name: r.name, Country: r.country, CityID: r.cityID, CityName: city.Name("en"), CityNames: city.Names, Closed: r.closed, FirstVisitDay: r.day, firstAt: r.at, photoID: r.photo, days: []string{}}
 			stamps[r.arcade] = stamp
 		}
 		stamp.TotalVisitCount++
@@ -211,11 +229,8 @@ func loadPassport(app core.App, userID, year string, includeTimeline bool) (Pass
 		}
 		if r.cityID != "" {
 			if cities[r.cityID] == nil {
-				var loc any
-				if a, b, ok := readVisitLocation(r.cityLocation.String); ok {
-					loc = map[string]float64{"lat": a, "lon": b}
-				}
-				cities[r.cityID] = &PassportCity{ID: r.cityID, Name: r.cityName, Country: r.country, Admin1: r.admin1, Location: loc}
+				city, _ := areas.City(r.cityID)
+				cities[r.cityID] = &PassportCity{ID: r.cityID, Name: city.Name("en"), Names: city.Names, Country: city.Country, Admin1: city.Admin1, Estimated: city.Estimated, Location: map[string]float64{"lat": city.Lat, "lon": city.Lon}}
 			}
 			cities[r.cityID].VisitCount++
 			if firstInPeriod {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ericbaek/musecat-backend-core/service/communitylikes"
 	"github.com/ericbaek/musecat-backend-core/service/communitymention"
 	"github.com/ericbaek/musecat-backend-core/service/usernotification"
 	"github.com/ericbaek/musecat-backend-core/service/xp"
@@ -132,6 +133,7 @@ func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
 	auth.POST("/comment", CreateComment).Bind(apis.BodyLimit(MaxCommentBodyBytes))
 	auth.PUT("/comment", UpdateComment).Bind(apis.BodyLimit(MaxCommentBodyBytes))
 	auth.DELETE("/comment", DeleteComment)
+	auth.GET("/post/likes", ListPostLikes)
 	auth.PUT("/post/like", LikePost)
 	auth.DELETE("/post/like", LikePost)
 	auth.PUT("/comment/like", LikeComment)
@@ -469,9 +471,19 @@ func ListPosts(re *core.RequestEvent) error {
 	if total > 0 {
 		lastPage = int((total + int64(perPage) - 1) / int64(perPage))
 	}
-	return re.JSON(http.StatusOK, map[string]any{
+	response := map[string]any{
 		"page": page, "per_page": perPage, "last_page": lastPage, "total": total, "items": items, "game_series_ids": gameIDs,
-	})
+	}
+	// An author's achievement gallery also reports the likes that author has
+	// received, independent of the current game filter and page.
+	if author, ok := params["author"].(string); ok && params["flair"] == "achievement" {
+		received, err := communitylikes.ReceivedAchievementLikeCount(re.App, author)
+		if err != nil {
+			return re.JSON(http.StatusBadGateway, map[string]any{"error": "failed to count received likes"})
+		}
+		response["author_received_like_count"] = received
+	}
+	return re.JSON(http.StatusOK, response)
 }
 
 func decodePostInput(re *core.RequestEvent) (postInput, error) {

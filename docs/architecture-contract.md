@@ -197,6 +197,14 @@ is a guest read. `comment_count` counts active root comments and replies. Root a
 reply wire pages contain up to 20 newest-first items with a stable created/id older
 cursor; the web client reverses loaded reply pages for chronological display.
 
+Who liked a post is visible only to that post's author through
+`GET /community/post/likes` (403 for anyone else); other viewers see the count
+only. The list excludes the author's own like and pages newest first by insertion
+rowid, because like rows carry no timestamp. The author's all-time received
+likes (other users' likes on active achievement posts) are exposed as
+`author_received_like_count` on author-filtered achievement lists and as
+`received_like_count` on `/user/activity`, which is outside its date range.
+
 The existing OpenAI worker processes up to 25 posts and 25 comments independently
 per run. Photo-only comments are ready immediately without an OpenAI call. Comments use empty titles and the same Korean-to-English/Japanese cache,
 leases, source hashes, retry bounds and five-minute delay. Claim, completion and
@@ -632,10 +640,9 @@ or invalid country code (including the bundled France/Norway `-99` sentinel)
 uses BigDataCloud, then Nominatim, within an eight-second total budget, keeping
 the offline timezone. Each provider response must have a two-letter uppercase
 country code; invalid responses try the next provider. A missing or invalid bundle returns the same
-`503` dependency failure. City labels come from the local `passport_city`
-GeoNames catalog: after the country lookup, the nearest catalog city is chosen
-deterministically. This deliberately favours a populated Passport over an
-unclassified venue; the country boundary still prevents cross-country labels.
+`503` dependency failure. Admin areas and Passport cities are derived from the
+embedded admin-area catalog and stored on `arcade`; see
+[`docs/offline-geo.md`](offline-geo.md). They never block an arcade write.
 Valid offline results do not enter the external HTTP cache; they are read from the
 immutable in-memory bundle on every request. Successful country fallbacks use the
 bounded 24-hour geo cache and coordinate-keyed singleflight; failures are not cached.
@@ -654,7 +661,7 @@ location. All external fallback calls happen before the mutation transaction.
 - `/arcades/nearby` accepts grouped `game_filter` values for cabinet-aware filtering. Each repeated value is a JSON object with a `series` id and an optional `cabinet` id; omitting `cabinet` means all cabinets for that series, and separate series groups use AND semantics. Grouped and legacy game parameters cannot be mixed. The legacy `game_series`/`game_cabinet` pair remains supported for compatibility: series-only filters ignore cabinet identity, while repeated and comma-separated values preserve positional `(series, cabinet)` pairs and require equal lengths. Invalid grouped filters, cabinet-only legacy requests, or unequal legacy list lengths return `400`.
 - Nearby remains an operating-discovery route: private and public/closed arcades, historical unselected batches, and unverified cabinet revisions for a cabinet-qualified pair MUST NOT affect results, pagination, country totals, or nearest-arcade summaries.
 - Candidate invalidation follows changes to arcade/basic data, `arcade.game_v2`, current game entries/revisions, versions, cabinets, and version/cabinet compatibility records.
-- `/arcades` is paginated `{page, per_page, last_page, total, items}` and includes only public/open candidates. Search intentionally includes public/closed candidates.
+- `/arcades` is paginated `{page, per_page, last_page, total, items}` and includes only public/open candidates. Search intentionally includes public/closed candidates. Like `/arcades/nearby`, `/arcades` returns `game_series` and `game` only to authenticated users or to a request the deployment registers as a trusted server reader through `readpolicy.RegisterTrustedReader`; standalone Core registers none.
 - `GET /arcade/public?arcade=...` is a creator-only, read-only XP estimate. It uses the same idempotent public and draft-backfill grant keys as `PUT /arcade/public`, writes no visibility or ledger state, and the successful PUT response is authoritative if the draft changes afterward. Public conversion grants 5 XP. Draft backfill is independent of the seven-day arcade-edit cooldown: each changed eligible area earns 2 XP once per arcade, regardless of how recently that area received normal edit XP.
 - Public conversion remains creator-only and uses the creator's level snapshot at request time: levels 0-4 require game information, contact-or-hours, and facility-photo-or-location-verification; levels 5-9 require game information and facility-photo-or-location-verification; levels 10+ require game information only. Supporter and staff tags never bypass these requirements. The one-time publication location verification keeps its stricter 100-meter distance / 100-meter GPS-accuracy rule, is tied to the current `arcade.basic` revision, and is invalidated automatically when basic information changes. It does not create a Passport visit or award XP.
 - XP ledger changes and aggregate mutations belong to the same transaction. No XP grant may survive a failed aggregate mutation.
@@ -752,13 +759,10 @@ Distances use current locations, with both consecutive endpoints inside the sele
 period; missing locations and excluded period records break a segment. Totals are
 straight-line distances, not actual travel or play time. Month series include zero months.
 
-Canonical `passport_city` records use GeoNames IDs as unique source identifiers; raw
-REST is locked. `arcade_basic.city_id` is optional and versioned with basic history.
-Current city metadata applies retrospectively. A missing or country-mismatched city is
-unclassified; those arcades remain in country and venue totals. Cities are matched by
-country, admin1 and locality aliases, never proximity. Explicit GeoNames hierarchy
-links attach PPLX neighbourhood aliases to a unique parent city; standalone cities
-such as Petaling Jaya remain distinct. Absent or ambiguous parentage is not inferred.
+Passport cities are the arcade's stored `city` key resolved against the embedded
+catalog, so catalog names apply retrospectively. An empty or unknown key is
+unclassified; those arcades remain in country and venue totals. `estimated`
+cities come from the nearest-seat fallback for countries without city boundaries.
 Rows missing admin1 are skipped during import. Address-based candidates require a
 named alias and use coordinates only to reject distant homonyms (50 km sanity limit,
 not a boundary). Every address candidate remains unapproved until operator review.

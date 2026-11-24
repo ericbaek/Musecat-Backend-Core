@@ -368,15 +368,15 @@ If you change a mutation handler, check two questions:
 If the answer is yes, add the endpoint here when you implement it.
 
 
-### Passport city classification
+### Admin area and Passport city
 
-`PUT /arcade/basic` accepts `city_id` (empty clears it), validates the city's country,
-and records its before/after value in the existing immutable `basic_diff` revision.
-Address/location changes clear an omitted city reference. Generic basic rollback restores
-the selected revision's city reference. `base_basic_id` optionally rejects a stale write
-with 409 before changing any row. Full's reviewed assignment command uses these normal
-mutations and authenticated editor attribution, including the existing basic-edit XP
-cooldown. GeoNames catalog import is reference-data maintenance and grants no XP.
+The admin area and Passport city are derived values on `arcade`, recomputed in
+the same save whenever `arcade.basic` or `arcade.country` changes. They write
+no `arcade_changelog` row and grant no XP; the basic revision that moved the
+location already records the edit. `PUT /arcade/basic` still accepts the
+deprecated `city_id` but ignores it. `base_basic_id` optionally rejects a stale
+write with 409 before changing any row. Historic `basic_diff` rows may still
+contain `city_id` and remain immutable.
 
 
 ### Flag and notice upload validation
