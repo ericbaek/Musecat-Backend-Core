@@ -186,7 +186,7 @@ func TestNativeAnnouncementManagementCurrentCredentialsAndRouteScope(t *testing.
 					{"GET", "/native" + announcementAdminPath, 404}, {"POST", "/native" + announcementAdminPath, 404},
 					{"PUT", "/native" + path, 404}, {"POST", "/native" + path + "/publish", 404}, {"POST", "/native" + path + "/archive", 404},
 					{"GET", "/native" + image, 404}, {"GET", "/api/collections/announcement/records", 403},
-					{"GET", "/announcements/" + id, 404}, {"GET", "/announcements/unseen", 401}, {"POST", "/announcements/" + id + "/view", 401},
+					{"GET", "/user/joint", 401},
 				} {
 					res := executeJSONRequest(t, app, op.method, op.path, "{}", headers)
 					res.Body.Close()

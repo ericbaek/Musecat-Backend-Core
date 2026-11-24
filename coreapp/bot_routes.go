@@ -18,6 +18,7 @@ import (
 	messaginghandler "github.com/ericbaek/musecat-backend-core/handlers/messaging"
 	search "github.com/ericbaek/musecat-backend-core/handlers/search"
 	user "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/nativeauth"
 	"github.com/ericbaek/musecat-backend-core/service/botaccess"
 	"github.com/ericbaek/musecat-backend-core/service/contribution"
 	"github.com/pocketbase/pocketbase/apis"
@@ -27,7 +28,7 @@ import (
 
 // The automation namespace explicitly lists arcade and official-account operations.
 // Registering a web/partner route never automatically exposes it to API keys.
-func registerBotRoutes(se *core.ServeEvent) {
+func registerBotRoutes(se *core.ServeEvent, nativeClients ...nativeauth.Client) {
 	// Raw photo metadata is publicly readable. Stored attribution must only be
 	// serialized through the viewer-aware custom history endpoints.
 	se.App.OnRecordEnrich("arcade", "arcade_changelog", "arcade_photo_atoms").Bind(&hook.Handler[*core.RecordEnrichEvent]{
@@ -37,7 +38,12 @@ func registerBotRoutes(se *core.ServeEvent) {
 			return e.Next()
 		},
 	})
-	keys := se.Router.Group("/user/bot-keys").Bind(apis.RequireAuth("user"), user.RequireActiveUser(), apis.BodyLimit(4096))
+	var firstPartyAuth []*hook.Handler[*core.RequestEvent]
+	if len(nativeClients) > 0 {
+		firstPartyAuth = append(firstPartyAuth, nativeauth.FirstPartyAuthentication(nativeClients))
+	}
+	// Owner key management only; /bot/v1 keeps API-key authentication alone.
+	keys := se.Router.Group("/user/bot-keys").Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), user.RequireActiveUser(), apis.BodyLimit(4096))
 	keys.GET("", botaccess.List)
 	keys.POST("", botaccess.Create)
 	keys.DELETE("/{id}", botaccess.Revoke)

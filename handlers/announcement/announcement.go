@@ -23,11 +23,11 @@ func RegisterRoutes(se *core.ServeEvent, nativeClients ...nativeauth.Client) {
 	if len(nativeClients) > 0 {
 		firstPartyAuth = append(firstPartyAuth, nativeauth.FirstPartyAuthentication(nativeClients))
 	}
-	se.Router.GET("/announcements", List)
-	se.Router.GET("/announcements/unseen", Unseen).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	se.Router.GET("/announcements/{id}", Get)
+	se.Router.GET("/announcements", List).Bind(firstPartyAuth...)
+	se.Router.GET("/announcements/unseen", Unseen).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	se.Router.GET("/announcements/{id}", Get).Bind(firstPartyAuth...)
 	se.Router.GET("/announcements/{id}/images/{filename}", Image).Bind(firstPartyAuth...)
-	se.Router.POST("/announcements/{id}/view", View).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(4096))
+	se.Router.POST("/announcements/{id}/view", View).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(4096))
 	staff := se.Router.Group("/moderation/announcements").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), arcadequery.RequireStrictReviewerAccess())
 	staff.GET("", ListAdmin).Bind(firstPartyAuth...)
 	staff.POST("", Create).Bind(firstPartyAuth...).Bind(apis.BodyLimit(announcement.MaxBodyBytes))

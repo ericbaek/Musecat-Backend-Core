@@ -308,7 +308,7 @@ func TestCanonicalNativeDraftActionsKeepRatesAndUnselectedPhotoScopes(t *testing
 	for _, op := range []struct {
 		method, path string
 		status       int
-	}{{"GET", "/arcades/updates/history", 401}, {"POST", "/arcade/check-notes", 401}, {"GET", "/native/arcade/public", 404}, {"POST", "/native/arcade/new", 404}, {"PUT", "/arcade/report-subscription", 401}} {
+	}{{"GET", "/user/joint", 401}, {"POST", "/user/connections/start", 401}, {"GET", "/native/arcade/public", 404}, {"POST", "/native/arcade/new", 404}, {"PUT", "/arcade/report-subscription", 401}} {
 		nativeDraftRequest(t, app, op.method, op.path, session.AccessToken, map[string]any{}, op.status, false)
 	}
 }

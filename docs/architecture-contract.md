@@ -1998,6 +1998,36 @@ Native responses remain no-store. Invalid credentials fail closed; this does
 not authorize withdrawal, push, raw REST or other settings.
 There is no schema or migration change.
 
+### Shared first-party account and community operations
+
+Configured first-party Native sessions also select these existing non-admin
+operations, sharing the Web handlers, DTOs, owner and active-account guards:
+`POST /user/check-in`; `GET /announcements`, `/announcements/{id}`,
+`/announcements/unseen` and `POST /announcements/{id}/view`;
+`GET /arcades/updates/history`; `GET|POST|PUT|DELETE /arcade/check-notes`;
+`GET /arcade/campaigns`; `GET /arcade/analytics`;
+`GET|PUT /user/inquiry-bots/arcade/{id}`; `GET /user/feedback`,
+`GET /user/feedback/thread/photo`, `POST|PATCH /user/feedback/thread` and
+`POST /support_feedback`; the `/community` post, comment, view and like
+operations; and `GET|POST /user/bot-keys` and `DELETE /user/bot-keys/{id}`.
+
+Public reads keep anonymous access; a configured Native bearer only adds the
+same viewer personalization a Web JWT receives, and invalid Native credentials
+fail closed instead of degrading to a guest view. Announcement view state,
+check-in XP and check-note authorship belong to the account, so Web and Native
+clients observe one state. Native responses are no-store and an empty client
+allowlist grants no Native identity.
+
+External account connections (`/integrations/providers`, `/user/connections`,
+`/user/records`), Joint pairing and partner routes, `/user/authorizations`
+grant management, OAuth authorize/consent/token/resource routes, web-push
+device and report subscriptions, signup, `/bot/v1` API-key routes, delegated
+account routes, raw collection REST and moderation edit reports remain
+unselected. External connections and grant management are not yet released
+on Web; the OAuth, Joint and partner flows are bound to the Web session that
+owns the browser callback or to separate credentials. No schema or migration
+is added.
+
 ### Shared first-party arcade editing
 
 Configured first-party native sessions use the same canonical `GET /arcade`,

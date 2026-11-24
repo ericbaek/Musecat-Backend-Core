@@ -4016,6 +4016,7 @@ components:
 paths:
   /arcade/check-notes:
     get:
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       tags: [Arcades]
       summary: Read shared check request notes without a distance restriction
       description: Public arcade notes are readable anonymously. Private drafts use existing creator/reviewer visibility. Returns up to 100 notes, open first then newest. No XP or arcade changelog is created. Raw collection REST remains locked.
@@ -4031,7 +4032,7 @@ paths:
     post:
       tags: [Arcade Mutations]
       summary: Attach a short check request from any distance
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       description: Requires an active user with arcade write access. Identical open notes by the same author return the existing record. At most 50 open notes per arcade. Does not require GPS. Body limit 16384 bytes.
       requestBody:
         required: true
@@ -4049,7 +4050,7 @@ paths:
     put:
       tags: [Arcade Mutations]
       summary: Complete a note with findings and a fresh GPS fix within 300 meters
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       description: Requires active arcade write access. GPS is checked by the server against the current basic revision. Accuracy must be 0 to 150 meters, captured_at must be within 60 seconds with at most 5 seconds future skew, and distance must be at most 300 meters. No remote bypass or historical Passport substitute. Completion is transactional and cannot overwrite prior findings. Body limit 16384 bytes.
       requestBody:
         required: true
@@ -4067,7 +4068,7 @@ paths:
     delete:
       tags: [Arcade Mutations]
       summary: Remove a note as its author or strict reviewer, from any distance
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -4082,6 +4083,7 @@ paths:
         '413': {description: Body limit exceeded.}
   /community/comments:
     get:
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       tags: [Community]
       summary: List root comments or replies with optional viewer personalization
       description: Twenty items per page, newest first with an opaque older cursor. Deleted roots remain only while active replies exist. Deleted posts are inaccessible. Responses are private and no-store.
@@ -4100,6 +4102,7 @@ paths:
         '404': {description: Post not found}
   /community/comment:
     get:
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       tags: [Community]
       summary: Read an active comment or its original
       parameters:
@@ -4116,7 +4119,7 @@ paths:
     post:
       tags: [Community]
       summary: Create a comment or one-level reply
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -4137,7 +4140,7 @@ paths:
     put:
       tags: [Community]
       summary: Edit own comment within five minutes
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
       requestBody:
@@ -4162,7 +4165,7 @@ paths:
       tags: [Community]
       summary: Delete own comment at any time
       description: Revokes the original comment XP and likes on this comment once. Visible replies and their XP remain. Daily grant caps are not refunded.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
       responses:
@@ -4176,7 +4179,7 @@ paths:
     put:
       tags: [Community]
       summary: Set a post like idempotently
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
       responses:
@@ -4192,7 +4195,7 @@ paths:
       tags: [Community]
       summary: Remove a post like idempotently
       description: Revokes previously granted like XP once, without refunding the daily cap. Re-liking does not re-award XP.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
       responses:
@@ -4208,7 +4211,7 @@ paths:
     put:
       tags: [Community]
       summary: Set a comment like idempotently
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
       responses:
@@ -4224,7 +4227,7 @@ paths:
       tags: [Community]
       summary: Remove a comment like idempotently
       description: Revokes previously granted like XP once, without refunding the daily cap. Re-liking does not re-award XP.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
       responses:
@@ -4523,6 +4526,7 @@ paths:
         `developer` or `moderator` tag. The `createdBy` relation alone is insufficient.
       security:
         - bearerAuth: []
+        - nativeSession: []
         - {}
       parameters:
         - name: arcade
@@ -4936,6 +4940,7 @@ paths:
       summary: Authenticated recent change history
       security:
         - bearerAuth: []
+        - nativeSession: []
       description: Historical public open arcade activity, excluding passport verifications before block grouping and pagination. Requires a user session.
       parameters:
         - $ref: '#/components/parameters/LimitQuery'
@@ -5162,6 +5167,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /community/posts:
     get:
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       tags: [Community]
       summary: List immediately public community posts
       parameters:
@@ -5217,6 +5223,7 @@ paths:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
   /community/post:
     get:
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       tags: [Community]
       summary: Get an immediately public community post
       parameters:
@@ -5248,6 +5255,7 @@ paths:
       summary: Publish a Korean community post immediately
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -5280,6 +5288,7 @@ paths:
       summary: Edit the author's Korean original within five minutes
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: id
           in: query
@@ -5325,6 +5334,7 @@ paths:
       description: Retains a private tombstone, removes attached public files and cached translations, and excludes the post from detail, feeds, galleries, counts and translation jobs. Repeated deletion by the author returns 204. Revokes original achievement XP and XP for hidden comments, replies and likes once, without refunding daily caps.
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: id
           in: query
@@ -6735,6 +6745,7 @@ paths:
       description: Active users only. Ownership is forced from the bearer token; createdBy query values are ignored. Anonymous submissions and other users' records are never returned. Includes all statuses unless filtered, with id, message, status, createdBy, photos (filenames), created and updated. This does not grant file access or open the reviewer queue.
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - name: status
           in: query
@@ -6790,6 +6801,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     post:
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       tags: [Support]
       summary: /support_feedback
       description: Default per-client-IP limit is 10 requests per 600 seconds, shared by anonymous and authenticated users. With no official account, arcade-scoped inquiries accept guests through moderator fallback. With a current official account, missing configuration defaults to OFF and disabled mode rejects creation with 409 INQUIRY_DISABLED; loginRequired rejects anonymous submissions with 401 LOGIN_REQUIRED; external mode rejects creation with 409 INQUIRY_EXTERNAL. Private arcades remain inaccessible to guests. Guest submissions with an optional X-Feedback-Guest-Key header (64 lowercase hexadecimal characters) create a browser-owned chat accessible through /guest/feedback endpoints. Only the credential digest is stored. Unkeyed submissions retain initial-receipt semantics and cannot be claimed later. Operator-configured limits and PocketBase exemptions may override the defaults. Accepts at most 3 images of 15000000 bytes each; the total encoded body is limited to 46048576 bytes (45 MB of photos plus 1 MiB of form overhead).
@@ -8333,6 +8345,7 @@ paths:
       summary: Download a private original or reply attachment as a current inquiry participant
       security:
         - bearerAuth: []
+        - nativeSession: []
       parameters:
         - in: query
           name: id
@@ -8382,6 +8395,7 @@ paths:
       summary: Append an immutable reply and atomically notify the other participant
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -8415,6 +8429,7 @@ paths:
       summary: Resolve or reopen an inquiry as its author, current scoped official, or strict staff
       security:
         - bearerAuth: []
+        - nativeSession: []
       requestBody:
         required: true
         content:
@@ -9158,6 +9173,7 @@ paths:
       summary: /user/check-in
       security:
         - bearerAuth: []
+        - nativeSession: []
       responses:
         '200':
           description: Check-in state and XP feedback.
@@ -9521,7 +9537,7 @@ paths:
       tags: [Arcades]
       summary: List active campaign prompts for an arcade
       description: Returns campaign prompts for the requested public/open arcade to an authenticated active user. Includes current from_version machines and current to_version machines within their review window. After the latest still_old (Wrong) report, one location-verified updated report or two unverified updated reports hide the prompt immediately. A single unverified updated report starts a seven-day window. Wrong resets the report counts and expiry anchor. Updated targets include review_expires_at for the countdown. Already-updated machines without a campaign update report are excluded. Each item includes current target status and report history; expiry leaves game state and campaign overview history intact.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - name: id
           in: query
@@ -17095,13 +17111,13 @@ paths:
     get:
       tags: ["Messaging"]
       summary: "Read an arcade's automatic-reply configuration"
-      security: [{"bearerAuth":[]}]
+      security: [{"bearerAuth":[]}, {"nativeSession":[]}]
       description: "Current arcade owner or authorized staff only. No raw collection access. Existing inquiries retain their private configuration snapshot."
       responses: {"200":{"description":"Configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/InquiryBotConfig"}}}},"401":{"description":"Authentication required"},"403":{"description":"Management required"},"404":{"description":"Arcade not found"}}
     put:
       tags: ["Messaging"]
       summary: "Configure an arcade's greeting, replies and choices"
-      security: [{"bearerAuth":[]}]
+      security: [{"bearerAuth":[]}, {"nativeSession":[]}]
       description: "Owner-controlled bounded reply graph, at most 60000 encoded bytes. Node and choice IDs are unique, every target must exist. Terminal nodes and free text hand off to human chat. Does not change existing conversation snapshots."
       requestBody: {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/InquiryBotConfig"}}}}
       responses: {"200":{"description":"Saved configuration","content":{"application/json":{"schema":{"$ref":"#/components/schemas/InquiryBotConfig"}}}},"400":{"description":"Invalid configuration"},"401":{"description":"Authentication required"},"403":{"description":"Management required"},"404":{"description":"Arcade not found"}}
@@ -17272,6 +17288,7 @@ paths:
 
   /announcements:
     get:
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       summary: List published announcement stories
       description: Newest publication first, 20 items, private no-store. A cursor from a now-archived publication remains valid. Only releases targeting the requested locale are returned. Public metadata omits unselected draft variants; image bytes are fetched separately. Guests may read published content.
       parameters:
@@ -17286,7 +17303,7 @@ paths:
       description: Does not queue older unviewed stories after the latest matching release has been viewed. Viewing a story is independent of inbox read state and shared across selected languages.
       parameters:
         - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}}
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       responses:
         '200':
           description: Latest unseen story or null.
@@ -17304,6 +17321,7 @@ paths:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string}}
     get:
+      security: [{}, {bearerAuth: []}, {nativeSession: []}]
       summary: Read an announcement story
       parameters:
         - {name: locale, in: query, schema: {type: string, enum: [ko, en, ja], default: ko}}
@@ -17329,7 +17347,7 @@ paths:
       - {name: id, in: path, required: true, schema: {type: string}}
     post:
       summary: Idempotently mark one published story viewed by the current account
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       responses:
         '200': {description: View persisted; inbox read state unchanged.}
         '401': {description: Authentication required.}
@@ -19145,7 +19163,7 @@ paths:
       description: Defaults to the current account. Only developers may inspect another account; foreign metadata omits bot names. Issuance and revocation remain owner-only.
       parameters:
         - {name: user, in: query, required: false, schema: {type: string}, description: Account ID to inspect.}
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       responses:
         '200':
           description: Up to 100 keys, unrevoked keys first. Private and no-store.
@@ -19163,7 +19181,7 @@ paths:
     post:
       summary: Issue a bot key owned by the authenticated account
       description: A completed active profile with arcade_owner, founding_supporter, supporter, designer, moderator or developer is required. At most five unrevoked keys. Keys have no automatic expiry, including keys issued under the former expiry policy. The secret is returned once and only its SHA-256 hash is stored.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       requestBody:
         required: true
         content:
@@ -19191,7 +19209,7 @@ paths:
   /user/bot-keys/{id}:
     delete:
       summary: Revoke an account-owned bot key
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       responses:
@@ -19205,7 +19223,7 @@ paths:
     put:
       summary: Lease the signed-in account's currently visible achievement detail
       description: Private no-store. Body limit 1 KiB. The 45-second session lease suppresses push and marks this account's post events read. Renew every 20 seconds only while visible. No other account's presence is exposed.
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
       requestBody:
@@ -19226,7 +19244,7 @@ paths:
         '413': {description: Body exceeds 1 KiB}
     delete:
       summary: Release only the caller's specified achievement view session
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {nativeSession: []}]
       parameters:
         - {name: id, in: query, required: true, schema: {type: string}}
       requestBody:

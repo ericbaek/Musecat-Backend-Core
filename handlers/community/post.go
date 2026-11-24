@@ -20,6 +20,7 @@ import (
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
+	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
 	"github.com/pocketbase/pocketbase/tools/types"
 
@@ -115,12 +116,14 @@ func finalPostPhotos(existing []string, input postInput) ([]any, error) {
 func RegisterRoutes(se *core.ServeEvent) { RegisterAccountRoutes(se.Router.RouterGroup) }
 
 // RegisterAccountRoutes shares the same guards and body limits on both transports.
-func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent]) {
-	api.GET("/community/posts", ListPosts)
-	api.GET("/community/post", GetPost)
-	api.GET("/community/comments", ListComments)
-	api.GET("/community/comment", GetComment)
-	auth := api.Group("/community").Bind(
+// RegisterAccountRoutes binds firstPartyAuth only when the caller selects
+// configured first-party Native sessions; delegated registration passes none.
+func RegisterAccountRoutes(api *router.RouterGroup[*core.RequestEvent], firstPartyAuth ...*hook.Handler[*core.RequestEvent]) {
+	api.GET("/community/posts", ListPosts).Bind(firstPartyAuth...)
+	api.GET("/community/post", GetPost).Bind(firstPartyAuth...)
+	api.GET("/community/comments", ListComments).Bind(firstPartyAuth...)
+	api.GET("/community/comment", GetComment).Bind(firstPartyAuth...)
+	auth := api.Group("/community").Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
