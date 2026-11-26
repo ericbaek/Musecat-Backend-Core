@@ -4,20 +4,27 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
-	"time"
 
-	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
 
+// The one-off 2026-11 ALL.Net recovery alert is retired. Only the rendering of
+// historic aime_recovery inbox rows remains; those rows follow the shared inbox
+// lifecycle and must not be deleted to retire the feature.
 const AimeKind = "aime_recovery"
+
+// Collection names of the retired feature, kept for Full's historic migrations.
 const AimeState = "aime_status"
 const AimeProbes = "aime_probe"
 const AimeSubscriptions = "aime_recovery_subscription"
-const aimeStateID = "aimestatus00001"
 
-// EnsureAimeSchema is used by fresh Core bootstrap and Full's forward migration.
+// AimeStatusUpdateEvent identifies the dated 2026-11-08 notice, rendered apart
+// from the terminal recovery event.
+const AimeStatusUpdateEvent = "aime:status:20261108"
+
+// EnsureAimeSchema is retained only so Full's immutable 1795100000/1795200000
+// migrations keep compiling and replaying in order. Full's retirement migration
+// drops these collections afterwards; nothing at runtime reads them anymore.
 func EnsureAimeSchema(app core.App) error {
 	return app.RunInTransaction(func(tx core.App) error {
 		user, err := tx.FindCollectionByNameOrId("user")
@@ -74,244 +81,6 @@ func EnsureAimeSchema(app core.App) error {
 	})
 }
 
-type AimeProbe struct {
-	CheckedAt  string `json:"checkedAt"`
-	Status     string `json:"status"`
-	HTTPStatus int    `json:"httpStatus"`
-}
-
-type AimeStatus struct {
-	History       []AimeProbe `json:"history"`
-	Status        string      `json:"status"`
-	HTTPStatus    int         `json:"httpStatus"`
-	CheckedAt     string      `json:"checkedAt"`
-	Subscribed    bool        `json:"subscribed"`
-	Completed     bool        `json:"completed"`
-	Confirmations int         `json:"confirmations"`
-}
-
-func GetAimeStatus(app core.App, userID string) (AimeStatus, error) {
-	result := AimeStatus{Status: "unknown", History: []AimeProbe{}}
-	row, err := app.FindRecordById(AimeState, aimeStateID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return result, nil
-	}
-	if err != nil {
-		return result, err
-	}
-	result.Status = aimeWebStatus(row.GetString("status"))
-	result.HTTPStatus = row.GetInt("http_status")
-	result.CheckedAt = row.GetString("checked_at")
-	result.Completed = row.GetBool("recovered")
-	if strings.HasPrefix(row.GetString("status"), "web_") {
-		result.Confirmations = row.GetInt("confirmations")
-	}
-	probes, err := app.FindRecordsByFilter(AimeProbes, "checked_at>={:cutoff}", "-checked_at,-id", 288, 0, dbx.Params{"cutoff": time.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02 15:04:05.000Z")})
-	if err != nil {
-		return result, err
-	}
-	for i := len(probes) - 1; i >= 0; i-- {
-		probe := probes[i]
-		result.History = append(result.History, AimeProbe{CheckedAt: probe.GetString("checked_at"), Status: aimeWebStatus(probe.GetString("status")), HTTPStatus: probe.GetInt("http_status")})
-	}
-	if userID != "" {
-		rows, err := app.FindRecordsByFilter(AimeSubscriptions, "user={:user} && incident={:incident}", "", 1, 0, dbx.Params{"user": userID, "incident": row.GetString("incident")})
-		if err != nil {
-			return result, err
-		}
-		result.Subscribed = len(rows) > 0
-	}
-	return result, nil
-}
-
-var ErrAimeNotBlocked = errors.New("Aime is not currently blocked")
-
-// A subscription is explicit, account scoped and consumed after this recovery.
-func SetAimeSubscription(app core.App, userID string, enabled bool) error {
-	return app.RunInTransaction(func(tx core.App) error {
-		rows, err := tx.FindRecordsByFilter(AimeSubscriptions, "user={:user}", "", 1, 0, dbx.Params{"user": userID})
-		if err != nil {
-			return err
-		}
-		if !enabled {
-			if len(rows) > 0 {
-				return tx.Delete(rows[0])
-			}
-			return nil
-		}
-		state, err := tx.FindRecordById(AimeState, aimeStateID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrAimeNotBlocked
-		}
-		if err != nil {
-			return err
-		}
-		if state.GetString("incident") == "" || state.GetBool("recovered") {
-			return ErrAimeNotBlocked
-		}
-		col, err := tx.FindCollectionByNameOrId(AimeSubscriptions)
-		if err != nil {
-			return err
-		}
-		row := core.NewRecord(col)
-		if len(rows) > 0 {
-			row = rows[0]
-		}
-		row.Set("user", userID)
-		row.Set("incident", state.GetString("incident"))
-		return tx.Save(row)
-	})
-}
-
-// RecordAimeProbe persists observations before queuing bounded, resumable fan-out.
-// The first candidate alerts operations; three further five-minute confirmations
-// complete this incident after both operational channels have been notified.
-func RecordAimeProbe(app core.App, observation AimeObservation, now time.Time) error {
-	if observation.Status != "available" && observation.Status != "blocked" && observation.Status != "unknown" {
-		return errors.New("invalid Aime observation status")
-	}
-	status := observation.HTTPStatus
-	return app.RunInTransaction(func(tx core.App) error {
-		row, err := tx.FindRecordById(AimeState, aimeStateID)
-		if errors.Is(err, sql.ErrNoRows) {
-			col, e := tx.FindCollectionByNameOrId(AimeState)
-			if e != nil {
-				return e
-			}
-			row = core.NewRecord(col)
-			row.Id = aimeStateID
-		} else if err != nil {
-			return err
-		}
-		observed := observation.Status
-		if !row.GetBool("recovered") {
-			// Do not combine old HTTP-only confirmations with verified pages.
-			if !strings.HasPrefix(row.GetString("status"), "web_") {
-				row.Set("confirmations", 0)
-				row.Set("confirmation_at", now.UTC())
-			}
-			if observed == "blocked" && row.GetString("incident") == "" {
-				row.Set("incident", now.UTC().Format("20060102T150405.000000000"))
-			}
-			if observed != "available" {
-				row.Set("confirmations", 0)
-				row.Set("confirmation_at", now.UTC())
-			} else if row.GetString("incident") != "" {
-				last := row.GetDateTime("confirmation_at").Time()
-				firstCandidate := row.GetDateTime("ops_candidate_at").IsZero()
-				if firstCandidate {
-					row.Set("ops_candidate_at", now.UTC())
-				}
-				// The first candidate starts a fresh 15-minute observation window.
-				if firstCandidate || row.GetString("status") != "web_available" || last.IsZero() || now.Sub(last) > 10*time.Minute {
-					row.Set("confirmations", 0)
-					row.Set("confirmation_at", now.UTC())
-				} else if !now.Before(last.Add(5 * time.Minute)) {
-					count := min(row.GetInt("confirmations")+1, 3)
-					row.Set("confirmations", count)
-					row.Set("confirmation_at", now.UTC())
-					if count >= 3 && row.GetBool("ops_telegram_sent") && row.GetBool("ops_discord_sent") {
-						row.Set("recovered", true)
-					}
-				}
-			}
-		}
-		row.Set("status", "web_"+observed)
-		row.Set("http_status", status)
-		row.Set("checked_at", now.UTC())
-		if err := tx.Save(row); err != nil {
-			return err
-		}
-		col, err := tx.FindCollectionByNameOrId(AimeProbes)
-		if err != nil {
-			return err
-		}
-		probe := core.NewRecord(col)
-		probe.Set("checked_at", now.UTC())
-		probe.Set("status", "web_"+observed)
-		probe.Set("http_status", status)
-		if err := tx.Save(probe); err != nil {
-			return err
-		}
-		expired, err := tx.FindRecordsByFilter(AimeProbes, "checked_at<{:cutoff}", "checked_at", 100, 0, dbx.Params{"cutoff": now.UTC().Add(-24 * time.Hour).Format("2006-01-02 15:04:05.000Z")})
-		if err != nil {
-			return err
-		}
-		for _, old := range expired {
-			if err := tx.Delete(old); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-// Old HTTP-only history is inconclusive under the new page-content contract.
-func aimeWebStatus(stored string) string {
-	switch stored {
-	case "web_available":
-		return "available"
-	case "web_blocked":
-		return "blocked"
-	default:
-		return "unknown"
-	}
-}
-
-// DrainAimeRecoveries is resumable after this incident completes. Later outages
-// never reopen the campaign or create another notification identity.
-func DrainAimeRecoveries(app core.App) error {
-	return app.RunInTransaction(func(tx core.App) error {
-		state, err := tx.FindRecordById(AimeState, aimeStateID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if !state.GetBool("recovered") {
-			return nil
-		}
-		rows, err := tx.FindRecordsByFilter(AimeSubscriptions, "", "id", 100, 0)
-		if err != nil {
-			return err
-		}
-		for _, sub := range rows {
-			user, err := tx.FindRecordById("user", sub.GetString("user"))
-			if err != nil {
-				return err
-			}
-			if !user.GetBool("withdrawn") {
-				event := "aime:" + sub.GetString("incident")
-				existing, err := tx.FindRecordsByFilter(Inbox, "user={:user} && event_key={:event}", "", 1, 0, dbx.Params{"user": user.Id, "event": event})
-				if err != nil {
-					return err
-				}
-				if len(existing) == 0 {
-					col, err := tx.FindCollectionByNameOrId(Inbox)
-					if err != nil {
-						return err
-					}
-					notice := core.NewRecord(col)
-					notice.Set("user", user.Id)
-					notice.Set("kind", AimeKind)
-					notice.Set("event_key", event)
-					if err := tx.Save(notice); err != nil {
-						return err
-					}
-					if err := enqueueDevicesTx(tx, notice, user.Id); err != nil {
-						return err
-					}
-				}
-			}
-			if err := tx.Delete(sub); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
 func AimeItem(row *core.Record, locale string) map[string]any {
 	if row.GetString("event_key") == AimeStatusUpdateEvent {
 		return aimeStatusUpdateItem(row, locale)
@@ -321,6 +90,19 @@ func AimeItem(row *core.Record, locale string) map[string]any {
 		title, body = "Game NET web access is restored", "Web maintenance is no longer detected on maimai DX NET or CHUNITHM-NET."
 	} else if locale == "ja" {
 		title, body = "ゲームNETへのWeb接続が復旧しました", "maimai DX NETとCHUNITHM-NETでWebメンテナンス案内が検出されなくなりました。"
+	}
+	return map[string]any{"id": row.Id, "kind": AimeKind, "read": row.GetBool("read"), "created": row.GetString("created"), "title": title, "message": body, "arcadeName": "", "gameName": "", "reaction": "", "url": "/"}
+}
+
+func aimeStatusUpdateItem(row *core.Record, locale string) map[string]any {
+	title := "ALL.Net 점검 현황 안내 (11월 8일)"
+	body := "11월 8일 오전 9시(한국 시간) 공식 안내: 일부 반다이남코 대상 게임은 오후부터 순차적으로 시험 운영을 재개할 예정입니다. 세가 게임은 점검이 계속되며 복구 일정은 미정입니다. 다음 공식 안내는 11월 10일 오전 9시(한국 시간) 예정입니다. 복구 알림 신청은 그대로 유지됩니다."
+	if locale == "en" {
+		title = "ALL.Net maintenance update (Nov 8)"
+		body = "Official update as of Nov 8, 09:00 JST: selected Bandai Namco games are scheduled to resume trial operation gradually from the afternoon. SEGA games remain under maintenance with no recovery date announced. The next official update is planned for Nov 10, 09:00 JST. Your recovery alert subscription remains active."
+	} else if locale == "ja" {
+		title = "ALL.Netメンテナンス状況（11月8日）"
+		body = "11月8日9:00（日本時間）の公式案内：バンダイナムコ製品の対象タイトルは午後から順次、試験的に稼働を再開する予定です。セガ製品は引き続きメンテナンス中で、再開の見通しは立っていません。次回の公式報告は11月10日9:00（日本時間）の予定です。復旧通知の登録は継続されます。"
 	}
 	return map[string]any{"id": row.Id, "kind": AimeKind, "read": row.GetBool("read"), "created": row.GetString("created"), "title": title, "message": body, "arcadeName": "", "gameName": "", "reaction": "", "url": "/"}
 }

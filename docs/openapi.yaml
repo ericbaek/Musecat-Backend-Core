@@ -7870,7 +7870,7 @@ paths:
                       required: [id, kind, read, created, arcadeName, gameName, message, reaction, url]
                       properties:
                         id: {type: string}
-                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement, community_like, community_comment, community_reply]}
+                        kind: {type: string, enum: [report_created, report_reaction, feedback_created, feedback_reply, arcade_setup, message, announcement, community_like, community_comment, community_reply, aime_recovery], description: aime_recovery appears only on historic rows from the retired 2026-11 ALL.Net recovery alert.}
                         groupKey: {type: string, description: Stable community grouping identity across new event IDs.}
                         read: {type: boolean}
                         created: {type: string}
@@ -12006,88 +12006,3 @@ x-musecat-joint-connection:
                   type: {type: string, enum: [guest]}
                   id: {type: string}
         '401': {description: Missing or malformed browser credential.}
-
-  /user/notifications/aime:
-    get:
-      tags: [Notifications]
-      summary: Read shared Aime availability and the current user's opt-in
-      security: [{bearerAuth: []}]
-      responses:
-        '200':
-          description: Latest shared probe; no external request is made by this endpoint.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status, httpStatus, checkedAt, subscribed, history, completed, confirmations]
-                properties:
-                  status: {type: string, enum: [unknown, blocked, available]}
-                  history:
-                    type: array
-                    maxItems: 288
-                    description: Real probes from the last 24 hours, oldest first. Missing periods have no fabricated observations.
-                    items:
-                      type: object
-                      required: [checkedAt, status, httpStatus]
-                      properties:
-                        checkedAt: {type: string}
-                        status: {type: string, enum: [unknown, blocked, available]}
-                        httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
-                  httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
-                  checkedAt: {type: string}
-                  subscribed: {type: boolean}
-                  completed: {type: boolean, description: Terminal completion of this one-off incident. Later outages never reopen it.}
-                  confirmations: {type: integer, minimum: 0, maximum: 3, description: Additional successful five-minute confirmations after the first operational candidate notice. Three confirms recovery once Telegram and Discord delivery receipts are successful.}
-        '401': {description: Authentication required.}
-        '403': {description: Inactive account.}
-    put:
-      tags: [Notifications]
-      summary: Explicitly opt in or cancel the current Aime recovery notification
-      description: Account scoped and idempotent. Allowed during the outage and its confirmation period until three consecutive five-minute successes complete this one-off campaign. Existing device permission alone never opts a user in.
-      security: [{bearerAuth: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [enabled]
-              properties:
-                enabled: {type: boolean}
-      responses:
-        '200': {description: Updated status and subscription, as in GET.}
-        '400': {description: Invalid input or no observed outage awaiting recovery.}
-        '401': {description: Authentication required.}
-        '403': {description: Inactive account.}
-
-  /aime/status:
-    get:
-      tags: [Notifications]
-      summary: Read shared Aime availability without signing in
-      security: []
-      responses:
-        '200':
-          description: Public game NET web maintenance status and 24-hour history. Available requires both game pages to return HTTP 200 without a maintenance path or visible maintenance message. Login forms and password inputs are not required; maintenance HTML can be blocked even with HTTP 200. A 403 alone is unknown. This does not verify in-game card authentication or saving. Authentication and user query parameters are ignored; no subscription membership or account data is read.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status, httpStatus, checkedAt, subscribed, history, completed, confirmations]
-                properties:
-                  status: {type: string, enum: [unknown, blocked, available]}
-                  history:
-                    type: array
-                    maxItems: 288
-                    description: Real probes from the last 24 hours, oldest first. Missing periods have no fabricated observations.
-                    items:
-                      type: object
-                      required: [checkedAt, status, httpStatus]
-                      properties:
-                        checkedAt: {type: string}
-                        status: {type: string, enum: [unknown, blocked, available]}
-                        httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
-                  httpStatus: {type: integer, description: "Actual response code of the game source deciding the aggregate, or 0 if no response. HTTP 200 alone is not availability."}
-                  checkedAt: {type: string}
-                  subscribed: {type: boolean, enum: [false]}
-                  completed: {type: boolean, description: Terminal completion of this one-off incident. Later outages never reopen it.}
-                  confirmations: {type: integer, minimum: 0, maximum: 3, description: Additional successful five-minute confirmations after the first operational candidate notice. Three confirms recovery once Telegram and Discord delivery receipts are successful.}

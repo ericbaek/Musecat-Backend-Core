@@ -1344,56 +1344,16 @@ are preserved. `/arcades` is a separate summary contract and is unchanged.
 
 Passport stamps include the current public arcade `location` (lat/lon or null), allowing the passport map to render without per-arcade detail requests. Private arcades remain excluded.
 
-## Aime recovery notification
+## Aime recovery notification (retired)
 
-Authenticated active users explicitly opt in through `/user/notifications/aime`.
-The account-scoped subscription is for one observed outage and is consumed after
-recovery; existing browser push consent never creates this subscription. Full
-checks public my-aime.net, maimai DX NET and CHUNITHM-NET entry pages in parallel
-once every five minutes with bounded HTTPS redirects and HTML bodies. Both game
-requests send `User-Agent: Mozilla/5.0`: the live upstream closes connections
-for Go's default User-Agent before returning a maintenance response. Both game
-entry points must return HTTP 200 without a final maintenance path or visible
-English/Japanese/Korean maintenance text. No password field, form, SEGA ID text,
-login URL path or return-target query is required. HTTP 200 maintenance pages
-are blocked. Other HTTP responses, transport errors, non-HTML responses,
-oversized bodies and disallowed redirects are unknown. my-aime.net
-is diagnostic only: its geo-blocked 403 cannot prove or disprove game NET recovery.
-Any blocked game result makes the aggregate blocked; otherwise both games must
-be available or the aggregate is unknown. The recorded httpStatus is the actual
-response code from the game source deciding the aggregate; it can be 200 while
-status is blocked or unknown. Full owns the additive migration for the candidate
-timestamp and separate Telegram/Discord delivery receipts on aime_status.
-New classifications use `web_`-prefixed internal status values. Legacy HTTP-only
-history projects as unknown, and the first new observation resets any unfinished
-legacy confirmation run. Existing subscriptions and terminal completion survive.
-
-Known maintenance starts this one-off incident. The first non-maintenance HTTP 200
-candidate starts the 15-minute confirmation window and queues an operational
-notice to both Telegram and Discord. Three further successful observations at
-least five minutes apart complete recovery only after both operational channels
-have successful persisted receipts. Counts and timestamps survive restart;
-rapid probes cannot advance the count. Failed observations reset the run;
-gaps over ten minutes restart it. Operational receipts and the first candidate
-timestamp survive resets, so a successful channel is not sent again. A failed
-channel retries independently. Pending account opt-ins are preserved throughout.
-Completion remains terminal. This checks public game NET web maintenance status,
-not in-game card authentication or score saving. Notifications state that scope.
-Core owns persisted state, atomic opt-in, bounded resumable fan-out and canonical
-inbox/device delivery identities. Full owns the polling schedule and push sender.
-No login credentials are collected. Probe networking runs outside transactions.
-
-Aime status includes at most 288 persisted probe observations from the last 24
-hours in chronological order. Status and probe history are saved atomically.
-Older observations are removed in bounded batches; missing periods remain unknown
-in the UI. History never uses the absence of an error as evidence of uptime.
-
-`GET /aime/status` is a public, read-only projection of the shared probe and
-history. It always returns `subscribed=false`, does not consult the caller's
-account even when authenticated, and ignores user query parameters. Guests can
-read guidance/status/history; opting in or cancelling still requires an active
-account through the existing authenticated `/user/notifications/aime` routes.
-
+The one-off 2026-11 ALL.Net recovery alert is retired. `/aime/status` and
+`/user/notifications/aime` are removed, Full no longer probes, and fresh Core
+bootstrap no longer creates `aime_status`, `aime_probe` or
+`aime_recovery_subscription`; a Full forward migration drops them. Historic
+`aime_recovery` inbox rows remain owner-only and keep their ko/en/ja rendering
+(`AimeItem`) under the shared inbox lifecycle. Device registrations, inbox rows
+and canonical delivery rows are never deleted to retire the feature.
+`EnsureAimeSchema` stays only for Full's immutable historic migrations.
 
 ## Achievement activity and XP feedback
 
