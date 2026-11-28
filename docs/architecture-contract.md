@@ -633,6 +633,37 @@ location. All external fallback calls happen before the mutation transaction.
 - The flag read and reaction mutation responses include the authoritative `resolution` summary, `myVote`, and newest-first `reportHistory`. Clients may calculate only display countdown/progress from `resolveAt`; they MUST NOT infer score, thresholds, rounds, or solve state from raw reaction counts.
 - Analytics responses include `page_views`, `fault_reports`, and `edit_count` for every caller. `page_views_by_source` and `series_filter_entries` are additionally available to authenticated users whose server-computed level is at least 15 when page views exceed 1,000, and remain available to official arcade accounts and `developer|moderator` callers. `direction_clicks`, `visit_verifications`, and `distinct_visitors` remain omitted unless the caller is an official arcade account or a `developer|moderator`. The web summary card remains staff-only; lower breakdowns display collecting for non-staff viewers until page views exceed 1,000, while staff see them immediately regardless of view count. Both states retain a September 30, 2026 collection-start caption.
 
+## First-party Native sessions
+
+Native app credentials are separate from Web JWTs, bot keys and partner grants.
+The executable passes an exact client/callback allowlist in
+`Config.NativeAuthClients`; an empty list registers no `/native` routes and binds
+no Native authentication anywhere, so deployments without `MUSECAT_NATIVE_*`
+behave exactly as before.
+
+- `POST /native/session/code` needs an active Web session and issues a one-use
+  code bound to the client, callback and an S256 PKCE challenge (120 seconds).
+- `POST /native/session/exchange` consumes the code once and returns a 600-second
+  access token and a 30-day refresh token for one device family.
+- `POST /native/session/refresh` rotates both tokens. The account restriction is
+  checked before the refresh token is consumed, so a temporarily restricted
+  account keeps a usable refresh token. Replaying a consumed refresh token revokes
+  only that device family. `POST /native/session/revoke` revokes it explicitly.
+- Changing the account token key, withdrawing, or removing the client from the
+  allowlist invalidates existing Native sessions.
+- Shared first-party routes opt in per operation by binding
+  `nativeauth.FirstPartyAuthentication`. Paths, payloads, permissions, rate
+  limits and changelog/XP rules stay identical to the Web route. An invalid
+  Native bearer never falls back to a Web cookie. Native responses are no-store.
+- Raw collection APIs, bot routes and routes that were not selected do not accept
+  Native tokens.
+- Each code issuance prunes expired codes and expired or revoked sessions with
+  their refresh tokens. The public exchange and refresh endpoints have default
+  rate limits.
+- GTK, hours and SNS updates accept an optional `base_*_id`. When present and
+  different from the current section relation, the write returns 409 without
+  changing relations, changelog or XP; omitting it keeps last-writer-wins.
+
 ## Core and Full migration boundary
 
 Core's migrations define the reusable schema/API contract and are verified only
