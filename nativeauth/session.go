@@ -90,9 +90,33 @@ func InstallSchema(app core.App) error {
 		return nil
 	})
 }
+
+// Prune deletes expired login codes and expired or revoked sessions with their
+// refresh tokens. Consumed refresh tokens of live sessions are kept so replay
+// detection still revokes the device. It is safe to call at any time.
+func (s Service) Prune(app core.App) error {
+	now := dbx.Params{"now": s.now()}
+	return app.RunInTransaction(func(tx core.App) error {
+		for _, q := range []string{
+			`DELETE FROM native_auth_code WHERE expires <= {:now}`,
+			`DELETE FROM native_auth_refresh WHERE session_id IN (SELECT id FROM native_auth_session WHERE expires <= {:now} OR revoked != 0)`,
+			`DELETE FROM native_auth_session WHERE expires <= {:now} OR revoked != 0`,
+		} {
+			if _, e := tx.DB().NewQuery(q).Bind(now).Execute(); e != nil {
+				return e
+			}
+		}
+		return nil
+	})
+}
+
 func (s Service) IssueCode(app core.App, u *core.Record, client, callback, challenge string) (string, error) {
 	if u == nil || u.Collection().Name != "user" || !s.allowed(client, callback) || !challengePattern.MatchString(challenge) {
 		return "", ErrInvalid
+	}
+	// Each login prunes stale rows so the tables stay bounded without a scheduler.
+	if e := s.Prune(app); e != nil {
+		return "", e
 	}
 	code, e := secret()
 	if e != nil {

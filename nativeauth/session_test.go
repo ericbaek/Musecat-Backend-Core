@@ -234,3 +234,44 @@ func TestRemovedDevelopmentClientCannotAuthenticateOrRefresh(t *testing.T) {
 		t.Fatal("remaining client rotation rejected")
 	}
 }
+
+func TestPruneRemovesExpiredAndRevokedRowsOnly(t *testing.T) {
+	app, u, s := setup(t)
+	base := time.Now()
+	s.Now = func() time.Time { return base }
+	stale := issue(t, s, app, u)
+	revoked := issue(t, s, app, u)
+	live := issue(t, s, app, u)
+	if err := s.Revoke(app, revoked.RefreshToken); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.DB().NewQuery("UPDATE native_auth_session SET expires=0 WHERE access_hash=(SELECT access_hash FROM native_auth_session ORDER BY rowid LIMIT 1)").Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.IssueCode(app, u, "ios", "https://musecat.app/native/callback", challenge(strings.Repeat("b", 43))); err != nil {
+		t.Fatal(err)
+	}
+	s.Now = func() time.Time { return base.Add(time.Hour) }
+	if err := s.Prune(app); err != nil {
+		t.Fatal(err)
+	}
+	count := func(table string) int {
+		var n int
+		if err := app.DB().NewQuery("SELECT COUNT(*) FROM " + table).Row(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count("native_auth_code") != 0 {
+		t.Fatal("expired login codes were kept")
+	}
+	if count("native_auth_session") != 1 || count("native_auth_refresh") != 1 {
+		t.Fatal("prune must keep only the live session and its refresh token", count("native_auth_session"), count("native_auth_refresh"))
+	}
+	if _, err := s.Refresh(app, live.RefreshToken); err != nil {
+		t.Fatal("live session must still refresh after prune", err)
+	}
+	if _, err := s.Refresh(app, stale.RefreshToken); err == nil {
+		t.Fatal("pruned session must not refresh")
+	}
+}
