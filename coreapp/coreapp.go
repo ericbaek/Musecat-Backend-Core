@@ -478,6 +478,12 @@ func RegisterDomainHooks(app core.App) {
 // edits interleave; rows edited meanwhile are recomputed by their own save.
 func startArcadeAreaRefresh(app *pocketbase.PocketBase) {
 	app.OnServe().BindFunc(func(se *core.ServeEvent) error {
+		// Only a real HTTP server owns the background refresh worker. Route tests
+		// trigger OnServe without one and then close the database, which would
+		// leave the worker reading a closed app.
+		if se.Server == nil {
+			return se.Next()
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		se.App.OnTerminate().BindFunc(func(e *core.TerminateEvent) error {
 			cancel()
