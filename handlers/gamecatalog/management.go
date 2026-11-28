@@ -213,7 +213,7 @@ func ReplaceCompatibilities(re *core.RequestEvent) error {
 	}
 
 	var items []map[string]any
-	var changes []map[string]any
+	changes := []map[string]any{}
 	replayed := false
 	stage := "load version"
 	err = re.App.RunInTransaction(func(tx core.App) error {
@@ -484,8 +484,22 @@ func revert(re *core.RequestEvent, body mutationBody, payloadHash string) error 
 			return &apiError{status: http.StatusConflict, message: "catalog revision conflict", details: map[string]any{"current_revision": revision(record)}}
 		}
 		before := snapshot(entity, record)
-		target, _ := change.Get("before").(map[string]any)
-		if target == nil || len(target) == 0 {
+		var target map[string]any
+		if err := json.Unmarshal([]byte(change.GetString("before")), &target); err != nil {
+			return fmt.Errorf("invalid stored catalog before snapshot")
+		}
+		if target == nil {
+			if change.GetString("action") != "create" {
+				return fmt.Errorf("missing stored catalog before snapshot")
+			}
+		} else {
+			revisionValue, validRevision := target["revision"].(float64)
+			_, validArchived := target["archived"].(bool)
+			if change.GetString("action") == "create" || target["id"] != record.Id || !validRevision || revisionValue < 1 || revisionValue != float64(int(revisionValue)) || !validArchived {
+				return fmt.Errorf("invalid stored catalog before snapshot identity")
+			}
+		}
+		if target == nil {
 			blockers, blockerErr := blockingReferences(tx, entity, record.Id)
 			if blockerErr != nil {
 				return blockerErr

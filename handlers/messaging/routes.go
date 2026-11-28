@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	userhandler "github.com/ericbaek/musecat-backend-core/handlers/user"
+	"github.com/ericbaek/musecat-backend-core/nativeauth"
 	"github.com/ericbaek/musecat-backend-core/service/messaging"
 	"github.com/ericbaek/musecat-backend-core/service/supportfeedback"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/hook"
 	"github.com/pocketbase/pocketbase/tools/router"
 	"net/http"
 	"strconv"
@@ -18,11 +20,15 @@ import (
 
 const MaxBodyBytes = 3*15_000_000 + (1 << 20)
 
-func RegisterRoutes(se *core.ServeEvent) {
+func RegisterRoutes(se *core.ServeEvent, nativeClients ...nativeauth.Client) {
+	var firstPartyAuth []*hook.Handler[*core.RequestEvent]
+	if len(nativeClients) > 0 {
+		firstPartyAuth = append(firstPartyAuth, nativeauth.FirstPartyAuthentication(nativeClients))
+	}
 	review := se.Router.Group("/moderation/messages/reports").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	review.GET("", ReviewReports)
-	review.GET("/{id}", ReviewReport)
-	review.GET("/{id}/attachments/{file}", ReviewPhoto)
+	review.GET("", ReviewReports).Bind(firstPartyAuth...)
+	review.GET("/{id}", ReviewReport).Bind(firstPartyAuth...)
+	review.GET("/{id}/attachments/{file}", ReviewPhoto).Bind(firstPartyAuth...)
 	guest := se.Router.Group("/guest").BindFunc(func(re *core.RequestEvent) error {
 		if supportfeedback.GuestKeyHash(re.Request.Header.Get(supportfeedback.GuestHeader)) == "" {
 			return re.UnauthorizedError("Inquiry credentials required.", nil)
@@ -44,25 +50,25 @@ func RegisterRoutes(se *core.ServeEvent) {
 	guest.PATCH("/conversations/{id}/inquiry", Status).Bind(apis.BodyLimit(4096))
 	guest.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo)
 	api := se.Router.Group("/user").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	api.GET("/inquiry-preview", InquiryPreview)
-	api.GET("/conversations", List)
-	api.POST("/conversations", Create).Bind(apis.BodyLimit(MaxBodyBytes))
-	api.GET("/conversations/{id}", Get)
-	api.GET("/conversations/{id}/messages", History)
-	api.POST("/conversations/{id}/messages", Send).Bind(apis.BodyLimit(MaxBodyBytes))
-	api.PUT("/conversations/{id}/read", Read).Bind(apis.BodyLimit(4096))
-	api.PATCH("/conversations/{id}/inquiry", Status).Bind(apis.BodyLimit(4096))
-	api.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo)
-	api.GET("/inquiry-bots/arcade/{id}", GetArcadeBot)
-	api.PUT("/inquiry-bots/arcade/{id}", SetArcadeBot).Bind(apis.BodyLimit(65536))
-	api.GET("/messaging/preferences", Preferences)
-	api.PUT("/messaging/preferences", SetPreferences).Bind(apis.BodyLimit(4096))
-	api.GET("/messaging/blocks", Blocks)
-	api.PUT("/messaging/blocks/{userId}", Block)
-	api.DELETE("/messaging/blocks/{userId}", Unblock)
-	api.GET("/messaging/recipients", Recipients)
-	api.POST("/messages/{messageId}/report", Report).Bind(apis.BodyLimit(8192))
-	api.GET("/events", Events)
+	api.GET("/inquiry-preview", InquiryPreview).Bind(firstPartyAuth...)
+	api.GET("/conversations", List).Bind(firstPartyAuth...)
+	api.POST("/conversations", Create).Bind(firstPartyAuth...).Bind(apis.BodyLimit(MaxBodyBytes))
+	api.GET("/conversations/{id}", Get).Bind(firstPartyAuth...)
+	api.GET("/conversations/{id}/messages", History).Bind(firstPartyAuth...)
+	api.POST("/conversations/{id}/messages", Send).Bind(firstPartyAuth...).Bind(apis.BodyLimit(MaxBodyBytes))
+	api.PUT("/conversations/{id}/read", Read).Bind(firstPartyAuth...).Bind(apis.BodyLimit(4096))
+	api.PATCH("/conversations/{id}/inquiry", Status).Bind(firstPartyAuth...).Bind(apis.BodyLimit(4096))
+	api.GET("/conversations/{id}/attachments/{messageId}/{file}", Photo).Bind(firstPartyAuth...)
+	api.GET("/inquiry-bots/arcade/{id}", GetArcadeBot).Bind(firstPartyAuth...)
+	api.PUT("/inquiry-bots/arcade/{id}", SetArcadeBot).Bind(firstPartyAuth...).Bind(apis.BodyLimit(65536))
+	api.GET("/messaging/preferences", Preferences).Bind(firstPartyAuth...)
+	api.PUT("/messaging/preferences", SetPreferences).Bind(firstPartyAuth...).Bind(apis.BodyLimit(4096))
+	api.GET("/messaging/blocks", Blocks).Bind(firstPartyAuth...)
+	api.PUT("/messaging/blocks/{userId}", Block).Bind(firstPartyAuth...)
+	api.DELETE("/messaging/blocks/{userId}", Unblock).Bind(firstPartyAuth...)
+	api.GET("/messaging/recipients", Recipients).Bind(firstPartyAuth...)
+	api.POST("/messages/{messageId}/report", Report).Bind(firstPartyAuth...).Bind(apis.BodyLimit(8192))
+	api.GET("/events", func(re *core.RequestEvent) error { return eventsWithNative(re, nativeClients) }).Bind(firstPartyAuth...)
 	if se.App.Store().Get("messaging.hooks") == nil {
 		messaging.RegisterEvents(se.App)
 		se.App.Store().Set("messaging.hooks", true)
@@ -275,7 +281,9 @@ func Photo(re *core.RequestEvent) error {
 	re.Response.Header().Set("X-Content-Type-Options", "nosniff")
 	return fs.Serve(re.Response, re.Request, storage, filename)
 }
-func Events(re *core.RequestEvent) error {
+func Events(re *core.RequestEvent) error { return eventsWithNative(re, nil) }
+
+func eventsWithNative(re *core.RequestEvent, nativeClients []nativeauth.Client) error {
 	hub := messaging.Events(re.App)
 	sub := hub.Subscribe(re.Auth.Id)
 	if sub == nil {
@@ -299,11 +307,18 @@ func Events(re *core.RequestEvent) error {
 	valid := func() bool {
 		token := strings.TrimPrefix(re.Request.Header.Get("Authorization"), "Bearer ")
 		u, err := re.App.FindAuthRecordByToken(token, core.TokenTypeAuth)
+		if err != nil && len(nativeClients) > 0 {
+			u, _, err = (nativeauth.Service{Clients: nativeClients}).AuthenticateSession(re.App, token)
+		}
 		if err != nil || u.Id != re.Auth.Id {
 			return false
 		}
 		_, err = messaging.ActiveUser(re.App, u.Id)
 		return err == nil
+	}
+	if !valid() {
+		_ = write(messaging.Event{Name: "session.expired"})
+		return nil
 	}
 	if err := write(messaging.Event{Name: "ready"}); err != nil {
 		return nil
@@ -319,6 +334,10 @@ func Events(re *core.RequestEvent) error {
 		case <-lifetime.C:
 			return nil
 		case <-sub.Overflow:
+			if !valid() {
+				_ = write(messaging.Event{Name: "session.expired"})
+				return nil
+			}
 			_ = write(messaging.Event{Name: "resync"})
 			return nil
 		case <-heartbeat.C:

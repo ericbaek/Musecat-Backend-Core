@@ -33,7 +33,7 @@ func TestOpenAPIDocumentsDirectCoreRoutes(t *testing.T) {
 	}
 
 	operations := documentedOperations(string(spec))
-	routeDecl := routeFunction(t, file, "RegisterAPIRoutes")
+	routeDecl := routeFunction(t, file, "registerAPIRoutes")
 	prefixes := routerGroupPrefixes(routeDecl.Body)
 	directOps := directRouteOperations(routeDecl.Body, prefixes)
 	if len(directOps) == 0 {

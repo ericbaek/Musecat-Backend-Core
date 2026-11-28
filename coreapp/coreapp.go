@@ -11,6 +11,7 @@ import (
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/hook"
 
 	"github.com/ericbaek/musecat-backend-core/arcadearea"
 	"github.com/ericbaek/musecat-backend-core/docs"
@@ -76,7 +77,7 @@ func Configure(app *pocketbase.PocketBase, config Config) {
 		se.Router.Bind(clientIPForwarding(config.ClientIPForwardSecret))
 		configureDefaultRateLimits(se.App)
 		RegisterDocumentationRoutes(se, config.Documentation)
-		RegisterAPIRoutes(se)
+		registerAPIRoutes(se, config.NativeAuthClients)
 		nativeauth.RegisterRoutes(se, config.NativeAuthClients, config.NativeWebClients...)
 		return se.Next()
 	})
@@ -117,9 +118,19 @@ func configureDefaultRateLimits(app core.App) {
 // It is exported so test applications and integration suites can wire the exact
 // same routing table without duplicating it.
 func RegisterAPIRoutes(se *core.ServeEvent) {
-	registerBotRoutes(se)
-	announcementhandler.RegisterRoutes(se)
-	messaginghandler.RegisterRoutes(se)
+	registerAPIRoutes(se, nil)
+}
+
+// registerAPIRoutes binds the same routes and additionally accepts first-party
+// Native session tokens on shared routes when nativeClients is non-empty.
+func registerAPIRoutes(se *core.ServeEvent, nativeClients []nativeauth.Client) {
+	var firstPartyAuth []*hook.Handler[*core.RequestEvent]
+	if len(nativeClients) > 0 {
+		firstPartyAuth = append(firstPartyAuth, nativeauth.FirstPartyAuthentication(nativeClients))
+	}
+	registerBotRoutes(se, nativeClients...)
+	announcementhandler.RegisterRoutes(se, nativeClients...)
+	messaginghandler.RegisterRoutes(se, nativeClients...)
 	se.Router.GET("/guest/feedback", arcadeadmin.ListGuestSupportFeedback).Bind(arcadeadmin.RequireGuestFeedback())
 	se.Router.GET("/guest/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(arcadeadmin.RequireGuestFeedback())
 	se.Router.GET("/guest/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(arcadeadmin.RequireGuestFeedback())
@@ -131,52 +142,52 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	se.Router.GET("/reverse_geocode", handlers.ReverseGeocodeHandler)
 	se.Router.GET("/search", searchhandler.Search)
 	se.Router.GET("/stats", statshandler.GetStats)
-	se.Router.GET("/rankings", rankinghandler.List)
+	se.Router.GET("/rankings", rankinghandler.List).Bind(firstPartyAuth...)
 	se.Router.GET("/arcade/ranking", rankinghandler.ArcadeVisitRanking)
 	se.Router.GET("/subway/map", subwayhandler.GetMap)
 	se.Router.GET("/subway/map/file", subwayhandler.DownloadMapFile)
-	se.Router.POST("/subway/map", subwayhandler.CreateMap).Bind(
+	se.Router.POST("/subway/map", subwayhandler.CreateMap).Bind(firstPartyAuth...).Bind(
 		apis.BodyLimit(24<<20),
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	se.Router.PUT("/subway/map", subwayhandler.UpdateMap).Bind(
+	se.Router.PUT("/subway/map", subwayhandler.UpdateMap).Bind(firstPartyAuth...).Bind(
 		apis.BodyLimit(24<<20),
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	se.Router.DELETE("/subway/map", subwayhandler.DeleteMap).Bind(
+	se.Router.DELETE("/subway/map", subwayhandler.DeleteMap).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	se.Router.GET("/subway/map/history", subwayhandler.ListMapHistory).Bind(
+	se.Router.GET("/subway/map/history", subwayhandler.ListMapHistory).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
 	// Public read endpoint: returns current relation ids for the arcade
-	se.Router.GET("/arcade", arcadequery.GetArcadeValues)
-	se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics)
+	se.Router.GET("/arcade", arcadequery.GetArcadeValues).Bind(firstPartyAuth...)
+	se.Router.GET("/arcade/analytics", arcadeanalytics.GetArcadeAnalytics).Bind(firstPartyAuth...)
 	se.Router.POST("/arcade/analytics/event", arcadeanalytics.RecordDirectionClick)
 	// Detailed changelog rows require an active user through this custom API.
-	se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog).Bind(
+	se.Router.GET("/arcade/changelog", arcadequery.ListArcadeChangelog).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
-	se.Router.GET("/arcade/memo", arcadememo.GetArcadeMemo)
-	se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom)
+	se.Router.GET("/arcade/memo", arcadememo.GetArcadeMemo).Bind(firstPartyAuth...)
+	se.Router.GET("/arcade/photo/file", arcadephoto.DownloadArcadePhotoAtom).Bind(firstPartyAuth...)
 	// Public read endpoint: list all arcades with basic info + gameSeries ids
 	se.Router.GET("/arcades", arcadequery.ListArcades)
 	se.Router.GET("/arcades/updates", arcadequery.ListArcadeUpdates)
-	se.Router.GET("/arcades/updates/history", arcadequery.ListArcadeUpdateHistory).Bind(apis.RequireAuth("user"))
+	se.Router.GET("/arcades/updates/history", arcadequery.ListArcadeUpdateHistory).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"))
 	se.Router.GET("/campaigns", arcadecampaign.ListCampaigns)
 	se.Router.GET("/campaign", arcadecampaign.GetCampaign)
 	se.Router.GET("/campaign/photo", arcadecampaign.ListPhotoCampaign)
 	se.Router.GET("/arcade/campaigns/presence", arcadecampaign.ListArcadeCampaignPresence)
-	se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns).Bind(
+	se.Router.GET("/arcade/campaigns", arcadecampaign.ListArcadeCampaigns).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
@@ -191,26 +202,26 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	se.Router.POST("/campaign", arcadecampaign.CreateCampaign).Bind(
+	se.Router.POST("/campaign", arcadecampaign.CreateCampaign).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	se.Router.PUT("/campaign", arcadecampaign.UpdateCampaign).Bind(
+	se.Router.PUT("/campaign", arcadecampaign.UpdateCampaign).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
-	se.Router.POST("/campaign/end", arcadecampaign.EndCampaign).Bind(
+	se.Router.POST("/campaign/end", arcadecampaign.EndCampaign).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireAdminAccess(),
 	)
 	// Public read endpoint: list arcades by game series near a location with pagination
-	se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation)
+	se.Router.GET("/arcades/nearby", arcadequery.ListArcadesBySeriesAndLocation).Bind(firstPartyAuth...)
 	se.Router.GET("/arcade/visits", userhandler.GetArcadeVisitStats)
 	// Public read endpoint: list machine rows filtered by country, game series, and version
-	se.Router.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(
+	se.Router.GET("/arcade/games", arcadequery.ListArcadeGames).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireGameToolsAccess(),
@@ -225,29 +236,29 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireGameToolsAccess(),
 	)
-	catalogManagement.GET("/catalog", gamecataloghandler.GetCatalog)
-	catalogManagement.POST("/catalog", gamecataloghandler.Create)
-	catalogManagement.PUT("/catalog", gamecataloghandler.Update)
-	catalogManagement.DELETE("/catalog", gamecataloghandler.Archive)
-	catalogManagement.POST("/catalog/restore", gamecataloghandler.Restore)
-	catalogManagement.POST("/catalog/compatibilities", gamecataloghandler.ReplaceCompatibilities)
-	catalogManagement.GET("/catalog/changes", gamecataloghandler.ListChanges)
-	catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert)
+	catalogManagement.GET("/catalog", gamecataloghandler.GetCatalog).Bind(firstPartyAuth...)
+	catalogManagement.POST("/catalog", gamecataloghandler.Create).Bind(firstPartyAuth...)
+	catalogManagement.PUT("/catalog", gamecataloghandler.Update).Bind(firstPartyAuth...)
+	catalogManagement.DELETE("/catalog", gamecataloghandler.Archive).Bind(firstPartyAuth...)
+	catalogManagement.POST("/catalog/restore", gamecataloghandler.Restore).Bind(firstPartyAuth...)
+	catalogManagement.POST("/catalog/compatibilities", gamecataloghandler.ReplaceCompatibilities).Bind(firstPartyAuth...)
+	catalogManagement.GET("/catalog/changes", gamecataloghandler.ListChanges).Bind(firstPartyAuth...)
+	catalogManagement.POST("/catalog/changes/revert", gamecataloghandler.Revert).Bind(firstPartyAuth...)
 	// Public user profile read endpoint
-	se.Router.GET("/user", userhandler.GetUserByID)
-	se.Router.GET("/user/arcade-inquiry-onboarding", arcadereporting.InquiryOnboarding).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	se.Router.GET("/user/activity", userhandler.GetUserActivity)
+	se.Router.GET("/user", userhandler.GetUserByID).Bind(firstPartyAuth...)
+	se.Router.GET("/user/arcade-inquiry-onboarding", arcadereporting.InquiryOnboarding).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	se.Router.GET("/user/activity", userhandler.GetUserActivity).Bind(firstPartyAuth...)
 	// Public user-scoped changelog read endpoint; private arcade rows are
 	// returned only to their owner or strict reviewers.
-	se.Router.GET("/user/changelog", userhandler.GetUserChangelog)
-	se.Router.GET("/user/feedback", arcadeadmin.ListMySupportFeedback).Bind(
+	se.Router.GET("/user/changelog", userhandler.GetUserChangelog).Bind(firstPartyAuth...)
+	se.Router.GET("/user/feedback", arcadeadmin.ListMySupportFeedback).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
-	se.Router.GET("/user/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	se.Router.GET("/user/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	se.Router.POST("/user/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
-	se.Router.PATCH("/user/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(4096))
+	se.Router.GET("/user/feedback/thread/photo", arcadeadmin.GetSupportFeedbackReplyPhoto).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	se.Router.GET("/user/feedback/thread", arcadeadmin.GetSupportFeedbackThread).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
+	se.Router.POST("/user/feedback/thread", arcadeadmin.ReplySupportFeedback).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
+	se.Router.PATCH("/user/feedback/thread", arcadeadmin.UpdateSupportFeedbackThreadStatus).Bind(firstPartyAuth...).Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser(), apis.BodyLimit(4096))
 	se.Router.GET("/support_feedback", arcadeadmin.ListSupportFeedback).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
@@ -258,53 +269,53 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireStrictReviewerAccess(),
 	)
-	se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback).Bind(apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
-	communityhandler.RegisterRoutes(se)
+	se.Router.POST("/support_feedback", arcadeadmin.CreateSupportFeedback).Bind(firstPartyAuth...).Bind(apis.BodyLimit(arcadeadmin.MaxSupportFeedbackBodyBytes))
+	communityhandler.RegisterAccountRoutes(se.Router.RouterGroup, firstPartyAuth...)
 
 	authArcade := se.Router.Group("/arcade").Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
-	authArcade.POST("/new", arcadebasic.NewArcade)
-	authArcade.GET("/draft", arcadequery.GetArcadeDraft)
-	authArcade.GET("/drafts", arcadequery.ListMyArcadeDrafts)
-	authArcade.DELETE("/draft", arcadequery.DeleteMyArcadeDraft)
-	authArcade.GET("/public", arcadepublic.PreviewPublicArcade)
-	authArcade.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin)
-	authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin)
-	authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport)
-	authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart)
-	authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(arcadequery.RequireAdminAccess())
-	authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic)
-	authArcade.PUT("/public", arcadepublic.RequestPublicArcade)
-	authArcade.POST("/location-verification", arcadepublic.VerifyArcadeLocation)
-	authArcade.PUT("/gtk", arcadegtk.UpdateArcadeGTK)
-	authArcade.PUT("/sns", arcadesns.UpdateArcadeSNS)
-	authArcade.PUT("/hour", arcadehour.UpdateArcadeHour)
-	authArcade.PUT("/game", arcadegame.UpdateArcadeGame)
-	authArcade.PUT("/photo", arcadephoto.UpdateArcadePhoto)
-	authArcade.PUT("/memo", arcadememo.UpdateArcadeMemo)
-	authArcade.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms)
-	authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom)
+	authArcade.POST("/new", arcadebasic.NewArcade).Bind(firstPartyAuth...)
+	authArcade.GET("/draft", arcadequery.GetArcadeDraft).Bind(firstPartyAuth...)
+	authArcade.GET("/drafts", arcadequery.ListMyArcadeDrafts).Bind(firstPartyAuth...)
+	authArcade.DELETE("/draft", arcadequery.DeleteMyArcadeDraft).Bind(firstPartyAuth...)
+	authArcade.GET("/public", arcadepublic.PreviewPublicArcade).Bind(firstPartyAuth...)
+	authArcade.GET("/request_admin", arcadeadmin.ListArcadeRequestAdmin).Bind(firstPartyAuth...)
+	authArcade.POST("/request_admin", arcadeadmin.CreateArcadeRequestAdmin).Bind(firstPartyAuth...)
+	authArcade.POST("/edit_report", arcadeadmin.CreateArcadeEditReport).Bind(firstPartyAuth...)
+	authArcade.POST("/rollback", arcadeadmin.RollbackArcadePart).Bind(firstPartyAuth...)
+	authArcade.POST("/game/bulk_version", arcadeadmin.BulkUpdateArcadeGameVersion).Bind(firstPartyAuth...).Bind(arcadequery.RequireAdminAccess())
+	authArcade.PUT("/basic", arcadebasic.UpdateArcadeBasic).Bind(firstPartyAuth...)
+	authArcade.PUT("/public", arcadepublic.RequestPublicArcade).Bind(firstPartyAuth...)
+	authArcade.POST("/location-verification", arcadepublic.VerifyArcadeLocation).Bind(firstPartyAuth...)
+	authArcade.PUT("/gtk", arcadegtk.UpdateArcadeGTK).Bind(firstPartyAuth...)
+	authArcade.PUT("/sns", arcadesns.UpdateArcadeSNS).Bind(firstPartyAuth...)
+	authArcade.PUT("/hour", arcadehour.UpdateArcadeHour).Bind(firstPartyAuth...)
+	authArcade.PUT("/game", arcadegame.UpdateArcadeGame).Bind(firstPartyAuth...)
+	authArcade.PUT("/photo", arcadephoto.UpdateArcadePhoto).Bind(firstPartyAuth...)
+	authArcade.PUT("/memo", arcadememo.UpdateArcadeMemo).Bind(firstPartyAuth...)
+	authArcade.GET("/photo/atoms", arcadephoto.ListArcadePhotoAtoms).Bind(firstPartyAuth...)
+	authArcade.DELETE("/photo/atom", arcadephoto.DeleteArcadePhotoAtom).Bind(firstPartyAuth...)
 	// Allow up to 10 * 20MB photo files (+multipart overhead) in a single request.
-	authArcade.POST("/photo/upload", arcadephoto.UploadArcadePhotos).Bind(apis.BodyLimit(220 << 20))
-	authArcade.GET("/report-settings", arcadereporting.GetSettings)
-	authArcade.PUT("/report-settings", arcadereporting.UpdateSettings).Bind(apis.BodyLimit(64 << 10))
-	authArcade.PUT("/inquiry-settings", arcadereporting.UpdateInquirySettings).Bind(apis.BodyLimit(64 << 10))
+	authArcade.POST("/photo/upload", arcadephoto.UploadArcadePhotos).Bind(firstPartyAuth...).Bind(apis.BodyLimit(220 << 20))
+	authArcade.GET("/report-settings", arcadereporting.GetSettings).Bind(firstPartyAuth...)
+	authArcade.PUT("/report-settings", arcadereporting.UpdateSettings).Bind(firstPartyAuth...).Bind(apis.BodyLimit(64 << 10))
+	authArcade.PUT("/inquiry-settings", arcadereporting.UpdateInquirySettings).Bind(firstPartyAuth...).Bind(apis.BodyLimit(64 << 10))
 	authArcade.POST("/report-subscription/status", arcadereporting.SubscriptionStatus).Bind(apis.BodyLimit(4 << 10))
 	authArcade.PUT("/report-subscription", arcadereporting.SaveSubscription).Bind(apis.BodyLimit(16 << 10))
 	authArcade.DELETE("/report-subscription", arcadereporting.DeleteSubscription).Bind(apis.BodyLimit(4 << 10))
-	authArcade.POST("/flag", arcadeflag.CreateArcadeFlag).Bind(apis.BodyLimit(arcadeflag.MaxFlagBodyBytes))
-	authArcade.POST("/flag/delete", arcadeflag.DeleteArcadeFlag)
-	authArcade.POST("/flag/reaction", arcadeflag.UpdateArcadeFlagReaction)
-	se.Router.GET("/arcade/notice", arcadenotice.ListArcadeNotice)
-	authArcade.POST("/notice", arcadenotice.CreateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
-	authArcade.PUT("/notice", arcadenotice.UpdateArcadeNotice).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
-	authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice)
-	authArcade.POST("/visit", userhandler.VisitArcade)
-	authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite)
-	authArcade.PUT("/favorite/order", userhandler.UpdateArcadeFavoriteOrder)
-	se.Router.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(
+	authArcade.POST("/flag", arcadeflag.CreateArcadeFlag).Bind(firstPartyAuth...).Bind(apis.BodyLimit(arcadeflag.MaxFlagBodyBytes))
+	authArcade.POST("/flag/delete", arcadeflag.DeleteArcadeFlag).Bind(firstPartyAuth...)
+	authArcade.POST("/flag/reaction", arcadeflag.UpdateArcadeFlagReaction).Bind(firstPartyAuth...)
+	se.Router.GET("/arcade/notice", arcadenotice.ListArcadeNotice).Bind(firstPartyAuth...)
+	authArcade.POST("/notice", arcadenotice.CreateArcadeNotice).Bind(firstPartyAuth...).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
+	authArcade.PUT("/notice", arcadenotice.UpdateArcadeNotice).Bind(firstPartyAuth...).Bind(apis.BodyLimit(arcadenotice.MaxNoticeBodyBytes))
+	authArcade.DELETE("/notice", arcadenotice.DeleteArcadeNotice).Bind(firstPartyAuth...)
+	authArcade.POST("/visit", userhandler.VisitArcade).Bind(firstPartyAuth...)
+	authArcade.PUT("/favorite", userhandler.UpdateArcadeFavorite).Bind(firstPartyAuth...)
+	authArcade.PUT("/favorite/order", userhandler.UpdateArcadeFavoriteOrder).Bind(firstPartyAuth...)
+	se.Router.POST("/campaign/check", arcadecampaign.CheckCampaign).Bind(firstPartyAuth...).Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
@@ -312,27 +323,27 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 	authUser := se.Router.Group("/user").Bind(apis.RequireAuth("user"))
 
 	authNotifications := se.Router.Group("/user/notifications").Bind(apis.RequireAuth("user"), userhandler.RequireActiveUser())
-	authNotifications.GET("", usernotifications.List)
-	authNotifications.POST("/read", usernotifications.Read).Bind(apis.BodyLimit(4096))
+	authNotifications.GET("", usernotifications.List).Bind(firstPartyAuth...)
+	authNotifications.POST("/read", usernotifications.Read).Bind(firstPartyAuth...).Bind(apis.BodyLimit(4096))
 	authNotifications.POST("/device", usernotifications.DeviceStatus).Bind(apis.BodyLimit(4096))
 	authNotifications.PATCH("/device", usernotifications.SyncDeviceLocale).Bind(apis.BodyLimit(4096))
 	authNotifications.PUT("/device", usernotifications.SaveDevice).Bind(apis.BodyLimit(16384))
 	authNotifications.DELETE("/device", usernotifications.DeleteDevice).Bind(apis.BodyLimit(4096))
 	authUser.GET("/me", userhandler.GetMe)
-	authUser.PUT("/profile", userhandler.UpdateProfile).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(35<<20))
-	authUser.PUT("/game-preferences", userhandler.UpdateGamePreferences).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(128<<10))
+	authUser.PUT("/profile", userhandler.UpdateProfile).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(35<<20))
+	authUser.PUT("/game-preferences", userhandler.UpdateGamePreferences).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(128<<10))
 	authUser.POST("/signup", userhandler.SignUp)
-	authUser.POST("/check-in", userhandler.CheckIn).Bind(userhandler.RequireActiveUser())
-	se.Router.GET("/user/passport", userhandler.GetMyPassport)
-	se.Router.GET("/user/passport/stamps", userhandler.GetMyPassportStamps)
-	authUser.GET("/visits", userhandler.GetMyVisits).Bind(userhandler.RequireActiveUser())
-	authUser.PUT("/countries", userhandler.UpdateCountries).Bind(userhandler.RequireActiveUser())
-	authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(userhandler.RequireActiveUser())
-	authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(userhandler.RequireActiveUser())
-	authUser.POST("/withdraw", userhandler.Withdraw)
-	authUser.PUT("/arcade-account/credentials", userhandler.UpdateArcadeCredentials).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(16<<10))
-	authUser.GET("/report", arcadeadmin.ListUserReport).Bind(userhandler.RequireActiveUser())
-	authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(userhandler.RequireActiveUser())
+	authUser.POST("/check-in", userhandler.CheckIn).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
+	se.Router.GET("/user/passport", userhandler.GetMyPassport).Bind(firstPartyAuth...)
+	se.Router.GET("/user/passport/stamps", userhandler.GetMyPassportStamps).Bind(firstPartyAuth...)
+	authUser.GET("/visits", userhandler.GetMyVisits).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
+	authUser.PUT("/countries", userhandler.UpdateCountries).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
+	authUser.PUT("/visit-visibility", userhandler.UpdateVisitVisibility).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
+	authUser.PUT("/favorite-visibility", userhandler.UpdateFavoriteVisibility).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
+	authUser.POST("/withdraw", userhandler.Withdraw).Bind(nativeauth.FirstPartyAccountClosureAuthentication(nativeClients))
+	authUser.PUT("/arcade-account/credentials", userhandler.UpdateArcadeCredentials).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser(), apis.BodyLimit(16<<10))
+	authUser.GET("/report", arcadeadmin.ListUserReport).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
+	authUser.POST("/report", arcadeadmin.CreateUserReport).Bind(firstPartyAuth...).Bind(userhandler.RequireActiveUser())
 
 	reviewQueue := se.Router.Group("/moderation/arcade").Bind(
 		apis.RequireAuth("user"),
@@ -344,19 +355,19 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireStrictReviewerAccess(),
 	)
-	supporterReview.GET("/requests", arcadeadmin.ListSupporterRequests)
-	supporterReview.GET("/request", arcadeadmin.GetSupporterRequest)
-	supporterReview.PUT("/request", arcadeadmin.ReviewSupporterRequest)
-	reviewQueue.GET("/requests", arcadeadmin.ListModerationRequests)
-	reviewQueue.PUT("/request", arcadeadmin.ReviewModerationRequest)
+	supporterReview.GET("/requests", arcadeadmin.ListSupporterRequests).Bind(firstPartyAuth...)
+	supporterReview.GET("/request", arcadeadmin.GetSupporterRequest).Bind(firstPartyAuth...)
+	supporterReview.PUT("/request", arcadeadmin.ReviewSupporterRequest).Bind(firstPartyAuth...)
+	reviewQueue.GET("/requests", arcadeadmin.ListModerationRequests).Bind(firstPartyAuth...)
+	reviewQueue.PUT("/request", arcadeadmin.ReviewModerationRequest).Bind(firstPartyAuth...)
 	// Status tools are authorized per arcade inside the handler: staff, or the
 	// same supporter/owner rule used for notices.
 	arcadeStatus := se.Router.Group("/moderation/arcade").Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
-	arcadeStatus.GET("/status", arcadeadmin.GetArcadeStatus)
-	arcadeStatus.PUT("/status", arcadeadmin.UpdateArcadeStatus)
+	arcadeStatus.GET("/status", arcadeadmin.GetArcadeStatus).Bind(firstPartyAuth...)
+	arcadeStatus.PUT("/status", arcadeadmin.UpdateArcadeStatus).Bind(firstPartyAuth...)
 	reviewQueue.GET("/edit-reports", arcadeadmin.ListArcadeEditReports)
 	reviewQueue.PUT("/edit-report", arcadeadmin.ReviewArcadeEditReport)
 
@@ -365,24 +376,24 @@ func RegisterAPIRoutes(se *core.ServeEvent) {
 		userhandler.RequireActiveUser(),
 		arcadequery.RequireStrictReviewerAccess(),
 	)
-	userReview.POST("/test-account", userhandler.CreateTestAccount).Bind(apis.BodyLimit(16 << 10))
-	userReview.GET("/reports", arcadeadmin.ListAllUserReports)
-	userReview.PUT("/report", arcadeadmin.ReviewUserReport)
-	userReview.GET("/bans", userhandler.ListUserBans)
-	userReview.POST("/ban", userhandler.CreateOrUpdateUserBan)
-	userReview.DELETE("/ban", userhandler.DeleteUserBan)
+	userReview.POST("/test-account", userhandler.CreateTestAccount).Bind(firstPartyAuth...).Bind(apis.BodyLimit(16 << 10))
+	userReview.GET("/reports", arcadeadmin.ListAllUserReports).Bind(firstPartyAuth...)
+	userReview.PUT("/report", arcadeadmin.ReviewUserReport).Bind(firstPartyAuth...)
+	userReview.GET("/bans", userhandler.ListUserBans).Bind(firstPartyAuth...)
+	userReview.POST("/ban", userhandler.CreateOrUpdateUserBan).Bind(firstPartyAuth...)
+	userReview.DELETE("/ban", userhandler.DeleteUserBan).Bind(firstPartyAuth...)
 	arcadeAccountCreation := se.Router.Group("/moderation/user").Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
-	arcadeAccountCreation.POST("/arcade-account", userhandler.CreateArcadeAccount).Bind(apis.BodyLimit(16 << 10))
+	arcadeAccountCreation.POST("/arcade-account", userhandler.CreateArcadeAccount).Bind(firstPartyAuth...).Bind(apis.BodyLimit(16 << 10))
 
 	authSupporter := se.Router.Group("/supporter").Bind(
 		apis.RequireAuth("user"),
 		userhandler.RequireActiveUser(),
 	)
-	authSupporter.GET("/score", arcadeadmin.GetSupporterScore)
-	authSupporter.POST("/request", arcadeadmin.CreateSupporterRequest)
+	authSupporter.GET("/score", arcadeadmin.GetSupporterScore).Bind(firstPartyAuth...)
+	authSupporter.POST("/request", arcadeadmin.CreateSupporterRequest).Bind(firstPartyAuth...)
 }
 
 func RegisterDocumentationRoutes(se *core.ServeEvent, config DocumentationConfig) {

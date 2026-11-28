@@ -9,6 +9,8 @@ import (
 
 var ErrArcadeWriteForbidden = errors.New("arcade editing is not permitted")
 
+var ErrArcadeRevisionConflict = errors.New("arcade information changed; reload before updating")
+
 // CanWriteArcade allows authenticated users to edit public arcades and limits
 // private drafts to their creator or a strict reviewer. Routes check active status.
 func CanWriteArcade(auth, arcade *core.Record) bool {

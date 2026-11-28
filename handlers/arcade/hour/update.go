@@ -68,15 +68,16 @@ func (d *DayHours) UnmarshalJSON(b []byte) error {
 
 // UpdateArcadeHourBody represents the request body for updating arcade hours.
 type UpdateArcadeHourBody struct {
-	Arcade    string    `json:"arcade"`
-	Monday    *DayHours `json:"Monday,omitempty"`
-	Tuesday   *DayHours `json:"Tuesday,omitempty"`
-	Wednesday *DayHours `json:"Wednesday,omitempty"`
-	Thursday  *DayHours `json:"Thursday,omitempty"`
-	Friday    *DayHours `json:"Friday,omitempty"`
-	Saturday  *DayHours `json:"Saturday,omitempty"`
-	Sunday    *DayHours `json:"Sunday,omitempty"`
-	Note      string    `json:"note,omitempty"`
+	BaseHourID *string   `json:"base_hour_id,omitempty"`
+	Arcade     string    `json:"arcade"`
+	Monday     *DayHours `json:"Monday,omitempty"`
+	Tuesday    *DayHours `json:"Tuesday,omitempty"`
+	Wednesday  *DayHours `json:"Wednesday,omitempty"`
+	Thursday   *DayHours `json:"Thursday,omitempty"`
+	Friday     *DayHours `json:"Friday,omitempty"`
+	Saturday   *DayHours `json:"Saturday,omitempty"`
+	Sunday     *DayHours `json:"Sunday,omitempty"`
+	Note       string    `json:"note,omitempty"`
 }
 
 func parseUpdateHourBody(re *core.RequestEvent) (UpdateArcadeHourBody, error) {
@@ -194,6 +195,9 @@ func UpdateArcadeHour(re *core.RequestEvent) error {
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
 		}
+		if body.BaseHourID != nil && *body.BaseHourID != strings.TrimSpace(arcadeRec.GetString("hour")) {
+			return arcadeinternal.ErrArcadeRevisionConflict
+		}
 		var prevHourRec *core.Record
 		oldHourID := strings.TrimSpace(arcadeRec.GetString("hour"))
 		if oldHourID != "" {
@@ -274,6 +278,9 @@ func UpdateArcadeHour(re *core.RequestEvent) error {
 	}); err != nil {
 		if errors.Is(err, arcadeinternal.ErrArcadeWriteForbidden) {
 			return re.JSON(http.StatusForbidden, map[string]any{"error": err.Error()})
+		}
+		if errors.Is(err, arcadeinternal.ErrArcadeRevisionConflict) {
+			return re.JSON(http.StatusConflict, map[string]any{"error": err.Error()})
 		}
 		return re.JSON(http.StatusBadGateway, map[string]any{
 			"error":   "transaction failed",
