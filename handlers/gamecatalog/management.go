@@ -485,8 +485,11 @@ func revert(re *core.RequestEvent, body mutationBody, payloadHash string) error 
 		}
 		before := snapshot(entity, record)
 		var target map[string]any
-		if err := json.Unmarshal([]byte(change.GetString("before")), &target); err != nil {
-			return fmt.Errorf("invalid stored catalog before snapshot")
+		// A create row stores no snapshot; treat an empty field like JSON null.
+		if raw := strings.TrimSpace(change.GetString("before")); raw != "" {
+			if err := json.Unmarshal([]byte(raw), &target); err != nil {
+				return fmt.Errorf("invalid stored catalog before snapshot")
+			}
 		}
 		if target == nil {
 			if change.GetString("action") != "create" {
