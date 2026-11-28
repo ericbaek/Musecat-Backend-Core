@@ -37,10 +37,10 @@ func TestConfigureDefaultRateLimitsPreservesExistingRules(t *testing.T) {
 			if !config.Enabled || !reflect.DeepEqual(config.Rules[:len(existing)], existing) {
 				t.Fatal("must enable limits and preserve existing rules")
 			}
-			if len(config.Rules) != len(existing)+8 {
-				t.Fatalf("expected eight missing all-user rules, got %v", config.Rules)
+			if len(config.Rules) != len(existing)+11 {
+				t.Fatalf("expected eleven missing all-user rules, got %v", config.Rules)
 			}
-			for _, label := range []string{"/bot/v1/", "POST /user/bot-keys", "GET /geo", "GET /geocode", "GET /reverse_geocode", "POST /support_feedback", "POST /guest/conversations", "POST /guest/feedback/thread", "POST /user/feedback/thread"} {
+			for _, label := range []string{"/bot/v1/", "POST /user/bot-keys", "GET /geo", "GET /geocode", "GET /reverse_geocode", "POST /support_feedback", "POST /guest/conversations", "POST /guest/feedback/thread", "POST /user/feedback/thread", "POST /native/session/exchange", "POST /native/session/refresh", "POST /native/session/web/exchange"} {
 				if _, ok := config.FindRateLimitRule([]string{label}, core.RateLimitRuleAudienceAll, core.RateLimitRuleAudienceAuth); !ok {
 					t.Errorf("no authenticated limit for %s", label)
 				}

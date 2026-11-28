@@ -91,6 +91,9 @@ func configureDefaultRateLimits(app core.App) {
 	settings.RateLimits.Enabled = true
 	defaults := []core.RateLimitRule{
 		{Label: "/bot/v1/", MaxRequests: 120, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /native/session/exchange", MaxRequests: 30, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /native/session/refresh", MaxRequests: 120, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
+		{Label: "POST /native/session/web/exchange", MaxRequests: 30, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "POST /user/bot-keys", MaxRequests: 10, Duration: 600, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
 		{Label: "GET /reverse_geocode", MaxRequests: 30, Duration: 60, Audience: core.RateLimitRuleAudienceAll},
