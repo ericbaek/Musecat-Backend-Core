@@ -177,6 +177,11 @@ func TestNativeSharedAccountRoutesFailClosedAndKeepUnselectedScope(t *testing.T)
 	app := nativeNearbyApp(t, true)
 	_, member := createAuthUser(t, app)
 	_, session := nativeNearbySession(t, app, member)
+	// External connections, Joint, delegation (/developer, /user/authorizations)
+	// and check notes are not registered on main yet, so these expect 404. When
+	// they land, restore the 401/403 boundary checks here and in the other
+	// tests/**/native_*_test.go files that list these routes
+	// (see archive/core-native-route-auth-20261129 for the original values).
 	for _, op := range []struct {
 		method, path string
 		want         int
