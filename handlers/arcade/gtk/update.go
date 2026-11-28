@@ -253,7 +253,7 @@ func UpdateArcadeGTK(re *core.RequestEvent) error {
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
 		}
-		if body.BaseGTKID != nil && *body.BaseGTKID != strings.TrimSpace(arcadeRec.GetString("gtk")) {
+		if body.BaseGTKID != nil && strings.TrimSpace(*body.BaseGTKID) != strings.TrimSpace(arcadeRec.GetString("gtk")) {
 			return arcadeinternal.ErrArcadeRevisionConflict
 		}
 		prevAtoms, err := loadCurrentGTKAtoms(txApp, body.Arcade, strings.TrimSpace(arcadeRec.GetString("gtk")))

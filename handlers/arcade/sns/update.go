@@ -86,7 +86,7 @@ func UpdateArcadeSNS(re *core.RequestEvent) error {
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
 		}
-		if body.BaseSNSID != nil && *body.BaseSNSID != strings.TrimSpace(arcadeRec.GetString("sns")) {
+		if body.BaseSNSID != nil && strings.TrimSpace(*body.BaseSNSID) != strings.TrimSpace(arcadeRec.GetString("sns")) {
 			return arcadeinternal.ErrArcadeRevisionConflict
 		}
 		prevAtoms, err := loadCurrentSNSAtoms(txApp, body.Arcade, strings.TrimSpace(arcadeRec.GetString("sns")))

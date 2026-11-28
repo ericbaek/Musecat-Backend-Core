@@ -195,7 +195,7 @@ func UpdateArcadeHour(re *core.RequestEvent) error {
 		if !arcadeinternal.CanWriteArcade(re.Auth, arcadeRec) {
 			return arcadeinternal.ErrArcadeWriteForbidden
 		}
-		if body.BaseHourID != nil && *body.BaseHourID != strings.TrimSpace(arcadeRec.GetString("hour")) {
+		if body.BaseHourID != nil && strings.TrimSpace(*body.BaseHourID) != strings.TrimSpace(arcadeRec.GetString("hour")) {
 			return arcadeinternal.ErrArcadeRevisionConflict
 		}
 		var prevHourRec *core.Record
