@@ -194,3 +194,22 @@ func TestNativeLoginHTTPRejectsRemovedClientWhileOtherClientRemains(t *testing.T
 	nativeLoginRequest(t, app, "POST", "/native/session/refresh", "", map[string]string{"refresh_token": current.RefreshToken}, 200)
 	nativeLoginRequest(t, app, "GET", "/user/me", web, nil, 200)
 }
+
+func TestNativeRefreshDuringBanKeepsRefreshTokenUsable(t *testing.T) {
+	app := nativeLoginApp(t, true)
+	web, account := createAuthUser(t, app, true)
+	creds := nativeLoginIssue(t, app, web)
+	seedUserBanForUserTest(t, app, account.Id, hashNormalizedEmailForUserTest(account.Email()), "native_refresh_ban", time.Now().Add(time.Hour))
+	nativeLoginRequest(t, app, "POST", "/native/session/refresh", "", map[string]string{"refresh_token": creds.RefreshToken}, 403)
+	nativeLoginRequest(t, app, "POST", "/native/session/refresh", "", map[string]string{"refresh_token": creds.RefreshToken}, 403)
+	ban, err := app.FindRecordById("user_ban", account.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Delete(ban); err != nil {
+		t.Fatal(err)
+	}
+	// The rejected refreshes did not consume the token or revoke the device family.
+	refreshed := nativeLoginCredentials(t, nativeLoginRequest(t, app, "POST", "/native/session/refresh", "", map[string]string{"refresh_token": creds.RefreshToken}, 200))
+	nativeLoginRequest(t, app, "GET", "/native/user/me", refreshed.AccessToken, nil, 200)
+}

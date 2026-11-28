@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"time"
 
+	user "github.com/ericbaek/musecat-backend-core/handlers/user"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -204,6 +205,7 @@ func (s Service) Exchange(app core.App, code, verifier, client, callback string)
 func (s Service) Refresh(app core.App, token string) (Credentials, error) {
 	var out Credentials
 	invalid := false
+	var restricted error
 	if !challengePattern.MatchString(token) {
 		return out, ErrInvalid
 	}
@@ -227,7 +229,14 @@ func (s Service) Refresh(app core.App, token string) (Credentials, error) {
 		if f.Revoked != 0 || f.Expires <= s.now() {
 			return ErrInvalid
 		}
-		if _, e := account(tx, f.UserID, f.AccountKey); e != nil {
+		u, e := account(tx, f.UserID, f.AccountKey)
+		if e != nil {
+			return e
+		}
+		// Check restrictions before consuming the token: a temporarily banned
+		// device must keep a usable refresh token for when the ban ends.
+		if e := user.CheckActiveUser(tx, u); e != nil {
+			restricted = e
 			return e
 		}
 		access, e := secret()
@@ -253,8 +262,18 @@ func (s Service) Refresh(app core.App, token string) (Credentials, error) {
 	if invalid {
 		return Credentials{}, ErrInvalid
 	}
+	if restricted != nil {
+		return Credentials{}, &RestrictedError{Err: restricted}
+	}
 	return out, e
 }
+
+// RestrictedError reports that the account is banned or otherwise restricted.
+// The refresh token was not consumed.
+type RestrictedError struct{ Err error }
+
+func (e *RestrictedError) Error() string { return e.Err.Error() }
+func (e *RestrictedError) Unwrap() error { return e.Err }
 func (s Service) Authenticate(app core.App, token string) (*core.Record, error) {
 	u, _, err := s.AuthenticateSession(app, token)
 	return u, err

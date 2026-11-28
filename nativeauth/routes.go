@@ -64,6 +64,10 @@ func RegisterRoutes(se *core.ServeEvent, clients []Client, webClients ...WebClie
 			return e.BadRequestError("Invalid refresh", nil)
 		}
 		out, err := s.Refresh(e.App, in.Refresh)
+		var restricted *RestrictedError
+		if errors.As(err, &restricted) {
+			return restricted.Err
+		}
 		if err != nil {
 			return e.UnauthorizedError("Session expired", nil)
 		}
